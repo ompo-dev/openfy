@@ -23,6 +23,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { usePlayer } from '@context';
 import { fetchLyrics, LyricsData, LyricSegment } from '@services';
 import { getDynamicColorPalette } from '@utils';
+import { GlassSurface } from '../native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COVER_SIZE = SCREEN_WIDTH - 64;
@@ -316,24 +317,26 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
             {/* Glassmorphic Lyrics Mini Preview */}
             {lyricsData && (
-              <Pressable
-                onPress={() => setShowLyricsFull(true)}
-                style={styles.lyricsGlassCard}
-              >
-                <View style={styles.lyricsPreviewHeader}>
-                  <MaterialCommunityIcons
-                    name="microphone-variant"
-                    size={16}
-                    color="#FFFFFF"
-                  />
-                  <Text style={styles.lyricsPreviewTitle}>LETRAS</Text>
-                </View>
-                <Text style={styles.lyricsPreviewLine} numberOfLines={2}>
-                  {lyricsData.segments.length > 0 && activeLineIndex >= 0
-                    ? lyricsData.segments[activeLineIndex].text
-                    : lyricsData.plainLyrics?.split('\n')[0] || 'Toque para ver a letra'}
-                </Text>
-              </Pressable>
+              <GlassSurface glass="regular" isInteractive style={styles.lyricsGlassCard}>
+                <Pressable
+                  onPress={() => setShowLyricsFull(true)}
+                  style={styles.lyricsGlassCardInner}
+                >
+                  <View style={styles.lyricsPreviewHeader}>
+                    <MaterialCommunityIcons
+                      name="microphone-variant"
+                      size={16}
+                      color="#FFFFFF"
+                    />
+                    <Text style={styles.lyricsPreviewTitle}>LETRAS</Text>
+                  </View>
+                  <Text style={styles.lyricsPreviewLine} numberOfLines={2}>
+                    {lyricsData.segments.length > 0 && activeLineIndex >= 0
+                      ? lyricsData.segments[activeLineIndex].text
+                      : lyricsData.plainLyrics?.split('\n')[0] || 'Toque para ver a letra'}
+                  </Text>
+                </Pressable>
+              </GlassSurface>
             )}
           </View>
         )}
@@ -553,11 +556,13 @@ const styles = StyleSheet.create({
   },
   lyricsGlassCard: {
     width: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    borderRadius: 16,
-    padding: 14,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    overflow: 'hidden',
+  },
+  lyricsGlassCardInner: {
+    padding: 16,
     gap: 6,
   },
   lyricsPreviewHeader: {
