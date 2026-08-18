@@ -1,0 +1,99 @@
+name: Gerar APK para Android
+
+on:
+  workflow_dispatch:
+
+jobs:
+  gerar-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    permissions:
+      contents: write
+
+    env:
+      CI: "1"
+      EXPO_NO_TELEMETRY: "1"
+
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v6
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci --legacy-peer-deps
+
+      - name: Definir versionCode = run_number
+        shell: bash
+        env:
+          RUN: ${{ github.run_number }}
+        run: |
+          node -e '
+          const fs = require("fs");
+          let src = fs.readFileSync("app.config.js", "utf8");
+          src = src.replace(
+            /(android:\s*\{)/,
+            `$1\n      versionCode: ${process.env.RUN},`
+          );
+          fs.writeFileSync("app.config.js", src);
+          '
+
+      - name: Gerar projeto nativo Android
+        run: |
+          npx expo prebuild \
+            --clean \
+            --no-install \
+            --platform android
+
+      - name: Compilar APK
+        timeout-minutes: 35
+        shell: bash
+        run: |
+          set -e
+          cd android
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease
+          APK="$PWD/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK" ]; then
+            echo "APK não encontrado em $APK"
+            find app/build/outputs/apk/release -type f | sort
+            exit 1
+          fi
+          echo "APK criado: $APK"
+
+      - name: Copiar APK para nome estável
+        shell: bash
+        run: |
+          APK="$(find android/app/build/outputs/apk/release -type f -name 'app-release*.apk' | head -1)"
+          cp "$APK" Openfy-android.apk
+          echo "APK final:"
+          ls -lh Openfy-android.apk
+
+      - name: Publicar release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -e
+          VERSION="$(node -p "require('./app.config.js').expo.version")"
+          TAG="v${VERSION}-android-${{ github.run_number }}"
+          gh release create "$TAG" \
+            Openfy-android.apk \
+            --title "Openfy ${VERSION} Android (build ${{ github.run_number }})" \
+            --notes "Build Android não-assinado." \
+            --latest
+
+      - name: Enviar APK para download
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Openfy-Android-release
+          path: Openfy-android.apk
+          if-no-files-found: error
+          retention-days: 7

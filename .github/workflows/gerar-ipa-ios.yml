@@ -1,0 +1,303 @@
+name: Gerar IPA para iPhone
+
+on:
+  workflow_dispatch:
+
+jobs:
+  gerar-ipa:
+    runs-on: macos-26-intel
+    timeout-minutes: 60
+
+    # Needed so GITHUB_TOKEN can publish the Release that hosts the IPA.
+    permissions:
+      contents: write
+
+    env:
+      CI: "1"
+      EXPO_NO_TELEMETRY: "1"
+
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v6
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Selecionar Xcode
+        run: |
+          sudo xcode-select \
+            --switch /Applications/Xcode_26.6.app/Contents/Developer
+
+          echo "Xcode:"
+          xcodebuild -version
+
+          echo "SDK iOS:"
+          xcrun --sdk iphoneos --show-sdk-version
+
+          echo "Arquitetura:"
+          uname -m
+
+      - name: Restaurar cache do CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods/repos
+          key: ${{ runner.os }}-${{ runner.arch }}-pods-${{ hashFiles('package-lock.json', 'app.config.js') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-pods-
+
+      - name: Instalar dependências
+        # SDK 57 tree resolves only with legacy-peer-deps (expo-audio / expo-glass-effect
+        # peer chains); lockfile was generated the same way, so npm ci must match.
+        run: npm ci --legacy-peer-deps
+
+      - name: Verificar configuração do Expo
+        run: |
+          npx expo config --type public
+          npx expo-doctor || true
+
+      - name: Definir buildNumber = run_number
+        # Each run bumps CFBundleVersion so AltStore sees every build as a new version.
+        # Patches app.config.js only — never committed.
+        shell: bash
+        env:
+          RUN: ${{ github.run_number }}
+        run: |
+          node -e '
+          const fs = require("fs");
+          // app.config.js exports a module, patch version in-place
+          let src = fs.readFileSync("app.config.js", "utf8");
+          // inject buildNumber into ios section
+          src = src.replace(
+            /(ios:\s*\{)/,
+            `$1\n      buildNumber: "${process.env.RUN}",`
+          );
+          fs.writeFileSync("app.config.js", src);
+          '
+
+      - name: Gerar projeto nativo iOS
+        run: |
+          npx expo prebuild \
+            --platform ios \
+            --clean \
+            --no-install
+
+      - name: Instalar CocoaPods
+        run: |
+          cd ios
+          pod install
+
+      - name: Identificar workspace e scheme
+        id: ios-project
+        shell: bash
+        run: |
+          set -e
+
+          WORKSPACE="$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+
+          if [ -z "$WORKSPACE" ]; then
+            echo "Nenhum workspace encontrado."
+            find ios -maxdepth 2 -type f | sort
+            exit 1
+          fi
+
+          SCHEME="$(basename "$WORKSPACE" .xcworkspace)"
+
+          echo "Workspace: $WORKSPACE"
+          echo "Scheme: $SCHEME"
+
+          echo "workspace=$WORKSPACE" >> "$GITHUB_OUTPUT"
+          echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
+
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -list
+
+      - name: Compilar aplicativo para iPhone
+        timeout-minutes: 50
+        shell: bash
+        run: |
+          set -e
+          set -o pipefail
+
+          WORKSPACE="${{ steps.ios-project.outputs.workspace }}"
+          SCHEME="${{ steps.ios-project.outputs.scheme }}"
+
+          echo "Iniciando compilação:"
+          echo "Workspace: $WORKSPACE"
+          echo "Scheme: $SCHEME"
+
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$PWD/build" \
+            -parallelizeTargets \
+            -jobs 4 \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            DEBUG_INFORMATION_FORMAT=dwarf \
+            GCC_GENERATE_DEBUGGING_SYMBOLS=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            build \
+            2>&1 | tee xcodebuild.log
+
+      - name: Mostrar erros de compilação
+        if: failure()
+        shell: bash
+        run: |
+          echo "===== error: / warning: (Swift + Clang) ====="
+          grep -nE "error:|warning:" xcodebuild.log | tail -120 || true
+          echo ""
+          echo "===== comandos que falharam ====="
+          grep -nE "BUILD FAILED|The following build commands failed|Compiling .*\.swift" xcodebuild.log | tail -40 || true
+
+      - name: Encontrar aplicativo compilado
+        id: compiled-app
+        shell: bash
+        run: |
+          set -e
+
+          APP_PATH="$(
+            find build/Build/Products/Release-iphoneos \
+              -maxdepth 1 \
+              -name '*.app' \
+              -print \
+              -quit
+          )"
+
+          if [ -z "$APP_PATH" ]; then
+            echo "O arquivo .app não foi encontrado."
+            find build \
+              -maxdepth 8 \
+              -type d \
+              -name '*.app' \
+              -print || true
+            exit 1
+          fi
+
+          APP_NAME="$(basename "$APP_PATH" .app)"
+
+          echo "Aplicativo: $APP_PATH"
+          echo "Nome: $APP_NAME"
+
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Empacotar IPA
+        shell: bash
+        run: |
+          set -e
+
+          APP_PATH="${{ steps.compiled-app.outputs.app_path }}"
+          APP_NAME="${{ steps.compiled-app.outputs.app_name }}"
+
+          rm -rf ipa-package
+          mkdir -p ipa-package/Payload
+
+          cp -R "$APP_PATH" ipa-package/Payload/
+
+          cd ipa-package
+
+          ditto \
+            -c \
+            -k \
+            --sequesterRsrc \
+            --keepParent \
+            Payload \
+            "../${APP_NAME}-unsigned.ipa"
+
+          cd ..
+
+          echo "IPA criado:"
+          ls -lh "${APP_NAME}-unsigned.ipa"
+
+      - name: Publicar release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -e
+          IPA="$(ls *-unsigned.ipa | head -1)"
+          SIZE="$(stat -f%z "$IPA")"
+          VERSION="$(node -p "require('./app.config.js').expo.version")"
+          BUILD="${{ github.run_number }}"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          REPO="${{ github.repository }}"
+          BASE="https://github.com/${REPO}/releases/latest/download"
+
+          # Self-updating AltStore source
+          SIZE="$SIZE" VERSION="$VERSION" BUILD="$BUILD" DATE="$DATE" BASE="$BASE" node -e '
+          const { SIZE, VERSION, BUILD, DATE, BASE } = process.env;
+          const icon = BASE + "/icon.png";
+          const src = {
+            name: "Openfy",
+            subtitle: "Seu Spotify local-first. Baixe e ouça sem internet.",
+            iconURL: icon,
+            tintColor: "#1DB954",
+            apps: [{
+              name: "Openfy",
+              bundleIdentifier: "com.openfy.app",
+              developerName: "openfy",
+              subtitle: "Música local-first.",
+              localizedDescription: "Baixe músicas, playlists e álbuns do Spotify e YouTube Music. Ouça offline com letras sincronizadas.",
+              iconURL: icon,
+              permissions: [],
+              category: "entertainment",
+              tintColor: "#1DB954",
+              versions: [{
+                version: VERSION,
+                buildVersion: BUILD,
+                date: DATE,
+                localizedDescription: "Build automático mais recente.",
+                downloadURL: BASE + "/Openfy-unsigned.ipa",
+                size: Number(SIZE),
+                minOSVersion: "16.0",
+              }],
+            }],
+            news: [],
+          };
+          require("fs").writeFileSync("apps.json", JSON.stringify(src, null, 2));
+          '
+
+          echo "apps.json:"; cat apps.json
+
+          # Stable asset name
+          if [ "$IPA" != "Openfy-unsigned.ipa" ]; then cp "$IPA" Openfy-unsigned.ipa; fi
+          # Copy icon if it exists
+          [ -f "assets/images/logo.png" ] && cp assets/images/logo.png icon.png || echo "icon.png not found, skipping"
+
+          TAG="v${VERSION}-${{ github.run_number }}"
+          gh release create "$TAG" \
+            Openfy-unsigned.ipa apps.json \
+            $([ -f icon.png ] && echo "icon.png") \
+            --title "Openfy ${VERSION} (build ${{ github.run_number }})" \
+            --notes "Build não-assinado (sideload via AltStore). Fonte AltStore: apps.json neste release." \
+            --latest
+
+      - name: Enviar IPA para download
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Openfy-iOS-unsigned
+          path: "*-unsigned.ipa"
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enviar log da compilação
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Openfy-iOS-build-log
+          path: xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
