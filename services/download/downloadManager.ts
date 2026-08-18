@@ -1,7 +1,7 @@
 /**
  * Download Manager Service
- * Handles downloading audio files and cover art to device local storage.
- * Ensures 100% progressive MP3/M4A binary file download (avoiding HLS .m3u8 manifests).
+ * Handles downloading audio files (both progressive MP3/M4A and assembled HLS .m3u8 streams)
+ * and cover art to device local storage for 100% offline playback.
  */
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -95,8 +95,109 @@ export const getDownloadedTrack = async (
 };
 
 /**
+ * Helper to convert Uint8Array / ArrayBuffer to Base64 in Hermes/React Native
+ */
+const bufferToBase64 = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  const globalObj = globalThis as { btoa?: (s: string) => string };
+  if (typeof globalObj.btoa === 'function') {
+    let binary = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < len; i += chunkSize) {
+      const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+      binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+    }
+    return globalObj.btoa(binary);
+  }
+
+  const chars =
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let base64 = '';
+  for (let i = 0; i < len; i += 3) {
+    const b1 = bytes[i];
+    const b2 = i + 1 < len ? bytes[i + 1] : 0;
+    const b3 = i + 2 < len ? bytes[i + 2] : 0;
+
+    const enc1 = b1 >> 2;
+    const enc2 = ((b1 & 3) << 4) | (b2 >> 4);
+    let enc3 = ((b2 & 15) << 2) | (b3 >> 6);
+    let enc4 = b3 & 63;
+
+    if (i + 1 >= len) {
+      enc3 = 64;
+      enc4 = 64;
+    } else if (i + 2 >= len) {
+      enc4 = 64;
+    }
+
+    base64 +=
+      chars.charAt(enc1) +
+      chars.charAt(enc2) +
+      (enc3 === 64 ? '=' : chars.charAt(enc3)) +
+      (enc4 === 64 ? '=' : chars.charAt(enc4));
+  }
+  return base64;
+};
+
+/**
+ * Download HLS .m3u8 stream by fetching audio segments and concatenating locally
+ */
+const downloadHlsAudio = async (
+  m3u8Url: string,
+  localPath: string,
+  onProgress?: (progress: number) => void
+): Promise<string | null> => {
+  try {
+    const res = await fetch(m3u8Url);
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching playlist`);
+
+    const m3u8Text = await res.text();
+    const segments = m3u8Text
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.startsWith('http'));
+
+    if (segments.length === 0) {
+      throw new Error('No audio segments in m3u8 playlist');
+    }
+
+    // Delete existing file if any
+    const existing = await FileSystem.getInfoAsync(localPath);
+    if (existing.exists) {
+      await FileSystem.deleteAsync(localPath, { idempotent: true });
+    }
+
+    for (let i = 0; i < segments.length; i++) {
+      const segRes = await fetch(segments[i]);
+      if (!segRes.ok) continue;
+
+      const segBuf = await segRes.arrayBuffer();
+      const b64 = bufferToBase64(segBuf);
+      if (b64) {
+        await FileSystem.writeAsStringAsync(localPath, b64, {
+          encoding: FileSystem.EncodingType.Base64,
+          append: true,
+        });
+      }
+
+      onProgress?.((i + 1) / segments.length);
+    }
+
+    const fileInfo = await FileSystem.getInfoAsync(localPath);
+    if (fileInfo.exists && fileInfo.size && fileInfo.size > 50000) {
+      return fileInfo.uri;
+    }
+    return null;
+  } catch (err) {
+    console.error('[DownloadManager] HLS download error:', err);
+    return null;
+  }
+};
+
+/**
  * Download audio file from URL to local storage.
- * Automatically avoids HLS .m3u8 playlist manifests and verifies file size.
+ * Seamlessly handles direct MP3/M4A URLs and HLS .m3u8 streams.
  */
 export const downloadAudio = async (
   audioUrl: string,
@@ -106,13 +207,18 @@ export const downloadAudio = async (
 ): Promise<string | null> => {
   try {
     await ensureDirectories();
-    const localPath = `${DOWNLOADS_DIR}${trackId}.${format}`;
+    const localPath = `${DOWNLOADS_DIR}${trackId}.${format === 'm3u8' ? 'mp3' : format}`;
 
-    if (!audioUrl || audioUrl.includes('.m3u8')) {
-      console.warn('[DownloadManager] HLS .m3u8 provided, skipping direct manifest download');
-      return null;
+    if (!audioUrl) return null;
+
+    // 1. If HLS .m3u8 playlist
+    if (audioUrl.includes('.m3u8')) {
+      console.log('[DownloadManager] Downloading HLS stream to local MP3...');
+      const hlsResult = await downloadHlsAudio(audioUrl, localPath, onProgress);
+      if (hlsResult) return hlsResult;
     }
 
+    // 2. Direct progressive download via createDownloadResumable
     try {
       const downloadResumable = FileSystem.createDownloadResumable(
         audioUrl,
@@ -134,17 +240,19 @@ export const downloadAudio = async (
         }
       }
     } catch {
-      // Fallback to direct downloadAsync
+      // Fallback
     }
 
-    // Direct FileSystem.downloadAsync fallback
-    const directResult = await FileSystem.downloadAsync(audioUrl, localPath);
-    if (directResult?.uri) {
-      const fileInfo = await FileSystem.getInfoAsync(directResult.uri);
-      if (fileInfo.exists && fileInfo.size && fileInfo.size > 50000) {
-        return directResult.uri;
+    // 3. Fallback to FileSystem.downloadAsync
+    try {
+      const directResult = await FileSystem.downloadAsync(audioUrl, localPath);
+      if (directResult?.uri) {
+        const fileInfo = await FileSystem.getInfoAsync(directResult.uri);
+        if (fileInfo.exists && fileInfo.size && fileInfo.size > 50000) {
+          return directResult.uri;
+        }
       }
-    }
+    } catch {}
 
     return null;
   } catch (error) {
@@ -194,41 +302,27 @@ export const downloadTrack = async (
     let resolvedUrl = audioUrl;
     let format = audioFormat;
 
-    // If no progressive direct audio URL or if URL is .m3u8, resolve fresh progressive MP3
-    if (!resolvedUrl || resolvedUrl.includes('.m3u8')) {
-      console.log(`[DownloadManager] Resolving progressive audio for download: "${track.artistName} - ${track.title}"`);
-      
-      const scResult = await resolveViaSoundCloud(track.title, track.artistName, track.duration_ms);
-      if (scResult?.url && !scResult.url.includes('.m3u8')) {
-        resolvedUrl = scResult.url;
-        format = 'mp3';
-      } else {
-        const spotyResult = await resolveViaSpotyloader(track.spotifyId);
-        if (spotyResult?.url && !spotyResult.url.includes('.m3u8')) {
-          resolvedUrl = spotyResult.url;
-          format = 'mp3';
-        } else {
-          const ytResult = await resolveViaYouTubeTopic(track.title, track.artistName);
-          if (ytResult?.url && !ytResult.url.includes('.m3u8')) {
-            resolvedUrl = ytResult.url;
-            format = 'm4a';
-          } else {
-            const mainResult = await resolveAudioUrl(track.title, track.artistName, track.spotifyId, track.duration_ms);
-            if (mainResult?.url && !mainResult.url.includes('.m3u8')) {
-              resolvedUrl = mainResult.url;
-              format = mainResult.format || 'mp3';
-            }
-          }
-        }
+    // If no URL provided, resolve audio source
+    if (!resolvedUrl) {
+      console.log(`[DownloadManager] Resolving audio for: "${track.artistName} - ${track.title}"`);
+      const mainResult = await resolveAudioUrl(
+        track.title,
+        track.artistName,
+        track.spotifyId,
+        track.duration_ms
+      );
+      if (mainResult?.url) {
+        resolvedUrl = mainResult.url;
+        format = mainResult.format || 'mp3';
       }
     }
 
-    if (!resolvedUrl || resolvedUrl.includes('.m3u8')) {
-      throw new Error('Could not resolve progressive audio URL for download');
+    if (!resolvedUrl) {
+      throw new Error('Could not resolve audio stream URL');
     }
 
     // Download audio file (70% of progress)
-    let localAudioPath = await downloadAudio(
+    const localAudioPath = await downloadAudio(
       resolvedUrl,
       trackId,
       format,
@@ -236,7 +330,7 @@ export const downloadTrack = async (
     );
 
     if (!localAudioPath) {
-      throw new Error('Audio binary file download failed');
+      throw new Error('Audio file download failed to produce valid local file');
     }
 
     onProgress?.(0.75);
