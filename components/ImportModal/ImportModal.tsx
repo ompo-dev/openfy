@@ -124,19 +124,21 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
       author_name?: string;
     };
 
-    let title = data.title || 'Unknown Track';
-    let artistName = data.author_name || '';
+    let title = (data.title || 'Unknown Track').replace(/^[\s\-–—]+/, '').trim();
+    let artistName = (data.author_name || '').trim();
 
     if (!artistName && title.includes(' - ')) {
       const parts = title.split(' - ');
-      artistName = parts[0].trim();
-      title = parts.slice(1).join(' - ').trim();
+      if (parts[0].trim() && parts[1]?.trim()) {
+        artistName = parts[0].trim();
+        title = parts.slice(1).join(' - ').trim();
+      }
     }
 
     return {
       spotifyId: trackId,
       title,
-      artistName: artistName || 'Unknown Artist',
+      artistName: artistName || 'Artista',
       albumName: 'Spotify',
       imageURL: data.thumbnail_url || '',
       duration_ms: 0,

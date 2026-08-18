@@ -73,16 +73,16 @@ const Card = React.memo(
             )}
           </React.Suspense>
         </View>
-        {title && (
+        {Boolean(title) ? (
           <Text numberOfLines={2} style={styles.cardTitleText}>
             {title}
           </Text>
-        )}
-        {subtitle && (
+        ) : null}
+        {Boolean(subtitle) ? (
           <Text numberOfLines={!title ? 2 : 1} style={styles.cardSubtitleText}>
             {subtitle}
           </Text>
-        )}
+        ) : null}
       </Pressable>
     );
   }

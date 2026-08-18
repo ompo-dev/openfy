@@ -62,22 +62,35 @@ export const isPreviewUrl = (url: string): boolean => {
   );
 };
 
+import { Platform } from 'react-native';
+
 /**
- * Fetch with timeout compatible with React Native / Hermes
+ * Fetch with timeout compatible with React Native / Hermes and Web (CORS Bypass)
  */
 const fetchWithTimeout = async (
   url: string,
   options: RequestInit = {},
-  timeoutMs = 5000
+  timeoutMs = 6000
 ): Promise<Response> => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, {
+    let targetUrl = url;
+    if (Platform.OS === 'web' && !url.includes('localhost') && !url.includes('127.0.0.1')) {
+      targetUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+    }
+    const response = await fetch(targetUrl, {
       ...options,
       signal: controller.signal,
     });
     return response;
+  } catch (err) {
+    if (Platform.OS === 'web') {
+      try {
+        return await fetch(url, options);
+      } catch {}
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
