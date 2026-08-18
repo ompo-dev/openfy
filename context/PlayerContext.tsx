@@ -110,7 +110,8 @@ export const PlayerProvider = ({
         const resolved = await resolveAudioUrl(
           track.title,
           track.artistName,
-          track.spotifyId
+          track.spotifyId,
+          track.duration_ms
         );
         if (resolved?.url) {
           uri = resolved.url;
@@ -152,7 +153,8 @@ export const PlayerProvider = ({
         const resolved = await resolveAudioUrl(
           track.title,
           track.artistName,
-          track.spotifyId
+          track.spotifyId,
+          track.duration_ms
         );
         if (resolved?.url) {
           track.streamUrl = resolved.url;

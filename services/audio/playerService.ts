@@ -1,10 +1,10 @@
 /**
  * PlayerService — Expo Audio SDK 57
- * Uses AudioModule from expo-audio (replaces deprecated expo-av).
+ * Uses createAudioPlayer from expo-audio (official SDK 57 API).
  * Supports streaming HLS, local files, and progressive mp3/m4a playback.
  */
 import {
-  AudioModule,
+  createAudioPlayer,
   setAudioModeAsync,
   type AudioStatus,
 } from 'expo-audio';
@@ -76,7 +76,7 @@ export const loadAndPlay = async (
 
     console.log('[PlayerService] Loading audio source:', uri);
 
-    const player = new AudioModule.AudioPlayer(uri, 100, true, 20);
+    const player = createAudioPlayer(uri, { updateInterval: 100 });
     playerInstance = player;
 
     player.addListener('playbackStatusUpdate', (status: AudioStatus) => {
@@ -148,19 +148,16 @@ export const unload = async (): Promise<void> => {
 };
 
 /**
- * Get current playback state.
+ * Get current player state.
  */
-export const getStatus = (): PlayerState => {
+export const getPlayerState = (): PlayerState => {
   if (!playerInstance) return DEFAULT_STATE;
   try {
-    return {
-      isPlaying: playerInstance.playing,
-      isBuffering: playerInstance.isBuffering,
-      isLoaded: playerInstance.isLoaded,
-      positionMs: playerInstance.currentTime * 1000,
-      durationMs: playerInstance.duration * 1000,
-    };
+    const status = playerInstance.currentStatus;
+    return toState(status);
   } catch {
     return DEFAULT_STATE;
   }
 };
+
+export const getStatus = getPlayerState;
