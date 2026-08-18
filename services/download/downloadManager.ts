@@ -45,14 +45,18 @@ const COVERS_DIR = `${FileSystem.documentDirectory}openfy_covers/`;
  * Ensure download directories exist
  */
 export const ensureDirectories = async (): Promise<void> => {
-  const downloadsInfo = await FileSystem.getInfoAsync(DOWNLOADS_DIR);
-  if (!downloadsInfo.exists) {
-    await FileSystem.makeDirectoryAsync(DOWNLOADS_DIR, { intermediates: true });
-  }
+  try {
+    const downloadsInfo = await FileSystem.getInfoAsync(DOWNLOADS_DIR);
+    if (!downloadsInfo.exists) {
+      await FileSystem.makeDirectoryAsync(DOWNLOADS_DIR, { intermediates: true });
+    }
 
-  const coversInfo = await FileSystem.getInfoAsync(COVERS_DIR);
-  if (!coversInfo.exists) {
-    await FileSystem.makeDirectoryAsync(COVERS_DIR, { intermediates: true });
+    const coversInfo = await FileSystem.getInfoAsync(COVERS_DIR);
+    if (!coversInfo.exists) {
+      await FileSystem.makeDirectoryAsync(COVERS_DIR, { intermediates: true });
+    }
+  } catch (e) {
+    console.warn('[DownloadManager] ensureDirectories warning:', e);
   }
 };
 
@@ -141,7 +145,8 @@ const bufferToBase64 = (buffer: ArrayBuffer): string => {
 };
 
 /**
- * Download HLS .m3u8 stream by fetching audio segments and concatenating locally
+ * Download HLS .m3u8 stream by fetching audio segments in parallel batches
+ * and concatenating them cleanly to local storage.
  */
 const downloadHlsAudio = async (
   m3u8Url: string,
@@ -149,6 +154,7 @@ const downloadHlsAudio = async (
   onProgress?: (progress: number) => void
 ): Promise<string | null> => {
   try {
+    console.log('[DownloadManager] Fetching HLS m3u8 playlist...');
     const res = await fetch(m3u8Url);
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching playlist`);
 
@@ -162,30 +168,52 @@ const downloadHlsAudio = async (
       throw new Error('No audio segments in m3u8 playlist');
     }
 
-    // Delete existing file if any
+    console.log(`[DownloadManager] Downloading ${segments.length} audio chunks...`);
+
+    // Ensure parent dir exists and delete previous incomplete file
+    await ensureDirectories();
     const existing = await FileSystem.getInfoAsync(localPath);
     if (existing.exists) {
       await FileSystem.deleteAsync(localPath, { idempotent: true });
     }
 
-    for (let i = 0; i < segments.length; i++) {
-      const segRes = await fetch(segments[i]);
-      if (!segRes.ok) continue;
+    const BATCH_SIZE = 4;
+    let writtenChunks = 0;
 
-      const segBuf = await segRes.arrayBuffer();
-      const b64 = bufferToBase64(segBuf);
-      if (b64) {
-        await FileSystem.writeAsStringAsync(localPath, b64, {
-          encoding: FileSystem.EncodingType.Base64,
-          append: true,
-        });
+    for (let i = 0; i < segments.length; i += BATCH_SIZE) {
+      const batch = segments.slice(i, i + BATCH_SIZE);
+      const batchBuffers = await Promise.all(
+        batch.map(async (url) => {
+          try {
+            const segRes = await fetch(url);
+            if (!segRes.ok) return null;
+            return await segRes.arrayBuffer();
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      for (let j = 0; j < batchBuffers.length; j++) {
+        const buf = batchBuffers[j];
+        if (!buf) continue;
+
+        const b64 = bufferToBase64(buf);
+        if (b64) {
+          await FileSystem.writeAsStringAsync(localPath, b64, {
+            encoding: FileSystem.EncodingType.Base64,
+            append: writtenChunks > 0, // First write creates file, subsequent appends!
+          });
+          writtenChunks++;
+        }
       }
 
-      onProgress?.((i + 1) / segments.length);
+      onProgress?.(Math.min(1, (i + BATCH_SIZE) / segments.length));
     }
 
     const fileInfo = await FileSystem.getInfoAsync(localPath);
     if (fileInfo.exists && fileInfo.size && fileInfo.size > 50000) {
+      console.log(`[DownloadManager] HLS download success: ${(fileInfo.size / 1024 / 1024).toFixed(2)} MB`);
       return fileInfo.uri;
     }
     return null;
@@ -207,7 +235,8 @@ export const downloadAudio = async (
 ): Promise<string | null> => {
   try {
     await ensureDirectories();
-    const localPath = `${DOWNLOADS_DIR}${trackId}.${format === 'm3u8' ? 'mp3' : format}`;
+    const cleanFormat = format === 'm3u8' ? 'mp3' : format || 'mp3';
+    const localPath = `${DOWNLOADS_DIR}${trackId}.${cleanFormat}`;
 
     if (!audioUrl) return null;
 
@@ -336,10 +365,13 @@ export const downloadTrack = async (
     onProgress?.(0.75);
 
     // Download cover art
-    const localImagePath =
-      track.imageURL
-        ? (await downloadCover(track.imageURL, trackId)) || track.imageURL
-        : track.imageURL;
+    let localImagePath = track.imageURL;
+    if (track.imageURL && track.imageURL.startsWith('http')) {
+      const downloadedCoverUri = await downloadCover(track.imageURL, trackId);
+      if (downloadedCoverUri) {
+        localImagePath = downloadedCoverUri;
+      }
+    }
 
     onProgress?.(0.9);
 

@@ -432,7 +432,8 @@ export const ImportModal = ({ visible, onClose }: ImportModalProps) => {
       const resolved = await resolveAudioUrl(
         track.title,
         track.artistName,
-        track.spotifyId
+        track.spotifyId,
+        track.duration_ms
       );
       if (!resolved) {
         throw new Error('Não foi possível encontrar a faixa de áudio.');

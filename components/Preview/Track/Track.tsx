@@ -120,7 +120,8 @@ export const Track = ({
       const resolved = await resolveAudioUrl(
         title,
         artistName || subtitle,
-        trackId
+        trackId,
+        duration_ms
       );
       if (!resolved) throw new Error('Could not find audio source');
 
