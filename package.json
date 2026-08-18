@@ -13,7 +13,8 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "test:e2e": "node scripts/e2e-test.js"
   },
   "dependencies": {
     "@expo/ui": "~57.0.7",
