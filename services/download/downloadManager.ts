@@ -1,12 +1,13 @@
 /**
  * Download Manager Service
- * Handles downloading audio files and cover art to device local storage
- * Uses expo-file-system for all file operations
+ * Handles downloading audio files and cover art to device local storage.
+ * Ensures 100% progressive MP3/M4A binary file download (avoiding HLS .m3u8 manifests).
  */
 
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchLyrics, saveLyricsOffline } from '../lyrics/lyricsService';
+import { resolveAudioUrl, resolveViaSpotyloader, resolveViaYouTubeTopic } from '../audio/audioResolver';
 
 export type DownloadStatus = 'idle' | 'downloading' | 'completed' | 'error';
 
@@ -89,17 +90,23 @@ export const getDownloadedTrack = async (
 };
 
 /**
- * Download audio file from URL to local storage
+ * Download audio file from URL to local storage.
+ * Automatically avoids HLS .m3u8 playlist manifests and verifies file size.
  */
 export const downloadAudio = async (
   audioUrl: string,
   trackId: string,
-  format: string = 'm4a',
+  format: string = 'mp3',
   onProgress?: (progress: number) => void
 ): Promise<string | null> => {
   try {
     await ensureDirectories();
     const localPath = `${DOWNLOADS_DIR}${trackId}.${format}`;
+
+    if (!audioUrl || audioUrl.includes('.m3u8')) {
+      console.warn('[DownloadManager] HLS .m3u8 provided, skipping direct manifest download');
+      return null;
+    }
 
     const downloadResumable = FileSystem.createDownloadResumable(
       audioUrl,
@@ -115,6 +122,14 @@ export const downloadAudio = async (
 
     const result = await downloadResumable.downloadAsync();
     if (!result) return null;
+
+    // Verify downloaded file size > 50KB to ensure real audio file was written
+    const fileInfo = await FileSystem.getInfoAsync(result.uri);
+    if (fileInfo.exists && fileInfo.size && fileInfo.size < 50000) {
+      console.warn('[DownloadManager] Downloaded file too small (< 50KB):', fileInfo.size);
+      await FileSystem.deleteAsync(result.uri, { idempotent: true });
+      return null;
+    }
 
     return result.uri;
   } catch (error) {
@@ -142,10 +157,8 @@ export const downloadCover = async (
   }
 };
 
-import { resolveAudioUrl } from '../audio/audioResolver';
-
 /**
- * Full download pipeline: audio + cover + save metadata
+ * Full download pipeline: audio + cover + lyrics + metadata
  */
 export const downloadTrack = async (
   track: {
@@ -161,35 +174,56 @@ export const downloadTrack = async (
   onProgress?: (progress: number) => void
 ): Promise<DownloadedTrack | null> => {
   try {
+    const trackId = `track_${track.spotifyId}`;
+
     let resolvedUrl = audioUrl;
     let format = audioFormat;
 
-    if (!resolvedUrl) {
-      const resolved = await resolveAudioUrl(
-        track.title,
-        track.artistName,
-        track.spotifyId,
-        track.duration_ms
-      );
-      if (!resolved?.url) {
-        throw new Error('Could not resolve audio URL');
+    // Reject .m3u8 for disk download and fetch progressive MP3 stream
+    if (!resolvedUrl || resolvedUrl.includes('.m3u8')) {
+      console.log(`[DownloadManager] Resolving progressive audio for download: "${track.artistName} - ${track.title}"`);
+      const spotyResult = await resolveViaSpotyloader(track.spotifyId);
+      if (spotyResult?.url && !spotyResult.url.includes('.m3u8')) {
+        resolvedUrl = spotyResult.url;
+        format = 'mp3';
+      } else {
+        const ytResult = await resolveViaYouTubeTopic(track.title, track.artistName);
+        if (ytResult?.url && !ytResult.url.includes('.m3u8')) {
+          resolvedUrl = ytResult.url;
+          format = 'm4a';
+        } else {
+          const mainResult = await resolveAudioUrl(track.title, track.artistName, track.spotifyId, track.duration_ms);
+          if (mainResult?.url && !mainResult.url.includes('.m3u8')) {
+            resolvedUrl = mainResult.url;
+            format = mainResult.format || 'mp3';
+          }
+        }
       }
-      resolvedUrl = resolved.url;
-      format = resolved.format || 'mp3';
     }
 
-    const trackId = `track_${track.spotifyId}`;
+    if (!resolvedUrl) {
+      throw new Error('Could not resolve progressive audio URL for download');
+    }
 
-    // Download audio (70% of progress)
-    const localAudioPath = await downloadAudio(
+    // Download audio file (70% of progress)
+    let localAudioPath = await downloadAudio(
       resolvedUrl,
       trackId,
       format,
       (p) => onProgress?.(p * 0.7)
     );
 
+    // If initial URL failed or was small, attempt secondary fallback
     if (!localAudioPath) {
-      throw new Error('Audio download failed');
+      console.log(`[DownloadManager] Fallback download attempt for: "${track.title}"`);
+      const ytResult = await resolveViaYouTubeTopic(track.title, track.artistName);
+      if (ytResult?.url && !ytResult.url.includes('.m3u8')) {
+        localAudioPath = await downloadAudio(ytResult.url, trackId, 'm4a', (p) => onProgress?.(p * 0.7));
+      }
+    }
+
+    if (!localAudioPath) {
+      throw new Error('Audio binary file download failed');
     }
 
     onProgress?.(0.75);
@@ -213,7 +247,7 @@ export const downloadTrack = async (
       localImagePath: localImagePath || track.imageURL,
       downloadedAt: new Date().toISOString(),
       duration_ms: track.duration_ms,
-      audioUrl,
+      audioUrl: resolvedUrl,
     };
 
     // Save lyrics in background
@@ -237,6 +271,7 @@ export const downloadTrack = async (
     await saveDownloadedTracks([...filtered, downloadedTrack]);
 
     onProgress?.(1.0);
+    console.log(`[DownloadManager] Successfully downloaded track "${track.title}" to ${localAudioPath}`);
     return downloadedTrack;
   } catch (error) {
     console.error('[DownloadManager] Track download failed:', error);
@@ -259,22 +294,22 @@ export const deleteDownloadedTrack = async (
     // Delete audio file
     const audioInfo = await FileSystem.getInfoAsync(track.localAudioPath);
     if (audioInfo.exists) {
-      await FileSystem.deleteAsync(track.localAudioPath);
+      await FileSystem.deleteAsync(track.localAudioPath, { idempotent: true });
     }
 
     // Delete cover file
-    const coverInfo = await FileSystem.getInfoAsync(track.localImagePath);
-    if (coverInfo.exists) {
-      await FileSystem.deleteAsync(track.localImagePath);
+    if (track.localImagePath && track.localImagePath.startsWith('file:')) {
+      const imageInfo = await FileSystem.getInfoAsync(track.localImagePath);
+      if (imageInfo.exists) {
+        await FileSystem.deleteAsync(track.localImagePath, { idempotent: true });
+      }
     }
 
-    // Remove from storage
     const filtered = tracks.filter((t) => t.spotifyId !== spotifyId);
     await saveDownloadedTracks(filtered);
-
     return true;
   } catch (error) {
-    console.error('[DownloadManager] Delete failed:', error);
+    console.error('[DownloadManager] Failed to delete downloaded track:', error);
     return false;
   }
 };

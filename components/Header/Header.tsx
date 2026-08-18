@@ -12,6 +12,7 @@ import { FontAwesome5, Ionicons, MaterialCommunityIcons, AntDesign } from '@expo
 
 import { LibraryRelated } from './LibraryRelated';
 import { HomeCategories } from './HomeCategories/HomeCategories';
+import { ImportModal } from '../ImportModal';
 import { useUserData } from '@context';
 import { Pages } from '@config';
 import { translations } from '@data';
@@ -23,6 +24,7 @@ export type HeaderPropsType = {
 export const Header = ({ tab }: HeaderPropsType) => {
   const { top: statusBarOffset } = useSafeAreaInsets();
   const { userData } = useUserData();
+  const [importModalVisible, setImportModalVisible] = React.useState(false);
 
   const isHome = tab === Pages.HOME;
   const isLibrary = tab === Pages.LIBRARY;
@@ -71,8 +73,12 @@ export const Header = ({ tab }: HeaderPropsType) => {
             </Pressable>
           )}
           {isLibrary && (
-            <Pressable style={styles.iconButton} hitSlop={8}>
-              <AntDesign name="plus" size={22} color="#FFFFFF" />
+            <Pressable
+              style={styles.iconButton}
+              hitSlop={8}
+              onPress={() => setImportModalVisible(true)}
+            >
+              <AntDesign name="plus" size={24} color="#FFFFFF" />
             </Pressable>
           )}
         </View>
@@ -81,6 +87,11 @@ export const Header = ({ tab }: HeaderPropsType) => {
       {/* Tab Specific Filter Sub-Header */}
       {isHome && <HomeCategories />}
       {isLibrary && <LibraryRelated />}
+
+      <ImportModal
+        visible={importModalVisible}
+        onClose={() => setImportModalVisible(false)}
+      />
     </View>
   );
 };
