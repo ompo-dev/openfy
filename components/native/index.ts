@@ -4,6 +4,9 @@ export { AppIcon } from './AppIcon';
 export type { AppIconName } from './AppIcon';
 export { GlassSurface } from './GlassSurface';
 export type { GlassSurfaceProps, GlassKind } from './GlassSurfaceFallback';
+export { LoggedPressable, LoggedTextInput, LoggedScrollView } from './Logged';
+export { NativeIconButton, glassCircleModifiers } from './NativeButtons';
+export { SheetFrame } from './SheetFrame';
 export {
   SwiftHost,
   SwiftButton,

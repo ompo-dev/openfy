@@ -1,12 +1,20 @@
 /**
  * HomeCategories Component
- * SwiftUI / Apple Design filter pills (All, Music, Podcasts, Audiobooks)
+ * Renders native Apple UISegmentedControl on iOS (SwiftPicker) and Glass Pills on Android/Web.
  */
 
 import * as React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from 'react-native';
+import {
+  IOS_NATIVE_ENABLED,
+  SwiftHost,
+  SwiftPicker,
+  SwiftText,
+  swiftPickerStyle,
+  swiftTag,
+} from '../../native';
 
-const CATEGORIES = ['All', 'Music', 'Podcasts', 'Audiobooks'];
+const CATEGORIES = ['Tudo', 'Músicas', 'Podcasts', 'Audiobooks'];
 
 type HomeCategoriesProps = {
   selectedCategory?: string;
@@ -14,15 +22,40 @@ type HomeCategoriesProps = {
 };
 
 export const HomeCategories = ({
-  selectedCategory = 'All',
+  selectedCategory = 'Tudo',
   onSelectCategory,
 }: HomeCategoriesProps) => {
   const [selected, setSelected] = React.useState(selectedCategory);
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
 
   const handlePress = (category: string) => {
     setSelected(category);
     onSelectCategory?.(category);
   };
+
+  if (IOS_NATIVE_ENABLED) {
+    return (
+      <View style={styles.iosWrapper}>
+        <SwiftHost
+          style={styles.iosHost}
+          colorScheme={scheme}
+          matchContents={{ horizontal: false, vertical: true }}
+        >
+          <SwiftPicker
+            selection={selected}
+            onSelectionChange={handlePress}
+            modifiers={[swiftPickerStyle('segmented')]}
+          >
+            {CATEGORIES.map((cat) => (
+              <SwiftText key={cat} modifiers={[swiftTag(cat)]}>
+                {cat}
+              </SwiftText>
+            ))}
+          </SwiftPicker>
+        </SwiftHost>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -45,7 +78,9 @@ export const HomeCategories = ({
               <Text
                 style={[
                   styles.pillText,
-                  isSelected ? styles.pillTextSelected : styles.pillTextUnselected,
+                  isSelected
+                    ? styles.pillTextSelected
+                    : styles.pillTextUnselected,
                 ]}
               >
                 {category}
@@ -59,6 +94,14 @@ export const HomeCategories = ({
 };
 
 const styles = StyleSheet.create({
+  iosWrapper: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  iosHost: {
+    height: 36,
+    alignSelf: 'stretch',
+  },
   container: {
     height: 48,
     justifyContent: 'center',

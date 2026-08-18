@@ -1,13 +1,13 @@
 /**
  * MiniPlayer Component
- * Floating Apple Music / Liquid Glass pill player.
- * Uses GlassSurface (real Liquid Glass on iOS 26, expo-blur on older).
+ * Floating Apple Music / Liquid Glass dock pill player matching Gym's TotalsDock architecture.
+ * Uses GlassSurface (real Liquid Glass on iOS 26, expo-blur on older) and LoggedPressable with spring physics.
  */
 import * as React from 'react';
-import { Animated, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Image, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { usePlayer } from '@context';
-import { GlassSurface } from '../native';
+import { GlassSurface, LoggedPressable } from '../native';
 
 type MiniPlayerProps = { onPress: () => void };
 
@@ -49,7 +49,12 @@ export const MiniPlayer = ({ onPress }: MiniPlayerProps) => {
         },
       ]}
     >
-      <Pressable onPress={onPress} style={styles.pressableWrapper}>
+      <LoggedPressable
+        onPress={onPress}
+        style={styles.pressableWrapper}
+        accessibilityRole="button"
+        accessibilityLabel="Abrir Player"
+      >
         <GlassSurface
           glass="regular"
           isInteractive
@@ -78,29 +83,34 @@ export const MiniPlayer = ({ onPress }: MiniPlayerProps) => {
             </View>
 
             <View style={styles.actionsSection}>
-              <Pressable
+              <LoggedPressable
                 style={styles.actionBtn}
                 hitSlop={10}
                 onPress={(e) => {
                   e.stopPropagation();
                 }}
+                accessibilityRole="button"
+                accessibilityLabel="AirPlay"
               >
                 <Ionicons name={'airplay' as any} size={22} color="#FFFFFF" />
-              </Pressable>
-              <Pressable
+              </LoggedPressable>
+
+              <LoggedPressable
                 style={styles.actionBtn}
                 hitSlop={10}
                 onPress={(e) => {
                   e.stopPropagation();
                   togglePlayPause();
                 }}
+                accessibilityRole="button"
+                accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'}
               >
                 <Ionicons
                   name={playerState.isPlaying ? 'pause' : 'play'}
                   size={26}
                   color="#FFFFFF"
                 />
-              </Pressable>
+              </LoggedPressable>
             </View>
           </View>
 
@@ -110,7 +120,7 @@ export const MiniPlayer = ({ onPress }: MiniPlayerProps) => {
             />
           </View>
         </GlassSurface>
-      </Pressable>
+      </LoggedPressable>
     </Animated.View>
   );
 };
@@ -136,13 +146,13 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.18)',
-    backgroundColor: 'rgba(20, 20, 26, 0.72)',
+    backgroundColor: 'rgba(20, 20, 26, 0.76)',
     overflow: 'hidden',
   },
   mainContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 10,
     gap: 12,
   },
@@ -179,7 +189,7 @@ const styles = StyleSheet.create({
     paddingRight: 4,
   },
   actionBtn: {
-    padding: 4,
+    padding: 6,
   },
   progressTrack: {
     height: 2.5,

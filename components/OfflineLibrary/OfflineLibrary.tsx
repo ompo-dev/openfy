@@ -1,13 +1,12 @@
 /**
  * OfflineLibrary screen
- * Shows all locally downloaded tracks with play button
+ * Shows all locally downloaded tracks with play button and Liquid Glass item styling
  */
 
 import * as React from 'react';
 import {
   FlatList,
   Image,
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -17,8 +16,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { getDownloadedTracks, deleteDownloadedTrack, DownloadedTrack } from '@services';
 import { usePlayer } from '@context';
-import { COLORS } from '@config';
 import { useFocusEffect } from 'expo-router';
+import { GlassSurface, LoggedPressable } from '../native';
 
 export const OfflineLibrary = () => {
   const [tracks, setTracks] = React.useState<DownloadedTrack[]>([]);
@@ -50,74 +49,84 @@ export const OfflineLibrary = () => {
     const isPlaying = isCurrentTrack && playerState.isPlaying;
 
     return (
-      <Pressable
+      <LoggedPressable
         style={styles.trackItem}
         onPress={() => handlePlay(item)}
+        accessibilityRole="button"
+        accessibilityLabel={`Tocar ${item.title}`}
       >
-        {item.imageURL ? (
-          <Image source={{ uri: item.imageURL }} style={styles.cover} />
-        ) : (
-          <View style={[styles.cover, styles.coverFallback]}>
-            <Ionicons name="musical-note" size={20} color="#555" />
-          </View>
-        )}
+        <GlassSurface glass="regular" isInteractive style={styles.trackGlass}>
+          <View style={styles.trackContent}>
+            {item.imageURL ? (
+              <Image source={{ uri: item.imageURL }} style={styles.cover} />
+            ) : (
+              <View style={[styles.cover, styles.coverFallback]}>
+                <Ionicons name="musical-note" size={20} color="#888" />
+              </View>
+            )}
 
-        <View style={styles.info}>
-          <Text
-            style={[styles.title, isCurrentTrack && styles.titleActive]}
-            numberOfLines={1}
-          >
-            {isCurrentTrack && (
+            <View style={styles.info}>
+              <Text
+                style={[styles.title, isCurrentTrack && styles.titleActive]}
+                numberOfLines={1}
+              >
+                {isCurrentTrack && (
+                  <Ionicons
+                    name={isPlaying ? 'volume-high' : 'pause'}
+                    size={12}
+                    color="#1DB954"
+                  />
+                )}{' '}
+                {item.title}
+              </Text>
+              <View style={styles.meta}>
+                <MaterialCommunityIcons
+                  name="arrow-down-bold"
+                  size={12}
+                  color="#1DB954"
+                />
+                <Text style={styles.artist} numberOfLines={1}>
+                  {item.artistName} • {item.albumName}
+                </Text>
+              </View>
+            </View>
+
+            <LoggedPressable
+              onPress={() => handlePlay(item)}
+              style={styles.playIconButton}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={isPlaying ? 'Pausar' : 'Tocar'}
+            >
               <Ionicons
-                name={isPlaying ? 'volume-high' : 'pause'}
-                size={12}
+                name={isPlaying ? 'pause-circle' : 'play-circle'}
+                size={32}
                 color="#1DB954"
               />
-            )}{' '}
-            {item.title}
-          </Text>
-          <View style={styles.meta}>
-            <MaterialCommunityIcons
-              name="arrow-down-bold"
-              size={10}
-              color="#1DB954"
-            />
-            <Text style={styles.artist} numberOfLines={1}>
-              {item.artistName} • {item.albumName}
-            </Text>
+            </LoggedPressable>
+
+            <LoggedPressable
+              onPress={() => handleDelete(item.spotifyId)}
+              style={styles.deleteButton}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Excluir música baixada"
+            >
+              <Ionicons name="trash-outline" size={18} color="#FF4444" />
+            </LoggedPressable>
           </View>
-        </View>
-
-        <Pressable
-          onPress={() => handlePlay(item)}
-          style={styles.playIconButton}
-          hitSlop={8}
-        >
-          <Ionicons
-            name={isPlaying ? 'pause-circle' : 'play-circle'}
-            size={28}
-            color="#1DB954"
-          />
-        </Pressable>
-
-        <Pressable
-          onPress={() => handleDelete(item.spotifyId)}
-          style={styles.deleteButton}
-          hitSlop={8}
-        >
-          <Ionicons name="trash-outline" size={18} color="#FF4444" />
-        </Pressable>
-      </Pressable>
+        </GlassSurface>
+      </LoggedPressable>
     );
   };
 
   if (tracks.length === 0) {
     return (
       <View style={styles.emptyContainer}>
-        <Ionicons name="download-outline" size={52} color="#555" />
+        <Ionicons name="download-outline" size={56} color="#666" />
         <Text style={styles.emptyTitle}>Nenhuma música baixada</Text>
         <Text style={styles.emptySubtitle}>
-          Use o botão + para importar e baixar músicas do Spotify
+          Toque no botão + na Library para importar e baixar músicas, playlists e álbuns
         </Text>
       </View>
     );
@@ -127,7 +136,7 @@ export const OfflineLibrary = () => {
     <View style={styles.container}>
       <Text style={styles.header}>
         {tracks.length} {tracks.length === 1 ? 'música' : 'músicas'} baixada
-        {tracks.length !== 1 ? 's' : ''}
+        {tracks.length !== 1 ? 's' : ''} • Offline
       </Text>
       <FlatList
         data={tracks}
@@ -146,28 +155,38 @@ const styles = StyleSheet.create({
     backgroundColor: '#121212',
   },
   header: {
-    color: '#A0A0A0',
+    color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 13,
-    fontFamily: 'SF-Regular',
+    fontFamily: 'SF-Semibold',
+    fontWeight: '600',
     paddingHorizontal: 20,
     paddingVertical: 12,
   },
   list: {
-    paddingHorizontal: 20,
-    paddingBottom: 100,
+    paddingHorizontal: 16,
+    paddingBottom: 110,
+    gap: 8,
   },
   trackItem: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  trackGlass: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    overflow: 'hidden',
+  },
+  trackContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    padding: 10,
     gap: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#282828',
   },
   cover: {
     width: 48,
     height: 48,
-    borderRadius: 4,
+    borderRadius: 8,
   },
   coverFallback: {
     backgroundColor: '#282828',
@@ -182,6 +201,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontFamily: 'SF-Semibold',
+    fontWeight: '600',
   },
   titleActive: {
     color: '#1DB954',
@@ -192,17 +212,16 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   artist: {
-    color: '#A0A0A0',
+    color: 'rgba(255, 255, 255, 0.65)',
     fontSize: 12,
     fontFamily: 'SF-Regular',
     flex: 1,
   },
   playIconButton: {
-    padding: 6,
-    marginRight: 4,
+    padding: 4,
   },
   deleteButton: {
-    padding: 8,
+    padding: 6,
   },
   emptyContainer: {
     flex: 1,
@@ -219,9 +238,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   emptySubtitle: {
-    color: '#A0A0A0',
+    color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 14,
     fontFamily: 'SF-Regular',
     textAlign: 'center',
+    lineHeight: 20,
   },
 });

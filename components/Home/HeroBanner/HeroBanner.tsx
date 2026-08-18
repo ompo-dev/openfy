@@ -1,6 +1,6 @@
 /**
  * HeroBanner Component
- * Featured hero carousel with huge artwork, Play / My List action pills with tactile feedback.
+ * Featured hero carousel with huge artwork, Play / My List Liquid Glass action pills with tactile feedback.
  * Uses exact Spotify IDs for authentic playback.
  */
 
@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   Dimensions,
   ImageBackground,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { usePlayer } from '@context';
 import { downloadTrack } from '@services';
+import { GlassSurface, LoggedPressable } from '../../native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 32;
@@ -95,7 +95,7 @@ export const HeroBanner = () => {
       });
       setAddedIds((prev) => ({ ...prev, [item.id]: true }));
     } catch {
-      // Ignore
+      // ignore
     } finally {
       setAddingId(null);
     }
@@ -125,9 +125,9 @@ export const HeroBanner = () => {
                 style={styles.cardImage}
                 imageStyle={styles.imageBorderRadius}
               >
-                {/* Subtle top and bottom dark gradient overlay */}
+                {/* Dark gradient overlay */}
                 <LinearGradient
-                  colors={['rgba(0,0,0,0.45)', 'transparent', 'rgba(0,0,0,0.85)']}
+                  colors={['rgba(0,0,0,0.4)', 'transparent', 'rgba(0,0,0,0.85)']}
                   locations={[0, 0.45, 1.0]}
                   style={styles.gradientOverlay}
                 >
@@ -141,15 +141,13 @@ export const HeroBanner = () => {
                     </Text>
                   </View>
 
-                  {/* Bottom Action Pills with Touch Feedback */}
+                  {/* Bottom Action Pills with Liquid Glass & Touch Feedback */}
                   <View style={styles.actionsContainer}>
-                    <Pressable
+                    <LoggedPressable
                       onPress={() => handlePlay(item)}
-                      style={({ pressed }) => [
-                        styles.playButton,
-                        { transform: [{ scale: pressed ? 0.94 : 1 }] },
-                      ]}
-                      hitSlop={4}
+                      style={styles.playButton}
+                      accessibilityRole="button"
+                      accessibilityLabel={isCurrentPlaying ? 'Pausar' : 'Tocar'}
                     >
                       <Ionicons
                         name={isCurrentPlaying ? 'pause' : 'play'}
@@ -159,30 +157,35 @@ export const HeroBanner = () => {
                       <Text style={styles.playButtonText}>
                         {isCurrentPlaying ? 'Pause' : 'Play'}
                       </Text>
-                    </Pressable>
+                    </LoggedPressable>
 
-                    <Pressable
+                    <LoggedPressable
                       onPress={() => handleAddToList(item)}
-                      style={({ pressed }) => [
-                        styles.myListButton,
-                        isAdded && styles.myListButtonAdded,
-                        { transform: [{ scale: pressed ? 0.94 : 1 }] },
-                      ]}
-                      hitSlop={4}
+                      accessibilityRole="button"
+                      accessibilityLabel="Adicionar à lista"
                     >
-                      {isAdding ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <Ionicons
-                          name={isAdded ? 'checkmark' : 'add'}
-                          size={20}
-                          color="#FFFFFF"
-                        />
-                      )}
-                      <Text style={styles.myListButtonText}>
-                        {isAdded ? 'Saved' : 'My List'}
-                      </Text>
-                    </Pressable>
+                      <GlassSurface
+                        glass="regular"
+                        isInteractive
+                        style={[
+                          styles.myListGlassButton,
+                          isAdded && styles.myListButtonAdded,
+                        ]}
+                      >
+                        {isAdding ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <Ionicons
+                            name={isAdded ? 'checkmark' : 'add'}
+                            size={20}
+                            color="#FFFFFF"
+                          />
+                        )}
+                        <Text style={styles.myListButtonText}>
+                          {isAdded ? 'Salvo' : 'Minha Lista'}
+                        </Text>
+                      </GlassSurface>
+                    </LoggedPressable>
                   </View>
                 </LinearGradient>
               </ImageBackground>
@@ -191,14 +194,14 @@ export const HeroBanner = () => {
         })}
       </ScrollView>
 
-      {/* Pagination Indicators (Bar + Dots) */}
-      <View style={styles.paginationContainer}>
-        {FEATURED_ITEMS.map((_, i) => (
+      {/* Slide Indicators */}
+      <View style={styles.indicatorContainer}>
+        {FEATURED_ITEMS.map((_, index) => (
           <View
-            key={i}
+            key={index}
             style={[
-              styles.dot,
-              i === activeIndex ? styles.dotActive : styles.dotInactive,
+              styles.indicatorDot,
+              index === activeIndex && styles.indicatorDotActive,
             ]}
           />
         ))}
@@ -210,7 +213,6 @@ export const HeroBanner = () => {
 const styles = StyleSheet.create({
   container: {
     marginVertical: 12,
-    alignItems: 'center',
   },
   scrollContent: {
     paddingHorizontal: 16,
@@ -219,66 +221,62 @@ const styles = StyleSheet.create({
   cardWrapper: {
     width: CARD_WIDTH,
     height: CARD_HEIGHT,
-    borderRadius: 20,
+    borderRadius: 24,
     overflow: 'hidden',
-    backgroundColor: '#1E1E1E',
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
   },
   cardImage: {
     width: '100%',
     height: '100%',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
   },
   imageBorderRadius: {
-    borderRadius: 20,
+    borderRadius: 24,
   },
   gradientOverlay: {
-    flex: 1,
+    ...(StyleSheet.absoluteFill as any),
     justifyContent: 'space-between',
     padding: 20,
-    borderRadius: 20,
+    borderRadius: 24,
   },
   headerTextContainer: {
-    alignItems: 'center',
-    marginTop: 10,
+    marginTop: 8,
   },
   artistSubtitle: {
-    color: '#FFFFFF',
-    fontSize: 14,
+    color: '#E5E5E5',
+    fontSize: 13,
     fontFamily: 'SF-Bold',
-    fontWeight: '800',
-    letterSpacing: 2,
+    fontWeight: '700',
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
   },
   mainHeadline: {
-    fontSize: 32,
+    fontSize: 28,
     fontFamily: 'SF-Bold',
     fontWeight: '900',
-    letterSpacing: 0.5,
-    textAlign: 'center',
+    letterSpacing: -0.5,
     marginTop: 4,
-    textShadowColor: 'rgba(0,0,0,0.9)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
+    textTransform: 'uppercase',
   },
   actionsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-    marginBottom: 6,
+    gap: 12,
+    marginBottom: 4,
   },
   playButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
     backgroundColor: '#FFFFFF',
-    paddingVertical: 14,
-    paddingHorizontal: 36,
-    borderRadius: 30,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 22,
+    gap: 8,
     elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -287,49 +285,47 @@ const styles = StyleSheet.create({
   },
   playButtonText: {
     color: '#000000',
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: 'SF-Bold',
     fontWeight: '700',
   },
-  myListButton: {
+  myListGlassButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(18, 18, 18, 0.65)',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 22,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: 30,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    gap: 6,
+    overflow: 'hidden',
   },
   myListButtonAdded: {
-    backgroundColor: 'rgba(29, 185, 84, 0.4)',
     borderColor: '#1DB954',
   },
   myListButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: 'SF-Bold',
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  paginationContainer: {
+  indicatorContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
     gap: 6,
-    marginTop: 14,
+    marginTop: 12,
   },
-  dot: {
+  indicatorDot: {
+    width: 6,
     height: 6,
     borderRadius: 3,
-  },
-  dotActive: {
-    width: 22,
-    backgroundColor: '#FFFFFF',
-  },
-  dotInactive: {
-    width: 6,
     backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  indicatorDotActive: {
+    width: 18,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 3,
   },
 });

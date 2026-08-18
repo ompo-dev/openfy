@@ -1,8 +1,7 @@
 /**
  * Audio Resolver Service
- * Powered by Spotify Ground Truth Engine and SpotDL Matching Architecture.
- * Strictly bans 30-second previews/snippets (/0/30/, preview, snippet).
- * Delivers full-length master audio for 100% synchronization.
+ * High-precision full-length audio resolver with dynamic client ID scraping,
+ * duration matching (rejecting 30s snippets), and progressive MP3 stream delivery.
  */
 
 export type ResolvedAudio = {
@@ -51,7 +50,7 @@ const hasUnwantedForbiddenWords = (
 /**
  * Is URL a forbidden preview or 30-second snippet?
  */
-const isPreviewUrl = (url: string): boolean => {
+export const isPreviewUrl = (url: string): boolean => {
   if (!url) return true;
   const lower = url.toLowerCase();
   return (
@@ -84,6 +83,53 @@ const fetchWithTimeout = async (
   }
 };
 
+let cachedSoundCloudClientId = 'UMY1dzQ68n2QbCuypNe8JOivmV2FO2Ep';
+let lastClientIdFetch = 0;
+
+/**
+ * Fetch live SoundCloud client ID dynamically from soundcloud.com web scripts
+ */
+export const getLiveSoundCloudClientId = async (): Promise<string> => {
+  const now = Date.now();
+  if (cachedSoundCloudClientId && now - lastClientIdFetch < 3600000) {
+    return cachedSoundCloudClientId;
+  }
+
+  try {
+    const pageRes = await fetchWithTimeout('https://soundcloud.com', {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    }, 4000);
+
+    if (pageRes.ok) {
+      const html = await pageRes.text();
+      const scriptUrls = [
+        ...html.matchAll(/src="(https:\/\/[^"]+\.js)"/g),
+      ].map((m) => m[1]);
+
+      for (const url of scriptUrls.slice(-6)) {
+        const jsRes = await fetchWithTimeout(url, {}, 3000);
+        if (jsRes.ok) {
+          const jsText = await jsRes.text();
+          const match =
+            jsText.match(/client_id:"([a-zA-Z0-9]{32})"/i) ||
+            jsText.match(/client_id=([a-zA-Z0-9]{32})/i) ||
+            jsText.match(/"client_id"\s*:\s*"([a-zA-Z0-9]{32})"/i);
+          if (match && match[1]) {
+            cachedSoundCloudClientId = match[1];
+            lastClientIdFetch = now;
+            return cachedSoundCloudClientId;
+          }
+        }
+      }
+    }
+  } catch {}
+
+  return cachedSoundCloudClientId || 'UMY1dzQ68n2QbCuypNe8JOivmV2FO2Ep';
+};
+
 /**
  * Spotyloader Full-Track Engine (Exact Spotify Ground Truth)
  */
@@ -110,7 +156,7 @@ export const resolveViaSpotyloader = async (
         },
         body: JSON.stringify({ url: spotifyUrl }),
       },
-      6000
+      5000
     );
 
     if (!res.ok) return null;
@@ -136,9 +182,8 @@ export const resolveViaSpotyloader = async (
     const jobId = data.jobId || data.id;
     if (!jobId) return null;
 
-    // Polling every 700ms (up to 20 attempts)
-    for (let i = 0; i < 20; i++) {
-      await new Promise((r) => setTimeout(r, 700));
+    for (let i = 0; i < 15; i++) {
+      await new Promise((r) => setTimeout(r, 600));
 
       try {
         const sRes = await fetchWithTimeout(
@@ -151,7 +196,7 @@ export const resolveViaSpotyloader = async (
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             },
           },
-          4000
+          3000
         );
 
         if (!sRes.ok) continue;
@@ -204,8 +249,8 @@ export const resolveViaYouTubeTopic = async (
   artistName: string
 ): Promise<ResolvedAudio | null> => {
   try {
-    const query = `${artistName} - ${trackName} - Topic`;
-    console.log(`[AudioResolver] Searching YouTube Topic Master for: ${query}`);
+    const query = `${artistName} - ${trackName} Official Audio`;
+    console.log(`[AudioResolver] Searching YouTube for: ${query}`);
 
     const ytRes = await fetchWithTimeout(
       `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
@@ -216,7 +261,7 @@ export const resolveViaYouTubeTopic = async (
           'Accept-Language': 'en-US,en;q=0.9',
         },
       },
-      5000
+      4000
     );
 
     if (!ytRes.ok) return null;
@@ -234,14 +279,13 @@ export const resolveViaYouTubeTopic = async (
     const streamGateways = [
       `https://pipedapi.kavin.rocks/streams/${videoId}`,
       `https://api.piped.private.coffee/streams/${videoId}`,
-      `https://pipedapi.adminforge.de/streams/${videoId}`,
       `https://inv.nadeko.net/api/v1/videos/${videoId}`,
       `https://invidious.nerdvpn.de/api/v1/videos/${videoId}`,
     ];
 
     for (const gateway of streamGateways) {
       try {
-        const gRes = await fetchWithTimeout(gateway, {}, 3500);
+        const gRes = await fetchWithTimeout(gateway, {}, 3000);
         if (!gRes.ok) continue;
 
         const gData = (await gRes.json()) as {
@@ -258,7 +302,7 @@ export const resolveViaYouTubeTopic = async (
           );
 
         if (audio && audio.url) {
-          console.log(`[AudioResolver] YouTube Topic Master resolved: ${audio.url.substring(0, 60)}...`);
+          console.log(`[AudioResolver] YouTube Stream resolved: ${audio.url.substring(0, 60)}...`);
           return {
             url: audio.url,
             quality: 'high',
@@ -271,76 +315,89 @@ export const resolveViaYouTubeTopic = async (
       }
     }
   } catch (error) {
-    console.warn('[AudioResolver] YouTube Topic fallback error:', error);
+    console.warn('[AudioResolver] YouTube fallback error:', error);
   }
 
   return null;
 };
 
 /**
- * SoundCloud Client ID and direct non-DRM stream resolver with strict Anti-Preview filtering
+ * SoundCloud Resolver with dynamic live Client ID, Anti-Preview duration scoring,
+ * and progressive MP3 direct download stream extraction.
  */
-let cachedSoundCloudClientId: string | null = 'UMY1dzQ68n2QbCuypNe8JOivmV2FO2Ep';
-
 export const resolveViaSoundCloud = async (
   trackName: string,
   artistName: string,
   expectedDurationMs?: number
 ): Promise<ResolvedAudio | null> => {
   try {
-    const query = `${artistName} - ${trackName}`;
-    const clientId = cachedSoundCloudClientId || 'UMY1dzQ68n2QbCuypNe8JOivmV2FO2Ep';
-    const searchUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(
-      query
-    )}&client_id=${clientId}&limit=10`;
+    const clientId = await getLiveSoundCloudClientId();
+    const expectedSec = expectedDurationMs && expectedDurationMs > 0
+      ? Math.round(expectedDurationMs / 1000)
+      : 200;
 
-    const res = await fetchWithTimeout(
-      searchUrl,
-      {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-      },
-      5000
-    );
+    const queries = [
+      `${artistName} ${trackName} audio`,
+      `${trackName} ${artistName}`,
+      `${artistName} - ${trackName}`,
+    ];
 
-    if (!res.ok) return null;
-
-    const data = (await res.json()) as {
-      collection?: {
-        title: string;
-        duration?: number;
-        media?: {
-          transcodings?: {
-            url: string;
-            format: { protocol: string; mime_type?: string };
-          }[];
-        };
-      }[];
+    type SCCandidate = {
+      title: string;
+      durSec: number;
+      media?: {
+        transcodings?: {
+          url: string;
+          format: { protocol: string; mime_type?: string };
+        }[];
+      };
     };
 
-    if (!data.collection || data.collection.length === 0) return null;
+    let candidates: SCCandidate[] = [];
 
-    for (const track of data.collection) {
-      // Rule 1: Strictly reject short snippets (< 60 seconds)
-      if (track.duration && track.duration < 60000) {
-        continue;
-      }
+    for (const query of queries) {
+      try {
+        const searchUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(
+          query
+        )}&client_id=${clientId}&limit=10`;
 
-      // Rule 2: Reject forbidden word matches (covers, live, remix)
-      if (hasUnwantedForbiddenWords(track.title, trackName)) {
-        continue;
-      }
+        const res = await fetchWithTimeout(
+          searchUrl,
+          {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            },
+          },
+          4000
+        );
 
-      // Rule 3: Duration check (within 15s of original)
-      if (expectedDurationMs && track.duration && expectedDurationMs > 0) {
-        const diffMs = Math.abs(track.duration - expectedDurationMs);
-        if (diffMs > 15000) {
-          continue;
+        if (!res.ok) continue;
+
+        const data = (await res.json()) as { collection?: any[] };
+        for (const item of data.collection || []) {
+          const durSec = Math.round((item.duration || 0) / 1000);
+          // Rule 1: Strictly reject short snippets (< 60s)
+          if (durSec < 60) continue;
+          // Rule 2: Reject huge mix files (> 900s)
+          if (durSec > 900) continue;
+          candidates.push({ ...item, durSec });
         }
+      } catch {
+        continue;
       }
+    }
 
+    if (candidates.length === 0) return null;
+
+    // Score and rank candidates by duration difference from expected song duration
+    candidates.sort((a, b) => {
+      const diffA = Math.abs(a.durSec - expectedSec);
+      const diffB = Math.abs(b.durSec - expectedSec);
+      return diffA - diffB;
+    });
+
+    for (const track of candidates.slice(0, 5)) {
       const transcodings = track.media?.transcodings || [];
       if (transcodings.length === 0) continue;
 
@@ -353,6 +410,7 @@ export const resolveViaSoundCloud = async (
         );
       });
 
+      // Prioritize progressive MP3 for immediate local saving
       const sorted = [...nonDrmTranscodings].sort((a, b) => {
         if (a.format.protocol === 'progressive') return -1;
         if (b.format.protocol === 'progressive') return 1;
@@ -366,7 +424,7 @@ export const resolveViaSoundCloud = async (
           const streamRes = await fetchWithTimeout(
             `${transcoding.url}?client_id=${clientId}`,
             {},
-            4000
+            3500
           );
 
           if (streamRes.ok) {
@@ -375,11 +433,12 @@ export const resolveViaSoundCloud = async (
               streamData.url &&
               !isPreviewUrl(streamData.url)
             ) {
+              const isProgressive = transcoding.format.protocol === 'progressive';
               const isM3u8 = streamData.url.includes('.m3u8');
               return {
                 url: streamData.url,
                 quality: 'high',
-                format: isM3u8 ? 'm3u8' : 'mp3',
+                format: isProgressive ? 'mp3' : isM3u8 ? 'm3u8' : 'mp3',
                 source: 'soundcloud',
               };
             }
@@ -398,7 +457,6 @@ export const resolveViaSoundCloud = async (
 
 /**
  * Main audio resolver: finds the 100% full-length master audio for the Spotify track.
- * Uses Spotyloader -> YouTube Topic Master -> Full-Length SoundCloud.
  */
 export const resolveAudioUrl = async (
   trackName: string,
@@ -417,21 +475,7 @@ export const resolveAudioUrl = async (
     `[AudioResolver] Resolving Full Audio for: "${artistName} - ${trackName}" (spotifyId: ${spotifyId || 'none'})`
   );
 
-  // 1. PRIMARY: Spotyloader 320kbps MP3 from Spotify ID
-  if (spotifyId && !spotifyId.startsWith('dz_') && !spotifyId.startsWith('yt_')) {
-    const spotyResult = await resolveViaSpotyloader(spotifyId);
-    if (spotyResult && spotyResult.url && !isPreviewUrl(spotyResult.url)) {
-      return spotyResult;
-    }
-  }
-
-  // 2. SECONDARY: YouTube Topic Official Master (100% Full-Length Studio Recording)
-  const ytResult = await resolveViaYouTubeTopic(trackName, primaryArtist);
-  if (ytResult && ytResult.url && !isPreviewUrl(ytResult.url)) {
-    return ytResult;
-  }
-
-  // 3. TERTIARY: SoundCloud (strictly anti-preview / > 60s)
+  // 1. PRIMARY: SoundCloud Anti-Preview Full-Length Stream (Instant & Non-DRM progressive MP3)
   const soundcloudResult = await resolveViaSoundCloud(
     trackName,
     primaryArtist,
@@ -439,6 +483,20 @@ export const resolveAudioUrl = async (
   );
   if (soundcloudResult && soundcloudResult.url && !isPreviewUrl(soundcloudResult.url)) {
     return soundcloudResult;
+  }
+
+  // 2. SECONDARY: Spotyloader 320kbps MP3 from Spotify ID
+  if (spotifyId && !spotifyId.startsWith('dz_') && !spotifyId.startsWith('yt_')) {
+    const spotyResult = await resolveViaSpotyloader(spotifyId);
+    if (spotyResult && spotyResult.url && !isPreviewUrl(spotyResult.url)) {
+      return spotyResult;
+    }
+  }
+
+  // 3. TERTIARY: YouTube Topic Official Master
+  const ytResult = await resolveViaYouTubeTopic(trackName, primaryArtist);
+  if (ytResult && ytResult.url && !isPreviewUrl(ytResult.url)) {
+    return ytResult;
   }
 
   return null;

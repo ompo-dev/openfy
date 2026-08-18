@@ -1,19 +1,14 @@
 /**
  * YourFavourites Component
  * Horizontal favorites section with square album cards and circular artist avatars.
- * Uses exact Spotify IDs and artist titles for authentic playback.
+ * Uses LoggedPressable for tactile spring scaling.
  */
 
 import * as React from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { usePlayer } from '@context';
+import { LoggedPressable } from '../../native';
 
 const FAVOURITE_ITEMS = [
   {
@@ -94,19 +89,19 @@ export const YourFavourites = () => {
         {FAVOURITE_ITEMS.map((item) => {
           const isArtist = item.type === 'artist';
           return (
-            <Pressable
+            <LoggedPressable
               key={item.id}
               onPress={() => handlePress(item)}
-              style={({ pressed }) => [
-                styles.itemWrapper,
-                { transform: [{ scale: pressed ? 0.94 : 1 }] },
-              ]}
-              hitSlop={4}
+              style={styles.itemWrapper}
+              accessibilityRole="button"
+              accessibilityLabel={`Tocar ${item.title}`}
             >
               <View
                 style={[
                   styles.imageContainer,
-                  isArtist ? styles.artistImageContainer : styles.albumImageContainer,
+                  isArtist
+                    ? styles.artistImageContainer
+                    : styles.albumImageContainer,
                 ]}
               >
                 <Image
@@ -118,7 +113,7 @@ export const YourFavourites = () => {
               <Text style={styles.itemTitle} numberOfLines={1}>
                 {item.title}
               </Text>
-            </Pressable>
+            </LoggedPressable>
           );
         })}
       </ScrollView>
@@ -126,7 +121,7 @@ export const YourFavourites = () => {
   );
 };
 
-const ITEM_SIZE = 88;
+const ITEM_SIZE = 96;
 
 const styles = StyleSheet.create({
   container: {
@@ -154,10 +149,17 @@ const styles = StyleSheet.create({
     width: ITEM_SIZE,
     height: ITEM_SIZE,
     overflow: 'hidden',
-    backgroundColor: '#282828',
+    backgroundColor: '#1E1E24',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
   },
   albumImageContainer: {
-    borderRadius: 8,
+    borderRadius: 16,
   },
   artistImageContainer: {
     borderRadius: ITEM_SIZE / 2,
@@ -172,5 +174,6 @@ const styles = StyleSheet.create({
     fontFamily: 'SF-Semibold',
     fontWeight: '600',
     textAlign: 'center',
+    marginTop: 2,
   },
 });
