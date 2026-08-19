@@ -468,9 +468,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 style={styles.pillSegment}
               >
                 <Ionicons
-                  name={isLiked ? 'star' : 'star-outline'}
+                  name={isLiked ? 'heart' : 'heart-outline'}
                   size={19}
-                  color={isLiked ? '#FFD700' : 'rgba(255,255,255,0.8)'}
+                  color={isLiked ? '#FF3B30' : 'rgba(255,255,255,0.8)'}
                 />
               </LoggedPressable>
 
@@ -496,25 +496,25 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 accessibilityLabel="Opções do YouTube"
               >
                 <Ionicons
-                  name="logo-youtube"
-                  size={18}
-                  color="#FF0000"
+                  name="ellipsis-horizontal"
+                  size={19}
+                  color="rgba(255,255,255,0.8)"
                 />
               </LoggedPressable>
             </GlassSurface>
           )}
 
-          {/* Right Pill: YouTube Button with Red Logo */}
+          {/* Right Pill: YouTube Button with Clean Glass Theme */}
           <LoggedPressable
             onPress={handleOpenYoutubeMenu}
-            style={[styles.circleActionBtn, styles.youtubeActionBtn]}
+            style={styles.circleActionBtn}
             accessibilityRole="button"
             accessibilityLabel="Opções do YouTube"
           >
             <Ionicons
               name="logo-youtube"
               size={20}
-              color="#FF0000"
+              color="rgba(255,255,255,0.85)"
             />
           </LoggedPressable>
         </View>
@@ -1031,11 +1031,6 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
-  youtubeActionBtn: {
-    backgroundColor: 'rgba(255, 0, 0, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 0, 0, 0.35)',
-  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
@@ -1051,7 +1046,7 @@ const styles = StyleSheet.create({
   actionSheetContainer: {
     borderRadius: 24,
     overflow: 'hidden',
-    backgroundColor: 'rgba(20, 24, 33, 0.88)',
+    backgroundColor: 'rgba(20, 24, 33, 0.92)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.14)',
   },
@@ -1064,12 +1059,12 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: 'rgba(255, 0, 0, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255, 0, 0, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
   },
   actionSheetTitle: {
     color: '#FFFFFF',
