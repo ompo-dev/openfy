@@ -44,6 +44,12 @@ export interface TrackSource {
   url?: string;
 }
 
+export interface TrackArtwork {
+  url: string;
+  width?: number;
+  height?: number;
+}
+
 export interface CanonicalTrack {
   id: string;
   title: string;
@@ -53,11 +59,7 @@ export interface CanonicalTrack {
   isrc?: string;
   musicbrainzRecordingId?: string;
   version: TrackVersion;
-  artwork?: {
-    url: string;
-    width?: number;
-    height?: number;
-  };
+  artwork?: TrackArtwork;
   sources: TrackSource[];
   createdAt: string;
   updatedAt: string;

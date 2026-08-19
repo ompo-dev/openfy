@@ -1,6 +1,6 @@
 /**
  * Openfy Music Resolution Backend Server
- * High-performance Node.js API with Structured Entity Discovery (Letras / MusicBrainz) & StrictTrackMatcher.
+ * High-performance Node.js API with IdentityLock, Structured Entity Discovery & BooleanMatchGuard.
  */
 
 const http = require('http');
@@ -55,123 +55,150 @@ function slugify(text) {
 }
 
 const FORBIDDEN_VERSION_TAGS = [
-  { tag: 'live', reason: 'LIVE_VERSION' },
-  { tag: 'concert', reason: 'LIVE_VERSION' },
-  { tag: 'ao vivo', reason: 'LIVE_VERSION' },
-  { tag: 'acoustic', reason: 'ACOUSTIC_VERSION' },
-  { tag: 'acustico', reason: 'ACOUSTIC_VERSION' },
-  { tag: 'unplugged', reason: 'ACOUSTIC_VERSION' },
-  { tag: 'remix', reason: 'REMIX' },
-  { tag: 'rework', reason: 'REMIX' },
-  { tag: 'sped up', reason: 'SPED_UP' },
-  { tag: 'speed up', reason: 'SPED_UP' },
-  { tag: 'nightcore', reason: 'SPED_UP' },
-  { tag: 'slowed', reason: 'SLOWED' },
-  { tag: 'reverb', reason: 'SLOWED' },
-  { tag: 'slowed+reverb', reason: 'SLOWED' },
-  { tag: 'cover', reason: 'COVER' },
-  { tag: 'tribute', reason: 'COVER' },
-  { tag: 'karaoke', reason: 'COVER' },
-  { tag: 'instrumental', reason: 'INSTRUMENTAL' },
-  { tag: '10 hour', reason: 'COMPILATION_OR_LOOP' },
-  { tag: '1 hour', reason: 'COMPILATION_OR_LOOP' },
-  { tag: 'loop', reason: 'COMPILATION_OR_LOOP' },
+  'live',
+  'concert',
+  'ao vivo',
+  'acoustic',
+  'acustico',
+  'unplugged',
+  'remix',
+  'rework',
+  'sped up',
+  'speed up',
+  'nightcore',
+  'slowed',
+  'reverb',
+  'slowed+reverb',
+  'cover',
+  'tribute',
+  'karaoke',
+  'instrumental',
+  '10 hour',
+  '1 hour',
+  'loop',
 ];
 
 /**
- * StrictTrackMatcher Core Evaluator
+ * BooleanMatchGuard - Absolute boolean gates for candidate validation
  */
-function evaluateCandidateStrict(target, candidate) {
-  const cTitle = (candidate.title || '').toLowerCase();
-  const tTitle = (target.title || '').toLowerCase();
+function evaluateBooleanGuard(target, candidate) {
+  const candTitleLower = (candidate.title || '').toLowerCase();
+  const targetTitleLower = (target.title || '').toLowerCase();
 
   // 1. Snippet filter
   if (candidate.durationMs && candidate.durationMs < 45000) {
-    return { confidence: 'REJECTED', reason: 'SNIPPET' };
+    return { passed: false, confidence: 'REJECTED', reason: 'SNIPPET' };
   }
 
-  // 2. Strict duration delta filter (<= 3000ms)
+  // 2. Version gate
+  for (const tag of FORBIDDEN_VERSION_TAGS) {
+    if (candTitleLower.includes(tag) && !targetTitleLower.includes(tag)) {
+      return { passed: false, confidence: 'REJECTED', reason: `VERSION_CONFLICT: ${tag}` };
+    }
+  }
+
+  // 3. Duration gate (<= 3000ms strict tolerance)
   let durationDiffMs = 0;
   if (target.durationMs && target.durationMs > 0 && candidate.durationMs && candidate.durationMs > 0) {
     durationDiffMs = Math.abs(candidate.durationMs - target.durationMs);
     if (durationDiffMs > 3000) {
-      return { confidence: 'REJECTED', reason: `DURATION_MISMATCH (${durationDiffMs}ms > 3000ms)` };
+      return { passed: false, confidence: 'REJECTED', reason: `DURATION_MISMATCH: ${durationDiffMs}ms` };
     }
   }
 
-  // 3. Version tag mismatch filter
-  for (const entry of FORBIDDEN_VERSION_TAGS) {
-    const candidateHasTag = cTitle.includes(entry.tag);
-    const targetHasTag = tTitle.includes(entry.tag);
-    if (candidateHasTag && !targetHasTag) {
-      return { confidence: 'REJECTED', reason: entry.reason };
-    }
-  }
-
-  // 4. Official uploader & title match
-  const targetArtistNorm = normalizeText(target.artists?.[0]?.name || '');
+  // 4. Artist gate
   const candAuthorNorm = normalizeText(candidate.author || candidate.artist || '');
   const candTitleNorm = normalizeText(candidate.title || '');
-  const targetTitleNorm = normalizeText(target.title || '');
+  const targetArtists = (target.artists || [{ name: target.artist || '' }]).map(a => normalizeText(a.name || a));
 
-  const isOfficialChannel =
-    targetArtistNorm &&
-    (candAuthorNorm.includes(targetArtistNorm) ||
-      candAuthorNorm.includes('vevo') ||
-      candAuthorNorm.includes('topic') ||
-      candAuthorNorm.includes('records'));
-
-  const titleMatches =
-    candTitleNorm.includes(targetTitleNorm) ||
-    targetTitleNorm.includes(candTitleNorm);
-
-  if (target.isrc && candidate.isrc && target.isrc === candidate.isrc && durationDiffMs <= 2000) {
-    return { confidence: 'PROVEN', score: 1.0, canAutoPlay: true, durationDiffMs };
+  let artistPassed = false;
+  for (const art of targetArtists) {
+    if (art && (candAuthorNorm.includes(art) || candTitleNorm.includes(art) || candAuthorNorm.includes('topic') || candAuthorNorm.includes('vevo'))) {
+      artistPassed = true;
+      break;
+    }
   }
 
-  if (isOfficialChannel && titleMatches && durationDiffMs <= 3000) {
-    return { confidence: 'VERY_HIGH', score: 0.92, canAutoPlay: true, durationDiffMs };
+  if (!artistPassed && targetArtists.length > 0 && targetArtists[0] !== '') {
+    return { passed: false, confidence: 'REJECTED', reason: 'ARTIST_MISMATCH' };
   }
 
-  if (titleMatches && durationDiffMs <= 2000) {
-    return { confidence: 'HIGH', score: 0.85, canAutoPlay: false, durationDiffMs };
+  // 5. Title gate
+  const normTargetTitle = normalizeText(target.title);
+  const titlePassed = candTitleNorm.includes(normTargetTitle) || normTargetTitle.includes(candTitleNorm);
+  if (!titlePassed) {
+    return { passed: false, confidence: 'REJECTED', reason: 'TITLE_MISMATCH' };
   }
 
-  return { confidence: 'UNCERTAIN', score: 0.5, canAutoPlay: false, durationDiffMs };
+  const isOfficial = Boolean(candidate.isOfficialRelation || (target.isrc && candidate.isrc && target.isrc === candidate.isrc));
+  const confidence = isOfficial && durationDiffMs <= 1500 ? 'PROVEN' : durationDiffMs <= 2000 ? 'VERY_HIGH' : 'HIGH';
+
+  return { passed: true, confidence, durationDiffMs, score: isOfficial ? 1.0 : 0.92 };
 }
 
 // 1. Structured Entity Page Discovery (Letras.mus.br direct YouTube ID binding)
-async function fetchLetrasEntity(artist, title) {
-  const cacheKey = `letras:${artist}:${title}`;
+async function fetchLetrasEntity(artists, title) {
+  const artistList = Array.isArray(artists) ? artists : [{ name: artists }];
+  const primaryArtist = artistList[0]?.name || '';
+  const cacheKey = `letras:${primaryArtist}:${title}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
-  const slugA = slugify(artist);
+  const candidateArtists = artistList.map(a => a.name).filter(Boolean);
   const cleanTitle = title.replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').replace(/feat\..*$/i, '').trim();
-  const slugT = slugify(cleanTitle);
 
-  const urls = [
-    `https://www.letras.mus.br/${slugA}/${slugT}/`,
-    `https://www.letras.mus.br/${slugA}/${slugify(title)}/`,
-  ];
+  for (const art of candidateArtists) {
+    const slugA = slugify(art);
+    const urls = [
+      `https://www.letras.mus.br/${slugA}/${slugify(cleanTitle)}/`,
+      `https://www.letras.mus.br/${slugA}/${slugify(title)}/`,
+    ];
 
-  for (const pageUrl of urls) {
+    for (const pageUrl of urls) {
+      try {
+        const res = await fetch(pageUrl, { signal: AbortSignal.timeout(3000) });
+        if (res.ok) {
+          const html = await res.text();
+          const ytMatch =
+            html.match(/"YoutubeID":"([a-zA-Z0-9_-]{11})"/i) ||
+            html.match(/"video":"([a-zA-Z0-9_-]{11})"/i);
+
+          if (ytMatch?.[1]) {
+            const result = {
+              provider: 'letras',
+              pageUrl,
+              youtubeId: ytMatch[1],
+              youtubeUrl: `https://www.youtube.com/watch?v=${ytMatch[1]}`,
+            };
+            setCache(cacheKey, result, 604800);
+            return result;
+          }
+        }
+      } catch {}
+    }
+  }
+  return null;
+}
+
+// 2. Metadata Provider: Deezer Search (Used ONLY for enriching missing ISRC/duration, NEVER overwriting locked identity)
+async function fetchDeezerEnrichment(compositeQueries) {
+  for (const query of compositeQueries) {
+    const cacheKey = `deezer:${query}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
     try {
-      const res = await fetch(pageUrl, { signal: AbortSignal.timeout(3000) });
+      const res = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=3`);
       if (res.ok) {
-        const html = await res.text();
-        const ytMatch =
-          html.match(/"YoutubeID":"([a-zA-Z0-9_-]{11})"/i) ||
-          html.match(/"video":"([a-zA-Z0-9_-]{11})"/i);
-
-        if (ytMatch?.[1]) {
+        const data = await res.json();
+        const item = data.data?.[0];
+        if (item) {
           const result = {
-            provider: 'letras',
-            pageUrl,
-            youtubeId: ytMatch[1],
-            youtubeUrl: `https://www.youtube.com/watch?v=${ytMatch[1]}`,
+            durationMs: (item.duration || 0) * 1000,
+            isrc: item.isrc || '',
+            artworkUrl: item.album?.cover_big || item.album?.cover_medium || '',
           };
-          setCache(cacheKey, result, 604800); // 7 days cache
+          setCache(cacheKey, result, 86400);
           return result;
         }
       }
@@ -180,91 +207,58 @@ async function fetchLetrasEntity(artist, title) {
   return null;
 }
 
-// 2. Metadata Provider: Deezer Search (for studio duration & ISRC)
-async function fetchDeezerMetadata(query) {
-  const cacheKey = `deezer:${query}`;
-  const cached = getCached(cacheKey);
-  if (cached) return cached;
-
-  try {
-    const res = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=3`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const item = data.data?.[0];
-    if (item) {
-      const result = {
-        title: item.title,
-        artists: [{ name: item.artist?.name || 'Artista' }],
-        album: { name: item.album?.title || 'Deezer' },
-        durationMs: (item.duration || 0) * 1000,
-        artwork: { url: item.album?.cover_big || item.album?.cover_medium || '' },
-        isrc: item.isrc || '',
-        sources: [{ provider: 'deezer', id: String(item.id) }]
-      };
-      setCache(cacheKey, result, 86400);
-      return result;
-    }
-  } catch (e) {
-    console.warn('[Deezer] fetch error:', e.message);
-  }
-  return null;
-}
-
-// 3. Audio Provider: SoundCloud Stream with Strict Verification
-async function fetchSoundCloudCandidate(title, artist, canonicalDurationMs, isrc) {
+// 3. Audio Provider: SoundCloud Stream with Strict Boolean Match Guard
+async function fetchSoundCloudCandidate(lockedTarget) {
   const clientId = 'UMY1dzQ68n2QbCuypNe8JOivmV2FO2Ep';
-  const query = `${artist} - ${title}`;
-  const cacheKey = `sc:${query}:${canonicalDurationMs}`;
-  const cached = getCached(cacheKey);
-  if (cached) return cached;
+  const queries = [
+    `${lockedTarget.artists[0]?.name || ''} - ${lockedTarget.title}`,
+    lockedTarget.title,
+  ];
 
-  try {
-    const res = await fetch(`https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&client_id=${clientId}&limit=12`);
-    if (!res.ok) return null;
-    const data = await res.json();
+  for (const query of queries) {
+    const cacheKey = `sc:${query}:${lockedTarget.durationMs}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
 
-    const candidates = [];
-    for (const item of data.collection || []) {
-      const decision = evaluateCandidateStrict(
-        { title, artists: [{ name: artist }], durationMs: canonicalDurationMs, isrc },
-        { title: item.title, author: item.user?.username, artist: item.user?.username, durationMs: item.duration }
-      );
+    try {
+      const res = await fetch(`https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&client_id=${clientId}&limit=12`);
+      if (!res.ok) continue;
+      const data = await res.json();
 
-      if (decision.canAutoPlay) {
-        const transcodings = (item.media?.transcodings || []).filter(t => !t.format?.protocol?.includes('encrypted'));
-        const progressive = transcodings.find(t => t.format?.protocol === 'progressive') || transcodings[0];
-        if (progressive?.url) {
-          candidates.push({ item, decision, streamEndpoint: progressive.url });
+      for (const item of data.collection || []) {
+        const guard = evaluateBooleanGuard(lockedTarget, {
+          title: item.title,
+          author: item.user?.username,
+          artist: item.user?.username,
+          durationMs: item.duration,
+        });
+
+        if (guard.passed) {
+          const transcodings = (item.media?.transcodings || []).filter(t => !t.format?.protocol?.includes('encrypted'));
+          const progressive = transcodings.find(t => t.format?.protocol === 'progressive') || transcodings[0];
+          if (progressive?.url) {
+            const sRes = await fetch(`${progressive.url}?client_id=${clientId}`);
+            if (sRes.ok) {
+              const sData = await sRes.json();
+              if (sData.url) {
+                const result = {
+                  url: sData.url,
+                  format: 'mp3',
+                  quality: '128kbps',
+                  confidence: guard.confidence,
+                  verified: true,
+                  score: guard.score,
+                  sourceTitle: item.title,
+                  sourceArtist: item.user?.username,
+                };
+                setCache(cacheKey, result, 300);
+                return result;
+              }
+            }
+          }
         }
       }
-    }
-
-    if (candidates.length > 0) {
-      candidates.sort((a, b) => (b.decision.score || 0) - (a.decision.score || 0));
-      const top = candidates[0];
-
-      // Resolve stream URL
-      const sRes = await fetch(`${top.streamEndpoint}?client_id=${clientId}`);
-      if (sRes.ok) {
-        const sData = await sRes.json();
-        if (sData.url) {
-          const result = {
-            url: sData.url,
-            format: 'mp3',
-            quality: '128kbps',
-            confidence: top.decision.confidence,
-            verified: true,
-            score: top.decision.score,
-            sourceTitle: top.item.title,
-            sourceArtist: top.item.user?.username,
-          };
-          setCache(cacheKey, result, 300); // 5 min TTL
-          return result;
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('[SoundCloud] fetch error:', e.message);
+    } catch {}
   }
   return null;
 }
@@ -288,13 +282,11 @@ async function fetchLyrics(title, artist) {
         }).filter(Boolean);
 
         const result = { synced: true, lines, source: 'lrclib' };
-        setCache(cacheKey, result, 604800); // 7 days TTL
+        setCache(cacheKey, result, 604800);
         return result;
       }
     }
-  } catch (e) {
-    console.warn('[Lyrics] fetch error:', e.message);
-  }
+  } catch {}
   return null;
 }
 
@@ -316,7 +308,7 @@ const server = http.createServer(async (req, res) => {
   // Health
   if (pathname === '/health' || pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'openfy-music-resolution-engine', time: new Date().toISOString() }));
+    res.end(JSON.stringify({ status: 'ok', service: 'openfy-identity-locked-resolution-engine', time: new Date().toISOString() }));
     return;
   }
 
@@ -357,14 +349,14 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // POST /api/music/resolve
+  // POST /api/music/resolve (Deterministic Identity Locked Pipeline)
   if (pathname === '/api/music/resolve' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
         const payload = JSON.parse(body || '{}');
-        const { title, artist, durationMs, spotifyId, isrc } = payload;
+        const { title, artist, artists, albumName, durationMs, spotifyId, isrc, imageURL } = payload;
 
         if (!title) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -372,48 +364,70 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        console.log(`[Resolution Engine] Resolving: "${artist || ''} - ${title}" (${durationMs || 0}ms)`);
+        // STEP 1: IDENTITY LOCK 🔒
+        // Canonical Target is sealed. Secondary sources NEVER overwrite these values!
+        const parsedArtists = Array.isArray(artists) && artists.length > 0
+          ? artists.map(a => typeof a === 'string' ? { name: a } : a)
+          : [{ name: artist || 'Artista' }];
 
-        // 1. Resolve Target Metadata (Deezer / Spotify Anchor)
-        let meta = await fetchDeezerMetadata(`${artist || ''} ${title}`);
-        if (!meta) {
-          meta = {
-            title,
-            artists: [{ name: artist || 'Artista' }],
-            durationMs: durationMs || 0,
-            album: { name: 'Single' },
-            isrc: isrc || '',
-            sources: []
-          };
+        const lockedTarget = {
+          title: title.trim(),
+          artists: parsedArtists,
+          artistName: parsedArtists[0]?.name || artist || 'Artista',
+          albumName: albumName || 'Single',
+          durationMs: durationMs || 0,
+          isrc: isrc || '',
+          imageURL: imageURL || '',
+          spotifyId: spotifyId || '',
+        };
+
+        console.log(`[Identity Lock 🔒] Target Sealed: "${lockedTarget.artistName} - ${lockedTarget.title}" (${lockedTarget.durationMs}ms)`);
+
+        // STEP 2: Enrich missing ISRC / duration without mutating title/artists
+        if (!lockedTarget.durationMs || !lockedTarget.isrc) {
+          const compositeQueries = [
+            `"${lockedTarget.title}" "${lockedTarget.artistName}"`,
+            `${lockedTarget.artistName} ${lockedTarget.title}`,
+            lockedTarget.title,
+          ];
+          const enrichment = await fetchDeezerEnrichment(compositeQueries);
+          if (enrichment) {
+            if (!lockedTarget.durationMs && enrichment.durationMs) {
+              lockedTarget.durationMs = enrichment.durationMs;
+            }
+            if (!lockedTarget.isrc && enrichment.isrc) {
+              lockedTarget.isrc = enrichment.isrc;
+            }
+            if (!lockedTarget.imageURL && enrichment.artworkUrl) {
+              lockedTarget.imageURL = enrichment.artworkUrl;
+            }
+          }
         }
 
-        const primaryArtist = meta.artists[0]?.name || artist || '';
-        const canonDuration = meta.durationMs || durationMs || 0;
-        const targetISRC = meta.isrc || isrc || '';
-
-        // 2. DIRECT ENTITY DISCOVERY: Discover Letras entity with pre-bound official YouTube ID
-        const letrasEntity = await fetchLetrasEntity(primaryArtist, meta.title);
+        // STEP 3: DISCOVERY - Letras Entity Relations (Lyrics + Direct YouTube Link)
+        const letrasEntity = await fetchLetrasEntity(lockedTarget.artists, lockedTarget.title);
         if (letrasEntity) {
           console.log(`  ✅ [Entity Discovered] Letras Page bound YouTube ID: ${letrasEntity.youtubeId}`);
         }
 
-        // 3. Resolve Verified Audio Stream via StrictTrackMatcher
-        const audioSource = await fetchSoundCloudCandidate(meta.title, primaryArtist, canonDuration, targetISRC);
+        // STEP 4: RESOLUTION - SoundCloud stream verified with BooleanMatchGuard
+        const audioSource = await fetchSoundCloudCandidate(lockedTarget);
 
-        // 4. Resolve Synchronized Lyrics
-        const lyrics = await fetchLyrics(meta.title, primaryArtist);
+        // STEP 5: LYRICS - Sychronized Lyrics
+        const lyrics = await fetchLyrics(lockedTarget.title, lockedTarget.artistName);
 
         const responseData = {
           confidence: audioSource ? audioSource.confidence : letrasEntity ? 'VERY_HIGH' : 'UNCERTAIN',
           status: (audioSource || letrasEntity) ? 'EXACT' : 'NO_MATCH',
           track: {
-            title: meta.title,
-            artistName: primaryArtist,
-            albumName: meta.album?.name || 'Single',
-            imageURL: meta.artwork?.url || '',
-            duration_ms: canonDuration,
-            spotifyId: spotifyId || '',
-            isrc: targetISRC,
+            title: lockedTarget.title,
+            artistName: lockedTarget.artistName,
+            artists: lockedTarget.artists,
+            albumName: lockedTarget.albumName,
+            imageURL: lockedTarget.imageURL,
+            duration_ms: lockedTarget.durationMs,
+            spotifyId: lockedTarget.spotifyId,
+            isrc: lockedTarget.isrc,
           },
           entity: letrasEntity ? {
             source: 'letras',
@@ -439,7 +453,7 @@ const server = http.createServer(async (req, res) => {
           } : null),
           lyrics,
           reason: audioSource
-            ? 'Audio stream verified and proxied directly'
+            ? 'Identity locked, duration matched <= 3s, and audio stream proxied'
             : letrasEntity
             ? 'Official YouTube link directly discovered and verified from Letras entity'
             : 'No verified source found. Prevented wrong audio.',
@@ -461,5 +475,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🚀 [Openfy Entity & Strict Resolution Server] Running on http://localhost:${PORT}`);
+  console.log(`🚀 [Openfy Identity-Locked Resolution Server] Running on http://localhost:${PORT}`);
 });
