@@ -7,16 +7,21 @@
 
 import * as React from 'react';
 import {
+  ActionSheetIOS,
+  ActivityIndicator,
   FlatList,
   Image,
+  Linking,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
   Dimensions,
-  Platform,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import Slider from '@react-native-community/slider';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -46,6 +51,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const {
     currentTrack,
     playerState,
+    playTrack,
     togglePlayPause,
     seekToPosition,
     playNext,
@@ -62,6 +68,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [lyricsData, setLyricsData] = React.useState<LyricsData | null>(null);
   const [isLoadingLyrics, setIsLoadingLyrics] = React.useState(false);
 
+  // YouTube action sheet and custom link edit state
+  const [youtubeUrl, setYoutubeUrl] = React.useState<string>('');
+  const [isActionModalVisible, setIsActionModalVisible] = React.useState(false);
+  const [isEditModalVisible, setIsEditModalVisible] = React.useState(false);
+  const [customLinkInput, setCustomLinkInput] = React.useState('');
+  const [isUpdatingAudio, setIsUpdatingAudio] = React.useState(false);
+
   const lyricsListRef = React.useRef<FlatList>(null);
 
   // Dynamic ambient color palette based on track
@@ -71,6 +84,41 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     return getDynamicColorPalette(
       `${currentTrack.artistName} - ${currentTrack.title}`
     );
+  }, [currentTrack]);
+
+  // Fetch YouTube URL when track changes
+  React.useEffect(() => {
+    if (!currentTrack) {
+      setYoutubeUrl('');
+      return;
+    }
+
+    let isMounted = true;
+    fetch('http://localhost:3001/api/music/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: currentTrack.title,
+        artist: currentTrack.artistName,
+        durationMs: currentTrack.duration_ms,
+        spotifyId: currentTrack.spotifyId,
+      }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (isMounted) {
+          if (data.source?.id) {
+            setYoutubeUrl(`https://www.youtube.com/watch?v=${data.source.id}`);
+          } else if (data.playback?.url && data.playback.url.includes('youtube.com')) {
+            setYoutubeUrl(data.playback.url);
+          }
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
   }, [currentTrack]);
 
   // Fetch lyrics when track changes
@@ -140,6 +188,76 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       } catch {}
     }
   }, [activeLineIndex, showLyricsFull, lyricsData]);
+
+  const handleOpenYoutubeMenu = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancelar', 'Ir para o vídeo do YouTube', 'Editar link do YouTube'],
+          cancelButtonIndex: 0,
+          title: currentTrack?.title || 'YouTube',
+          message: 'Origem oficial do áudio no YouTube',
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) {
+            handleGoToYoutube();
+          } else if (buttonIndex === 2) {
+            handleOpenEditLinkModal();
+          }
+        }
+      );
+    } else {
+      setIsActionModalVisible(true);
+    }
+  };
+
+  const handleGoToYoutube = () => {
+    Haptics.selectionAsync().catch(() => {});
+    setIsActionModalVisible(false);
+    const urlToOpen =
+      youtubeUrl ||
+      `https://www.youtube.com/results?search_query=${encodeURIComponent(
+        `${currentTrack?.artistName || ''} - ${currentTrack?.title || ''}`
+      )}`;
+    Linking.openURL(urlToOpen).catch(() => {});
+  };
+
+  const handleOpenEditLinkModal = () => {
+    Haptics.selectionAsync().catch(() => {});
+    setIsActionModalVisible(false);
+    setCustomLinkInput(
+      youtubeUrl ||
+        `https://www.youtube.com/results?search_query=${encodeURIComponent(
+          `${currentTrack?.artistName || ''} - ${currentTrack?.title || ''}`
+        )}`
+    );
+    setIsEditModalVisible(true);
+  };
+
+  const handleConfirmEditLink = async () => {
+    if (!customLinkInput.trim() || !currentTrack) return;
+    const newUrl = customLinkInput.trim();
+    setIsUpdatingAudio(true);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+
+    try {
+      setYoutubeUrl(newUrl);
+
+      // Resolve and update audio stream directly
+      await playTrack({
+        ...currentTrack,
+        streamUrl: newUrl,
+        localAudioPath: undefined,
+      });
+
+      setIsEditModalVisible(false);
+    } catch (e) {
+      console.warn('Failed to update audio link:', e);
+    } finally {
+      setIsUpdatingAudio(false);
+    }
+  };
 
   if (!currentTrack) return null;
 
@@ -371,22 +489,32 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
               <View style={styles.pillDivider} />
 
-              <LoggedPressable style={styles.pillSegment}>
+              <LoggedPressable
+                style={styles.pillSegment}
+                onPress={handleOpenYoutubeMenu}
+                accessibilityRole="button"
+                accessibilityLabel="Opções do YouTube"
+              >
                 <Ionicons
-                  name="ellipsis-horizontal"
-                  size={19}
-                  color="rgba(255,255,255,0.8)"
+                  name="logo-youtube"
+                  size={18}
+                  color="#FF0000"
                 />
               </LoggedPressable>
             </GlassSurface>
           )}
 
-          {/* Right Pill: Queue / List */}
-          <LoggedPressable style={styles.circleActionBtn}>
+          {/* Right Pill: YouTube Button with Red Logo */}
+          <LoggedPressable
+            onPress={handleOpenYoutubeMenu}
+            style={[styles.circleActionBtn, styles.youtubeActionBtn]}
+            accessibilityRole="button"
+            accessibilityLabel="Opções do YouTube"
+          >
             <Ionicons
-              name="list"
+              name="logo-youtube"
               size={20}
-              color="rgba(255,255,255,0.75)"
+              color="#FF0000"
             />
           </LoggedPressable>
         </View>
@@ -497,6 +625,144 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             />
           </LoggedPressable>
         </View>
+
+        {/* =========================================================
+         * YOUTUBE ACTIONS PICKER SHEET MODAL (Web & Cross-Platform)
+         * ========================================================= */}
+        <Modal
+          visible={isActionModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIsActionModalVisible(false)}
+        >
+          <Pressable
+            style={styles.modalOverlay}
+            onPress={() => setIsActionModalVisible(false)}
+          >
+            <View style={styles.actionSheetWrapper}>
+              <GlassSurface glass="thick" style={styles.actionSheetContainer}>
+                <View style={styles.actionSheetHeader}>
+                  <View style={styles.youtubeCircleBadge}>
+                    <Ionicons name="logo-youtube" size={26} color="#FF0000" />
+                  </View>
+                  <Text style={styles.actionSheetTitle} numberOfLines={1}>
+                    {currentTrack.title}
+                  </Text>
+                  <Text style={styles.actionSheetSubtitle}>
+                    Origem do Áudio no YouTube
+                  </Text>
+                </View>
+
+                <View style={styles.actionSheetDivider} />
+
+                <LoggedPressable
+                  style={styles.actionSheetItem}
+                  onPress={handleGoToYoutube}
+                >
+                  <Ionicons name="open-outline" size={20} color="#FFFFFF" />
+                  <Text style={styles.actionSheetItemText}>
+                    Ir para o vídeo do YouTube
+                  </Text>
+                </LoggedPressable>
+
+                <View style={styles.actionSheetDivider} />
+
+                <LoggedPressable
+                  style={styles.actionSheetItem}
+                  onPress={handleOpenEditLinkModal}
+                >
+                  <Ionicons name="create-outline" size={20} color="#FFFFFF" />
+                  <Text style={styles.actionSheetItemText}>
+                    Editar link do YouTube
+                  </Text>
+                </LoggedPressable>
+
+                <View style={styles.actionSheetDivider} />
+
+                <LoggedPressable
+                  style={[styles.actionSheetItem, styles.actionSheetCancelItem]}
+                  onPress={() => setIsActionModalVisible(false)}
+                >
+                  <Text style={styles.actionSheetCancelText}>Cancelar</Text>
+                </LoggedPressable>
+              </GlassSurface>
+            </View>
+          </Pressable>
+        </Modal>
+
+        {/* =========================================================
+         * EDIT YOUTUBE LINK MODAL (SwiftUI Glass Style)
+         * ========================================================= */}
+        <Modal
+          visible={isEditModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIsEditModalVisible(false)}
+        >
+          <Pressable
+            style={styles.modalOverlay}
+            onPress={() => setIsEditModalVisible(false)}
+          >
+            <Pressable
+              style={styles.editModalContainer}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <GlassSurface glass="thick" style={styles.editModalCard}>
+                <View style={styles.editModalHeader}>
+                  <View style={styles.youtubeCircleBadge}>
+                    <Ionicons name="logo-youtube" size={28} color="#FF0000" />
+                  </View>
+                  <Text style={styles.editModalTitle}>Editar Link do YouTube</Text>
+                  <Text style={styles.editModalSubtitle}>
+                    Altere o link do vídeo para atualizar instantaneamente o áudio e a reprodução desta música.
+                  </Text>
+                </View>
+
+                <View style={styles.inputWrapper}>
+                  <Ionicons
+                    name="link"
+                    size={18}
+                    color="rgba(255,255,255,0.6)"
+                    style={styles.inputIcon}
+                  />
+                  <TextInput
+                    value={customLinkInput}
+                    onChangeText={setCustomLinkInput}
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    placeholderTextColor="rgba(255,255,255,0.4)"
+                    style={styles.textInput}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    selectTextOnFocus
+                  />
+                </View>
+
+                <View style={styles.modalButtonRow}>
+                  <LoggedPressable
+                    style={styles.modalCancelBtn}
+                    onPress={() => setIsEditModalVisible(false)}
+                  >
+                    <Text style={styles.modalCancelBtnText}>Cancelar</Text>
+                  </LoggedPressable>
+
+                  <LoggedPressable
+                    style={styles.modalConfirmBtn}
+                    onPress={handleConfirmEditLink}
+                    disabled={isUpdatingAudio}
+                  >
+                    {isUpdatingAudio ? (
+                      <ActivityIndicator size="small" color="#000000" />
+                    ) : (
+                      <Text style={styles.modalConfirmBtnText}>
+                        Atualizar Áudio
+                      </Text>
+                    )}
+                  </LoggedPressable>
+                </View>
+              </GlassSurface>
+            </Pressable>
+          </Pressable>
+        </Modal>
       </LinearGradient>
     </Modal>
   );
@@ -764,5 +1030,176 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 12,
     elevation: 8,
+  },
+  youtubeActionBtn: {
+    backgroundColor: 'rgba(255, 0, 0, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 0, 0, 0.35)',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  actionSheetWrapper: {
+    width: '100%',
+    maxWidth: 480,
+    paddingHorizontal: 16,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+  },
+  actionSheetContainer: {
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(20, 24, 33, 0.88)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  actionSheetHeader: {
+    alignItems: 'center',
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+  },
+  youtubeCircleBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 0, 0, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 0, 0, 0.3)',
+  },
+  actionSheetTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  actionSheetSubtitle: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 13,
+    fontWeight: '500',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  actionSheetDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  actionSheetItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    gap: 14,
+  },
+  actionSheetItemText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  actionSheetCancelItem: {
+    justifyContent: 'center',
+    paddingVertical: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  actionSheetCancelText: {
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  editModalContainer: {
+    width: '100%',
+    maxWidth: 440,
+    paddingHorizontal: 16,
+    paddingBottom: Platform.OS === 'ios' ? 44 : 28,
+  },
+  editModalCard: {
+    borderRadius: 28,
+    padding: 24,
+    backgroundColor: 'rgba(18, 22, 30, 0.94)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.5,
+    shadowRadius: 32,
+    elevation: 20,
+  },
+  editModalHeader: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  editModalTitle: {
+    color: '#FFFFFF',
+    fontSize: 19,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  editModalSubtitle: {
+    color: 'rgba(255, 255, 255, 0.65)',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    paddingHorizontal: 12,
+    height: 48,
+    marginBottom: 20,
+  },
+  inputIcon: {
+    marginRight: 8,
+  },
+  textInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  modalButtonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCancelBtnText: {
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  modalConfirmBtn: {
+    flex: 1.3,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#FFFFFF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+  },
+  modalConfirmBtnText: {
+    color: '#000000',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });
