@@ -134,7 +134,8 @@ export const resolveViaYouTubeTopic = async (
   trackName: string,
   artistName: string
 ): Promise<ResolvedAudio | null> => {
-  const query = `${artistName} - ${trackName} Official Audio Topic`;
+  const primaryArtist = (artistName || '').split(',')[0].split('&')[0].trim();
+  const query = primaryArtist ? `${primaryArtist} - ${trackName} Official Audio` : `${trackName} Official Audio`;
   const instances = [
     'https://invidious.flokinet.to',
     'https://inv.nadeko.net',
@@ -313,114 +314,125 @@ export const resolveViaSoundCloud = async (
   try {
     let clientId = cachedSoundCloudClientId;
 
-    const query = `${artistName} - ${trackName}`;
-    const searchUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(
-      query
-    )}&client_id=${clientId}&limit=12`;
+    const primaryArtist = (artistName || '').split(',')[0].split('&')[0].trim();
+    const isGeneric =
+      !primaryArtist ||
+      primaryArtist.toLowerCase() === 'artista' ||
+      primaryArtist.toLowerCase().includes('unknown');
 
-    let res = await fetchWithTimeout(
-      searchUrl,
-      {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-      },
-      5000
-    );
+    const searchQueries = isGeneric
+      ? [trackName]
+      : [`${primaryArtist} - ${trackName}`, trackName];
 
-    // If 401, refresh client ID and retry
-    if (res.status === 401) {
-      clientId = await refreshSoundCloudClientId();
-      const retryUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(
+    for (const query of searchQueries) {
+      const searchUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(
         query
       )}&client_id=${clientId}&limit=12`;
-      res = await fetchWithTimeout(retryUrl, {}, 5000);
-    }
 
-    if (!res.ok) return null;
-
-    const data = (await res.json()) as { collection?: any[] };
-    const candidates: any[] = [];
-
-    for (const item of data.collection || []) {
-      const matchReport = evaluateCandidateMatch(
+      let res = await fetchWithTimeout(
+        searchUrl,
         {
-          title: item.title || '',
-          artist: item.user?.username,
-          durationMs: item.duration || 0,
-          provider: 'soundcloud',
-          url: item.permalink_url || '',
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
         },
-        {
-          title: trackName,
-          artists: [artistName],
-          durationMs: expectedDurationMs || 0,
-          spotifyId: '',
-        }
+        5000
       );
 
-      // Strictly discard non-matching candidates (loops, remixes, covers, long compilations)
-      if (matchReport.status === 'unavailable' || matchReport.sourceConfidence < 45) {
-        continue;
+      // If 401, refresh client ID and retry
+      if (res.status === 401) {
+        clientId = await refreshSoundCloudClientId();
+        const retryUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(
+          query
+        )}&client_id=${clientId}&limit=12`;
+        res = await fetchWithTimeout(retryUrl, {}, 5000);
       }
 
-      candidates.push({ ...item, matchReport });
-    }
+      if (!res.ok) continue;
 
-    if (candidates.length === 0) return null;
+      const data = (await res.json()) as { collection?: any[] };
+      const candidates: any[] = [];
 
-    // Rank candidates by highest Match Confidence
-    candidates.sort(
-      (a, b) => b.matchReport.sourceConfidence - a.matchReport.sourceConfidence
-    );
-
-    for (const track of candidates.slice(0, 4)) {
-      const transcodings = track.media?.transcodings || [];
-      if (transcodings.length === 0) continue;
-
-      const nonDrmTranscodings = transcodings.filter((t: any) => {
-        const p = (t.format?.protocol || '').toLowerCase();
-        return (
-          !p.includes('encrypted') &&
-          !p.includes('cenc') &&
-          !p.includes('cbcs')
-        );
-      });
-
-      const sorted = [...nonDrmTranscodings].sort((a: any, b: any) => {
-        if (a.format.protocol === 'progressive') return -1;
-        if (b.format.protocol === 'progressive') return 1;
-        return 0;
-      });
-
-      for (const transcoding of sorted) {
-        if (!transcoding.url) continue;
-
-        try {
-          const streamRes = await fetchWithTimeout(
-            `${transcoding.url}?client_id=${clientId}`,
-            {},
-            4000
-          );
-
-          if (streamRes.ok) {
-            const streamData = (await streamRes.json()) as { url?: string };
-            if (streamData.url && !isPreviewUrl(streamData.url)) {
-              const isProgressive =
-                transcoding.format.protocol === 'progressive';
-              const isM3u8 = streamData.url.includes('.m3u8');
-              return {
-                url: streamData.url,
-                quality: 'high',
-                format: isProgressive ? 'mp3' : isM3u8 ? 'm3u8' : 'mp3',
-                source: 'soundcloud',
-                confidence: track.matchReport.sourceConfidence,
-              };
-            }
+      for (const item of data.collection || []) {
+        const matchReport = evaluateCandidateMatch(
+          {
+            title: item.title || '',
+            artist: item.user?.username,
+            durationMs: item.duration || 0,
+            provider: 'soundcloud',
+            url: item.permalink_url || '',
+          },
+          {
+            title: trackName,
+            artists: primaryArtist ? [primaryArtist] : [],
+            durationMs: expectedDurationMs || 0,
+            spotifyId: '',
           }
-        } catch {
+        );
+
+        // Discard hard-rejected candidates (loops, compilations, slowed, snippets)
+        if (matchReport.status === 'unavailable' || matchReport.sourceConfidence < 45) {
           continue;
+        }
+
+        candidates.push({ ...item, matchReport });
+      }
+
+      if (candidates.length === 0) continue;
+
+      // Rank candidates by highest Match Confidence
+      candidates.sort(
+        (a, b) => b.matchReport.sourceConfidence - a.matchReport.sourceConfidence
+      );
+
+      for (const track of candidates.slice(0, 4)) {
+        const transcodings = track.media?.transcodings || [];
+        if (transcodings.length === 0) continue;
+
+        const nonDrmTranscodings = transcodings.filter((t: any) => {
+          const p = (t.format?.protocol || '').toLowerCase();
+          return (
+            !p.includes('encrypted') &&
+            !p.includes('cenc') &&
+            !p.includes('cbcs')
+          );
+        });
+
+        const sorted = [...nonDrmTranscodings].sort((a: any, b: any) => {
+          if (a.format.protocol === 'progressive') return -1;
+          if (b.format.protocol === 'progressive') return 1;
+          return 0;
+        });
+
+        for (const transcoding of sorted) {
+          if (!transcoding.url) continue;
+
+          try {
+            const streamRes = await fetchWithTimeout(
+              `${transcoding.url}?client_id=${clientId}`,
+              {},
+              4000
+            );
+
+            if (streamRes.ok) {
+              const streamData = (await streamRes.json()) as { url?: string };
+              if (streamData.url && !isPreviewUrl(streamData.url)) {
+                const isProgressive =
+                  transcoding.format.protocol === 'progressive';
+                const isM3u8 = streamData.url.includes('.m3u8');
+                return {
+                  url: streamData.url,
+                  quality: 'high',
+                  format: isProgressive ? 'mp3' : isM3u8 ? 'm3u8' : 'mp3',
+                  source: 'soundcloud',
+                  confidence: track.matchReport.sourceConfidence,
+                };
+              }
+            }
+          } catch {
+            continue;
+          }
         }
       }
     }
@@ -462,18 +474,18 @@ export const resolveAudioUrl = async (
     return soundcloudResult;
   }
 
-  // 2. SECONDARY: YouTube Invidious Master Topic Matcher
-  const ytResult = await resolveViaYouTubeTopic(trackName, primaryArtist);
-  if (ytResult?.url && !isPreviewUrl(ytResult.url)) {
-    return ytResult;
-  }
-
-  // 3. TERTIARY: Spotyloader 320kbps MP3
+  // 2. SECONDARY: Spotyloader 320kbps MP3
   if (spotifyId && !spotifyId.startsWith('dz_') && !spotifyId.startsWith('yt_')) {
     const spotyResult = await resolveViaSpotyloader(spotifyId);
     if (spotyResult?.url && !isPreviewUrl(spotyResult.url)) {
       return spotyResult;
     }
+  }
+
+  // 3. TERTIARY: YouTube Invidious Master Topic Matcher
+  const ytResult = await resolveViaYouTubeTopic(trackName, primaryArtist);
+  if (ytResult?.url && !isPreviewUrl(ytResult.url)) {
+    return ytResult;
   }
 
   return null;

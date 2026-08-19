@@ -85,26 +85,27 @@ export const evaluateDurationMatch = (
 ): { score: number; diffMs: number; isAcceptable: boolean } => {
   const durSec = candidateDurationMs / 1000;
 
-  // Reject hard snippets (< 45s) or long compilations (> 420s / 7 mins)
-  if (durSec < 45 || durSec > 420) {
+  // Reject hard snippets (< 45s)
+  if (durSec < 45) {
     return { score: 0, diffMs: Math.abs(candidateDurationMs - canonicalDurationMs), isAcceptable: false };
   }
 
-  if (!canonicalDurationMs || canonicalDurationMs <= 0) {
-    const isReasonable = durSec >= 60 && durSec <= 360;
-    return { score: isReasonable ? 80 : 20, diffMs: 0, isAcceptable: isReasonable };
+  if (canonicalDurationMs && canonicalDurationMs > 0) {
+    const diffMs = Math.abs(candidateDurationMs - canonicalDurationMs);
+    const diffSec = diffMs / 1000;
+
+    // If duration differs by more than 35 seconds from Spotify canonical duration, reject
+    if (diffSec > 35) {
+      return { score: 0, diffMs, isAcceptable: false };
+    }
+
+    const score = Math.max(50, 100 - diffSec * 1.5);
+    return { score: Math.round(score), diffMs, isAcceptable: true };
   }
 
-  const diffMs = Math.abs(candidateDurationMs - canonicalDurationMs);
-  const diffSec = diffMs / 1000;
-
-  // If duration differs by more than 35 seconds from Spotify canonical duration, reject
-  if (diffSec > 35) {
-    return { score: 0, diffMs, isAcceptable: false };
-  }
-
-  const score = Math.max(50, 100 - diffSec * 1.5);
-  return { score: Math.round(score), diffMs, isAcceptable: true };
+  // Fallback when canonical duration is unknown: accept 60s to 1200s (up to 20 min cyphers)
+  const isReasonable = durSec >= 60 && durSec <= 1200;
+  return { score: isReasonable ? 80 : 20, diffMs: 0, isAcceptable: isReasonable };
 };
 
 /**
