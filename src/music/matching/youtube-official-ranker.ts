@@ -1,7 +1,7 @@
 /**
  * YouTubeOfficialRanker
  * High-precision YouTube search ranker that identifies the exact 100% official artist upload.
- * Validates channel authenticity, duration proximity (<= 15s / 5%), and view count.
+ * Validates channel authenticity, duration proximity (<= 15s / 5%), and sorts official artist uploads by highest view count.
  */
 
 import { normalizeText } from '../identity/normalizer';
@@ -14,6 +14,7 @@ export interface VerifiedYouTubeCandidate {
   durationSec: number;
   durationText: string;
   viewCountText: string;
+  views: number;
   url: string;
   isOfficialArtistChannel: boolean;
   durationDiffSec: number;
@@ -37,6 +38,18 @@ const FORBIDDEN_WORDS = [
   'tribute',
   'karaoke',
 ];
+
+export function parseViewCount(viewText: string): number {
+  if (!viewText) return 0;
+  const clean = viewText.toLowerCase().replace(/visualizaç[õo]es|views/g, '').trim();
+  if (clean.includes('mi') || clean.includes('m')) {
+    return parseFloat(clean.replace(',', '.')) * 1000000;
+  }
+  if (clean.includes('mil') || clean.includes('k')) {
+    return parseFloat(clean.replace(',', '.')) * 1000;
+  }
+  return parseInt(clean.replace(/\./g, '').replace(/,/g, ''), 10) || 0;
+}
 
 export class YouTubeOfficialRanker {
   /**
@@ -84,6 +97,7 @@ export class YouTubeOfficialRanker {
         const channel = v.ownerText?.runs?.[0]?.text || '';
         const durationText = v.lengthText?.simpleText || '';
         const viewCountText = v.viewCountText?.simpleText || '';
+        const views = parseViewCount(viewCountText);
 
         // Calculate duration in seconds
         const parts = durationText.split(':').map(Number);
@@ -130,12 +144,12 @@ export class YouTubeOfficialRanker {
           }
         }
 
-        // 4. Duration Proximity Check (<= 15s or <= 5% for long sets)
+        // 4. Duration Proximity Check (<= 25s or <= 5% for long sets/intros)
         let durationDiffSec = 0;
         let durationAcceptable = true;
         if (targetDurationSec > 0) {
           durationDiffSec = Math.abs(targetDurationSec - durationSec);
-          const maxDiffSec = Math.max(15, targetDurationSec * 0.05); // 15s or 5% tolerance for video intros/outros
+          const maxDiffSec = Math.max(25, targetDurationSec * 0.05);
           if (durationDiffSec > maxDiffSec) {
             durationAcceptable = false;
           }
@@ -143,10 +157,9 @@ export class YouTubeOfficialRanker {
 
         if (!durationAcceptable) continue;
 
-        // Scoring: favor official artist channels and close duration
         let score = 0.7;
         if (isOfficialArtistChannel) score += 0.2;
-        if (durationDiffSec <= 5) score += 0.1;
+        if (durationDiffSec <= 10) score += 0.1;
 
         candidates.push({
           videoId,
@@ -155,6 +168,7 @@ export class YouTubeOfficialRanker {
           durationSec,
           durationText,
           viewCountText,
+          views,
           url: `https://www.youtube.com/watch?v=${videoId}`,
           isOfficialArtistChannel,
           durationDiffSec,
@@ -164,12 +178,16 @@ export class YouTubeOfficialRanker {
 
       if (candidates.length === 0) return null;
 
-      // Sort candidates: official artist channel first, then lowest duration diff, then highest score
+      // Primary sort: Official artist channels first, then by HIGHEST VIEW COUNT
       candidates.sort((a, b) => {
         if (a.isOfficialArtistChannel && !b.isOfficialArtistChannel) return -1;
         if (!a.isOfficialArtistChannel && b.isOfficialArtistChannel) return 1;
-        if (a.durationDiffSec !== b.durationDiffSec) return a.durationDiffSec - b.durationDiffSec;
-        return b.score - a.score;
+        const aIsTopic = a.channel.toLowerCase().includes('topic');
+        const bIsTopic = b.channel.toLowerCase().includes('topic');
+        if (!aIsTopic && bIsTopic) return -1;
+        if (aIsTopic && !bIsTopic) return 1;
+        if (a.views !== b.views) return b.views - a.views;
+        return a.durationDiffSec - b.durationDiffSec;
       });
 
       return candidates[0];

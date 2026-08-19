@@ -81,6 +81,18 @@ const FORBIDDEN_VERSION_TAGS = [
   'bastidores',
 ];
 
+function parseViewCount(viewText) {
+  if (!viewText) return 0;
+  const clean = (viewText || '').toLowerCase().replace(/visualizaç[õo]es|views/g, '').trim();
+  if (clean.includes('mi') || clean.includes('m')) {
+    return parseFloat(clean.replace(',', '.')) * 1000000;
+  }
+  if (clean.includes('mil') || clean.includes('k')) {
+    return parseFloat(clean.replace(',', '.')) * 1000;
+  }
+  return parseInt(clean.replace(/\./g, '').replace(/,/g, ''), 10) || 0;
+}
+
 /**
  * YouTube Official Channel & Timing Ranker
  * Searches YouTube for the track and finds the official artist video with matching duration.
@@ -188,6 +200,7 @@ async function fetchYouTubeOfficialVideo(target) {
       if (isOfficialArtistChannel) score += 0.2;
       if (durationDiffSec <= 5) score += 0.1;
 
+      const views = parseViewCount(viewCountText);
       candidates.push({
         videoId,
         title,
@@ -195,6 +208,7 @@ async function fetchYouTubeOfficialVideo(target) {
         durationSec,
         durationText,
         viewCountText,
+        views,
         url: `https://www.youtube.com/watch?v=${videoId}`,
         isOfficialArtistChannel,
         durationDiffSec,
@@ -206,8 +220,12 @@ async function fetchYouTubeOfficialVideo(target) {
       candidates.sort((a, b) => {
         if (a.isOfficialArtistChannel && !b.isOfficialArtistChannel) return -1;
         if (!a.isOfficialArtistChannel && b.isOfficialArtistChannel) return 1;
-        if (a.durationDiffSec !== b.durationDiffSec) return a.durationDiffSec - b.durationDiffSec;
-        return b.score - a.score;
+        const aIsTopic = a.channel.toLowerCase().includes('topic');
+        const bIsTopic = b.channel.toLowerCase().includes('topic');
+        if (!aIsTopic && bIsTopic) return -1;
+        if (aIsTopic && !bIsTopic) return 1;
+        if (a.views !== b.views) return b.views - a.views;
+        return a.durationDiffSec - b.durationDiffSec;
       });
 
       const top = candidates[0];
