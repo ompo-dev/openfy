@@ -143,9 +143,14 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
   if (!currentTrack) return null;
 
+  const totalDurationMs =
+    playerState.durationMs > 0
+      ? playerState.durationMs
+      : currentTrack.duration_ms || 0;
+
   const progress =
-    !seeking && playerState.durationMs > 0
-      ? playerState.positionMs / playerState.durationMs
+    !seeking && totalDurationMs > 0
+      ? playerState.positionMs / totalDurationMs
       : seekValue;
 
   const handleToggleRepeat = () => {
@@ -205,9 +210,16 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
         {showLyricsFull ? (
           /* =========================================================
-           * FULL SCREEN APPLE MUSIC SYNCED LYRICS VIEW
+           * FULL SCREEN APPLE MUSIC SYNCED LYRICS VIEW WITH FADE MASKS
            * ========================================================= */
           <View style={styles.lyricsMainContainer}>
+            {/* Top Fade Gradient Mask */}
+            <LinearGradient
+              colors={[palette.primary, 'transparent']}
+              style={styles.lyricsTopFadeMask}
+              pointerEvents="none"
+            />
+
             {lyricsData && lyricsData.isSynced && lyricsData.segments.length > 0 ? (
               <FlatList
                 ref={lyricsListRef}
@@ -268,6 +280,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 </Text>
               </View>
             )}
+
+            {/* Bottom Fade Gradient Mask */}
+            <LinearGradient
+              colors={['transparent', palette.secondary]}
+              style={styles.lyricsBottomFadeMask}
+              pointerEvents="none"
+            />
           </View>
         ) : (
           /* =========================================================
@@ -393,7 +412,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             onValueChange={(v) => setSeekValue(v)}
             onSlidingComplete={async (v) => {
               setSeeking(false);
-              const targetMs = v * playerState.durationMs;
+              const targetMs = v * totalDurationMs;
               await seekToPosition(targetMs);
             }}
           />
@@ -401,7 +420,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             <Text style={styles.timeText}>
               {formatTime(
                 seeking
-                  ? seekValue * playerState.durationMs
+                  ? seekValue * totalDurationMs
                   : playerState.positionMs
               )}
             </Text>
@@ -413,7 +432,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             </View>
 
             <Text style={styles.timeText}>
-              {formatTime(playerState.durationMs)}
+              {formatTime(totalDurationMs)}
             </Text>
           </View>
         </View>
@@ -585,6 +604,23 @@ const styles = StyleSheet.create({
   lyricsMainContainer: {
     flex: 1,
     marginVertical: 8,
+    position: 'relative',
+  },
+  lyricsTopFadeMask: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 52,
+    zIndex: 10,
+  },
+  lyricsBottomFadeMask: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 64,
+    zIndex: 10,
   },
   lyricsScrollContent: {
     paddingVertical: 40,

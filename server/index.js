@@ -1,6 +1,6 @@
 /**
  * Openfy Music Resolution Backend Server
- * High-performance Node.js API with Spotify Canonical Scraper, YouTubeOfficialRanker, IdentityLock & CORS-Free Proxy.
+ * High-performance Node.js API with Spotify Canonical Scraper, YouTubeOfficialRanker, SoundCloud Stream Resolver, IdentityLock & CORS-Free Proxy.
  */
 
 const http = require('http');
@@ -290,7 +290,59 @@ async function fetchYouTubeOfficialVideo(target) {
   return null;
 }
 
-// 2. Direct Parametric GET Identifier (track_name + artist_name + duration) with Strict Cross-Validation
+/**
+ * 2. SoundCloud Playable Audio Stream Resolver
+ */
+async function fetchSoundCloudPlayableStream(title, artist, durationMs) {
+  const primaryArtist = artist || '';
+  const searchQueries = primaryArtist ? [`${primaryArtist} - ${title}`, title] : [title];
+  const clientId = 'UMY1dzQ68n2QbCuypNe8JOivmV2FO2Ep';
+
+  for (const query of searchQueries) {
+    try {
+      const searchUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&client_id=${clientId}&limit=8`;
+      const res = await fetch(searchUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        signal: AbortSignal.timeout(4000)
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      for (const item of (data.collection || [])) {
+        if (!item.title) continue;
+        const dur = item.duration || 0;
+        const diffMs = durationMs > 0 ? Math.abs(dur - durationMs) : 0;
+        if (durationMs > 0 && diffMs > 25000) continue; // within 25s
+
+        const transcodings = item.media?.transcodings || [];
+        const nonDrm = transcodings.filter(t => {
+          const p = (t.format?.protocol || '').toLowerCase();
+          return !p.includes('encrypted') && !p.includes('cenc');
+        });
+        nonDrm.sort((a, b) => (a.format?.protocol === 'progressive' ? -1 : 1));
+
+        for (const t of nonDrm) {
+          if (!t.url) continue;
+          const streamRes = await fetch(`${t.url}?client_id=${clientId}`, { signal: AbortSignal.timeout(3500) });
+          if (streamRes.ok) {
+            const sData = await streamRes.json();
+            if (sData.url) {
+              return {
+                streamUrl: sData.url,
+                format: t.format?.protocol === 'progressive' ? 'mp3' : 'm3u8',
+                durationMs: dur,
+                title: item.title,
+                quality: '128kbps',
+              };
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
+// 3. Direct Parametric GET Identifier (track_name + artist_name + duration) with Strict Cross-Validation
 async function fetchExactIdentifierGet(title, artist, durationMs, albumName) {
   const durationSec = durationMs > 0 ? Math.round(durationMs / 1000) : 0;
   const cacheKey = `exact_get:${artist}:${title}:${durationSec}`;
@@ -427,7 +479,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // POST /api/music/resolve (End-to-End Canonical Spotify + YouTube Official Ranker Pipeline)
+  // POST /api/music/resolve (End-to-End Canonical Spotify + YouTube Official Ranker + Playable Audio Stream Pipeline)
   if (pathname === '/api/music/resolve' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
@@ -480,7 +532,10 @@ const server = http.createServer(async (req, res) => {
           console.log(`  ✅ [YouTube Official Video Found] "${ytOfficial.title}" by channel "${ytOfficial.channel}" (${ytOfficial.durationSec}s)`);
         }
 
-        // STEP 3: EXACT PARAMETRIC GET IDENTIFIER (Lyrics)
+        // STEP 3: SOUNDCLOUD PLAYABLE AUDIO STREAM RESOLVER
+        const scStream = await fetchSoundCloudPlayableStream(lockedTarget.title, lockedTarget.artistName, lockedTarget.durationMs);
+
+        // STEP 4: EXACT PARAMETRIC GET IDENTIFIER (Lyrics)
         const exactGet = await fetchExactIdentifierGet(
           lockedTarget.title,
           lockedTarget.artistName,
@@ -491,8 +546,8 @@ const server = http.createServer(async (req, res) => {
         let resolvedLyrics = exactGet?.valid ? { synced: exactGet.synced, lines: exactGet.lines } : null;
 
         const responseData = {
-          confidence: ytOfficial ? 'VERY_HIGH' : 'UNCERTAIN',
-          status: ytOfficial ? 'EXACT' : 'NO_MATCH',
+          confidence: ytOfficial || scStream ? 'VERY_HIGH' : 'UNCERTAIN',
+          status: ytOfficial || scStream ? 'EXACT' : 'NO_MATCH',
           identity: {
             id: lockedTarget.spotifyId || `target_${Date.now()}`,
             title: lockedTarget.title,
@@ -508,17 +563,17 @@ const server = http.createServer(async (req, res) => {
             url: lockedTarget.imageURL,
           } : undefined,
           lyrics: resolvedLyrics,
-          playback: ytOfficial ? {
-            type: 'EXTERNAL',
-            provider: 'youtube',
-            url: ytOfficial.url,
-            directUrl: ytOfficial.url,
-            format: 'stream',
-            quality: 'official_master',
+          playback: {
+            type: scStream ? 'DIRECT_AUDIO' : 'EXTERNAL',
+            provider: scStream ? 'soundcloud' : 'youtube',
+            url: scStream?.streamUrl || ytOfficial?.url || '',
+            directUrl: scStream?.streamUrl || '',
+            format: scStream?.format || 'mp3',
+            quality: scStream?.quality || '128kbps',
             verified: true,
             confidence: 'VERY_HIGH',
-            score: ytOfficial.score,
-          } : undefined,
+            score: ytOfficial?.score || 0.95,
+          },
           track: {
             title: lockedTarget.title,
             artistName: lockedTarget.artistName,
@@ -529,15 +584,16 @@ const server = http.createServer(async (req, res) => {
             spotifyId: lockedTarget.spotifyId,
             isrc: lockedTarget.isrc,
           },
-          source: ytOfficial ? {
-            type: 'EXTERNAL',
-            provider: 'youtube',
-            id: ytOfficial.id,
-            url: ytOfficial.url,
+          source: {
+            type: scStream ? 'DIRECT_AUDIO' : 'EXTERNAL',
+            provider: scStream ? 'soundcloud' : 'youtube',
+            id: ytOfficial?.id || '',
+            url: scStream?.streamUrl || ytOfficial?.url || '',
+            streamUrl: scStream?.streamUrl || '',
             verified: true,
-            channel: ytOfficial.channel,
-            score: ytOfficial.score,
-          } : null,
+            channel: ytOfficial?.channel || '',
+            score: ytOfficial?.score || 0.95,
+          },
         };
 
         res.writeHead(200, { 'Content-Type': 'application/json' });

@@ -438,12 +438,13 @@ export const resolveAudioUrl = async (
 
     if (backendRes.ok) {
       const data = await backendRes.json();
-      if (data.source && data.source.url) {
+      const streamUrl = data.source?.streamUrl || (data.source?.url && !data.source.url.includes('youtube.com/watch') && !data.source.url.includes('youtu.be') ? data.source.url : null);
+      if (streamUrl) {
         console.log(
-          `[AudioResolver] Resolved via Backend Server: "${data.track?.title}" (${data.source.quality || 'direct'})`
+          `[AudioResolver] Resolved Playable Stream via Backend Server: "${data.track?.title}"`
         );
         return {
-          url: data.source.url,
+          url: streamUrl,
           quality: data.source.quality || '128kbps',
           format: data.source.format || 'mp3',
           source: 'soundcloud',
