@@ -210,16 +210,21 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
         {showLyricsFull ? (
           /* =========================================================
-           * FULL SCREEN APPLE MUSIC SYNCED LYRICS VIEW WITH FADE MASKS
+           * FULL SCREEN APPLE MUSIC SYNCED LYRICS VIEW
            * ========================================================= */
-          <View style={styles.lyricsMainContainer}>
-            {/* Top Fade Gradient Mask */}
-            <LinearGradient
-              colors={[palette.primary, 'transparent']}
-              style={styles.lyricsTopFadeMask}
-              pointerEvents="none"
-            />
-
+          <View
+            style={[
+              styles.lyricsMainContainer,
+              Platform.OS === 'web'
+                ? ({
+                    maskImage:
+                      'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 14%, rgba(0,0,0,1) 86%, transparent 100%)',
+                    WebkitMaskImage:
+                      'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 14%, rgba(0,0,0,1) 86%, transparent 100%)',
+                  } as any)
+                : undefined,
+            ]}
+          >
             {lyricsData && lyricsData.isSynced && lyricsData.segments.length > 0 ? (
               <FlatList
                 ref={lyricsListRef}
@@ -280,13 +285,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 </Text>
               </View>
             )}
-
-            {/* Bottom Fade Gradient Mask */}
-            <LinearGradient
-              colors={['transparent', palette.secondary]}
-              style={styles.lyricsBottomFadeMask}
-              pointerEvents="none"
-            />
           </View>
         ) : (
           /* =========================================================
@@ -603,28 +601,12 @@ const styles = StyleSheet.create({
   },
   lyricsMainContainer: {
     flex: 1,
-    marginVertical: 8,
-    position: 'relative',
-  },
-  lyricsTopFadeMask: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 52,
-    zIndex: 10,
-  },
-  lyricsBottomFadeMask: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 64,
-    zIndex: 10,
+    marginVertical: 4,
   },
   lyricsScrollContent: {
-    paddingVertical: 40,
-    paddingHorizontal: 8,
+    paddingTop: 48,
+    paddingBottom: 72,
+    paddingHorizontal: 12,
   },
   lyricLineButton: {
     paddingVertical: 14,
