@@ -1,7 +1,7 @@
 /**
  * FriendActivityStatus Component
- * Real-time friend listening status with floating speech bubbles and avatar circles.
- * Inspired by Instagram Stories & Spotify Social Listening.
+ * Real-time friend listening status with floating speech bubbles, enlarged avatar circles,
+ * lateral fade marquee scrolling text, and clean minimal aesthetic.
  */
 
 import * as React from 'react';
@@ -12,10 +12,11 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
 import { LoggedPressable } from '../../native';
+import { MarqueeText } from '../../common/MarqueeText';
 
 export interface FriendStatusItem {
   id: string;
@@ -163,7 +164,7 @@ export const FriendActivityStatus = () => {
               accessibilityRole="button"
               accessibilityLabel={`${item.user.username} está ouvindo ${item.track.title} de ${item.track.artist}`}
             >
-              {/* Floating Listening Bubble */}
+              {/* Floating Listening Bubble without Spotify Icon & with Marquee */}
               <View
                 style={[
                   styles.speechBubble,
@@ -171,25 +172,21 @@ export const FriendActivityStatus = () => {
                   isPlaying && styles.speechBubblePlaying,
                 ]}
               >
-                <View style={styles.bubbleContent}>
-                  <FontAwesome5
-                    name="spotify"
-                    size={13}
-                    color="#FFFFFF"
-                    style={styles.spotifyIcon}
+                <View style={styles.textContainer}>
+                  <MarqueeText
+                    text={item.track.title}
+                    style={styles.trackTitle}
+                    fadeWidth={6}
                   />
-                  <View style={styles.textContainer}>
-                    <Text style={styles.trackTitle} numberOfLines={1}>
-                      {item.track.title}
-                    </Text>
-                    <Text style={styles.artistName} numberOfLines={1}>
-                      {item.track.artist}
-                    </Text>
-                  </View>
+                  <MarqueeText
+                    text={item.track.artist}
+                    style={styles.artistName}
+                    fadeWidth={6}
+                  />
                 </View>
               </View>
 
-              {/* Avatar Circle Container */}
+              {/* Enlarged Avatar Circle Container */}
               <View style={styles.avatarContainer}>
                 {item.user.isCurrentUser ? (
                   <View style={styles.userActivityAvatar}>
@@ -238,14 +235,14 @@ const styles = StyleSheet.create({
   },
   itemWrapper: {
     alignItems: 'center',
-    width: 104,
+    width: 96,
   },
   speechBubble: {
-    width: 104,
-    height: 48,
-    borderRadius: 20,
+    width: 92,
+    height: 38,
+    borderRadius: 15,
     paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingVertical: 4,
     justifyContent: 'center',
     zIndex: 2,
     elevation: 6,
@@ -253,57 +250,53 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 6,
-    marginBottom: -14, // overlap the avatar circle
+    marginBottom: -12, // overlap the avatar circle
   },
   speechBubblePlaying: {
     borderWidth: 1.5,
-    borderColor: '#1DB954',
-  },
-  bubbleContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  spotifyIcon: {
-    opacity: 0.95,
+    borderColor: '#FFFFFF',
   },
   textContainer: {
-    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
     gap: 1,
   },
   trackTitle: {
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: 10.5,
     fontFamily: 'SF-Bold',
     fontWeight: '700',
     letterSpacing: 0.1,
+    textAlign: 'center',
   },
   artistName: {
-    color: 'rgba(255, 255, 255, 0.72)',
-    fontSize: 10,
+    color: 'rgba(255, 255, 255, 0.76)',
+    fontSize: 9.5,
     fontFamily: 'SF-Regular',
+    textAlign: 'center',
   },
   avatarContainer: {
-    width: 66,
-    height: 66,
-    borderRadius: 33,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     backgroundColor: '#1E1E1E',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#262626',
+    borderWidth: 2.5,
+    borderColor: '#2A2A2E',
     zIndex: 1,
     overflow: 'visible',
   },
   avatarImage: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 70,
+    height: 70,
+    borderRadius: 35,
   },
   userActivityAvatar: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
@@ -311,36 +304,36 @@ const styles = StyleSheet.create({
   userActivityEyes: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 7,
   },
   eyeCircleOuter: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     borderWidth: 3,
     borderColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',
   },
   eyeCircleInner: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
     backgroundColor: '#000000',
   },
   eyeCircleSolid: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: '#000000',
   },
   playingBadge: {
     position: 'absolute',
-    bottom: -2,
-    right: -2,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    bottom: -1,
+    right: -1,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: '#1DB954',
     alignItems: 'center',
     justifyContent: 'center',

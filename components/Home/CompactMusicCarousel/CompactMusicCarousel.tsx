@@ -1,22 +1,22 @@
 /**
  * CompactMusicCarousel Component
- * Compact modern track carousel cards with album art, parental advisory badge,
- * bold typography, and floating circular Spotify play action button.
+ * Compact modern track carousel cards with album art, explicit badge,
+ * in-image bottom-right circular play button, and marquee scrolling titles with lateral fade.
  */
 
 import * as React from 'react';
 import {
-  Dimensions,
   Image,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
 import { LoggedPressable } from '../../native';
+import { MarqueeText } from '../../common/MarqueeText';
 
 export interface CompactTrackItem {
   id: string;
@@ -124,7 +124,7 @@ export const CompactMusicCarousel = () => {
               accessibilityRole="button"
               accessibilityLabel={`Tocar ${item.title} de ${item.artist}`}
             >
-              {/* Square Album Cover with Explicit Badge */}
+              {/* Square Album Cover with Explicit Badge & In-Image Play Button */}
               <View style={styles.imageContainer}>
                 <Image
                   source={{ uri: item.imageUrl }}
@@ -136,26 +136,9 @@ export const CompactMusicCarousel = () => {
                     <Text style={styles.explicitText}>E</Text>
                   </View>
                 )}
-              </View>
 
-              {/* Title & Artist */}
-              <View style={styles.infoContainer}>
-                <Text style={styles.titleText} numberOfLines={1}>
-                  {item.title}
-                </Text>
-                <Text style={styles.artistText} numberOfLines={1}>
-                  {item.artist}
-                </Text>
-              </View>
-
-              {/* Bottom Footer: Spotify branding + Circular White Play Button */}
-              <View style={styles.cardFooter}>
-                <View style={styles.spotifyBranding}>
-                  <FontAwesome5 name="spotify" size={14} color="#FFFFFF" />
-                  <Text style={styles.spotifyText}>Spotify</Text>
-                </View>
-
-                <View style={styles.playButton}>
+                {/* Circular White Play Button positioned inside the image (bottom-right) */}
+                <View style={styles.inImagePlayButton}>
                   <Ionicons
                     name={isPlaying ? 'pause' : 'play'}
                     size={16}
@@ -163,6 +146,20 @@ export const CompactMusicCarousel = () => {
                     style={{ marginLeft: isPlaying ? 0 : 2 }}
                   />
                 </View>
+              </View>
+
+              {/* Title & Artist with Lateral Fade Marquee Scroll */}
+              <View style={styles.infoContainer}>
+                <MarqueeText
+                  text={item.title}
+                  style={styles.titleText}
+                  fadeWidth={8}
+                />
+                <MarqueeText
+                  text={item.artist}
+                  style={styles.artistText}
+                  fadeWidth={8}
+                />
               </View>
             </LoggedPressable>
           );
@@ -200,16 +197,16 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   card: {
-    width: 172,
+    width: 154,
     backgroundColor: '#161618',
     borderRadius: 16,
-    padding: 12,
+    padding: 10,
+    paddingBottom: 14,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
-    justifyContent: 'space-between',
   },
   cardActive: {
-    borderColor: '#1DB954',
+    borderColor: 'rgba(255, 255, 255, 0.35)',
   },
   imageContainer: {
     width: '100%',
@@ -234,6 +231,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: 0.5,
     borderColor: 'rgba(255, 255, 255, 0.3)',
+    zIndex: 2,
   },
   explicitText: {
     color: '#FFFFFF',
@@ -241,13 +239,31 @@ const styles = StyleSheet.create({
     fontFamily: 'SF-Bold',
     fontWeight: '800',
   },
+  inImagePlayButton: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.45,
+    shadowRadius: 5,
+    zIndex: 3,
+  },
   infoContainer: {
     marginTop: 10,
     gap: 2,
+    width: '100%',
   },
   titleText: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 14.5,
     fontFamily: 'SF-Bold',
     fontWeight: '700',
     letterSpacing: 0.1,
@@ -256,37 +272,5 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.62)',
     fontSize: 12,
     fontFamily: 'SF-Regular',
-  },
-  cardFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 12,
-    paddingTop: 4,
-  },
-  spotifyBranding: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    opacity: 0.9,
-  },
-  spotifyText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontFamily: 'SF-Bold',
-    fontWeight: '700',
-  },
-  playButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 4,
   },
 });
