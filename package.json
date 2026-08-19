@@ -14,7 +14,8 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "jest",
-    "test:e2e": "node scripts/e2e-test.js"
+    "test:e2e": "node scripts/e2e-test.js",
+    "server": "node server/index.js"
   },
   "dependencies": {
     "@expo/ui": "~57.0.7",

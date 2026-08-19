@@ -534,7 +534,38 @@ export const resolveAudioUrl = async (
     `[AudioResolver] Resolving Audio for Canonical: "${artistName} - ${trackName}" (${durationMs || 0}ms)`
   );
 
-  // 1. PRIMARY: SoundCloud Match Engine (Strict Duration & Anti-Remix verification)
+  // 0. PRIMARY: Dedicated Node.js Resolution Backend API (CORS-free & High Speed)
+  try {
+    const backendRes = await fetch('http://localhost:3001/api/music/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: trackName,
+        artist: primaryArtist,
+        durationMs,
+        spotifyId,
+      }),
+      signal: AbortSignal.timeout(3000),
+    });
+
+    if (backendRes.ok) {
+      const data = await backendRes.json();
+      if (data.source && data.source.url) {
+        console.log(
+          `[AudioResolver] Resolved via Backend Server: "${data.track?.title}" (${data.source.quality})`
+        );
+        return {
+          url: data.source.url,
+          quality: data.source.quality || '128kbps',
+          format: data.source.format || 'mp3',
+          source: 'soundcloud',
+          confidence: Math.round((data.source.score || 0.9) * 100),
+        };
+      }
+    }
+  } catch {}
+
+  // 1. SECONDARY: SoundCloud Match Engine (Strict Duration & Anti-Remix verification)
   const soundcloudResult = await resolveViaSoundCloud(
     trackName,
     primaryArtist,
@@ -544,7 +575,7 @@ export const resolveAudioUrl = async (
     return soundcloudResult;
   }
 
-  // 2. SECONDARY: YouTube Official Channel & Master Topic Ranker
+  // 2. TERTIARY: YouTube Official Channel & Master Topic Ranker
   const ytResult = await resolveViaYouTubeTopic(
     trackName,
     primaryArtist,
@@ -554,7 +585,7 @@ export const resolveAudioUrl = async (
     return ytResult;
   }
 
-  // 3. TERTIARY: Spotyloader 320kbps MP3
+  // 3. QUATERNARY: Spotyloader 320kbps MP3
   if (spotifyId && !spotifyId.startsWith('dz_') && !spotifyId.startsWith('yt_')) {
     const spotyResult = await resolveViaSpotyloader(spotifyId);
     if (spotyResult?.url && !isPreviewUrl(spotyResult.url)) {
