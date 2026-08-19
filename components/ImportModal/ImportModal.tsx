@@ -55,116 +55,62 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
 
   // 1. PRIMARY: Official Spotify Embed (__NEXT_DATA__) scraper (100% accurate artists, title, duration)
   try {
-    let embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
-    if (Platform.OS === 'web') {
-      embedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(embedUrl)}`;
-    }
+    const embedUrls = [
+      `https://open.spotify.com/embed/track/${trackId}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://open.spotify.com/embed/track/${trackId}`)}`,
+    ];
 
-    const res = await axios.get(embedUrl, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-      timeout: 6000,
-    });
+    for (const embedUrl of embedUrls) {
+      try {
+        const res = await axios.get(embedUrl, {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          },
+          timeout: 4000,
+        });
 
-    const html = res.data;
-    if (typeof html === 'string') {
-      const nextDataMatch = html.match(
-        /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/
-      );
-      if (nextDataMatch) {
-        const parsed = JSON.parse(nextDataMatch[1]);
-        const entity = parsed.props?.pageProps?.state?.data?.entity;
-        if (entity && entity.name) {
-          const artists =
-            entity.artists?.map((a: { name: string }) => a.name).join(', ') ||
-            'Unknown Artist';
-          const cover =
-            entity.visualIdentity?.image?.[0]?.url ||
-            entity.album?.coverArt?.sources?.[0]?.url ||
-            entity.coverArt?.sources?.[0]?.url ||
-            '';
+        const html = res.data;
+        if (typeof html === 'string') {
+          const nextDataMatch = html.match(
+            /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/
+          );
+          if (nextDataMatch) {
+            const parsed = JSON.parse(nextDataMatch[1]);
+            const entity = parsed.props?.pageProps?.state?.data?.entity;
+            if (entity && entity.name) {
+              const artists =
+                entity.artists?.map((a: { name: string }) => a.name).join(', ') ||
+                '';
+              const cover =
+                entity.visualIdentity?.image?.[0]?.url ||
+                entity.album?.coverArt?.sources?.[0]?.url ||
+                entity.coverArt?.sources?.[0]?.url ||
+                '';
 
-          return {
-            spotifyId: trackId,
-            title: entity.name,
-            artistName: artists,
-            albumName: entity.album?.name || 'Spotify',
-            imageURL: cover,
-            duration_ms: entity.duration || 0,
-          };
+              if (artists) {
+                return {
+                  spotifyId: trackId,
+                  title: entity.name,
+                  artistName: artists,
+                  albumName: entity.album?.name || 'Spotify',
+                  imageURL: cover,
+                  duration_ms: entity.duration || 0,
+                };
+              }
+            }
+          }
         }
-      }
+      } catch {}
     }
   } catch (embedErr) {
     console.warn('[ImportModal] Spotify embed lookup failed:', embedErr);
   }
 
-  // 2. SECONDARY: SongLink / Odesli
-  try {
-    const songlinkRes = await axios.get(
-      `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(spotifyUrl)}&userCountry=BR`,
-      { timeout: 6000 }
-    );
-    const data = songlinkRes.data;
-    const entityId = data.entityUniqueId;
-    const entity = data.entitiesByUniqueId?.[entityId];
-
-    if (entity && entity.title) {
-      const deezerUrl = data.linksByPlatform?.deezer?.url;
-      let duration_ms = 0;
-      let albumName = 'Spotify';
-      if (deezerUrl) {
-        try {
-          const deezerId = deezerUrl.split('/').pop();
-          const dRes = await axios.get(`https://api.deezer.com/track/${deezerId}`, { timeout: 4000 });
-          if (dRes.data) {
-            duration_ms = (dRes.data.duration || 0) * 1000;
-            albumName = dRes.data.album?.title || albumName;
-          }
-        } catch {}
-      }
-
-      return {
-        spotifyId: trackId,
-        title: entity.title,
-        artistName: entity.artistName || 'Unknown Artist',
-        albumName,
-        imageURL: entity.thumbnailUrl || '',
-        duration_ms,
-      };
-    }
-  } catch (songlinkErr) {
-    console.warn('[ImportModal] Songlink lookup failed:', songlinkErr);
-  }
-
-  // 3. TERTIARY: Spotyloader API
-  try {
-    const spotyloaderRes = await axios.get(
-      `https://spotyloader.com/api/spotify/info?url=${encodeURIComponent(spotifyUrl)}`,
-      { timeout: 6000 }
-    );
-    const post = spotyloaderRes.data?.post;
-    if (post && post.name) {
-      const artist = Array.isArray(post.artists) ? post.artists.join(', ') : (post.artist || 'Unknown Artist');
-      return {
-        spotifyId: trackId,
-        title: post.name,
-        artistName: artist,
-        albumName: post.album || 'Spotify',
-        imageURL: post.image || '',
-        duration_ms: post.duration_ms || 0,
-      };
-    }
-  } catch (spotyloaderErr) {
-    console.warn('[ImportModal] Spotyloader lookup failed:', spotyloaderErr);
-  }
-
-  // 4. QUATERNARY: Public Spotify oEmbed
+  // 2. SECONDARY: Public Spotify oEmbed + iTunes / Deezer verification
   try {
     const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
-    const response = await axios.get(oembedUrl, { timeout: 5000 });
+    const response = await axios.get(oembedUrl, { timeout: 4000 });
     const data = response.data as {
       title?: string;
       thumbnail_url?: string;
@@ -174,13 +120,43 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
     let title = (data.title || 'Unknown Track').replace(/^[\s\-–—]+/, '').trim();
     let artistName = (data.author_name || '').trim();
 
-    if (!artistName && title.includes(' - ')) {
-      const parts = title.split(' - ');
-      if (parts[0].trim() && parts[1]?.trim()) {
-        artistName = parts[0].trim();
-        title = parts.slice(1).join(' - ').trim();
+    // Query iTunes API for 100% verified artist and canonical metadata
+    try {
+      const itunesRes = await axios.get(
+        `https://itunes.apple.com/search?term=${encodeURIComponent(title)}&entity=song&limit=1`,
+        { timeout: 3000 }
+      );
+      const topResult = itunesRes.data?.results?.[0];
+      if (topResult) {
+        return {
+          spotifyId: trackId,
+          title: topResult.trackName || title,
+          artistName: topResult.artistName || artistName || 'Unknown Artist',
+          albumName: topResult.collectionName || 'Single',
+          imageURL: topResult.artworkUrl100 || data.thumbnail_url || '',
+          duration_ms: topResult.trackTimeMillis || 0,
+        };
       }
-    }
+    } catch {}
+
+    // Query Deezer API fallback
+    try {
+      const deezerRes = await axios.get(
+        `https://api.deezer.com/search?q=${encodeURIComponent(title)}&limit=1`,
+        { timeout: 3000 }
+      );
+      const topDeezer = deezerRes.data?.data?.[0];
+      if (topDeezer) {
+        return {
+          spotifyId: trackId,
+          title: topDeezer.title || title,
+          artistName: topDeezer.artist?.name || artistName || 'Unknown Artist',
+          albumName: topDeezer.album?.title || 'Single',
+          imageURL: topDeezer.album?.cover_big || data.thumbnail_url || '',
+          duration_ms: (topDeezer.duration || 0) * 1000,
+        };
+      }
+    } catch {}
 
     return {
       spotifyId: trackId,
@@ -192,8 +168,9 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
     };
   } catch (oembedError) {
     console.error('[ImportModal] oEmbed fallback failed:', oembedError);
-    return null;
   }
+
+  return null;
 };
 
 const fetchPlaylistOrAlbum = async (
