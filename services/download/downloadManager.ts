@@ -4,6 +4,7 @@
  * and cover art to device local storage for 100% offline playback.
  */
 
+import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchLyrics, saveLyricsOffline } from '../lyrics/lyricsService';
@@ -38,13 +39,14 @@ export type DownloadProgress = {
 };
 
 const DOWNLOADS_STORAGE_KEY = 'openfy_downloads';
-const DOWNLOADS_DIR = `${FileSystem.documentDirectory}openfy_downloads/`;
-const COVERS_DIR = `${FileSystem.documentDirectory}openfy_covers/`;
+const DOWNLOADS_DIR = `${FileSystem.documentDirectory || ''}openfy_downloads/`;
+const COVERS_DIR = `${FileSystem.documentDirectory || ''}openfy_covers/`;
 
 /**
  * Ensure download directories exist
  */
 export const ensureDirectories = async (): Promise<void> => {
+  if (Platform.OS === 'web') return;
   try {
     const downloadsInfo = await FileSystem.getInfoAsync(DOWNLOADS_DIR);
     if (!downloadsInfo.exists) {
@@ -153,6 +155,7 @@ const downloadHlsAudio = async (
   localPath: string,
   onProgress?: (progress: number) => void
 ): Promise<string | null> => {
+  if (Platform.OS === 'web') return m3u8Url;
   try {
     console.log('[DownloadManager] Fetching HLS m3u8 playlist...');
     const res = await fetch(m3u8Url);
@@ -202,7 +205,7 @@ const downloadHlsAudio = async (
         if (b64) {
           await FileSystem.writeAsStringAsync(localPath, b64, {
             encoding: FileSystem.EncodingType.Base64,
-            append: writtenChunks > 0, // First write creates file, subsequent appends!
+            append: writtenChunks > 0,
           });
           writtenChunks++;
         }
@@ -225,7 +228,7 @@ const downloadHlsAudio = async (
 
 /**
  * Download audio file from URL to local storage.
- * Seamlessly handles direct MP3/M4A URLs and HLS .m3u8 streams.
+ * Seamlessly handles direct MP3/M4A URLs and HLS .m3u8 streams on native and web.
  */
 export const downloadAudio = async (
   audioUrl: string,
@@ -233,12 +236,16 @@ export const downloadAudio = async (
   format: string = 'mp3',
   onProgress?: (progress: number) => void
 ): Promise<string | null> => {
+  if (!audioUrl) return null;
+  if (Platform.OS === 'web') {
+    onProgress?.(1);
+    return audioUrl;
+  }
+
   try {
     await ensureDirectories();
     const cleanFormat = format === 'm3u8' ? 'mp3' : format || 'mp3';
     const localPath = `${DOWNLOADS_DIR}${trackId}.${cleanFormat}`;
-
-    if (!audioUrl) return null;
 
     // 1. If HLS .m3u8 playlist
     if (audioUrl.includes('.m3u8')) {
@@ -297,6 +304,9 @@ export const downloadCover = async (
   imageUrl: string,
   trackId: string
 ): Promise<string | null> => {
+  if (!imageUrl) return null;
+  if (Platform.OS === 'web') return imageUrl;
+
   try {
     await ensureDirectories();
     const localPath = `${COVERS_DIR}${trackId}.jpg`;
@@ -350,7 +360,7 @@ export const downloadTrack = async (
       throw new Error('Could not resolve audio stream URL');
     }
 
-    // Download audio file (70% of progress)
+    // Download audio file
     const localAudioPath = await downloadAudio(
       resolvedUrl,
       trackId,
@@ -430,17 +440,19 @@ export const deleteDownloadedTrack = async (
 
     if (!track) return false;
 
-    // Delete audio file
-    const audioInfo = await FileSystem.getInfoAsync(track.localAudioPath);
-    if (audioInfo.exists) {
-      await FileSystem.deleteAsync(track.localAudioPath, { idempotent: true });
-    }
+    if (Platform.OS !== 'web') {
+      if (track.localAudioPath?.startsWith('file:')) {
+        const audioInfo = await FileSystem.getInfoAsync(track.localAudioPath);
+        if (audioInfo.exists) {
+          await FileSystem.deleteAsync(track.localAudioPath, { idempotent: true });
+        }
+      }
 
-    // Delete cover file
-    if (track.localImagePath && track.localImagePath.startsWith('file:')) {
-      const imageInfo = await FileSystem.getInfoAsync(track.localImagePath);
-      if (imageInfo.exists) {
-        await FileSystem.deleteAsync(track.localImagePath, { idempotent: true });
+      if (track.localImagePath?.startsWith('file:')) {
+        const imageInfo = await FileSystem.getInfoAsync(track.localImagePath);
+        if (imageInfo.exists) {
+          await FileSystem.deleteAsync(track.localImagePath, { idempotent: true });
+        }
       }
     }
 
