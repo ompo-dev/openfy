@@ -2,6 +2,7 @@
  * Audio Resolver Service
  * High-speed 100% Original Master Studio Track Resolver with Canonical Matching Engine.
  * Rejects remixes, covers, slowed/reverb, live versions, extended loops, and 30s snippets.
+ * Prioritizes official artist channels, highest view/play counts, and closest song timing.
  */
 
 import { Platform } from 'react-native';
@@ -128,14 +129,24 @@ export const refreshSoundCloudClientId = async (): Promise<string> => {
 };
 
 /**
- * YouTube Master Topic search with active Invidious instances
+ * YouTube Master Topic & Official Channel Ranker
+ * Priority: Official Artist Channel / Topic -> Highest View Count -> Closest Song Timing
  */
 export const resolveViaYouTubeTopic = async (
   trackName: string,
-  artistName: string
+  artistName: string,
+  expectedDurationMs?: number
 ): Promise<ResolvedAudio | null> => {
+  const expectedSec =
+    expectedDurationMs && expectedDurationMs > 0
+      ? Math.round(expectedDurationMs / 1000)
+      : 0;
+
   const primaryArtist = (artistName || '').split(',')[0].split('&')[0].trim();
-  const query = primaryArtist ? `${primaryArtist} - ${trackName} Official Audio` : `${trackName} Official Audio`;
+  const query = primaryArtist
+    ? `${primaryArtist} - ${trackName} Official Audio`
+    : `${trackName} Official Audio`;
+
   const instances = [
     'https://invidious.flokinet.to',
     'https://inv.nadeko.net',
@@ -152,39 +163,94 @@ export const resolveViaYouTubeTopic = async (
       const results = (await res.json()) as any[];
       if (!Array.isArray(results) || results.length === 0) continue;
 
-      const video = results.find(
-        (v) => !hasUnwantedForbiddenWords(v.title || '', trackName)
-      ) || results[0];
+      // Filter and score candidates
+      const scoredCandidates: any[] = [];
 
-      if (!video?.videoId) continue;
+      for (const video of results) {
+        if (!video.videoId) continue;
+        if (hasUnwantedForbiddenWords(video.title || '', trackName)) continue;
 
-      const videoRes = await fetchWithTimeout(
-        `${inst}/api/v1/videos/${video.videoId}?fields=adaptiveFormats`,
-        {},
-        4000
-      );
-      if (!videoRes.ok) continue;
+        const durSec = video.lengthSeconds || 0;
+        const viewCount = video.viewCount || 0;
+        const author = (video.author || '').toLowerCase();
+        const title = (video.title || '').toLowerCase();
 
-      const videoData = (await videoRes.json()) as {
-        adaptiveFormats?: { url?: string; type?: string; bitrate?: number }[];
-      };
+        // Duration proximity filter
+        const diffSec = expectedSec > 0 ? Math.abs(durSec - expectedSec) : 0;
+        if (diffSec > 45 && expectedSec > 0) continue;
 
-      const audioFormats = (videoData.adaptiveFormats || []).filter((f) =>
-        f.type?.includes('audio')
-      );
+        let score = 0;
 
-      if (audioFormats.length > 0) {
-        const best = audioFormats.sort(
-          (a, b) => (b.bitrate || 0) - (a.bitrate || 0)
-        )[0];
-        if (best.url && !isPreviewUrl(best.url)) {
-          return {
-            url: best.url,
-            quality: 'high',
-            format: 'm4a',
-            source: 'youtube',
-            confidence: 95,
-          };
+        // 1. High view count (more popular = official)
+        if (viewCount > 0) {
+          score += Math.min(1000, Math.log10(viewCount) * 100);
+        }
+
+        // 2. Official artist channel / topic channel (+800)
+        const normAuthor = author.replace(/[^a-z0-9]/g, '');
+        const normArtist = primaryArtist.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (
+          normAuthor.includes(normArtist) ||
+          normAuthor.includes('vevo') ||
+          normAuthor.includes('topic') ||
+          author.includes(primaryArtist.toLowerCase())
+        ) {
+          score += 800;
+        }
+
+        // 3. Official in title (+300)
+        if (
+          title.includes('official') ||
+          title.includes('audio') ||
+          title.includes('video') ||
+          title.includes('clipe')
+        ) {
+          score += 300;
+        }
+
+        // 4. Timing proximity penalty
+        score -= diffSec * 20;
+
+        scoredCandidates.push({ ...video, score, diffSec });
+      }
+
+      if (scoredCandidates.length === 0) continue;
+
+      // Rank by highest score
+      scoredCandidates.sort((a, b) => b.score - a.score);
+
+      for (const video of scoredCandidates.slice(0, 2)) {
+        const videoRes = await fetchWithTimeout(
+          `${inst}/api/v1/videos/${video.videoId}?fields=adaptiveFormats`,
+          {},
+          4000
+        );
+        if (!videoRes.ok) continue;
+
+        const videoData = (await videoRes.json()) as {
+          adaptiveFormats?: { url?: string; type?: string; bitrate?: number }[];
+        };
+
+        const audioFormats = (videoData.adaptiveFormats || []).filter((f) =>
+          f.type?.includes('audio')
+        );
+
+        if (audioFormats.length > 0) {
+          const best = audioFormats.sort(
+            (a, b) => (b.bitrate || 0) - (a.bitrate || 0)
+          )[0];
+          if (best.url && !isPreviewUrl(best.url)) {
+            console.log(
+              `[AudioResolver] Verified Official YouTube Master: "${video.title}" by "${video.author}" (${video.viewCount?.toLocaleString()} views, score: ${video.score})`
+            );
+            return {
+              url: best.url,
+              quality: 'high',
+              format: 'm4a',
+              source: 'youtube',
+              confidence: 98,
+            };
+          }
         }
       }
     } catch {
@@ -362,6 +428,7 @@ export const resolveViaSoundCloud = async (
             durationMs: item.duration || 0,
             provider: 'soundcloud',
             url: item.permalink_url || '',
+            playbackCount: item.playback_count,
           },
           {
             title: trackName,
@@ -372,7 +439,7 @@ export const resolveViaSoundCloud = async (
         );
 
         // Discard hard-rejected candidates (loops, compilations, slowed, snippets)
-        if (matchReport.status === 'unavailable' || matchReport.sourceConfidence < 45) {
+        if (matchReport.status === 'unavailable' || matchReport.sourceConfidence < 40) {
           continue;
         }
 
@@ -421,6 +488,9 @@ export const resolveViaSoundCloud = async (
                 const isProgressive =
                   transcoding.format.protocol === 'progressive';
                 const isM3u8 = streamData.url.includes('.m3u8');
+                console.log(
+                  `[AudioResolver] Verified SoundCloud Track: "${track.title}" by "${track.user?.username}" (Confidence: ${track.matchReport.sourceConfidence}%)`
+                );
                 return {
                   url: streamData.url,
                   quality: 'high',
@@ -474,18 +544,22 @@ export const resolveAudioUrl = async (
     return soundcloudResult;
   }
 
-  // 2. SECONDARY: Spotyloader 320kbps MP3
+  // 2. SECONDARY: YouTube Official Channel & Master Topic Ranker
+  const ytResult = await resolveViaYouTubeTopic(
+    trackName,
+    primaryArtist,
+    durationMs
+  );
+  if (ytResult?.url && !isPreviewUrl(ytResult.url)) {
+    return ytResult;
+  }
+
+  // 3. TERTIARY: Spotyloader 320kbps MP3
   if (spotifyId && !spotifyId.startsWith('dz_') && !spotifyId.startsWith('yt_')) {
     const spotyResult = await resolveViaSpotyloader(spotifyId);
     if (spotyResult?.url && !isPreviewUrl(spotyResult.url)) {
       return spotyResult;
     }
-  }
-
-  // 3. TERTIARY: YouTube Invidious Master Topic Matcher
-  const ytResult = await resolveViaYouTubeTopic(trackName, primaryArtist);
-  if (ytResult?.url && !isPreviewUrl(ytResult.url)) {
-    return ytResult;
   }
 
   return null;

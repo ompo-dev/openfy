@@ -2,13 +2,14 @@
  * Canonical Matcher & Audio Alignment Engine
  *
  * Implements Multi-Layer Verification:
- * 1. Spotify / Catalog Reference Identity
- * 2. Strict Duration Proximity Scoring (rejection of extended loops, podcasts, compilations, snippets)
- * 3. Tiered Filtering: Hard Rejection for Sped Up/Slowed/Loops vs Soft Scoring for Official Edits
- * 4. Audio-to-Lyrics Timestamp Alignment & Offset Calibration
+ * 1. Official Artist Channel verification (VEVO, Topic, Artist Name, Official)
+ * 2. High View / Play Count Popularity Weighting (favor millions of views over fan uploads)
+ * 3. Strict Duration Proximity Scoring (timing must match the Spotify/catalog reference)
+ * 4. Anti-Remix / Anti-Cover / Anti-Slowed / Anti-Loop Filtering
+ * 5. Audio-to-Lyrics Timestamp Alignment & Offset Calibration
  */
 
-import { CanonicalTrack, MatchReport, TrackSource, CanonicalLyrics } from '../../models/CanonicalTrack';
+import { CanonicalTrack, MatchReport, CanonicalLyrics } from '../../models/CanonicalTrack';
 
 const HARD_REJECT_WORDS = [
   'slowed',
@@ -17,6 +18,7 @@ const HARD_REJECT_WORDS = [
   'bass boosted',
   'bassboost',
   '8daudio',
+  '8d audio',
   'nightcore',
   '10 hour',
   '1 hour',
@@ -37,6 +39,8 @@ const SOFT_PENALTY_WORDS = [
   'concert',
   'acoustic',
   'tiny desk',
+  'instrumental',
+  'karaoke',
 ];
 
 /**
@@ -94,12 +98,12 @@ export const evaluateDurationMatch = (
     const diffMs = Math.abs(candidateDurationMs - canonicalDurationMs);
     const diffSec = diffMs / 1000;
 
-    // If duration differs by more than 35 seconds from Spotify canonical duration, reject
-    if (diffSec > 35) {
+    // If duration differs by more than 40 seconds from canonical duration, reject
+    if (diffSec > 40) {
       return { score: 0, diffMs, isAcceptable: false };
     }
 
-    const score = Math.max(50, 100 - diffSec * 1.5);
+    const score = Math.max(40, 100 - diffSec * 2);
     return { score: Math.round(score), diffMs, isAcceptable: true };
   }
 
@@ -109,7 +113,7 @@ export const evaluateDurationMatch = (
 };
 
 /**
- * Multi-layer Canonical Match Engine
+ * Multi-layer Canonical Match Engine with Channel & View Count Weighting
  */
 export const evaluateCandidateMatch = (
   candidate: {
@@ -118,6 +122,8 @@ export const evaluateCandidateMatch = (
     durationMs: number;
     provider: 'soundcloud' | 'youtube' | 'spotyloader';
     url: string;
+    viewCount?: number;
+    playbackCount?: number;
   },
   canonical: {
     title: string;
@@ -129,8 +135,9 @@ export const evaluateCandidateMatch = (
   const reasons: string[] = [];
   const lowerCandTitle = (candidate.title || '').toLowerCase();
   const lowerCanonTitle = (canonical.title || '').toLowerCase();
+  const candAuthor = (candidate.artist || '').toLowerCase();
 
-  // 1. Hard Rejection (slowed, loops, compilations)
+  // 1. Hard Rejection (slowed, loops, compilations, snippets)
   if (hasHardForbiddenWords(candidate.title, canonical.title)) {
     return {
       spotifyId: canonical.spotifyId,
@@ -145,7 +152,7 @@ export const evaluateCandidateMatch = (
     };
   }
 
-  // 2. Duration Verification
+  // 2. Duration Verification (Timing proximity)
   const durationEval = evaluateDurationMatch(candidate.durationMs, canonical.durationMs);
   if (!durationEval.isAcceptable) {
     return {
@@ -161,43 +168,54 @@ export const evaluateCandidateMatch = (
     };
   }
 
-  let confidence = durationEval.score * 0.5; // 50% baseline from exact duration proximity
+  let confidence = durationEval.score * 0.4; // 40% baseline from exact duration proximity
   reasons.push(`Duration matched: ${(durationEval.diffMs / 1000).toFixed(1)}s difference`);
 
-  // 3. Title & Artist Lexical Matching
+  // 3. Official Artist Channel / Uploader Matching (+30 points)
   const normCanonicalTitle = normalizeString(canonical.title);
   const normCandidateTitle = normalizeString(candidate.title);
   const normPrimaryArtist = normalizeString(canonical.artists[0] || '');
 
+  const isOfficialChannel =
+    normPrimaryArtist &&
+    (candAuthor.includes(normPrimaryArtist) ||
+      candAuthor.includes('vevo') ||
+      candAuthor.includes('topic') ||
+      candAuthor.includes('records') ||
+      candAuthor.includes('official'));
+
+  if (isOfficialChannel) {
+    confidence += 30;
+    reasons.push('Official channel/uploader verified');
+  }
+
+  // 4. Title & Artist Lexical Matching (+20 points)
   const hasTitleMatch =
     normCandidateTitle.includes(normCanonicalTitle) ||
     normCanonicalTitle.includes(normCandidateTitle);
 
-  const hasArtistMatch =
-    normPrimaryArtist &&
-    (normCandidateTitle.includes(normPrimaryArtist) ||
-      normalizeString(candidate.artist || '').includes(normPrimaryArtist));
-
   if (hasTitleMatch) {
-    confidence += 30;
+    confidence += 20;
     reasons.push('Title verified');
   }
 
-  if (hasArtistMatch) {
-    confidence += 20;
-    reasons.push('Artist verified');
+  // 5. Popularity / View Count Bonus (+10 points)
+  const popularity = candidate.viewCount || candidate.playbackCount || 0;
+  if (popularity > 50000) {
+    confidence += 10;
+    reasons.push(`High playcount verified (${popularity.toLocaleString()})`);
   }
 
-  // Soft word penalty (covers, edits, remixes not present in original title)
+  // 6. Soft Penalty for Remix/Cover/Edits
   for (const w of SOFT_PENALTY_WORDS) {
     if (lowerCandTitle.includes(w) && !lowerCanonTitle.includes(w)) {
-      confidence -= 18;
+      confidence -= 35;
       reasons.push(`Soft penalty for "${w}"`);
     }
   }
 
-  const finalConfidence = Math.min(100, Math.max(20, Math.round(confidence)));
-  const isVerified = finalConfidence >= 75;
+  const finalConfidence = Math.min(100, Math.max(10, Math.round(confidence)));
+  const isVerified = finalConfidence >= 70;
 
   return {
     spotifyId: canonical.spotifyId,
@@ -207,7 +225,7 @@ export const evaluateCandidateMatch = (
     sourceConfidence: finalConfidence,
     durationDifferenceMs: durationEval.diffMs,
     isVerified,
-    status: isVerified ? 'verified' : finalConfidence >= 50 ? 'matched' : 'ambiguous',
+    status: isVerified ? 'verified' : finalConfidence >= 40 ? 'matched' : 'ambiguous',
     reasons,
   };
 };
