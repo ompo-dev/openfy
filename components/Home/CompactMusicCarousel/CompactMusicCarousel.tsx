@@ -1,13 +1,15 @@
 /**
  * CompactMusicCarousel Component
  * Compact modern track carousel cards with album art, explicit badge,
- * in-image bottom-right circular play button, and marquee scrolling titles with lateral fade.
+ * in-image bottom-right circular play button, physics-based scroll inertia animation,
+ * and marquee scrolling titles with lateral fade.
  */
 
 import * as React from 'react';
 import {
+  Animated,
   Image,
-  ScrollView,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -82,8 +84,11 @@ const COMPACT_TRACKS: CompactTrackItem[] = [
   },
 ];
 
+const CARD_SNAP_WIDTH = 168; // 154 width + 14 gap
+
 export const CompactMusicCarousel = () => {
   const { playTrack, currentTrack, playerState } = usePlayer();
+  const scrollX = React.useRef(new Animated.Value(0)).current;
 
   const handlePlay = (item: CompactTrackItem) => {
     try {
@@ -107,64 +112,94 @@ export const CompactMusicCarousel = () => {
         <Text style={styles.seeAllText}>Ver tudo</Text>
       </View>
 
-      <ScrollView
+      <Animated.ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        scrollEventThrottle={16}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+          { useNativeDriver: Platform.OS !== 'web' }
+        )}
       >
-        {COMPACT_TRACKS.map((item) => {
+        {COMPACT_TRACKS.map((item, index) => {
           const isPlaying =
             currentTrack?.spotifyId === item.spotifyId && playerState.isPlaying;
 
+          // Physics scroll inertia animation
+          const inputRange = [
+            (index - 1) * CARD_SNAP_WIDTH,
+            index * CARD_SNAP_WIDTH,
+            (index + 1) * CARD_SNAP_WIDTH,
+          ];
+
+          const scale = scrollX.interpolate({
+            inputRange,
+            outputRange: [0.94, 1.0, 0.94],
+            extrapolate: 'clamp',
+          });
+
+          const translateY = scrollX.interpolate({
+            inputRange,
+            outputRange: [2, 0, 2],
+            extrapolate: 'clamp',
+          });
+
           return (
-            <LoggedPressable
+            <Animated.View
               key={item.id}
-              style={[styles.card, isPlaying && styles.cardActive]}
-              onPress={() => handlePlay(item)}
-              accessibilityRole="button"
-              accessibilityLabel={`Tocar ${item.title} de ${item.artist}`}
+              style={{
+                transform: [{ scale }, { translateY }],
+              }}
             >
-              {/* Square Album Cover with Explicit Badge & In-Image Play Button */}
-              <View style={styles.imageContainer}>
-                <Image
-                  source={{ uri: item.imageUrl }}
-                  style={styles.artworkImage}
-                />
+              <LoggedPressable
+                style={[styles.card, isPlaying && styles.cardActive]}
+                onPress={() => handlePlay(item)}
+                accessibilityRole="button"
+                accessibilityLabel={`Tocar ${item.title} de ${item.artist}`}
+              >
+                {/* Square Album Cover with Explicit Badge & In-Image Play Button */}
+                <View style={styles.imageContainer}>
+                  <Image
+                    source={{ uri: item.imageUrl }}
+                    style={styles.artworkImage}
+                  />
 
-                {item.explicit && (
-                  <View style={styles.explicitBadge}>
-                    <Text style={styles.explicitText}>E</Text>
+                  {item.explicit && (
+                    <View style={styles.explicitBadge}>
+                      <Text style={styles.explicitText}>E</Text>
+                    </View>
+                  )}
+
+                  {/* Circular White Play Button positioned inside the image (bottom-right) */}
+                  <View style={styles.inImagePlayButton}>
+                    <Ionicons
+                      name={isPlaying ? 'pause' : 'play'}
+                      size={16}
+                      color="#000000"
+                      style={{ marginLeft: isPlaying ? 0 : 2 }}
+                    />
                   </View>
-                )}
+                </View>
 
-                {/* Circular White Play Button positioned inside the image (bottom-right) */}
-                <View style={styles.inImagePlayButton}>
-                  <Ionicons
-                    name={isPlaying ? 'pause' : 'play'}
-                    size={16}
-                    color="#000000"
-                    style={{ marginLeft: isPlaying ? 0 : 2 }}
+                {/* Title & Artist with Lateral Fade Marquee Scroll */}
+                <View style={styles.infoContainer}>
+                  <MarqueeText
+                    text={item.title}
+                    style={styles.titleText}
+                    fadeWidth={8}
+                  />
+                  <MarqueeText
+                    text={item.artist}
+                    style={styles.artistText}
+                    fadeWidth={8}
                   />
                 </View>
-              </View>
-
-              {/* Title & Artist with Lateral Fade Marquee Scroll */}
-              <View style={styles.infoContainer}>
-                <MarqueeText
-                  text={item.title}
-                  style={styles.titleText}
-                  fadeWidth={8}
-                />
-                <MarqueeText
-                  text={item.artist}
-                  style={styles.artistText}
-                  fadeWidth={8}
-                />
-              </View>
-            </LoggedPressable>
+              </LoggedPressable>
+            </Animated.View>
           );
         })}
-      </ScrollView>
+      </Animated.ScrollView>
     </View>
   );
 };

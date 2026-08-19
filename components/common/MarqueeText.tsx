@@ -1,7 +1,7 @@
 /**
  * MarqueeText Component
  * Smooth marquee text that scrolls horizontally when text overflows the container,
- * with subtle left and right gradient alpha fade masks.
+ * perfectly centered when static, with subtle left and right gradient alpha fade masks.
  */
 
 import * as React from 'react';
@@ -101,12 +101,19 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
         style={{
           transform: [{ translateX: scrollAnim }],
           flexDirection: 'row',
+          justifyContent: isOverflowing ? 'flex-start' : 'center',
+          alignItems: 'center',
+          width: isOverflowing ? undefined : '100%',
         }}
       >
         <Text
           onLayout={onTextLayout}
           numberOfLines={1}
-          style={[styles.text, style]}
+          style={[
+            styles.text,
+            style,
+            !isOverflowing && { textAlign: 'center' },
+          ]}
         >
           {text}
         </Text>
@@ -120,8 +127,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     width: '100%',
     justifyContent: 'center',
+    alignItems: 'center',
   },
   text: {
     flexShrink: 0,
+    textAlign: 'center',
   },
 });

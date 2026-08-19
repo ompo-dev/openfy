@@ -1,13 +1,14 @@
 /**
  * FriendActivityStatus Component
- * Real-time friend listening status with floating speech bubbles, enlarged avatar circles,
- * lateral fade marquee scrolling text, and clean minimal aesthetic.
+ * Real-time friend listening status with enlarged avatar circles, floating speech bubbles,
+ * physics-based scroll inertia animations, and centered marquee titles with lateral fade.
  */
 
 import * as React from 'react';
 import {
+  Animated,
   Image,
-  ScrollView,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -126,8 +127,11 @@ const FRIEND_STATUSES: FriendStatusItem[] = [
   },
 ];
 
+const ITEM_WIDTH = 112; // 96 card width + 16 gap
+
 export const FriendActivityStatus = () => {
   const { playTrack, currentTrack, playerState } = usePlayer();
+  const scrollX = React.useRef(new Animated.Value(0)).current;
 
   const handlePressStatus = (item: FriendStatusItem) => {
     try {
@@ -146,80 +150,119 @@ export const FriendActivityStatus = () => {
 
   return (
     <View style={styles.container}>
-      <ScrollView
+      <Animated.ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        scrollEventThrottle={16}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+          { useNativeDriver: Platform.OS !== 'web' }
+        )}
       >
-        {FRIEND_STATUSES.map((item) => {
+        {FRIEND_STATUSES.map((item, index) => {
           const isPlaying =
             currentTrack?.spotifyId === item.track.spotifyId &&
             playerState.isPlaying;
 
+          // Physics-based scroll inertia interpolation
+          const inputRange = [
+            (index - 1) * ITEM_WIDTH,
+            index * ITEM_WIDTH,
+            (index + 1) * ITEM_WIDTH,
+          ];
+
+          const scale = scrollX.interpolate({
+            inputRange,
+            outputRange: [0.93, 1.0, 0.93],
+            extrapolate: 'clamp',
+          });
+
+          const rotate = scrollX.interpolate({
+            inputRange,
+            outputRange: ['-2.5deg', '0deg', '2.5deg'],
+            extrapolate: 'clamp',
+          });
+
+          const translateY = scrollX.interpolate({
+            inputRange,
+            outputRange: [3, 0, 3],
+            extrapolate: 'clamp',
+          });
+
           return (
-            <LoggedPressable
+            <Animated.View
               key={item.id}
-              style={styles.itemWrapper}
-              onPress={() => handlePressStatus(item)}
-              accessibilityRole="button"
-              accessibilityLabel={`${item.user.username} está ouvindo ${item.track.title} de ${item.track.artist}`}
+              style={[
+                styles.itemWrapper,
+                {
+                  transform: [{ scale }, { rotate }, { translateY }],
+                },
+              ]}
             >
-              {/* Floating Listening Bubble without Spotify Icon & with Marquee */}
-              <View
-                style={[
-                  styles.speechBubble,
-                  { backgroundColor: item.track.bubbleColor },
-                  isPlaying && styles.speechBubblePlaying,
-                ]}
+              <LoggedPressable
+                style={styles.pressableItem}
+                onPress={() => handlePressStatus(item)}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.user.username} está ouvindo ${item.track.title} de ${item.track.artist}`}
               >
-                <View style={styles.textContainer}>
-                  <MarqueeText
-                    text={item.track.title}
-                    style={styles.trackTitle}
-                    fadeWidth={6}
-                  />
-                  <MarqueeText
-                    text={item.track.artist}
-                    style={styles.artistName}
-                    fadeWidth={6}
-                  />
+                {/* Floating Listening Bubble without Spotify Icon & Strictly Centered */}
+                <View
+                  style={[
+                    styles.speechBubble,
+                    { backgroundColor: item.track.bubbleColor },
+                    isPlaying && styles.speechBubblePlaying,
+                  ]}
+                >
+                  <View style={styles.textContainer}>
+                    <MarqueeText
+                      text={item.track.title}
+                      style={styles.trackTitle}
+                      fadeWidth={6}
+                    />
+                    <MarqueeText
+                      text={item.track.artist}
+                      style={styles.artistName}
+                      fadeWidth={6}
+                    />
+                  </View>
                 </View>
-              </View>
 
-              {/* Enlarged Avatar Circle Container */}
-              <View style={styles.avatarContainer}>
-                {item.user.isCurrentUser ? (
-                  <View style={styles.userActivityAvatar}>
-                    <View style={styles.userActivityEyes}>
-                      <View style={styles.eyeCircleOuter}>
-                        <View style={styles.eyeCircleInner} />
+                {/* Enlarged Avatar Circle Container */}
+                <View style={styles.avatarContainer}>
+                  {item.user.isCurrentUser ? (
+                    <View style={styles.userActivityAvatar}>
+                      <View style={styles.userActivityEyes}>
+                        <View style={styles.eyeCircleOuter}>
+                          <View style={styles.eyeCircleInner} />
+                        </View>
+                        <View style={styles.eyeCircleSolid} />
                       </View>
-                      <View style={styles.eyeCircleSolid} />
                     </View>
-                  </View>
-                ) : (
-                  <Image
-                    source={{ uri: item.user.avatarUrl }}
-                    style={styles.avatarImage}
-                  />
-                )}
+                  ) : (
+                    <Image
+                      source={{ uri: item.user.avatarUrl }}
+                      style={styles.avatarImage}
+                    />
+                  )}
 
-                {/* Animated listening equalizer badge if playing */}
-                {isPlaying && (
-                  <View style={styles.playingBadge}>
-                    <Ionicons name="volume-high" size={11} color="#FFFFFF" />
-                  </View>
-                )}
-              </View>
+                  {/* Animated listening equalizer badge if playing */}
+                  {isPlaying && (
+                    <View style={styles.playingBadge}>
+                      <Ionicons name="volume-high" size={11} color="#FFFFFF" />
+                    </View>
+                  )}
+                </View>
 
-              {/* Username text */}
-              <Text style={styles.usernameText} numberOfLines={1}>
-                {item.user.username}
-              </Text>
-            </LoggedPressable>
+                {/* Username text */}
+                <Text style={styles.usernameText} numberOfLines={1}>
+                  {item.user.username}
+                </Text>
+              </LoggedPressable>
+            </Animated.View>
           );
         })}
-      </ScrollView>
+      </Animated.ScrollView>
     </View>
   );
 };
@@ -237,13 +280,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: 96,
   },
+  pressableItem: {
+    alignItems: 'center',
+    width: '100%',
+  },
   speechBubble: {
-    width: 92,
+    width: 90,
     height: 38,
     borderRadius: 15,
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     paddingVertical: 4,
     justifyContent: 'center',
+    alignItems: 'center',
     zIndex: 2,
     elevation: 6,
     shadowColor: '#000',
