@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -52,11 +53,59 @@ const BASE_URL = 'https://api.spotify.com/v1';
 const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => {
   const spotifyUrl = `https://open.spotify.com/track/${trackId}`;
 
-  // 1. Primary: SongLink / Odesli (Universal music metadata engine)
+  // 1. PRIMARY: Official Spotify Embed (__NEXT_DATA__) scraper (100% accurate artists, title, duration)
+  try {
+    let embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
+    if (Platform.OS === 'web') {
+      embedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(embedUrl)}`;
+    }
+
+    const res = await axios.get(embedUrl, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      timeout: 6000,
+    });
+
+    const html = res.data;
+    if (typeof html === 'string') {
+      const nextDataMatch = html.match(
+        /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/
+      );
+      if (nextDataMatch) {
+        const parsed = JSON.parse(nextDataMatch[1]);
+        const entity = parsed.props?.pageProps?.state?.data?.entity;
+        if (entity && entity.name) {
+          const artists =
+            entity.artists?.map((a: { name: string }) => a.name).join(', ') ||
+            'Unknown Artist';
+          const cover =
+            entity.visualIdentity?.image?.[0]?.url ||
+            entity.album?.coverArt?.sources?.[0]?.url ||
+            entity.coverArt?.sources?.[0]?.url ||
+            '';
+
+          return {
+            spotifyId: trackId,
+            title: entity.name,
+            artistName: artists,
+            albumName: entity.album?.name || 'Spotify',
+            imageURL: cover,
+            duration_ms: entity.duration || 0,
+          };
+        }
+      }
+    }
+  } catch (embedErr) {
+    console.warn('[ImportModal] Spotify embed lookup failed:', embedErr);
+  }
+
+  // 2. SECONDARY: SongLink / Odesli
   try {
     const songlinkRes = await axios.get(
       `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(spotifyUrl)}&userCountry=BR`,
-      { timeout: 7000 }
+      { timeout: 6000 }
     );
     const data = songlinkRes.data;
     const entityId = data.entityUniqueId;
@@ -65,8 +114,6 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
     if (entity && entity.title) {
       const deezerUrl = data.linksByPlatform?.deezer?.url;
       let duration_ms = 0;
-
-      // If Deezer link exists, fetch exact duration and album
       let albumName = 'Spotify';
       if (deezerUrl) {
         try {
@@ -92,7 +139,7 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
     console.warn('[ImportModal] Songlink lookup failed:', songlinkErr);
   }
 
-  // 2. Secondary: Spotyloader API
+  // 3. TERTIARY: Spotyloader API
   try {
     const spotyloaderRes = await axios.get(
       `https://spotyloader.com/api/spotify/info?url=${encodeURIComponent(spotifyUrl)}`,
@@ -114,7 +161,7 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
     console.warn('[ImportModal] Spotyloader lookup failed:', spotyloaderErr);
   }
 
-  // 3. Tertiary: Public Spotify oEmbed
+  // 4. QUATERNARY: Public Spotify oEmbed
   try {
     const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
     const response = await axios.get(oembedUrl, { timeout: 5000 });

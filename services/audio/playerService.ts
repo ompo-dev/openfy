@@ -113,6 +113,10 @@ export const pause = async (): Promise<void> => {
   if (!playerInstance) return;
   try {
     playerInstance.pause();
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      const audioElements = document.querySelectorAll('audio');
+      audioElements.forEach((el) => el.pause());
+    }
   } catch (error) {
     console.error('[PlayerService] pause error:', error);
   }
@@ -140,8 +144,16 @@ export const seekTo = async (positionMs: number): Promise<void> => {
 export const unload = async (): Promise<void> => {
   if (!playerInstance) return;
   try {
+    playerInstance.pause();
     playerInstance.remove();
     playerInstance = null;
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      const audioElements = document.querySelectorAll('audio');
+      audioElements.forEach((el) => {
+        el.pause();
+        el.src = '';
+      });
+    }
   } catch (error) {
     console.error('[PlayerService] unload error:', error);
   }

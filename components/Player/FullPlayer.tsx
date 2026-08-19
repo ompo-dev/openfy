@@ -1,8 +1,8 @@
 /**
- * FullPlayer Component
- * Modern SwiftUI & Apple Music Liquid Glass aesthetic.
- * Full-screen player with dynamic backdrop gradients, floating shadow cover,
- * glassmorphic lyrics card, iOS style fluid slider, and rich playback controls.
+ * FullPlayer Component — Apple Music & Liquid Glass Design System
+ * Matches the official iOS Apple Music player and synced lyrics experience.
+ * Includes Dolby Atmos spatial audio badge, glass action pills,
+ * glowing karaoke synced lyrics, and native haptic feedback.
  */
 
 import * as React from 'react';
@@ -15,18 +15,20 @@ import {
   Text,
   View,
   Dimensions,
+  Platform,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import FontAwesome6 from '@expo/vector-icons/FontAwesome6';
 import { usePlayer } from '@context';
 import { fetchLyrics, LyricsData, LyricSegment } from '@services';
 import { getDynamicColorPalette } from '@utils';
-import { GlassSurface } from '../native';
+import { GlassSurface, LoggedPressable } from '../native';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const COVER_SIZE = SCREEN_WIDTH - 64;
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const COVER_SIZE = Math.min(SCREEN_WIDTH - 64, 340);
 
 type FullPlayerProps = {
   visible: boolean;
@@ -102,7 +104,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     };
   }, [currentTrack]);
 
-  // Determine current active lyric segment index [startTimeMs, endTimeMs]
+  // Determine current active lyric segment index
   const activeLineIndex = React.useMemo(() => {
     if (!lyricsData || !lyricsData.segments || lyricsData.segments.length === 0)
       return -1;
@@ -133,7 +135,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
         lyricsListRef.current.scrollToIndex({
           index: activeLineIndex,
           animated: true,
-          viewPosition: 0.4,
+          viewPosition: 0.35,
         });
       } catch {}
     }
@@ -166,54 +168,46 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       onRequestClose={onClose}
     >
       <LinearGradient
-        colors={[palette.primary, palette.secondary, '#0a0a0c']}
-        locations={[0, 0.5, 1.0]}
+        colors={[palette.primary, palette.secondary, '#0a0d14']}
+        locations={[0, 0.45, 1.0]}
         style={styles.container}
       >
-        {/* Header */}
+        {/* Grab Handle Header */}
+        <View style={styles.topGrabRow}>
+          <View style={styles.grabBar} />
+        </View>
+
+        {/* Top Navigation Bar */}
         <View style={styles.header}>
-          <Pressable onPress={onClose} style={styles.headerIconButton} hitSlop={12}>
-            <Ionicons name="chevron-down" size={28} color="#FFFFFF" />
-          </Pressable>
+          <LoggedPressable onPress={onClose} style={styles.headerIconButton}>
+            <Ionicons name="chevron-down" size={26} color="#FFFFFF" />
+          </LoggedPressable>
           <View style={styles.headerInfo}>
-            <Text style={styles.headerFrom}>TOCANDO DO SPOTIFY</Text>
+            <Text style={styles.headerFrom}>OPENFY MUSIC</Text>
             <Text style={styles.headerContext} numberOfLines={1}>
-              {currentTrack.albumName || 'Openfy Music'}
+              {currentTrack.albumName || 'Reproduzindo'}
             </Text>
           </View>
-          <Pressable
+          <LoggedPressable
             onPress={() => setShowLyricsFull(!showLyricsFull)}
-            style={styles.headerIconButton}
-            hitSlop={8}
+            style={[
+              styles.headerIconButton,
+              showLyricsFull && styles.headerIconButtonActive,
+            ]}
           >
-            <MaterialCommunityIcons
-              name={showLyricsFull ? 'image-outline' : 'microphone-variant'}
-              size={24}
-              color={showLyricsFull ? palette.accent : '#FFFFFF'}
+            <Ionicons
+              name="chatbubble-ellipses-outline"
+              size={22}
+              color={showLyricsFull ? '#FFFFFF' : 'rgba(255,255,255,0.7)'}
             />
-          </Pressable>
+          </LoggedPressable>
         </View>
 
         {showLyricsFull ? (
-          /* FULL SCREEN LYRICS VIEW */
-          <View style={styles.fullLyricsContainer}>
-            <View style={styles.lyricsHeaderRow}>
-              <View>
-                <Text style={styles.lyricsHeaderTitle}>
-                  {lyricsData?.isSynced ? 'Letras Sincronizadas' : 'Letra da Música'}
-                </Text>
-                <Text style={styles.lyricsHeaderSubtitle}>
-                  {lyricsData?.isSynced ? 'Karaokê • Toque para pular' : 'Modo Leitura'}
-                </Text>
-              </View>
-              {lyricsData?.isSynced && (
-                <View style={styles.syncedBadge}>
-                  <Ionicons name="checkmark-circle" size={14} color="#1DB954" />
-                  <Text style={styles.syncedBadgeText}>Sincronizada</Text>
-                </View>
-              )}
-            </View>
-
+          /* =========================================================
+           * FULL SCREEN APPLE MUSIC SYNCED LYRICS VIEW
+           * ========================================================= */
+          <View style={styles.lyricsMainContainer}>
             {lyricsData && lyricsData.isSynced && lyricsData.segments.length > 0 ? (
               <FlatList
                 ref={lyricsListRef}
@@ -263,20 +257,22 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             ) : (
               <View style={styles.noLyricsContainer}>
                 <MaterialCommunityIcons
-                  name="microphone-off"
-                  size={48}
-                  color="rgba(255,255,255,0.4)"
+                  name="microphone-outline"
+                  size={52}
+                  color="rgba(255,255,255,0.3)"
                 />
                 <Text style={styles.noLyricsText}>
                   {isLoadingLyrics
-                    ? 'Buscando letra...'
-                    : 'Letra não encontrada para esta música.'}
+                    ? 'Carregando letra...'
+                    : 'Letra não disponível para esta faixa.'}
                 </Text>
               </View>
             )}
           </View>
         ) : (
-          /* STANDARD ALBUM ART & TRACK INFO VIEW */
+          /* =========================================================
+           * STANDARD ALBUM ART & TRACK INFO VIEW
+           * ========================================================= */
           <View style={styles.mainPlayerSection}>
             {/* Floating Cover Art */}
             <View style={styles.coverContainer}>
@@ -292,56 +288,95 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               )}
             </View>
 
-            {/* Track Info & Like Action */}
-            <View style={styles.trackInfoRow}>
-              <View style={styles.trackText}>
-                <Text style={styles.trackTitle} numberOfLines={1}>
-                  {currentTrack.title}
-                </Text>
-                <Text style={styles.trackArtist} numberOfLines={1}>
-                  {currentTrack.artistName}
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => setIsLiked(!isLiked)}
-                style={styles.likeButton}
-                hitSlop={8}
-              >
-                <Ionicons
-                  name={isLiked ? 'heart' : 'heart-outline'}
-                  size={28}
-                  color={isLiked ? '#1DB954' : '#FFFFFF'}
-                />
-              </Pressable>
+            {/* Track Info (Title & Artist) */}
+            <View style={styles.trackInfoSection}>
+              <Text style={styles.trackTitle} numberOfLines={1}>
+                {currentTrack.title}
+              </Text>
+              <Text style={styles.trackArtist} numberOfLines={1}>
+                {currentTrack.artistName}
+              </Text>
             </View>
-
-            {/* Glassmorphic Lyrics Mini Preview */}
-            {lyricsData && (
-              <GlassSurface glass="regular" isInteractive style={styles.lyricsGlassCard}>
-                <Pressable
-                  onPress={() => setShowLyricsFull(true)}
-                  style={styles.lyricsGlassCardInner}
-                >
-                  <View style={styles.lyricsPreviewHeader}>
-                    <MaterialCommunityIcons
-                      name="microphone-variant"
-                      size={16}
-                      color="#FFFFFF"
-                    />
-                    <Text style={styles.lyricsPreviewTitle}>LETRAS</Text>
-                  </View>
-                  <Text style={styles.lyricsPreviewLine} numberOfLines={2}>
-                    {lyricsData.segments.length > 0 && activeLineIndex >= 0
-                      ? lyricsData.segments[activeLineIndex].text
-                      : lyricsData.plainLyrics?.split('\n')[0] || 'Toque para ver a letra'}
-                  </Text>
-                </Pressable>
-              </GlassSurface>
-            )}
           </View>
         )}
 
-        {/* Progress Slider */}
+        {/* =========================================================
+         * MIDDLE GLASS ACTION PILL ROW (Apple Music Style)
+         * ========================================================= */}
+        <View style={styles.actionPillRow}>
+          {/* Left Pill: Lyrics Toggle */}
+          <LoggedPressable
+            onPress={() => setShowLyricsFull(!showLyricsFull)}
+            style={[
+              styles.circleActionBtn,
+              showLyricsFull && styles.circleActionBtnActive,
+            ]}
+          >
+            <Ionicons
+              name="chatbubble-ellipses-outline"
+              size={20}
+              color={showLyricsFull ? '#FFFFFF' : 'rgba(255,255,255,0.75)'}
+            />
+          </LoggedPressable>
+
+          {/* Center Pill: Quick Controls or Track Info */}
+          {showLyricsFull ? (
+            <GlassSurface glass="regular" style={styles.lyricsTrackPill}>
+              <Text style={styles.lyricsTrackPillText} numberOfLines={1}>
+                {currentTrack.title} • {currentTrack.artistName}
+              </Text>
+            </GlassSurface>
+          ) : (
+            <GlassSurface glass="regular" style={styles.centerActionPill}>
+              <LoggedPressable
+                onPress={() => setIsLiked(!isLiked)}
+                style={styles.pillSegment}
+              >
+                <Ionicons
+                  name={isLiked ? 'star' : 'star-outline'}
+                  size={19}
+                  color={isLiked ? '#FFD700' : 'rgba(255,255,255,0.8)'}
+                />
+              </LoggedPressable>
+
+              <View style={styles.pillDivider} />
+
+              <LoggedPressable
+                onPress={() => setShowLyricsFull(true)}
+                style={styles.pillSegment}
+              >
+                <Ionicons
+                  name="musical-note"
+                  size={19}
+                  color="rgba(255,255,255,0.8)"
+                />
+              </LoggedPressable>
+
+              <View style={styles.pillDivider} />
+
+              <LoggedPressable style={styles.pillSegment}>
+                <Ionicons
+                  name="ellipsis-horizontal"
+                  size={19}
+                  color="rgba(255,255,255,0.8)"
+                />
+              </LoggedPressable>
+            </GlassSurface>
+          )}
+
+          {/* Right Pill: Queue / List */}
+          <LoggedPressable style={styles.circleActionBtn}>
+            <Ionicons
+              name="list"
+              size={20}
+              color="rgba(255,255,255,0.75)"
+            />
+          </LoggedPressable>
+        </View>
+
+        {/* =========================================================
+         * SCRUBBER & DOLBY ATMOS STATUS ROW
+         * ========================================================= */}
         <View style={styles.progressContainer}>
           <Slider
             style={styles.slider}
@@ -349,7 +384,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             maximumValue={1}
             value={progress}
             minimumTrackTintColor="#FFFFFF"
-            maximumTrackTintColor="rgba(255,255,255,0.2)"
+            maximumTrackTintColor="rgba(255,255,255,0.22)"
             thumbTintColor="#FFFFFF"
             onSlidingStart={(v) => {
               setSeeking(true);
@@ -370,40 +405,44 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   : playerState.positionMs
               )}
             </Text>
+
+            {/* Spatial Audio Badge */}
+            <View style={styles.dolbyBadge}>
+              <FontAwesome6 name="tower-broadcast" size={11} color="rgba(255,255,255,0.65)" />
+              <Text style={styles.dolbyBadgeText}>Dolby Atmos</Text>
+            </View>
+
             <Text style={styles.timeText}>
               {formatTime(playerState.durationMs)}
             </Text>
           </View>
         </View>
 
-        {/* Controls */}
-        <View style={styles.controls}>
-          <Pressable
-            onPress={() => setIsShuffle(!isShuffle)}
-            style={styles.auxButton}
-            hitSlop={8}
-          >
-            <MaterialCommunityIcons
-              name="shuffle-variant"
+        {/* =========================================================
+         * BOTTOM PLAYBACK CONTROLS
+         * ========================================================= */}
+        <View style={styles.controlsRow}>
+          {/* AirPlay / Output icon */}
+          <LoggedPressable style={styles.sideControlBtn}>
+            <Ionicons
+              name="radio-outline"
               size={24}
-              color={isShuffle ? palette.accent : 'rgba(255,255,255,0.6)'}
+              color="rgba(255,255,255,0.75)"
             />
-          </Pressable>
+          </LoggedPressable>
 
-          <Pressable
+          {/* Previous Track */}
+          <LoggedPressable
             onPress={playPrevious}
-            style={styles.controlButton}
-            disabled={queue.length === 0}
-            hitSlop={8}
+            style={styles.seekControlBtn}
           >
-            <Ionicons name="play-skip-back" size={34} color="#FFFFFF" />
-          </Pressable>
+            <Ionicons name="play-back" size={32} color="#FFFFFF" />
+          </LoggedPressable>
 
           {/* Solid White Play/Pause Button */}
-          <Pressable
+          <LoggedPressable
             onPress={togglePlayPause}
-            style={styles.mainPlayButton}
-            hitSlop={4}
+            style={styles.playPauseCircle}
           >
             {playerState.isBuffering ? (
               <MaterialCommunityIcons
@@ -419,48 +458,27 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 style={playerState.isPlaying ? undefined : { marginLeft: 3 }}
               />
             )}
-          </Pressable>
+          </LoggedPressable>
 
-          <Pressable
+          {/* Next Track */}
+          <LoggedPressable
             onPress={playNext}
-            style={styles.controlButton}
-            disabled={queue.length === 0}
-            hitSlop={8}
+            style={styles.seekControlBtn}
           >
-            <Ionicons name="play-skip-forward" size={34} color="#FFFFFF" />
-          </Pressable>
+            <Ionicons name="play-forward" size={32} color="#FFFFFF" />
+          </LoggedPressable>
 
-          <Pressable
-            onPress={handleToggleRepeat}
-            style={styles.auxButton}
-            hitSlop={8}
+          {/* Shuffle / Repeat toggle */}
+          <LoggedPressable
+            onPress={() => setIsShuffle(!isShuffle)}
+            style={styles.sideControlBtn}
           >
             <MaterialCommunityIcons
-              name={
-                repeatMode === 'one'
-                  ? 'repeat-once'
-                  : repeatMode === 'all'
-                  ? 'repeat'
-                  : 'repeat-off'
-              }
+              name="shuffle-variant"
               size={24}
-              color={
-                repeatMode !== 'off'
-                  ? palette.accent
-                  : 'rgba(255,255,255,0.6)'
-              }
+              color={isShuffle ? palette.accent : 'rgba(255,255,255,0.75)'}
             />
-          </Pressable>
-        </View>
-
-        {/* Bottom Actions: Devices + Share */}
-        <View style={styles.bottomActionsRow}>
-          <Pressable style={styles.bottomActionButton} hitSlop={8}>
-            <MaterialCommunityIcons name="devices" size={22} color="rgba(255,255,255,0.7)" />
-          </Pressable>
-          <Pressable style={styles.bottomActionButton} hitSlop={8}>
-            <Ionicons name="share-outline" size={22} color="rgba(255,255,255,0.7)" />
-          </Pressable>
+          </LoggedPressable>
         </View>
       </LinearGradient>
     </Modal>
@@ -471,9 +489,19 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 24,
+    paddingTop: Platform.OS === 'ios' ? 12 : 20,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
     justifyContent: 'space-between',
+  },
+  topGrabRow: {
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  grabBar: {
+    width: 36,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.3)',
   },
   header: {
     flexDirection: 'row',
@@ -482,198 +510,183 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   headerIconButton: {
-    padding: 6,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerIconButtonActive: {
+    backgroundColor: 'rgba(255,255,255,0.35)',
   },
   headerInfo: {
     alignItems: 'center',
     flex: 1,
-    marginHorizontal: 8,
+    marginHorizontal: 12,
   },
   headerFrom: {
     color: 'rgba(255,255,255,0.5)',
     fontSize: 10,
-    fontFamily: 'SF-Bold',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
+    fontWeight: '700',
+    letterSpacing: 1.2,
   },
   headerContext: {
     color: '#FFFFFF',
-    fontSize: 12,
-    fontFamily: 'SF-Semibold',
+    fontSize: 13,
+    fontWeight: '600',
     marginTop: 2,
   },
   mainPlayerSection: {
-    flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    gap: 20,
+    justifyContent: 'center',
+    marginVertical: 10,
   },
   coverContainer: {
     width: COVER_SIZE,
     height: COVER_SIZE,
-    borderRadius: 20,
-    overflow: 'hidden',
-    elevation: 20,
-    shadowColor: '#000',
+    borderRadius: 24,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.6,
-    shadowRadius: 24,
-    backgroundColor: '#1E1E1E',
+    shadowOpacity: 0.45,
+    shadowRadius: 28,
+    elevation: 16,
+    marginBottom: 28,
   },
   cover: {
     width: '100%',
     height: '100%',
+    borderRadius: 24,
   },
   coverFallback: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#282828',
   },
-  trackInfoRow: {
-    flexDirection: 'row',
+  trackInfoSection: {
     alignItems: 'center',
-    justifyContent: 'space-between',
     width: '100%',
-  },
-  trackText: {
-    flex: 1,
-    gap: 4,
+    paddingHorizontal: 16,
   },
   trackTitle: {
     color: '#FFFFFF',
     fontSize: 22,
-    fontFamily: 'SF-Bold',
-    fontWeight: '800',
+    fontWeight: '700',
+    textAlign: 'center',
     letterSpacing: -0.3,
   },
   trackArtist: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 16,
-    fontFamily: 'SF-Regular',
+    color: 'rgba(255,255,255,0.65)',
+    fontSize: 17,
+    fontWeight: '500',
+    marginTop: 4,
+    textAlign: 'center',
   },
-  likeButton: {
-    padding: 6,
-  },
-  lyricsGlassCard: {
-    width: '100%',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-    overflow: 'hidden',
-  },
-  lyricsGlassCardInner: {
-    padding: 16,
-    gap: 6,
-  },
-  lyricsPreviewHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  lyricsPreviewTitle: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontFamily: 'SF-Bold',
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-  lyricsPreviewLine: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: 14,
-    fontFamily: 'SF-Semibold',
-    lineHeight: 20,
-  },
-  fullLyricsContainer: {
+  lyricsMainContainer: {
     flex: 1,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
-    padding: 16,
-    marginVertical: 12,
-  },
-  lyricsHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  lyricsHeaderTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontFamily: 'SF-Bold',
-    fontWeight: '800',
-  },
-  lyricsHeaderSubtitle: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 12,
-    fontFamily: 'SF-Regular',
-    marginTop: 2,
-  },
-  syncedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(29, 185, 84, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  syncedBadgeText: {
-    color: '#1DB954',
-    fontSize: 11,
-    fontFamily: 'SF-Bold',
+    marginVertical: 8,
   },
   lyricsScrollContent: {
-    paddingVertical: 20,
-    gap: 8,
-  },
-  lyricLineButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-  },
-  lyricLineActiveButton: {
-    backgroundColor: 'rgba(255,255,255,0.18)',
-  },
-  lyricText: {
-    fontSize: 20,
-    fontFamily: 'SF-Bold',
-    lineHeight: 28,
-  },
-  lyricTextActive: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  lyricTextInactive: {
-    color: 'rgba(255,255,255,0.4)',
-    fontWeight: '600',
-  },
-  plainLyricRow: {
-    paddingVertical: 6,
+    paddingVertical: 40,
     paddingHorizontal: 8,
   },
+  lyricLineButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+  },
+  lyricLineActiveButton: {
+    transform: [{ scale: 1.02 }],
+  },
+  lyricText: {
+    fontSize: 22,
+    fontWeight: '600',
+    letterSpacing: -0.2,
+  },
+  lyricTextActive: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(255,255,255,0.4)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
+  },
+  lyricTextInactive: {
+    color: 'rgba(255,255,255,0.32)',
+  },
+  plainLyricRow: {
+    paddingVertical: 8,
+  },
   plainLyricText: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 17,
-    fontFamily: 'SF-Semibold',
-    lineHeight: 26,
+    color: '#FFFFFF',
+    fontSize: 18,
+    lineHeight: 28,
+    fontWeight: '500',
   },
   noLyricsContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-    padding: 32,
   },
   noLyricsText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 14,
-    fontFamily: 'SF-Regular',
-    textAlign: 'center',
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 15,
+    fontWeight: '500',
+    marginTop: 12,
+  },
+  actionPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 12,
+    gap: 12,
+  },
+  circleActionBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  circleActionBtnActive: {
+    backgroundColor: 'rgba(255,255,255,0.32)',
+  },
+  centerActionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 44,
+    paddingHorizontal: 16,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  lyricsTrackPill: {
+    height: 44,
+    paddingHorizontal: 20,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    maxWidth: SCREEN_WIDTH - 150,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  lyricsTrackPillText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  pillSegment: {
+    paddingHorizontal: 12,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pillDivider: {
+    width: 1,
+    height: 16,
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   progressContainer: {
-    marginTop: 8,
-    marginBottom: 4,
+    width: '100%',
+    marginVertical: 8,
   },
   slider: {
     width: '100%',
@@ -682,48 +695,56 @@ const styles = StyleSheet.create({
   timeRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 4,
-    marginTop: -8,
   },
   timeText: {
     color: 'rgba(255,255,255,0.55)',
-    fontSize: 11,
-    fontFamily: 'SF-Medium',
+    fontSize: 12,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
   },
-  controls: {
+  dolbyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  dolbyBadgeText: {
+    color: 'rgba(255,255,255,0.65)',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 8,
-    marginVertical: 10,
+    paddingHorizontal: 12,
+    marginTop: 4,
+    marginBottom: 8,
   },
-  auxButton: {
-    padding: 8,
+  sideControlBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  controlButton: {
-    padding: 8,
+  seekControlBtn: {
+    width: 52,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  mainPlayButton: {
+  playPauseCircle: {
     width: 68,
     height: 68,
     borderRadius: 34,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 8,
-    shadowColor: '#000',
+    shadowColor: '#FFFFFF',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-  },
-  bottomActionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 4,
-  },
-  bottomActionButton: {
-    padding: 6,
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
   },
 });

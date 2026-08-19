@@ -90,9 +90,9 @@ export const MiniPlayer = ({ onPress }: MiniPlayerProps) => {
                   e.stopPropagation();
                 }}
                 accessibilityRole="button"
-                accessibilityLabel="AirPlay"
+                accessibilityLabel="Audio Output"
               >
-                <Ionicons name={'airplay' as any} size={22} color="#FFFFFF" />
+                <Ionicons name="headset-outline" size={20} color="rgba(255,255,255,0.85)" />
               </LoggedPressable>
 
               <LoggedPressable
