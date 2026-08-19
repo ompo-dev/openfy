@@ -30,6 +30,7 @@ export * from './audio/types';
 export * from './audio/resolver';
 export * from './importer/url-detector';
 export * from './importer/universal-importer';
+export * from './discovery/entity-page-resolver';
 
 export class MusicResolutionService {
   constructor(

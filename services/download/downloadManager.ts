@@ -11,7 +11,6 @@ import { fetchLyrics, saveLyricsOffline } from '../lyrics/lyricsService';
 import {
   resolveAudioUrl,
   resolveViaSoundCloud,
-  resolveViaSpotyloader,
   resolveViaYouTubeTopic,
 } from '../audio/audioResolver';
 

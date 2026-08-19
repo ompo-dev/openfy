@@ -3,7 +3,6 @@ export type { ParsedSpotifyLink, SpotifyResourceType } from './spotify/linkParse
 
 export {
   resolveAudioUrl,
-  resolveViaSpotyloader,
   resolveViaSoundCloud,
   resolveViaYouTubeTopic,
 } from './audio/audioResolver';

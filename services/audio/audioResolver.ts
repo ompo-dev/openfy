@@ -262,114 +262,6 @@ export const resolveViaYouTubeTopic = async (
 };
 
 /**
- * Spotyloader Full-Track Engine (Exact Spotify Original Master)
- */
-export const resolveViaSpotyloader = async (
-  spotifyIdOrUrl: string
-): Promise<ResolvedAudio | null> => {
-  try {
-    const spotifyUrl = spotifyIdOrUrl.startsWith('http')
-      ? spotifyIdOrUrl
-      : `https://open.spotify.com/track/${spotifyIdOrUrl}`;
-
-    const res = await fetchWithTimeout(
-      'https://spotyloader.com/api/spotify/track',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Origin: 'https://spotyloader.com',
-          Referer: 'https://spotyloader.com/',
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-        body: JSON.stringify({ url: spotifyUrl }),
-      },
-      4000
-    );
-
-    if (!res.ok) return null;
-
-    const data = (await res.json()) as {
-      jobId?: string;
-      id?: string;
-      downloadLink?: string;
-      url?: string;
-      link?: string;
-    };
-
-    const directUrl = data.downloadLink || data.link || data.url;
-    if (directUrl && !isPreviewUrl(directUrl)) {
-      return {
-        url: directUrl,
-        quality: '320kbps',
-        format: 'mp3',
-        source: 'spotyloader',
-        confidence: 99,
-      };
-    }
-
-    const jobId = data.jobId || data.id;
-    if (!jobId) return null;
-
-    for (let i = 0; i < 6; i++) {
-      await new Promise((r) => setTimeout(r, 600));
-
-      try {
-        const sRes = await fetchWithTimeout(
-          `https://spotyloader.com/api/spotify/track/status/${jobId}`,
-          {
-            headers: {
-              Origin: 'https://spotyloader.com',
-              Referer: 'https://spotyloader.com/',
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            },
-          },
-          3000
-        );
-
-        if (!sRes.ok) continue;
-
-        const sData = (await sRes.json()) as {
-          status?: string;
-          downloadLink?: string;
-          link?: string;
-          download_url?: string;
-          url?: string;
-          post?: { download_url?: string };
-        };
-
-        const downloadUrl =
-          sData.downloadLink ||
-          sData.link ||
-          sData.download_url ||
-          sData.url ||
-          sData.post?.download_url;
-
-        if (
-          downloadUrl &&
-          downloadUrl.startsWith('http') &&
-          !isPreviewUrl(downloadUrl)
-        ) {
-          return {
-            url: downloadUrl,
-            quality: '320kbps',
-            format: 'mp3',
-            source: 'spotyloader',
-            confidence: 99,
-          };
-        }
-      } catch {
-        continue;
-      }
-    }
-  } catch {}
-
-  return null;
-};
-
-/**
  * SoundCloud Resolver with strict Canonical Matcher validation
  */
 export const resolveViaSoundCloud = async (
@@ -438,25 +330,21 @@ export const resolveViaSoundCloud = async (
           }
         );
 
-        // Discard hard-rejected candidates (loops, compilations, slowed, snippets)
-        if (matchReport.status === 'unavailable' || matchReport.sourceConfidence < 40) {
-          continue;
+        if (
+          matchReport.status !== 'unavailable' &&
+          !hasUnwantedForbiddenWords(item.title, trackName)
+        ) {
+          candidates.push({ ...item, matchReport });
         }
-
-        candidates.push({ ...item, matchReport });
       }
 
-      if (candidates.length === 0) continue;
+      if (candidates.length > 0) {
+        candidates.sort(
+          (a, b) => b.matchReport.overallScore - a.matchReport.overallScore
+        );
+        const track = candidates[0];
 
-      // Rank candidates by highest Match Confidence
-      candidates.sort(
-        (a, b) => b.matchReport.sourceConfidence - a.matchReport.sourceConfidence
-      );
-
-      for (const track of candidates.slice(0, 4)) {
         const transcodings = track.media?.transcodings || [];
-        if (transcodings.length === 0) continue;
-
         const nonDrmTranscodings = transcodings.filter((t: any) => {
           const p = (t.format?.protocol || '').toLowerCase();
           return (
@@ -489,14 +377,14 @@ export const resolveViaSoundCloud = async (
                   transcoding.format.protocol === 'progressive';
                 const isM3u8 = streamData.url.includes('.m3u8');
                 console.log(
-                  `[AudioResolver] Verified SoundCloud Track: "${track.title}" by "${track.user?.username}" (Confidence: ${track.matchReport.sourceConfidence}%)`
+                  `[AudioResolver] Verified SoundCloud Track: "${track.title}" by "${track.user?.username}" (Confidence: ${track.matchReport.overallScore}%)`
                 );
                 return {
                   url: streamData.url,
                   quality: 'high',
                   format: isProgressive ? 'mp3' : isM3u8 ? 'm3u8' : 'mp3',
                   source: 'soundcloud',
-                  confidence: track.matchReport.sourceConfidence,
+                  confidence: track.matchReport.overallScore,
                 };
               }
             }
@@ -514,7 +402,7 @@ export const resolveViaSoundCloud = async (
 };
 
 /**
- * Main audio resolver: resolves 100% full-length master audio for the Spotify canonical track.
+ * Main audio resolver: resolves 100% master audio for the Spotify canonical track.
  */
 export const resolveAudioUrl = async (
   trackName: string,
@@ -534,7 +422,7 @@ export const resolveAudioUrl = async (
     `[AudioResolver] Resolving Audio for Canonical: "${artistName} - ${trackName}" (${durationMs || 0}ms)`
   );
 
-  // 0. PRIMARY: Dedicated Node.js Resolution Backend API (CORS-free & High Speed)
+  // 0. PRIMARY: Dedicated Node.js Resolution Backend API (Structured Entity & Strict Matching)
   try {
     const backendRes = await fetch('http://localhost:3001/api/music/resolve', {
       method: 'POST',
@@ -552,7 +440,7 @@ export const resolveAudioUrl = async (
       const data = await backendRes.json();
       if (data.source && data.source.url) {
         console.log(
-          `[AudioResolver] Resolved via Backend Server: "${data.track?.title}" (${data.source.quality})`
+          `[AudioResolver] Resolved via Backend Server: "${data.track?.title}" (${data.source.quality || 'direct'})`
         );
         return {
           url: data.source.url,
@@ -583,14 +471,6 @@ export const resolveAudioUrl = async (
   );
   if (ytResult?.url && !isPreviewUrl(ytResult.url)) {
     return ytResult;
-  }
-
-  // 3. QUATERNARY: Spotyloader 320kbps MP3
-  if (spotifyId && !spotifyId.startsWith('dz_') && !spotifyId.startsWith('yt_')) {
-    const spotyResult = await resolveViaSpotyloader(spotifyId);
-    if (spotyResult?.url && !isPreviewUrl(spotyResult.url)) {
-      return spotyResult;
-    }
   }
 
   return null;
