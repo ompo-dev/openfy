@@ -18,6 +18,7 @@
     "server": "node server/index.js"
   },
   "dependencies": {
+    "@distube/ytdl-core": "^4.16.12",
     "@expo/ui": "~57.0.7",
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -43,6 +44,7 @@
     "expo-system-ui": "~57.0.1",
     "expo-web-browser": "~57.0.2",
     "lucide-react-native": "^1.24.0",
+    "play-dl": "^1.9.7",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.0",
@@ -53,6 +55,7 @@
     "react-native-svg": "15.15.4",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.10.0",
+    "youtube-dl-exec": "^3.1.12",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

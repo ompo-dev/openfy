@@ -1,6 +1,6 @@
 /**
  * Openfy Music Resolution Backend Server
- * High-performance Node.js API with YouTubeOfficialRanker, ExactIdentifierGet, IdentityLock & BooleanMatchGuard.
+ * High-performance Node.js API with Spotify Canonical Scraper, YouTubeOfficialRanker, IdentityLock & CORS-Free Proxy.
  */
 
 const http = require('http');
@@ -42,16 +42,16 @@ function normalizeText(str) {
     .trim();
 }
 
-function slugify(text) {
-  return (text || '')
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[()[\]{}]/g, ' ')
-    .replace(/['"`]/g, '')
-    .replace(/[^a-z0-9\s-]/g, '')
-    .trim()
-    .replace(/\s+/g, '-');
+function parseViewCount(viewText) {
+  if (!viewText) return 0;
+  const clean = (viewText || '').toLowerCase().replace(/visualizaç[õo]es|views/g, '').trim();
+  if (clean.includes('mi') || clean.includes('m')) {
+    return parseFloat(clean.replace(',', '.')) * 1000000;
+  }
+  if (clean.includes('mil') || clean.includes('k')) {
+    return parseFloat(clean.replace(',', '.')) * 1000;
+  }
+  return parseInt(clean.replace(/\./g, '').replace(/,/g, ''), 10) || 0;
 }
 
 const FORBIDDEN_VERSION_TAGS = [
@@ -81,21 +81,64 @@ const FORBIDDEN_VERSION_TAGS = [
   'bastidores',
 ];
 
-function parseViewCount(viewText) {
-  if (!viewText) return 0;
-  const clean = (viewText || '').toLowerCase().replace(/visualizaç[õo]es|views/g, '').trim();
-  if (clean.includes('mi') || clean.includes('m')) {
-    return parseFloat(clean.replace(',', '.')) * 1000000;
+/**
+ * 0. Node.js Spotify Canonical Scraper (CORS-free, 100% accurate title, artists, duration, artwork)
+ */
+async function fetchSpotifyCanonicalTrack(trackId) {
+  const cacheKey = `spotify_track:${trackId}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
+    const res = await fetch(embedUrl, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      signal: AbortSignal.timeout(4000),
+    });
+
+    if (res.ok) {
+      const html = await res.text();
+      const nextDataMatch = html.match(
+        /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/
+      );
+      if (nextDataMatch) {
+        const parsed = JSON.parse(nextDataMatch[1]);
+        const entity = parsed.props?.pageProps?.state?.data?.entity;
+        if (entity && entity.name) {
+          const artists = (entity.artists || []).map(a => ({ name: a.name }));
+          const cover =
+            entity.visualIdentity?.image?.[0]?.url ||
+            entity.album?.coverArt?.sources?.[0]?.url ||
+            entity.coverArt?.sources?.[0]?.url ||
+            '';
+
+          const result = {
+            spotifyId: trackId,
+            title: entity.name,
+            artistName: artists[0]?.name || 'Artista',
+            artists: artists.length > 0 ? artists : [{ name: 'Artista' }],
+            albumName: entity.album?.name || 'Spotify',
+            imageURL: cover,
+            duration_ms: entity.duration || 0,
+          };
+
+          setCache(cacheKey, result, 86400); // 24h TTL
+          return result;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`[Spotify Scraper] Failed to fetch embed for ${trackId}:`, e.message);
   }
-  if (clean.includes('mil') || clean.includes('k')) {
-    return parseFloat(clean.replace(',', '.')) * 1000;
-  }
-  return parseInt(clean.replace(/\./g, '').replace(/,/g, ''), 10) || 0;
+
+  return null;
 }
 
 /**
- * YouTube Official Channel & Timing Ranker
- * Searches YouTube for the track and finds the official artist video with matching duration.
+ * 1. YouTube Official Channel & Timing Ranker
  */
 async function fetchYouTubeOfficialVideo(target) {
   const primaryArtist = target.artists[0]?.name || target.artistName || '';
@@ -142,6 +185,7 @@ async function fetchYouTubeOfficialVideo(target) {
       const channel = v.ownerText?.runs?.[0]?.text || '';
       const durationText = v.lengthText?.simpleText || '';
       const viewCountText = v.viewCountText?.simpleText || '';
+      const views = parseViewCount(viewCountText);
 
       const parts = durationText.split(':').map(Number);
       let durationSec = 0;
@@ -188,7 +232,7 @@ async function fetchYouTubeOfficialVideo(target) {
       let durationAcceptable = true;
       if (targetDurationSec > 0) {
         durationDiffSec = Math.abs(targetDurationSec - durationSec);
-        const maxDiffSec = Math.max(15, targetDurationSec * 0.05);
+        const maxDiffSec = Math.max(25, targetDurationSec * 0.05);
         if (durationDiffSec > maxDiffSec) {
           durationAcceptable = false;
         }
@@ -198,9 +242,8 @@ async function fetchYouTubeOfficialVideo(target) {
 
       let score = 0.7;
       if (isOfficialArtistChannel) score += 0.2;
-      if (durationDiffSec <= 5) score += 0.1;
+      if (durationDiffSec <= 10) score += 0.1;
 
-      const views = parseViewCount(viewCountText);
       candidates.push({
         videoId,
         title,
@@ -311,33 +354,6 @@ async function fetchExactIdentifierGet(title, artist, durationMs, albumName) {
   return null;
 }
 
-// 3. Metadata Provider: Deezer Search (Used ONLY for enriching missing ISRC/duration)
-async function fetchDeezerEnrichment(compositeQueries) {
-  for (const query of compositeQueries) {
-    const cacheKey = `deezer:${query}`;
-    const cached = getCached(cacheKey);
-    if (cached) return cached;
-
-    try {
-      const res = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=3`);
-      if (res.ok) {
-        const data = await res.json();
-        const item = data.data?.[0];
-        if (item) {
-          const result = {
-            durationMs: (item.duration || 0) * 1000,
-            isrc: item.isrc || '',
-            artworkUrl: item.album?.cover_big || item.album?.cover_medium || '',
-          };
-          setCache(cacheKey, result, 86400);
-          return result;
-        }
-      }
-    } catch {}
-  }
-  return null;
-}
-
 // HTTP Server
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -357,6 +373,20 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/health' || pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', service: 'openfy-official-ranker-resolution-engine', time: new Date().toISOString() }));
+    return;
+  }
+
+  // GET /api/spotify/track/:id
+  if (pathname.startsWith('/api/spotify/track/')) {
+    const trackId = pathname.replace('/api/spotify/track/', '').split('?')[0];
+    const track = await fetchSpotifyCanonicalTrack(trackId);
+    if (track) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(track));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Track not found' }));
+    }
     return;
   }
 
@@ -397,18 +427,32 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // POST /api/music/resolve (Exact Official Ranker Pipeline)
+  // POST /api/music/resolve (End-to-End Canonical Spotify + YouTube Official Ranker Pipeline)
   if (pathname === '/api/music/resolve' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
         const payload = JSON.parse(body || '{}');
-        const { title, artist, artists, albumName, durationMs, spotifyId, isrc, imageURL } = payload;
+        let { title, artist, artists, albumName, durationMs, spotifyId, isrc, imageURL } = payload;
+
+        // If spotifyId is provided and details are missing or need validation, extract canonical track directly
+        if (spotifyId && (!title || !artists || artists.length === 0)) {
+          const cleanSpotifyId = spotifyId.replace(/^spotify:track:/, '').split('?')[0];
+          const spCanonical = await fetchSpotifyCanonicalTrack(cleanSpotifyId);
+          if (spCanonical) {
+            title = spCanonical.title;
+            artists = spCanonical.artists;
+            artist = spCanonical.artistName;
+            albumName = spCanonical.albumName;
+            durationMs = spCanonical.duration_ms;
+            imageURL = spCanonical.imageURL;
+          }
+        }
 
         if (!title) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Title is required' }));
+          res.end(JSON.stringify({ error: 'Title or spotifyId is required' }));
           return;
         }
 
@@ -445,27 +489,6 @@ const server = http.createServer(async (req, res) => {
         );
 
         let resolvedLyrics = exactGet?.valid ? { synced: exactGet.synced, lines: exactGet.lines } : null;
-
-        // STEP 4: Enrich missing ISRC / duration
-        if (!lockedTarget.durationMs || !lockedTarget.isrc) {
-          const compositeQueries = [
-            `"${lockedTarget.title}" "${lockedTarget.artistName}"`,
-            `${lockedTarget.artistName} ${lockedTarget.title}`,
-            lockedTarget.title,
-          ];
-          const enrichment = await fetchDeezerEnrichment(compositeQueries);
-          if (enrichment) {
-            if (!lockedTarget.durationMs && enrichment.durationMs) {
-              lockedTarget.durationMs = enrichment.durationMs;
-            }
-            if (!lockedTarget.isrc && enrichment.isrc) {
-              lockedTarget.isrc = enrichment.isrc;
-            }
-            if (!lockedTarget.imageURL && enrichment.artworkUrl) {
-              lockedTarget.imageURL = enrichment.artworkUrl;
-            }
-          }
-        }
 
         const responseData = {
           confidence: ytOfficial ? 'VERY_HIGH' : 'UNCERTAIN',
@@ -533,5 +556,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🚀 [Openfy Official Ranker Server] Running on http://localhost:${PORT}`);
+  console.log(`🚀 [Openfy Backend Server] Running on http://localhost:${PORT}`);
 });

@@ -51,13 +51,35 @@ type ImportModalProps = {
 const BASE_URL = 'https://api.spotify.com/v1';
 
 const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => {
-  const spotifyUrl = `https://open.spotify.com/track/${trackId}`;
+  const cleanTrackId = trackId.replace(/^spotify:track:/, '').split('?')[0];
 
-  // 1. PRIMARY: Official Spotify Embed (__NEXT_DATA__) scraper (100% accurate artists, title, duration)
+  // 0. PRIMARY: Dedicated Local / Cloud Node.js Resolution Backend (CORS-free, 100% accurate)
+  try {
+    const backendRes = await fetch(`http://localhost:3001/api/spotify/track/${cleanTrackId}`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (backendRes.ok) {
+      const data = await backendRes.json();
+      if (data && data.title) {
+        return {
+          spotifyId: cleanTrackId,
+          title: data.title,
+          artistName: Array.isArray(data.artists) ? data.artists.map((a: any) => a.name).join(', ') : data.artistName,
+          albumName: data.albumName || 'Spotify',
+          imageURL: data.imageURL || '',
+          duration_ms: data.duration_ms || 0,
+        };
+      }
+    }
+  } catch {}
+
+  const spotifyUrl = `https://open.spotify.com/track/${cleanTrackId}`;
+
+  // 1. SECONDARY: Official Spotify Embed (__NEXT_DATA__) scraper
   try {
     const embedUrls = [
-      `https://open.spotify.com/embed/track/${trackId}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://open.spotify.com/embed/track/${trackId}`)}`,
+      `https://open.spotify.com/embed/track/${cleanTrackId}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://open.spotify.com/embed/track/${cleanTrackId}`)}`,
     ];
 
     for (const embedUrl of embedUrls) {
@@ -90,7 +112,7 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
 
               if (artists) {
                 return {
-                  spotifyId: trackId,
+                  spotifyId: cleanTrackId,
                   title: entity.name,
                   artistName: artists,
                   albumName: entity.album?.name || 'Spotify',
@@ -107,7 +129,7 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
     console.warn('[ImportModal] Spotify embed lookup failed:', embedErr);
   }
 
-  // 2. SECONDARY: Public Spotify oEmbed + Deezer / iTunes verification
+  // 2. TERTIARY: Public Spotify oEmbed
   try {
     const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
     const response = await axios.get(oembedUrl, { timeout: 4000 });
@@ -120,47 +142,8 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
     let title = (data.title || 'Unknown Track').replace(/^[\s\-–—]+/, '').trim();
     let artistName = (data.author_name || '').trim();
 
-    // Query Deezer API first (superior Brazilian & international catalog precision)
-    try {
-      const cleanSearchTitle = title.replace(/\(.*?\)/g, '').trim();
-      const deezerRes = await axios.get(
-        `https://api.deezer.com/search?q=${encodeURIComponent(cleanSearchTitle)}&limit=3`,
-        { timeout: 3500 }
-      );
-      const topDeezer = deezerRes.data?.data?.[0];
-      if (topDeezer && topDeezer.title) {
-        return {
-          spotifyId: trackId,
-          title: topDeezer.title || title,
-          artistName: topDeezer.artist?.name || artistName || 'Unknown Artist',
-          albumName: topDeezer.album?.title || 'Single',
-          imageURL: topDeezer.album?.cover_big || data.thumbnail_url || '',
-          duration_ms: (topDeezer.duration || 0) * 1000,
-        };
-      }
-    } catch {}
-
-    // Query iTunes API fallback
-    try {
-      const itunesRes = await axios.get(
-        `https://itunes.apple.com/search?term=${encodeURIComponent(title)}&entity=song&limit=1`,
-        { timeout: 3000 }
-      );
-      const topResult = itunesRes.data?.results?.[0];
-      if (topResult) {
-        return {
-          spotifyId: trackId,
-          title: topResult.trackName || title,
-          artistName: topResult.artistName || artistName || 'Unknown Artist',
-          albumName: topResult.collectionName || 'Single',
-          imageURL: topResult.artworkUrl100 || data.thumbnail_url || '',
-          duration_ms: topResult.trackTimeMillis || 0,
-        };
-      }
-    } catch {}
-
     return {
-      spotifyId: trackId,
+      spotifyId: cleanTrackId,
       title,
       artistName: artistName || 'Artista',
       albumName: 'Spotify',
