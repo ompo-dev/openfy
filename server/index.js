@@ -1,6 +1,6 @@
 /**
  * Openfy Music Resolution Backend Server
- * High-performance Node.js API with IdentityLock, Structured Entity Discovery & BooleanMatchGuard.
+ * High-performance Node.js API with Exact Identifier GET, IdentityLock, and Decoupled Canonical Model.
  */
 
 const http = require('http');
@@ -136,7 +136,72 @@ function evaluateBooleanGuard(target, candidate) {
   return { passed: true, confidence, durationDiffMs, score: isOfficial ? 1.0 : 0.92 };
 }
 
-// 1. Structured Entity Page Discovery (Letras.mus.br direct YouTube ID binding)
+// 1. STEP 1: Direct Parametric GET Identifier (track_name + artist_name + duration) with Strict Cross-Validation
+async function fetchExactIdentifierGet(title, artist, durationMs, albumName) {
+  const durationSec = durationMs > 0 ? Math.round(durationMs / 1000) : 0;
+  const cacheKey = `exact_get:${artist}:${title}:${durationSec}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cached;
+
+  const queryParams = new URLSearchParams({
+    track_name: title,
+    artist_name: artist,
+    ...(durationSec > 0 ? { duration: String(durationSec) } : {}),
+    ...(albumName ? { album_name: albumName } : {}),
+  });
+
+  try {
+    const res = await fetch(`https://lrclib.net/api/get?${queryParams.toString()}`, {
+      headers: { 'User-Agent': 'OpenfyMusic/1.0.0 ( contact@openfy.app )' },
+      signal: AbortSignal.timeout(3500),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+
+      // Cross-validate response against target identity
+      const normTargetTitle = normalizeText(title);
+      const normResolvedTitle = normalizeText(data.trackName || '');
+      const titleMatch = normResolvedTitle.includes(normTargetTitle) || normTargetTitle.includes(normResolvedTitle);
+
+      const normTargetArtist = normalizeText(artist);
+      const normResolvedArtist = normalizeText(data.artistName || '');
+      const artistMatch = normResolvedArtist.includes(normTargetArtist) || normTargetArtist.includes(normResolvedArtist);
+
+      if (titleMatch && artistMatch) {
+        let lines = [];
+        if (data.syncedLyrics) {
+          lines = data.syncedLyrics
+            .split('\n')
+            .filter(Boolean)
+            .map(l => {
+              const m = l.match(/\[(\d+):(\d+\.\d+)\](.*)/);
+              if (!m) return null;
+              const startMs = (parseInt(m[1]) * 60 + parseFloat(m[2])) * 1000;
+              return { text: m[3].trim(), startMs: Math.round(startMs) };
+            })
+            .filter(Boolean);
+        }
+
+        const result = {
+          valid: true,
+          synced: lines.length > 0,
+          lines,
+          trackName: data.trackName,
+          artistName: data.artistName,
+          albumName: data.albumName,
+          durationMs: data.duration ? data.duration * 1000 : durationMs,
+          source: 'lrclib_exact_get',
+        };
+        setCache(cacheKey, result, 604800);
+        return result;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+// 2. Structured Entity Page Discovery (Letras.mus.br direct YouTube ID binding)
 async function fetchLetrasEntity(artists, title) {
   const artistList = Array.isArray(artists) ? artists : [{ name: artists }];
   const primaryArtist = artistList[0]?.name || '';
@@ -180,7 +245,7 @@ async function fetchLetrasEntity(artists, title) {
   return null;
 }
 
-// 2. Metadata Provider: Deezer Search (Used ONLY for enriching missing ISRC/duration, NEVER overwriting locked identity)
+// 3. Metadata Provider: Deezer Search (Used ONLY for enriching missing ISRC/duration, NEVER overwriting locked identity)
 async function fetchDeezerEnrichment(compositeQueries) {
   for (const query of compositeQueries) {
     const cacheKey = `deezer:${query}`;
@@ -207,7 +272,7 @@ async function fetchDeezerEnrichment(compositeQueries) {
   return null;
 }
 
-// 3. Audio Provider: SoundCloud Stream with Strict Boolean Match Guard
+// 4. Audio Provider: SoundCloud Stream with Strict Boolean Match Guard
 async function fetchSoundCloudCandidate(lockedTarget) {
   const clientId = 'UMY1dzQ68n2QbCuypNe8JOivmV2FO2Ep';
   const queries = [
@@ -263,33 +328,6 @@ async function fetchSoundCloudCandidate(lockedTarget) {
   return null;
 }
 
-// 4. Lyrics Provider: Synchronized Lyrics
-async function fetchLyrics(title, artist) {
-  const cacheKey = `lyrics:${artist}:${title}`;
-  const cached = getCached(cacheKey);
-  if (cached) return cached;
-
-  try {
-    const res = await fetch(`https://lrclib.net/api/get?track_name=${encodeURIComponent(title)}&artist_name=${encodeURIComponent(artist)}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.syncedLyrics) {
-        const lines = data.syncedLyrics.split('\n').filter(Boolean).map(l => {
-          const m = l.match(/\[(\d+):(\d+\.\d+)\](.*)/);
-          if (!m) return null;
-          const startMs = (parseInt(m[1]) * 60 + parseFloat(m[2])) * 1000;
-          return { text: m[3].trim(), startMs: Math.round(startMs) };
-        }).filter(Boolean);
-
-        const result = { synced: true, lines, source: 'lrclib' };
-        setCache(cacheKey, result, 604800);
-        return result;
-      }
-    }
-  } catch {}
-  return null;
-}
-
 // HTTP Server
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -308,7 +346,7 @@ const server = http.createServer(async (req, res) => {
   // Health
   if (pathname === '/health' || pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'openfy-identity-locked-resolution-engine', time: new Date().toISOString() }));
+    res.end(JSON.stringify({ status: 'ok', service: 'openfy-exact-get-resolution-engine', time: new Date().toISOString() }));
     return;
   }
 
@@ -349,7 +387,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // POST /api/music/resolve (Deterministic Identity Locked Pipeline)
+  // POST /api/music/resolve (Deterministic Exact-GET + Identity Locked Pipeline)
   if (pathname === '/api/music/resolve' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
@@ -365,7 +403,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         // STEP 1: IDENTITY LOCK 🔒
-        // Canonical Target is sealed. Secondary sources NEVER overwrite these values!
+        // Canonical Target is permanently sealed.
         const parsedArtists = Array.isArray(artists) && artists.length > 0
           ? artists.map(a => typeof a === 'string' ? { name: a } : a)
           : [{ name: artist || 'Artista' }];
@@ -381,9 +419,19 @@ const server = http.createServer(async (req, res) => {
           spotifyId: spotifyId || '',
         };
 
-        console.log(`[Identity Lock 🔒] Target Sealed: "${lockedTarget.artistName} - ${lockedTarget.title}" (${lockedTarget.durationMs}ms)`);
+        console.log(`[Exact GET Identifier] Target: "${lockedTarget.artistName} - ${lockedTarget.title}" (${lockedTarget.durationMs}ms)`);
 
-        // STEP 2: Enrich missing ISRC / duration without mutating title/artists
+        // STEP 2: EXACT GET IDENTIFIER (First attempt: direct parametric match)
+        const exactGet = await fetchExactIdentifierGet(
+          lockedTarget.title,
+          lockedTarget.artistName,
+          lockedTarget.durationMs,
+          lockedTarget.albumName
+        );
+
+        let resolvedLyrics = exactGet?.valid ? { synced: exactGet.synced, lines: exactGet.lines } : null;
+
+        // STEP 3: Enrich missing ISRC / duration if needed
         if (!lockedTarget.durationMs || !lockedTarget.isrc) {
           const compositeQueries = [
             `"${lockedTarget.title}" "${lockedTarget.artistName}"`,
@@ -404,21 +452,53 @@ const server = http.createServer(async (req, res) => {
           }
         }
 
-        // STEP 3: DISCOVERY - Letras Entity Relations (Lyrics + Direct YouTube Link)
+        // STEP 4: DISCOVERY - Letras Entity Relations (Lyrics fallback + Direct YouTube Link)
         const letrasEntity = await fetchLetrasEntity(lockedTarget.artists, lockedTarget.title);
-        if (letrasEntity) {
-          console.log(`  ✅ [Entity Discovered] Letras Page bound YouTube ID: ${letrasEntity.youtubeId}`);
-        }
 
-        // STEP 4: RESOLUTION - SoundCloud stream verified with BooleanMatchGuard
+        // STEP 5: RESOLUTION - SoundCloud stream verified with BooleanMatchGuard
         const audioSource = await fetchSoundCloudCandidate(lockedTarget);
 
-        // STEP 5: LYRICS - Sychronized Lyrics
-        const lyrics = await fetchLyrics(lockedTarget.title, lockedTarget.artistName);
-
+        // Build Decoupled Response (identity, metadata, artwork, lyrics, playback)
         const responseData = {
           confidence: audioSource ? audioSource.confidence : letrasEntity ? 'VERY_HIGH' : 'UNCERTAIN',
           status: (audioSource || letrasEntity) ? 'EXACT' : 'NO_MATCH',
+          identity: {
+            id: lockedTarget.spotifyId || `target_${Date.now()}`,
+            title: lockedTarget.title,
+            artists: lockedTarget.artists.map(a => a.name),
+            durationMs: lockedTarget.durationMs,
+            isrc: lockedTarget.isrc,
+            anchorProvider: 'spotify',
+          },
+          metadata: {
+            album: lockedTarget.albumName,
+          },
+          artwork: lockedTarget.imageURL ? {
+            url: lockedTarget.imageURL,
+          } : undefined,
+          lyrics: resolvedLyrics,
+          playback: audioSource ? {
+            type: 'DIRECT_AUDIO',
+            url: `http://localhost:${PORT}/api/audio/proxy?url=${encodeURIComponent(audioSource.url)}`,
+            directUrl: audioSource.url,
+            provider: 'soundcloud',
+            format: audioSource.format,
+            quality: audioSource.quality,
+            verified: true,
+            confidence: audioSource.confidence,
+            score: audioSource.score,
+          } : (letrasEntity ? {
+            type: 'EXTERNAL',
+            provider: 'youtube',
+            url: letrasEntity.youtubeUrl,
+            directUrl: letrasEntity.youtubeUrl,
+            format: 'stream',
+            quality: 'official_video',
+            verified: true,
+            confidence: 'VERY_HIGH',
+            score: 0.95,
+          } : undefined),
+          // Backward-compatible track format
           track: {
             title: lockedTarget.title,
             artistName: lockedTarget.artistName,
@@ -429,12 +509,6 @@ const server = http.createServer(async (req, res) => {
             spotifyId: lockedTarget.spotifyId,
             isrc: lockedTarget.isrc,
           },
-          entity: letrasEntity ? {
-            source: 'letras',
-            pageUrl: letrasEntity.pageUrl,
-            youtubeId: letrasEntity.youtubeId,
-            youtubeUrl: letrasEntity.youtubeUrl,
-          } : null,
           source: audioSource ? {
             type: 'DIRECT_AUDIO',
             url: `http://localhost:${PORT}/api/audio/proxy?url=${encodeURIComponent(audioSource.url)}`,
@@ -442,21 +516,15 @@ const server = http.createServer(async (req, res) => {
             format: audioSource.format,
             quality: audioSource.quality,
             verified: true,
-            score: audioSource.score
+            score: audioSource.score,
           } : (letrasEntity ? {
             type: 'EXTERNAL',
             provider: 'youtube',
             id: letrasEntity.youtubeId,
             url: letrasEntity.youtubeUrl,
             verified: true,
-            score: 0.95
+            score: 0.95,
           } : null),
-          lyrics,
-          reason: audioSource
-            ? 'Identity locked, duration matched <= 3s, and audio stream proxied'
-            : letrasEntity
-            ? 'Official YouTube link directly discovered and verified from Letras entity'
-            : 'No verified source found. Prevented wrong audio.',
         };
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -475,5 +543,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🚀 [Openfy Identity-Locked Resolution Server] Running on http://localhost:${PORT}`);
+  console.log(`🚀 [Openfy Exact GET Resolution Server] Running on http://localhost:${PORT}`);
 });

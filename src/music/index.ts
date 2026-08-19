@@ -13,6 +13,7 @@ export * from './identity/canonical-track';
 export * from './identity/identifiers';
 export * from './identity/normalizer';
 export * from './identity/identity-lock';
+export * from './identity/canonical-track-model';
 export * from './matching/duration-matcher';
 export * from './matching/version-matcher';
 export * from './matching/match-engine';
@@ -33,6 +34,7 @@ export * from './audio/resolver';
 export * from './importer/url-detector';
 export * from './importer/universal-importer';
 export * from './discovery/entity-page-resolver';
+export * from './resolver/exact-identifier-get';
 
 export class MusicResolutionService {
   constructor(
