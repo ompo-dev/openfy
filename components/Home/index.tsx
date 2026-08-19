@@ -1,11 +1,14 @@
 /**
  * Home Component
- * Modern SwiftUI & Spotify layout with HeroBanner, YourFavourites, Top Albums, and Playlists.
+ * Modern SwiftUI & Spotify layout with FriendActivityStatus, CompactMusicCarousel,
+ * HeroBanner, YourFavourites, Top Albums, and Playlists.
  */
 
 import * as React from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
+import { FriendActivityStatus } from './FriendActivityStatus';
+import { CompactMusicCarousel } from './CompactMusicCarousel';
 import { HeroBanner } from './HeroBanner/HeroBanner';
 import { YourFavourites } from './YourFavourites/YourFavourites';
 import { RecentlyPlayed } from './RecentlyPlayed';
@@ -14,8 +17,11 @@ import { TopArtists } from './TopArtists';
 import { YourPlaylists } from './YourPlaylists';
 import { FeaturedPlaylists } from './FeaturedPlaylists';
 import { EmptySection } from '../EmptySection';
-import { BOTTOM_NAVIGATION_HEIGHT, COLORS } from '@config';
+import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { useApplicationDimensions } from '@hooks';
+
+export { FriendActivityStatus } from './FriendActivityStatus';
+export { CompactMusicCarousel } from './CompactMusicCarousel';
 
 export const Home = () => {
   const { height } = useApplicationDimensions();
@@ -33,20 +39,26 @@ export const Home = () => {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* 1. Featured Hero Carousel */}
+        {/* 1. Friend Activity Listening Status (Stories / Speech Bubbles) */}
+        <FriendActivityStatus />
+
+        {/* 2. Compact Music Carousel Cards (Album Art + Explicit + Play Button) */}
+        <CompactMusicCarousel />
+
+        {/* 3. Featured Hero Carousel */}
         <HeroBanner />
 
-        {/* 2. Your favourites row */}
+        {/* 4. Your favourites row */}
         <YourFavourites />
 
-        {/* 3. Recently Played grid */}
+        {/* 5. Recently Played grid */}
         <RecentlyPlayed />
 
-        {/* 4. Top Albums & Artists */}
+        {/* 6. Top Albums & Artists */}
         <TopAlbums />
         <TopArtists />
 
-        {/* 5. Playlists */}
+        {/* 7. Playlists */}
         <YourPlaylists />
         <FeaturedPlaylists />
 
