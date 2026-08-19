@@ -107,7 +107,7 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
     console.warn('[ImportModal] Spotify embed lookup failed:', embedErr);
   }
 
-  // 2. SECONDARY: Public Spotify oEmbed + iTunes / Deezer verification
+  // 2. SECONDARY: Public Spotify oEmbed + Deezer / iTunes verification
   try {
     const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
     const response = await axios.get(oembedUrl, { timeout: 4000 });
@@ -120,7 +120,27 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
     let title = (data.title || 'Unknown Track').replace(/^[\s\-–—]+/, '').trim();
     let artistName = (data.author_name || '').trim();
 
-    // Query iTunes API for 100% verified artist and canonical metadata
+    // Query Deezer API first (superior Brazilian & international catalog precision)
+    try {
+      const cleanSearchTitle = title.replace(/\(.*?\)/g, '').trim();
+      const deezerRes = await axios.get(
+        `https://api.deezer.com/search?q=${encodeURIComponent(cleanSearchTitle)}&limit=3`,
+        { timeout: 3500 }
+      );
+      const topDeezer = deezerRes.data?.data?.[0];
+      if (topDeezer && topDeezer.title) {
+        return {
+          spotifyId: trackId,
+          title: topDeezer.title || title,
+          artistName: topDeezer.artist?.name || artistName || 'Unknown Artist',
+          albumName: topDeezer.album?.title || 'Single',
+          imageURL: topDeezer.album?.cover_big || data.thumbnail_url || '',
+          duration_ms: (topDeezer.duration || 0) * 1000,
+        };
+      }
+    } catch {}
+
+    // Query iTunes API fallback
     try {
       const itunesRes = await axios.get(
         `https://itunes.apple.com/search?term=${encodeURIComponent(title)}&entity=song&limit=1`,
@@ -135,25 +155,6 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
           albumName: topResult.collectionName || 'Single',
           imageURL: topResult.artworkUrl100 || data.thumbnail_url || '',
           duration_ms: topResult.trackTimeMillis || 0,
-        };
-      }
-    } catch {}
-
-    // Query Deezer API fallback
-    try {
-      const deezerRes = await axios.get(
-        `https://api.deezer.com/search?q=${encodeURIComponent(title)}&limit=1`,
-        { timeout: 3000 }
-      );
-      const topDeezer = deezerRes.data?.data?.[0];
-      if (topDeezer) {
-        return {
-          spotifyId: trackId,
-          title: topDeezer.title || title,
-          artistName: topDeezer.artist?.name || artistName || 'Unknown Artist',
-          albumName: topDeezer.album?.title || 'Single',
-          imageURL: topDeezer.album?.cover_big || data.thumbnail_url || '',
-          duration_ms: (topDeezer.duration || 0) * 1000,
         };
       }
     } catch {}

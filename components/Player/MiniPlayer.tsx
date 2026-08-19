@@ -52,7 +52,6 @@ export const MiniPlayer = ({ onPress }: MiniPlayerProps) => {
       <LoggedPressable
         onPress={onPress}
         style={styles.pressableWrapper}
-        accessibilityRole="button"
         accessibilityLabel="Abrir Player"
       >
         <GlassSurface

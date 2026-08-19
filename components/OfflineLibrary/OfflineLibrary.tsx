@@ -52,7 +52,6 @@ export const OfflineLibrary = () => {
       <LoggedPressable
         style={styles.trackItem}
         onPress={() => handlePlay(item)}
-        accessibilityRole="button"
         accessibilityLabel={`Tocar ${item.title}`}
       >
         <GlassSurface glass="regular" isInteractive style={styles.trackGlass}>
