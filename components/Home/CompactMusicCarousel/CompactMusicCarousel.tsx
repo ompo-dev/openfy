@@ -155,22 +155,14 @@ export const CompactMusicCarousel = () => {
                   <Text style={styles.spotifyText}>Spotify</Text>
                 </View>
 
-                <LoggedPressable
-                  style={styles.playButton}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    handlePlay(item);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={isPlaying ? 'Pausar' : 'Tocar'}
-                >
+                <View style={styles.playButton}>
                   <Ionicons
                     name={isPlaying ? 'pause' : 'play'}
                     size={16}
                     color="#000000"
                     style={{ marginLeft: isPlaying ? 0 : 2 }}
                   />
-                </LoggedPressable>
+                </View>
               </View>
             </LoggedPressable>
           );
