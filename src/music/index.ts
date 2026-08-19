@@ -19,6 +19,7 @@ export * from './matching/version-matcher';
 export * from './matching/match-engine';
 export * from './matching/strict-track-matcher';
 export * from './matching/boolean-match-guard';
+export * from './matching/youtube-official-ranker';
 export * from './matching/candidate-resolver';
 export * from './fingerprint/types';
 export * from './fingerprint/chromaprint';

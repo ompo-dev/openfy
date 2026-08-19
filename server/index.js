@@ -1,6 +1,6 @@
 /**
  * Openfy Music Resolution Backend Server
- * High-performance Node.js API with Exact Identifier GET, IdentityLock, and Decoupled Canonical Model.
+ * High-performance Node.js API with YouTubeOfficialRanker, ExactIdentifierGet, IdentityLock & BooleanMatchGuard.
  */
 
 const http = require('http');
@@ -76,67 +76,160 @@ const FORBIDDEN_VERSION_TAGS = [
   '10 hour',
   '1 hour',
   'loop',
+  'react',
+  'reacao',
+  'bastidores',
 ];
 
 /**
- * BooleanMatchGuard - Absolute boolean gates for candidate validation
+ * YouTube Official Channel & Timing Ranker
+ * Searches YouTube for the track and finds the official artist video with matching duration.
  */
-function evaluateBooleanGuard(target, candidate) {
-  const candTitleLower = (candidate.title || '').toLowerCase();
-  const targetTitleLower = (target.title || '').toLowerCase();
+async function fetchYouTubeOfficialVideo(target) {
+  const primaryArtist = target.artists[0]?.name || target.artistName || '';
+  const query = `${target.title} ${primaryArtist}`.trim();
+  const cacheKey = `yt_official:${query}:${target.durationMs}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cached;
 
-  // 1. Snippet filter
-  if (candidate.durationMs && candidate.durationMs < 45000) {
-    return { passed: false, confidence: 'REJECTED', reason: 'SNIPPET' };
-  }
+  try {
+    const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+      },
+      signal: AbortSignal.timeout(5000),
+    });
 
-  // 2. Version gate
-  for (const tag of FORBIDDEN_VERSION_TAGS) {
-    if (candTitleLower.includes(tag) && !targetTitleLower.includes(tag)) {
-      return { passed: false, confidence: 'REJECTED', reason: `VERSION_CONFLICT: ${tag}` };
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    const match =
+      html.match(/var ytInitialData = ({[\s\S]*?});<\/script>/) ||
+      html.match(/ytInitialData\s*=\s*({[\s\S]*?});/);
+
+    if (!match) return null;
+
+    const data = JSON.parse(match[1]);
+    const contents =
+      data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer
+        ?.contents?.[0]?.itemSectionRenderer?.contents || [];
+
+    const candidates = [];
+    const targetDurationSec = target.durationMs > 0 ? target.durationMs / 1000 : 0;
+    const normTargetTitle = normalizeText(target.title);
+    const lockedArtistsNorm = (target.artists || [{ name: primaryArtist }]).map(a => normalizeText(a.name || a));
+
+    for (const item of contents) {
+      const v = item.videoRenderer;
+      if (!v || !v.videoId) continue;
+
+      const videoId = v.videoId;
+      const title = v.title?.runs?.[0]?.text || '';
+      const channel = v.ownerText?.runs?.[0]?.text || '';
+      const durationText = v.lengthText?.simpleText || '';
+      const viewCountText = v.viewCountText?.simpleText || '';
+
+      const parts = durationText.split(':').map(Number);
+      let durationSec = 0;
+      if (parts.length === 2) durationSec = parts[0] * 60 + parts[1];
+      if (parts.length === 3) durationSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
+
+      if (durationSec < 40) continue;
+
+      const titleLower = title.toLowerCase();
+      const normCandTitle = normalizeText(title);
+      const normChannel = normalizeText(channel);
+
+      let hasForbidden = false;
+      for (const f of FORBIDDEN_VERSION_TAGS) {
+        if (titleLower.includes(f) && !target.title.toLowerCase().includes(f)) {
+          hasForbidden = true;
+          break;
+        }
+      }
+      if (hasForbidden) continue;
+
+      const titleMatched =
+        normCandTitle.includes(normTargetTitle) ||
+        normTargetTitle.includes(normCandTitle);
+
+      if (!titleMatched) continue;
+
+      let isOfficialArtistChannel = false;
+      for (const artNorm of lockedArtistsNorm) {
+        if (
+          artNorm &&
+          (normChannel.includes(artNorm) ||
+            normCandTitle.includes(artNorm) ||
+            normChannel.includes('topic') ||
+            normChannel.includes('vevo') ||
+            normChannel.includes('records'))
+        ) {
+          isOfficialArtistChannel = true;
+          break;
+        }
+      }
+
+      let durationDiffSec = 0;
+      let durationAcceptable = true;
+      if (targetDurationSec > 0) {
+        durationDiffSec = Math.abs(targetDurationSec - durationSec);
+        const maxDiffSec = Math.max(15, targetDurationSec * 0.05);
+        if (durationDiffSec > maxDiffSec) {
+          durationAcceptable = false;
+        }
+      }
+
+      if (!durationAcceptable) continue;
+
+      let score = 0.7;
+      if (isOfficialArtistChannel) score += 0.2;
+      if (durationDiffSec <= 5) score += 0.1;
+
+      candidates.push({
+        videoId,
+        title,
+        channel,
+        durationSec,
+        durationText,
+        viewCountText,
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        isOfficialArtistChannel,
+        durationDiffSec,
+        score,
+      });
     }
-  }
 
-  // 3. Duration gate (<= 3000ms strict tolerance)
-  let durationDiffMs = 0;
-  if (target.durationMs && target.durationMs > 0 && candidate.durationMs && candidate.durationMs > 0) {
-    durationDiffMs = Math.abs(candidate.durationMs - target.durationMs);
-    if (durationDiffMs > 3000) {
-      return { passed: false, confidence: 'REJECTED', reason: `DURATION_MISMATCH: ${durationDiffMs}ms` };
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => {
+        if (a.isOfficialArtistChannel && !b.isOfficialArtistChannel) return -1;
+        if (!a.isOfficialArtistChannel && b.isOfficialArtistChannel) return 1;
+        if (a.durationDiffSec !== b.durationDiffSec) return a.durationDiffSec - b.durationDiffSec;
+        return b.score - a.score;
+      });
+
+      const top = candidates[0];
+      const result = {
+        provider: 'youtube',
+        id: top.videoId,
+        title: top.title,
+        channel: top.channel,
+        url: top.url,
+        durationSec: top.durationSec,
+        viewCountText: top.viewCountText,
+        verified: true,
+        score: top.score,
+      };
+      setCache(cacheKey, result, 86400);
+      return result;
     }
-  }
-
-  // 4. Artist gate
-  const candAuthorNorm = normalizeText(candidate.author || candidate.artist || '');
-  const candTitleNorm = normalizeText(candidate.title || '');
-  const targetArtists = (target.artists || [{ name: target.artist || '' }]).map(a => normalizeText(a.name || a));
-
-  let artistPassed = false;
-  for (const art of targetArtists) {
-    if (art && (candAuthorNorm.includes(art) || candTitleNorm.includes(art) || candAuthorNorm.includes('topic') || candAuthorNorm.includes('vevo'))) {
-      artistPassed = true;
-      break;
-    }
-  }
-
-  if (!artistPassed && targetArtists.length > 0 && targetArtists[0] !== '') {
-    return { passed: false, confidence: 'REJECTED', reason: 'ARTIST_MISMATCH' };
-  }
-
-  // 5. Title gate
-  const normTargetTitle = normalizeText(target.title);
-  const titlePassed = candTitleNorm.includes(normTargetTitle) || normTargetTitle.includes(candTitleNorm);
-  if (!titlePassed) {
-    return { passed: false, confidence: 'REJECTED', reason: 'TITLE_MISMATCH' };
-  }
-
-  const isOfficial = Boolean(candidate.isOfficialRelation || (target.isrc && candidate.isrc && target.isrc === candidate.isrc));
-  const confidence = isOfficial && durationDiffMs <= 1500 ? 'PROVEN' : durationDiffMs <= 2000 ? 'VERY_HIGH' : 'HIGH';
-
-  return { passed: true, confidence, durationDiffMs, score: isOfficial ? 1.0 : 0.92 };
+  } catch {}
+  return null;
 }
 
-// 1. STEP 1: Direct Parametric GET Identifier (track_name + artist_name + duration) with Strict Cross-Validation
+// 2. Direct Parametric GET Identifier (track_name + artist_name + duration) with Strict Cross-Validation
 async function fetchExactIdentifierGet(title, artist, durationMs, albumName) {
   const durationSec = durationMs > 0 ? Math.round(durationMs / 1000) : 0;
   const cacheKey = `exact_get:${artist}:${title}:${durationSec}`;
@@ -159,7 +252,6 @@ async function fetchExactIdentifierGet(title, artist, durationMs, albumName) {
     if (res.ok) {
       const data = await res.json();
 
-      // Cross-validate response against target identity
       const normTargetTitle = normalizeText(title);
       const normResolvedTitle = normalizeText(data.trackName || '');
       const titleMatch = normResolvedTitle.includes(normTargetTitle) || normTargetTitle.includes(normResolvedTitle);
@@ -201,51 +293,7 @@ async function fetchExactIdentifierGet(title, artist, durationMs, albumName) {
   return null;
 }
 
-// 2. Structured Entity Page Discovery (Letras.mus.br direct YouTube ID binding)
-async function fetchLetrasEntity(artists, title) {
-  const artistList = Array.isArray(artists) ? artists : [{ name: artists }];
-  const primaryArtist = artistList[0]?.name || '';
-  const cacheKey = `letras:${primaryArtist}:${title}`;
-  const cached = getCached(cacheKey);
-  if (cached) return cached;
-
-  const candidateArtists = artistList.map(a => a.name).filter(Boolean);
-  const cleanTitle = title.replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').replace(/feat\..*$/i, '').trim();
-
-  for (const art of candidateArtists) {
-    const slugA = slugify(art);
-    const urls = [
-      `https://www.letras.mus.br/${slugA}/${slugify(cleanTitle)}/`,
-      `https://www.letras.mus.br/${slugA}/${slugify(title)}/`,
-    ];
-
-    for (const pageUrl of urls) {
-      try {
-        const res = await fetch(pageUrl, { signal: AbortSignal.timeout(3000) });
-        if (res.ok) {
-          const html = await res.text();
-          const ytMatch =
-            html.match(/"YoutubeID":"([a-zA-Z0-9_-]{11})"/i) ||
-            html.match(/"video":"([a-zA-Z0-9_-]{11})"/i);
-
-          if (ytMatch?.[1]) {
-            const result = {
-              provider: 'letras',
-              pageUrl,
-              youtubeId: ytMatch[1],
-              youtubeUrl: `https://www.youtube.com/watch?v=${ytMatch[1]}`,
-            };
-            setCache(cacheKey, result, 604800);
-            return result;
-          }
-        }
-      } catch {}
-    }
-  }
-  return null;
-}
-
-// 3. Metadata Provider: Deezer Search (Used ONLY for enriching missing ISRC/duration, NEVER overwriting locked identity)
+// 3. Metadata Provider: Deezer Search (Used ONLY for enriching missing ISRC/duration)
 async function fetchDeezerEnrichment(compositeQueries) {
   for (const query of compositeQueries) {
     const cacheKey = `deezer:${query}`;
@@ -272,62 +320,6 @@ async function fetchDeezerEnrichment(compositeQueries) {
   return null;
 }
 
-// 4. Audio Provider: SoundCloud Stream with Strict Boolean Match Guard
-async function fetchSoundCloudCandidate(lockedTarget) {
-  const clientId = 'UMY1dzQ68n2QbCuypNe8JOivmV2FO2Ep';
-  const queries = [
-    `${lockedTarget.artists[0]?.name || ''} - ${lockedTarget.title}`,
-    lockedTarget.title,
-  ];
-
-  for (const query of queries) {
-    const cacheKey = `sc:${query}:${lockedTarget.durationMs}`;
-    const cached = getCached(cacheKey);
-    if (cached) return cached;
-
-    try {
-      const res = await fetch(`https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&client_id=${clientId}&limit=12`);
-      if (!res.ok) continue;
-      const data = await res.json();
-
-      for (const item of data.collection || []) {
-        const guard = evaluateBooleanGuard(lockedTarget, {
-          title: item.title,
-          author: item.user?.username,
-          artist: item.user?.username,
-          durationMs: item.duration,
-        });
-
-        if (guard.passed) {
-          const transcodings = (item.media?.transcodings || []).filter(t => !t.format?.protocol?.includes('encrypted'));
-          const progressive = transcodings.find(t => t.format?.protocol === 'progressive') || transcodings[0];
-          if (progressive?.url) {
-            const sRes = await fetch(`${progressive.url}?client_id=${clientId}`);
-            if (sRes.ok) {
-              const sData = await sRes.json();
-              if (sData.url) {
-                const result = {
-                  url: sData.url,
-                  format: 'mp3',
-                  quality: '128kbps',
-                  confidence: guard.confidence,
-                  verified: true,
-                  score: guard.score,
-                  sourceTitle: item.title,
-                  sourceArtist: item.user?.username,
-                };
-                setCache(cacheKey, result, 300);
-                return result;
-              }
-            }
-          }
-        }
-      }
-    } catch {}
-  }
-  return null;
-}
-
 // HTTP Server
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -346,7 +338,7 @@ const server = http.createServer(async (req, res) => {
   // Health
   if (pathname === '/health' || pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'openfy-exact-get-resolution-engine', time: new Date().toISOString() }));
+    res.end(JSON.stringify({ status: 'ok', service: 'openfy-official-ranker-resolution-engine', time: new Date().toISOString() }));
     return;
   }
 
@@ -387,7 +379,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // POST /api/music/resolve (Deterministic Exact-GET + Identity Locked Pipeline)
+  // POST /api/music/resolve (Exact Official Ranker Pipeline)
   if (pathname === '/api/music/resolve' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
@@ -403,7 +395,6 @@ const server = http.createServer(async (req, res) => {
         }
 
         // STEP 1: IDENTITY LOCK 🔒
-        // Canonical Target is permanently sealed.
         const parsedArtists = Array.isArray(artists) && artists.length > 0
           ? artists.map(a => typeof a === 'string' ? { name: a } : a)
           : [{ name: artist || 'Artista' }];
@@ -419,9 +410,15 @@ const server = http.createServer(async (req, res) => {
           spotifyId: spotifyId || '',
         };
 
-        console.log(`[Exact GET Identifier] Target: "${lockedTarget.artistName} - ${lockedTarget.title}" (${lockedTarget.durationMs}ms)`);
+        console.log(`[Official Resolution] Target: "${lockedTarget.artistName} - ${lockedTarget.title}" (${lockedTarget.durationMs}ms)`);
 
-        // STEP 2: EXACT GET IDENTIFIER (First attempt: direct parametric match)
+        // STEP 2: YOUTUBE OFFICIAL ARTIST RANKER
+        const ytOfficial = await fetchYouTubeOfficialVideo(lockedTarget);
+        if (ytOfficial) {
+          console.log(`  ✅ [YouTube Official Video Found] "${ytOfficial.title}" by channel "${ytOfficial.channel}" (${ytOfficial.durationSec}s)`);
+        }
+
+        // STEP 3: EXACT PARAMETRIC GET IDENTIFIER (Lyrics)
         const exactGet = await fetchExactIdentifierGet(
           lockedTarget.title,
           lockedTarget.artistName,
@@ -431,7 +428,7 @@ const server = http.createServer(async (req, res) => {
 
         let resolvedLyrics = exactGet?.valid ? { synced: exactGet.synced, lines: exactGet.lines } : null;
 
-        // STEP 3: Enrich missing ISRC / duration if needed
+        // STEP 4: Enrich missing ISRC / duration
         if (!lockedTarget.durationMs || !lockedTarget.isrc) {
           const compositeQueries = [
             `"${lockedTarget.title}" "${lockedTarget.artistName}"`,
@@ -452,16 +449,9 @@ const server = http.createServer(async (req, res) => {
           }
         }
 
-        // STEP 4: DISCOVERY - Letras Entity Relations (Lyrics fallback + Direct YouTube Link)
-        const letrasEntity = await fetchLetrasEntity(lockedTarget.artists, lockedTarget.title);
-
-        // STEP 5: RESOLUTION - SoundCloud stream verified with BooleanMatchGuard
-        const audioSource = await fetchSoundCloudCandidate(lockedTarget);
-
-        // Build Decoupled Response (identity, metadata, artwork, lyrics, playback)
         const responseData = {
-          confidence: audioSource ? audioSource.confidence : letrasEntity ? 'VERY_HIGH' : 'UNCERTAIN',
-          status: (audioSource || letrasEntity) ? 'EXACT' : 'NO_MATCH',
+          confidence: ytOfficial ? 'VERY_HIGH' : 'UNCERTAIN',
+          status: ytOfficial ? 'EXACT' : 'NO_MATCH',
           identity: {
             id: lockedTarget.spotifyId || `target_${Date.now()}`,
             title: lockedTarget.title,
@@ -477,28 +467,17 @@ const server = http.createServer(async (req, res) => {
             url: lockedTarget.imageURL,
           } : undefined,
           lyrics: resolvedLyrics,
-          playback: audioSource ? {
-            type: 'DIRECT_AUDIO',
-            url: `http://localhost:${PORT}/api/audio/proxy?url=${encodeURIComponent(audioSource.url)}`,
-            directUrl: audioSource.url,
-            provider: 'soundcloud',
-            format: audioSource.format,
-            quality: audioSource.quality,
-            verified: true,
-            confidence: audioSource.confidence,
-            score: audioSource.score,
-          } : (letrasEntity ? {
+          playback: ytOfficial ? {
             type: 'EXTERNAL',
             provider: 'youtube',
-            url: letrasEntity.youtubeUrl,
-            directUrl: letrasEntity.youtubeUrl,
+            url: ytOfficial.url,
+            directUrl: ytOfficial.url,
             format: 'stream',
-            quality: 'official_video',
+            quality: 'official_master',
             verified: true,
             confidence: 'VERY_HIGH',
-            score: 0.95,
-          } : undefined),
-          // Backward-compatible track format
+            score: ytOfficial.score,
+          } : undefined,
           track: {
             title: lockedTarget.title,
             artistName: lockedTarget.artistName,
@@ -509,22 +488,15 @@ const server = http.createServer(async (req, res) => {
             spotifyId: lockedTarget.spotifyId,
             isrc: lockedTarget.isrc,
           },
-          source: audioSource ? {
-            type: 'DIRECT_AUDIO',
-            url: `http://localhost:${PORT}/api/audio/proxy?url=${encodeURIComponent(audioSource.url)}`,
-            directUrl: audioSource.url,
-            format: audioSource.format,
-            quality: audioSource.quality,
-            verified: true,
-            score: audioSource.score,
-          } : (letrasEntity ? {
+          source: ytOfficial ? {
             type: 'EXTERNAL',
             provider: 'youtube',
-            id: letrasEntity.youtubeId,
-            url: letrasEntity.youtubeUrl,
+            id: ytOfficial.id,
+            url: ytOfficial.url,
             verified: true,
-            score: 0.95,
-          } : null),
+            channel: ytOfficial.channel,
+            score: ytOfficial.score,
+          } : null,
         };
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -543,5 +515,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🚀 [Openfy Exact GET Resolution Server] Running on http://localhost:${PORT}`);
+  console.log(`🚀 [Openfy Official Ranker Server] Running on http://localhost:${PORT}`);
 });
