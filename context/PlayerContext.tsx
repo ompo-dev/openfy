@@ -14,6 +14,7 @@ import {
   PlayerState,
   resolveAudioUrl,
   downloadTrack,
+  recordInteraction,
 } from '@services';
 import { DownloadedTrack } from '@services';
 
@@ -126,6 +127,9 @@ export const PlayerProvider = ({
 
       setCurrentTrack(track);
       setIsPlayerVisible(true);
+
+      // Record recommendation interaction signal
+      recordInteraction(track, 'play').catch(() => {});
 
       console.log('[PlayerContext] Playing URI:', uri);
       const success = await loadAndPlay(uri, handleStatusUpdate);

@@ -43,3 +43,19 @@ export {
   getOfflineLyrics,
 } from './lyrics/lyricsService';
 export type { LyricSegment, LyricsData } from './lyrics/lyricsService';
+
+export {
+  evaluateCandidateMatch,
+  evaluateDurationMatch,
+  alignLyricsWithAudio,
+} from './canonical/canonicalMatcher';
+
+export {
+  recordInteraction,
+  getUserProfile,
+  getTopAffinityArtist,
+  getContinueListening,
+  getExplainableRecommendations,
+  preWarmStream,
+} from './recommendation/recommendationEngine';
+export type { UserProfile, InteractionType } from './recommendation/recommendationEngine';
