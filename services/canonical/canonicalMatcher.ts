@@ -4,42 +4,39 @@
  * Implements Multi-Layer Verification:
  * 1. Spotify / Catalog Reference Identity
  * 2. Strict Duration Proximity Scoring (rejection of extended loops, podcasts, compilations, snippets)
- * 3. Anti-Cover / Anti-Remix Strict Rule Enforcement
+ * 3. Tiered Filtering: Hard Rejection for Sped Up/Slowed/Loops vs Soft Scoring for Official Edits
  * 4. Audio-to-Lyrics Timestamp Alignment & Offset Calibration
  */
 
 import { CanonicalTrack, MatchReport, TrackSource, CanonicalLyrics } from '../../models/CanonicalTrack';
 
-const FORBIDDEN_WORDS = [
-  'remix',
-  'reverb',
+const HARD_REJECT_WORDS = [
   'slowed',
   'speed up',
   'sped up',
   'bass boosted',
   'bassboost',
-  'live',
-  'acoustic',
   '8daudio',
-  'concert',
-  'acapella',
-  'instrumental',
-  'cover',
-  'karaoke',
-  'tribute',
-  'edit',
-  'remake',
-  'type beat',
   'nightcore',
-  'slow',
-  'loop',
   '10 hour',
   '1 hour',
   'extended',
   'compilation',
-  'mix',
-  'set',
+  'loop',
+  'full album',
   'podcast',
+  'snippet',
+  'preview',
+];
+
+const SOFT_PENALTY_WORDS = [
+  'remix',
+  'edit',
+  'cover',
+  'live',
+  'concert',
+  'acoustic',
+  'tiny desk',
 ];
 
 /**
@@ -57,16 +54,16 @@ export const normalizeString = (str: string): string => {
 };
 
 /**
- * Check if candidate title contains forbidden non-original words
+ * Check if candidate title contains hard forbidden non-original words
  */
-export const hasUnwantedForbiddenWords = (
+export const hasHardForbiddenWords = (
   candidateTitle: string,
   canonicalTitle: string
 ): boolean => {
   const cTitle = (candidateTitle || '').toLowerCase();
   const oTitle = (canonicalTitle || '').toLowerCase();
 
-  for (const word of FORBIDDEN_WORDS) {
+  for (const word of HARD_REJECT_WORDS) {
     if (cTitle.includes(word) && !oTitle.includes(word)) {
       return true;
     }
@@ -75,32 +72,38 @@ export const hasUnwantedForbiddenWords = (
 };
 
 /**
+ * Alias for backward compatibility
+ */
+export const hasUnwantedForbiddenWords = hasHardForbiddenWords;
+
+/**
  * Score how well candidate duration matches canonical duration
- * Max allowed difference: 18 seconds (or 10% of track length)
  */
 export const evaluateDurationMatch = (
   candidateDurationMs: number,
   canonicalDurationMs: number
 ): { score: number; diffMs: number; isAcceptable: boolean } => {
+  const durSec = candidateDurationMs / 1000;
+
+  // Reject hard snippets (< 45s) or long compilations (> 420s / 7 mins)
+  if (durSec < 45 || durSec > 420) {
+    return { score: 0, diffMs: Math.abs(candidateDurationMs - canonicalDurationMs), isAcceptable: false };
+  }
+
   if (!canonicalDurationMs || canonicalDurationMs <= 0) {
-    // If canonical duration unknown, accept reasonable track length (60s to 380s)
-    const isReasonable = candidateDurationMs >= 60000 && candidateDurationMs <= 400000;
+    const isReasonable = durSec >= 60 && durSec <= 360;
     return { score: isReasonable ? 80 : 20, diffMs: 0, isAcceptable: isReasonable };
   }
 
   const diffMs = Math.abs(candidateDurationMs - canonicalDurationMs);
   const diffSec = diffMs / 1000;
-  const canonicalSec = canonicalDurationMs / 1000;
 
-  // Reject snippets (< 45s) or extended loops (> 25s difference)
-  const maxAllowedDiffSec = Math.min(20, Math.max(8, canonicalSec * 0.08));
-
-  if (diffSec > maxAllowedDiffSec) {
+  // If duration differs by more than 35 seconds from Spotify canonical duration, reject
+  if (diffSec > 35) {
     return { score: 0, diffMs, isAcceptable: false };
   }
 
-  // 100% score for exact match (< 2s diff), sliding down to 75% at max threshold
-  const score = Math.max(75, 100 - (diffSec / maxAllowedDiffSec) * 25);
+  const score = Math.max(50, 100 - diffSec * 1.5);
   return { score: Math.round(score), diffMs, isAcceptable: true };
 };
 
@@ -123,9 +126,25 @@ export const evaluateCandidateMatch = (
   }
 ): MatchReport => {
   const reasons: string[] = [];
-  let confidence = 0;
+  const lowerCandTitle = (candidate.title || '').toLowerCase();
+  const lowerCanonTitle = (canonical.title || '').toLowerCase();
 
-  // 1. Duration Verification
+  // 1. Hard Rejection (slowed, loops, compilations)
+  if (hasHardForbiddenWords(candidate.title, canonical.title)) {
+    return {
+      spotifyId: canonical.spotifyId,
+      canonicalTitle: canonical.title,
+      canonicalArtists: canonical.artists,
+      expectedDurationMs: canonical.durationMs,
+      sourceConfidence: 0,
+      durationDifferenceMs: 0,
+      isVerified: false,
+      status: 'unavailable',
+      reasons: ['Candidate title contains hard-rejected word (slowed/loop/compilation)'],
+    };
+  }
+
+  // 2. Duration Verification
   const durationEval = evaluateDurationMatch(candidate.durationMs, canonical.durationMs);
   if (!durationEval.isAcceptable) {
     return {
@@ -141,23 +160,8 @@ export const evaluateCandidateMatch = (
     };
   }
 
-  confidence += durationEval.score * 0.4; // 40% weight on exact duration
+  let confidence = durationEval.score * 0.5; // 50% baseline from exact duration proximity
   reasons.push(`Duration matched: ${(durationEval.diffMs / 1000).toFixed(1)}s difference`);
-
-  // 2. Anti-Remix / Anti-Cover Verification
-  if (hasUnwantedForbiddenWords(candidate.title, canonical.title)) {
-    return {
-      spotifyId: canonical.spotifyId,
-      canonicalTitle: canonical.title,
-      canonicalArtists: canonical.artists,
-      expectedDurationMs: canonical.durationMs,
-      sourceConfidence: 0,
-      durationDifferenceMs: durationEval.diffMs,
-      isVerified: false,
-      status: 'unavailable',
-      reasons: ['Candidate title contains non-original remix/cover/slowed words'],
-    };
-  }
 
   // 3. Title & Artist Lexical Matching
   const normCanonicalTitle = normalizeString(canonical.title);
@@ -174,19 +178,25 @@ export const evaluateCandidateMatch = (
       normalizeString(candidate.artist || '').includes(normPrimaryArtist));
 
   if (hasTitleMatch) {
-    confidence += 35;
+    confidence += 30;
     reasons.push('Title verified');
-  } else {
-    confidence += 10;
   }
 
   if (hasArtistMatch) {
-    confidence += 25;
+    confidence += 20;
     reasons.push('Artist verified');
   }
 
-  const finalConfidence = Math.min(100, Math.round(confidence));
-  const isVerified = finalConfidence >= 85;
+  // Soft word penalty (covers, edits, remixes not present in original title)
+  for (const w of SOFT_PENALTY_WORDS) {
+    if (lowerCandTitle.includes(w) && !lowerCanonTitle.includes(w)) {
+      confidence -= 18;
+      reasons.push(`Soft penalty for "${w}"`);
+    }
+  }
+
+  const finalConfidence = Math.min(100, Math.max(20, Math.round(confidence)));
+  const isVerified = finalConfidence >= 75;
 
   return {
     spotifyId: canonical.spotifyId,
@@ -196,14 +206,13 @@ export const evaluateCandidateMatch = (
     sourceConfidence: finalConfidence,
     durationDifferenceMs: durationEval.diffMs,
     isVerified,
-    status: isVerified ? 'verified' : finalConfidence >= 65 ? 'matched' : 'ambiguous',
+    status: isVerified ? 'verified' : finalConfidence >= 50 ? 'matched' : 'ambiguous',
     reasons,
   };
 };
 
 /**
  * Audio-to-Lyrics Alignment Engine
- * Calibrates timeline offset so lyrics synchronize seamlessly with slight intro silences
  */
 export const alignLyricsWithAudio = (
   lyrics: CanonicalLyrics,
@@ -214,13 +223,13 @@ export const alignLyricsWithAudio = (
     return lyrics;
   }
 
-  // If audio has a known slight duration offset relative to reference, calculate intro alignment offset
-  const durationDelta = audioDurationMs > 0 && canonicalDurationMs > 0
-    ? audioDurationMs - canonicalDurationMs
-    : 0;
+  const durationDelta =
+    audioDurationMs > 0 && canonicalDurationMs > 0
+      ? audioDurationMs - canonicalDurationMs
+      : 0;
 
-  // Typical intro offset is around half of total duration delta for small shifts (< 3s)
-  const offsetMs = Math.abs(durationDelta) < 3500 ? Math.round(durationDelta / 2) : 0;
+  const offsetMs =
+    Math.abs(durationDelta) < 3500 ? Math.round(durationDelta / 2) : 0;
 
   const adjustedSegments = lyrics.segments.map((seg) => ({
     ...seg,

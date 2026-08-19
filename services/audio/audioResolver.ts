@@ -34,40 +34,50 @@ export const isPreviewUrl = (url: string): boolean => {
 };
 
 /**
- * Fetch with timeout and web CORS proxy support
+ * Fetch with timeout and graceful web CORS handling
  */
 const fetchWithTimeout = async (
   url: string,
   options: RequestInit = {},
-  timeoutMs = 8000
+  timeoutMs = 7000
 ): Promise<Response> => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    let targetUrl = url;
-    if (
-      Platform.OS === 'web' &&
-      !url.includes('localhost') &&
-      !url.includes('127.0.0.1') &&
-      !url.includes('lrclib.net')
-    ) {
-      targetUrl = `https://proxy.cors.sh/${url}`;
+    // 1. Try direct fetch first
+    try {
+      const directRes = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      if (directRes.ok || directRes.status === 304 || directRes.status === 401) {
+        return directRes;
+      }
+    } catch (e: any) {
+      if (Platform.OS !== 'web') throw e;
     }
 
-    const response = await fetch(targetUrl, {
-      ...options,
-      signal: controller.signal,
-    });
-    return response;
-  } catch (err) {
-    if (Platform.OS === 'web') {
-      try {
-        const altUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-        return await fetch(altUrl, { ...options, signal: controller.signal });
-      } catch {}
+    // 2. On Web: Fallback through public CORS proxies
+    if (Platform.OS === 'web' && !url.includes('localhost') && !url.includes('127.0.0.1')) {
+      const proxies = [
+        `https://corsproxy.io/?${encodeURIComponent(url)}`,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+      ];
+
+      for (const proxyUrl of proxies) {
+        try {
+          const proxyRes = await fetch(proxyUrl, {
+            ...options,
+            signal: controller.signal,
+          });
+          if (proxyRes.ok) return proxyRes;
+        } catch {}
+      }
     }
-    throw err;
+
+    // Final attempt
+    return await fetch(url, { ...options, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -115,6 +125,73 @@ export const refreshSoundCloudClientId = async (): Promise<string> => {
   } catch {}
 
   return cachedSoundCloudClientId;
+};
+
+/**
+ * YouTube Master Topic search with active Invidious instances
+ */
+export const resolveViaYouTubeTopic = async (
+  trackName: string,
+  artistName: string
+): Promise<ResolvedAudio | null> => {
+  const query = `${artistName} - ${trackName} Official Audio Topic`;
+  const instances = [
+    'https://invidious.flokinet.to',
+    'https://inv.nadeko.net',
+    'https://invidious.nerdvpn.de',
+    'https://invidious.drgns.space',
+  ];
+
+  for (const inst of instances) {
+    try {
+      const searchUrl = `${inst}/api/v1/search?q=${encodeURIComponent(query)}&type=video`;
+      const res = await fetchWithTimeout(searchUrl, {}, 4000);
+      if (!res.ok) continue;
+
+      const results = (await res.json()) as any[];
+      if (!Array.isArray(results) || results.length === 0) continue;
+
+      const video = results.find(
+        (v) => !hasUnwantedForbiddenWords(v.title || '', trackName)
+      ) || results[0];
+
+      if (!video?.videoId) continue;
+
+      const videoRes = await fetchWithTimeout(
+        `${inst}/api/v1/videos/${video.videoId}?fields=adaptiveFormats`,
+        {},
+        4000
+      );
+      if (!videoRes.ok) continue;
+
+      const videoData = (await videoRes.json()) as {
+        adaptiveFormats?: { url?: string; type?: string; bitrate?: number }[];
+      };
+
+      const audioFormats = (videoData.adaptiveFormats || []).filter((f) =>
+        f.type?.includes('audio')
+      );
+
+      if (audioFormats.length > 0) {
+        const best = audioFormats.sort(
+          (a, b) => (b.bitrate || 0) - (a.bitrate || 0)
+        )[0];
+        if (best.url && !isPreviewUrl(best.url)) {
+          return {
+            url: best.url,
+            quality: 'high',
+            format: 'm4a',
+            source: 'youtube',
+            confidence: 95,
+          };
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 };
 
 /**
@@ -168,7 +245,7 @@ export const resolveViaSpotyloader = async (
     const jobId = data.jobId || data.id;
     if (!jobId) return null;
 
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 6; i++) {
       await new Promise((r) => setTimeout(r, 600));
 
       try {
@@ -214,83 +291,6 @@ export const resolveViaSpotyloader = async (
             format: 'mp3',
             source: 'spotyloader',
             confidence: 99,
-          };
-        }
-      } catch {
-        continue;
-      }
-    }
-  } catch {}
-
-  return null;
-};
-
-/**
- * YouTube Topic search with stream extraction
- */
-export const resolveViaYouTubeTopic = async (
-  trackName: string,
-  artistName: string
-): Promise<ResolvedAudio | null> => {
-  try {
-    const query = `${artistName} - ${trackName} Official Audio`;
-
-    const ytRes = await fetchWithTimeout(
-      `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
-      {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept-Language': 'en-US,en;q=0.9',
-        },
-      },
-      4000
-    );
-
-    if (!ytRes.ok) return null;
-
-    const html = await ytRes.text();
-    const matches = [...html.matchAll(/"videoId":"([a-zA-Z0-9_-]{11})"/g)];
-    const videoIds = [...new Set(matches.map((m) => m[1]))].filter(
-      (id) => id.length === 11
-    );
-
-    if (videoIds.length === 0) return null;
-
-    const videoId = videoIds[0];
-
-    const streamGateways = [
-      `https://inv.nadeko.net/api/v1/videos/${videoId}`,
-      `https://invidious.nerdvpn.de/api/v1/videos/${videoId}`,
-      `https://pipedapi.kavin.rocks/streams/${videoId}`,
-      `https://api.piped.private.coffee/streams/${videoId}`,
-    ];
-
-    for (const gateway of streamGateways) {
-      try {
-        const gRes = await fetchWithTimeout(gateway, {}, 3000);
-        if (!gRes.ok) continue;
-
-        const gData = (await gRes.json()) as {
-          adaptiveFormats?: { url?: string; type?: string; container?: string }[];
-          audioStreams?: { url?: string; format?: string; mimeType?: string }[];
-        };
-
-        const audio =
-          gData.audioStreams?.find(
-            (s) => s.url && !isPreviewUrl(s.url)
-          ) ||
-          gData.adaptiveFormats?.find(
-            (f) => f.url && f.type?.includes('audio') && !isPreviewUrl(f.url)
-          );
-
-        if (audio && audio.url) {
-          return {
-            url: audio.url,
-            quality: 'high',
-            format: 'm4a',
-            source: 'youtube',
-            confidence: 90,
           };
         }
       } catch {
@@ -361,7 +361,7 @@ export const resolveViaSoundCloud = async (
       );
 
       // Strictly discard non-matching candidates (loops, remixes, covers, long compilations)
-      if (matchReport.status === 'unavailable' || matchReport.sourceConfidence < 65) {
+      if (matchReport.status === 'unavailable' || matchReport.sourceConfidence < 45) {
         continue;
       }
 
@@ -462,18 +462,18 @@ export const resolveAudioUrl = async (
     return soundcloudResult;
   }
 
-  // 2. SECONDARY: Spotyloader 320kbps MP3
+  // 2. SECONDARY: YouTube Invidious Master Topic Matcher
+  const ytResult = await resolveViaYouTubeTopic(trackName, primaryArtist);
+  if (ytResult?.url && !isPreviewUrl(ytResult.url)) {
+    return ytResult;
+  }
+
+  // 3. TERTIARY: Spotyloader 320kbps MP3
   if (spotifyId && !spotifyId.startsWith('dz_') && !spotifyId.startsWith('yt_')) {
     const spotyResult = await resolveViaSpotyloader(spotifyId);
     if (spotyResult?.url && !isPreviewUrl(spotyResult.url)) {
       return spotyResult;
     }
-  }
-
-  // 3. TERTIARY: YouTube Topic Official Master
-  const ytResult = await resolveViaYouTubeTopic(trackName, primaryArtist);
-  if (ytResult?.url && !isPreviewUrl(ytResult.url)) {
-    return ytResult;
   }
 
   return null;
