@@ -29,6 +29,8 @@ export type TrackVersionType =
   | 'INSTRUMENTAL'
   | 'CLEAN'
   | 'EXPLICIT'
+  | 'SPED_UP'
+  | 'SLOWED'
   | 'UNKNOWN';
 
 export interface TrackVersion {

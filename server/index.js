@@ -1,6 +1,6 @@
 /**
  * Openfy Music Resolution Backend Server
- * High-performance, CORS-free Node.js API for Music Identity Matching & Stream Resolution.
+ * High-performance, CORS-free Node.js API with StrictTrackMatcher Anti-Guessing Engine.
  */
 
 const http = require('http');
@@ -29,7 +29,7 @@ function setCache(key, data, ttlSeconds = 3600) {
   cache.set(key, { data, expiresAt: Date.now() + ttlSeconds * 1000 });
 }
 
-// String Normalization
+// Normalization
 function normalizeText(str) {
   return (str || '')
     .normalize('NFKD')
@@ -42,82 +42,93 @@ function normalizeText(str) {
     .trim();
 }
 
-function levenshtein(a, b) {
-  if (a === b) return 0;
-  if (!a.length) return b.length;
-  if (!b.length) return a.length;
-  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    let curr = i;
-    for (let j = 1; j <= b.length; j++) {
-      const val = Math.min(prev[j] + 1, curr + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-      prev[j - 1] = curr;
-      curr = val;
-    }
-    prev[b.length] = curr;
-  }
-  return prev[b.length];
-}
+const FORBIDDEN_VERSION_TAGS = [
+  { tag: 'live', reason: 'LIVE_VERSION' },
+  { tag: 'concert', reason: 'LIVE_VERSION' },
+  { tag: 'ao vivo', reason: 'LIVE_VERSION' },
+  { tag: 'acoustic', reason: 'ACOUSTIC_VERSION' },
+  { tag: 'acustico', reason: 'ACOUSTIC_VERSION' },
+  { tag: 'unplugged', reason: 'ACOUSTIC_VERSION' },
+  { tag: 'remix', reason: 'REMIX' },
+  { tag: 'rework', reason: 'REMIX' },
+  { tag: 'sped up', reason: 'SPED_UP' },
+  { tag: 'speed up', reason: 'SPED_UP' },
+  { tag: 'nightcore', reason: 'SPED_UP' },
+  { tag: 'slowed', reason: 'SLOWED' },
+  { tag: 'reverb', reason: 'SLOWED' },
+  { tag: 'slowed+reverb', reason: 'SLOWED' },
+  { tag: 'cover', reason: 'COVER' },
+  { tag: 'tribute', reason: 'COVER' },
+  { tag: 'karaoke', reason: 'COVER' },
+  { tag: 'instrumental', reason: 'INSTRUMENTAL' },
+  { tag: '10 hour', reason: 'COMPILATION_OR_LOOP' },
+  { tag: '1 hour', reason: 'COMPILATION_OR_LOOP' },
+  { tag: 'loop', reason: 'COMPILATION_OR_LOOP' },
+];
 
-function similarity(a, b) {
-  if (!a && !b) return 1;
-  if (!a || !b) return 0;
-  const aa = a.split(' ').filter(Boolean);
-  const bb = new Set(b.split(' ').filter(Boolean));
-  const inter = aa.filter(t => bb.has(t)).length;
-  const union = new Set([...aa, ...bb]).size;
-  const jaccard = union === 0 ? 0 : inter / union;
-  const lev = 1 - levenshtein(a, b) / Math.max(a.length, b.length);
-  return lev * 0.65 + jaccard * 0.35;
-}
-
-// Match Evaluator
-function evaluateCandidate(candidate, canonical) {
+/**
+ * StrictTrackMatcher Core Evaluator
+ */
+function evaluateCandidateStrict(target, candidate) {
   const cTitle = (candidate.title || '').toLowerCase();
-  const oTitle = (canonical.title || '').toLowerCase();
-  const cAuthor = (candidate.artist || candidate.author || '').toLowerCase();
-  const primaryArtist = canonical.artists[0]?.name || '';
+  const tTitle = (target.title || '').toLowerCase();
 
-  const FORBIDDEN = ['slowed', 'speed up', 'sped up', 'bassboost', '10 hour', '1 hour', 'loop', '8d audio'];
-  for (const f of FORBIDDEN) {
-    if (cTitle.includes(f) && !oTitle.includes(f)) {
-      return { score: 0, status: 'NO_MATCH', reason: `Forbidden word: ${f}` };
+  // 1. Snippet filter
+  if (candidate.durationMs && candidate.durationMs < 45000) {
+    return { confidence: 'REJECTED', reason: 'SNIPPET' };
+  }
+
+  // 2. Strict duration delta filter (<= 3000ms)
+  let durationDiffMs = 0;
+  if (target.durationMs && target.durationMs > 0 && candidate.durationMs && candidate.durationMs > 0) {
+    durationDiffMs = Math.abs(candidate.durationMs - target.durationMs);
+    if (durationDiffMs > 3000) {
+      return { confidence: 'REJECTED', reason: `DURATION_MISMATCH (${durationDiffMs}ms > 3000ms)` };
     }
   }
 
-  const candSec = (candidate.durationMs || 0) / 1000;
-  const canonSec = (canonical.durationMs || 0) / 1000;
-  if (candSec < 45) return { score: 0, status: 'NO_MATCH', reason: 'Snippet < 45s' };
-
-  let diffSec = 0;
-  let durScore = 0.7;
-  if (canonSec > 0) {
-    diffSec = Math.abs(candSec - canonSec);
-    if (diffSec > 40) return { score: 0, status: 'NO_MATCH', reason: `Duration mismatch (${diffSec}s)` };
-    durScore = Math.max(0.4, 1 - diffSec * 0.02);
+  // 3. Version tag mismatch filter
+  for (const entry of FORBIDDEN_VERSION_TAGS) {
+    const candidateHasTag = cTitle.includes(entry.tag);
+    const targetHasTag = tTitle.includes(entry.tag);
+    if (candidateHasTag && !targetHasTag) {
+      return { confidence: 'REJECTED', reason: entry.reason };
+    }
   }
 
-  const normCand = normalizeText(candidate.title);
-  const normCanon = normalizeText(canonical.title);
-  const normArt = normalizeText(primaryArtist);
+  // 4. Official uploader & title match
+  const targetArtistNorm = normalizeText(target.artists?.[0]?.name || '');
+  const candAuthorNorm = normalizeText(candidate.author || candidate.artist || '');
+  const candTitleNorm = normalizeText(candidate.title || '');
+  const targetTitleNorm = normalizeText(target.title || '');
 
-  const titleScore = similarity(normCand, normCanon);
-  let artistScore = 0.5;
-  if (normArt) {
-    artistScore = cAuthor.includes(normArt) || normCand.includes(normArt) ? 1 : similarity(normArt, cAuthor);
+  const isOfficialChannel =
+    targetArtistNorm &&
+    (candAuthorNorm.includes(targetArtistNorm) ||
+      candAuthorNorm.includes('vevo') ||
+      candAuthorNorm.includes('topic') ||
+      candAuthorNorm.includes('records'));
+
+  const titleMatches =
+    candTitleNorm.includes(targetTitleNorm) ||
+    targetTitleNorm.includes(candTitleNorm);
+
+  if (target.isrc && candidate.isrc && target.isrc === candidate.isrc && durationDiffMs <= 2000) {
+    return { confidence: 'PROVEN', score: 1.0, canAutoPlay: true, durationDiffMs };
   }
 
-  const isOfficial = normArt && (cAuthor.includes(normArt) || cAuthor.includes('topic') || cAuthor.includes('vevo'));
-  const softPenalty = ['remix', 'cover', 'edit', 'acoustic', 'live'].some(w => cTitle.includes(w) && !oTitle.includes(w)) ? 0.35 : 0;
+  if (isOfficialChannel && titleMatches && durationDiffMs <= 3000) {
+    return { confidence: 'VERY_HIGH', score: 0.92, canAutoPlay: true, durationDiffMs };
+  }
 
-  let total = durScore * 0.35 + titleScore * 0.35 + artistScore * 0.3 + (isOfficial ? 0.15 : 0) - softPenalty;
-  total = Math.min(1, Math.max(0, total));
+  if (titleMatches && durationDiffMs <= 2000) {
+    return { confidence: 'HIGH', score: 0.85, canAutoPlay: false, durationDiffMs };
+  }
 
-  const status = total >= 0.88 ? 'EXACT' : total >= 0.75 ? 'HIGH_CONFIDENCE' : total >= 0.5 ? 'AMBIGUOUS' : 'NO_MATCH';
-  return { score: Math.round(total * 100) / 100, status, diffSec };
+  return { confidence: 'UNCERTAIN', score: 0.5, canAutoPlay: false, durationDiffMs };
 }
 
-// Provider: Deezer Search
+// Metadata Provider: Deezer Search
 async function fetchDeezerMetadata(query) {
   const cacheKey = `deezer:${query}`;
   const cached = getCached(cacheKey);
@@ -147,8 +158,8 @@ async function fetchDeezerMetadata(query) {
   return null;
 }
 
-// Provider: SoundCloud Search & Stream
-async function fetchSoundCloudCandidate(title, artist, canonicalDurationMs) {
+// Audio Provider: SoundCloud with Strict Verification
+async function fetchSoundCloudCandidate(title, artist, canonicalDurationMs, isrc) {
   const clientId = 'UMY1dzQ68n2QbCuypNe8JOivmV2FO2Ep';
   const query = `${artist} - ${title}`;
   const cacheKey = `sc:${query}:${canonicalDurationMs}`;
@@ -156,28 +167,28 @@ async function fetchSoundCloudCandidate(title, artist, canonicalDurationMs) {
   if (cached) return cached;
 
   try {
-    const res = await fetch(`https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&client_id=${clientId}&limit=10`);
+    const res = await fetch(`https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&client_id=${clientId}&limit=12`);
     if (!res.ok) return null;
     const data = await res.json();
 
     const candidates = [];
     for (const item of data.collection || []) {
-      const match = evaluateCandidate(
-        { title: item.title, artist: item.user?.username, durationMs: item.duration },
-        { title, artists: [{ name: artist }], durationMs: canonicalDurationMs }
+      const decision = evaluateCandidateStrict(
+        { title, artists: [{ name: artist }], durationMs: canonicalDurationMs, isrc },
+        { title: item.title, author: item.user?.username, artist: item.user?.username, durationMs: item.duration }
       );
 
-      if (match.status === 'EXACT' || match.status === 'HIGH_CONFIDENCE') {
+      if (decision.canAutoPlay) {
         const transcodings = (item.media?.transcodings || []).filter(t => !t.format?.protocol?.includes('encrypted'));
         const progressive = transcodings.find(t => t.format?.protocol === 'progressive') || transcodings[0];
         if (progressive?.url) {
-          candidates.push({ item, match, streamEndpoint: progressive.url });
+          candidates.push({ item, decision, streamEndpoint: progressive.url });
         }
       }
     }
 
     if (candidates.length > 0) {
-      candidates.sort((a, b) => b.match.score - a.match.score);
+      candidates.sort((a, b) => (b.decision.score || 0) - (a.decision.score || 0));
       const top = candidates[0];
 
       // Resolve stream URL
@@ -189,8 +200,9 @@ async function fetchSoundCloudCandidate(title, artist, canonicalDurationMs) {
             url: sData.url,
             format: 'mp3',
             quality: '128kbps',
+            confidence: top.decision.confidence,
             verified: true,
-            score: top.match.score,
+            score: top.decision.score,
             sourceTitle: top.item.title,
             sourceArtist: top.item.user?.username,
           };
@@ -205,7 +217,7 @@ async function fetchSoundCloudCandidate(title, artist, canonicalDurationMs) {
   return null;
 }
 
-// Provider: Synchronized Lyrics
+// Lyrics Provider: Synchronized Lyrics
 async function fetchLyrics(title, artist) {
   const cacheKey = `lyrics:${artist}:${title}`;
   const cached = getCached(cacheKey);
@@ -257,7 +269,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Audio Stream Proxy (Eliminates CORS on Web completely)
+  // Audio Stream Proxy
   if (pathname === '/api/audio/proxy') {
     const targetUrl = parsedUrl.query.url;
     if (!targetUrl) {
@@ -301,7 +313,7 @@ const server = http.createServer(async (req, res) => {
     req.on('end', async () => {
       try {
         const payload = JSON.parse(body || '{}');
-        const { title, artist, durationMs, spotifyId } = payload;
+        const { title, artist, durationMs, spotifyId, isrc } = payload;
 
         if (!title) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -309,9 +321,9 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        console.log(`[Backend Resolution] Resolving: "${artist || ''} - ${title}" (${durationMs || 0}ms)`);
+        console.log(`[Strict Track Resolution] Resolving: "${artist || ''} - ${title}" (${durationMs || 0}ms)`);
 
-        // 1. Resolve Canonical Metadata
+        // 1. Resolve Canonical Target Identity
         let meta = await fetchDeezerMetadata(`${artist || ''} ${title}`);
         if (!meta) {
           meta = {
@@ -319,20 +331,23 @@ const server = http.createServer(async (req, res) => {
             artists: [{ name: artist || 'Artista' }],
             durationMs: durationMs || 0,
             album: { name: 'Single' },
+            isrc: isrc || '',
             sources: []
           };
         }
 
         const primaryArtist = meta.artists[0]?.name || artist || '';
         const canonDuration = meta.durationMs || durationMs || 0;
+        const targetISRC = meta.isrc || isrc || '';
 
-        // 2. Resolve Verified Audio Stream
-        const audioSource = await fetchSoundCloudCandidate(meta.title, primaryArtist, canonDuration);
+        // 2. Strict Match against candidates (requires PROVEN or VERY_HIGH)
+        const audioSource = await fetchSoundCloudCandidate(meta.title, primaryArtist, canonDuration, targetISRC);
 
         // 3. Resolve Synchronized Lyrics
         const lyrics = await fetchLyrics(meta.title, primaryArtist);
 
         const responseData = {
+          confidence: audioSource ? audioSource.confidence : 'UNCERTAIN',
           status: audioSource ? 'EXACT' : 'NO_MATCH',
           track: {
             title: meta.title,
@@ -341,6 +356,7 @@ const server = http.createServer(async (req, res) => {
             imageURL: meta.artwork?.url || '',
             duration_ms: canonDuration,
             spotifyId: spotifyId || '',
+            isrc: targetISRC,
           },
           source: audioSource ? {
             type: 'DIRECT_AUDIO',
@@ -352,12 +368,15 @@ const server = http.createServer(async (req, res) => {
             score: audioSource.score
           } : null,
           lyrics,
+          reason: audioSource
+            ? 'Identity proven with strict duration and verified artist channel'
+            : 'No candidate met strict PROVEN/VERY_HIGH thresholds. Auto-play prevented.',
         };
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(responseData));
       } catch (err) {
-        console.error('[Backend Resolution Error]:', err);
+        console.error('[Strict Resolution Error]:', err);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
@@ -370,5 +389,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🚀 [Openfy Resolution Server] Running on http://localhost:${PORT}`);
+  console.log(`🚀 [Openfy Strict Resolution Server] Running on http://localhost:${PORT}`);
 });

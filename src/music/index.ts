@@ -15,6 +15,7 @@ export * from './identity/normalizer';
 export * from './matching/duration-matcher';
 export * from './matching/version-matcher';
 export * from './matching/match-engine';
+export * from './matching/strict-track-matcher';
 export * from './matching/candidate-resolver';
 export * from './fingerprint/types';
 export * from './fingerprint/chromaprint';
