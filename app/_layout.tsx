@@ -80,5 +80,8 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  gestureHandlerRootView: { flex: 1 },
+  gestureHandlerRootView: {
+    flex: 1,
+    backgroundColor: '#0a0a0c',
+  },
 });

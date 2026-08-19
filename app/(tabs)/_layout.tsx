@@ -3,7 +3,18 @@ import { BottomTabBar } from '@navigators';
 
 export default function Layout() {
   return (
-    <Tabs tabBar={(props: any) => <BottomTabBar {...props} />}>
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: {
+          position: 'absolute',
+          backgroundColor: 'transparent',
+          borderTopWidth: 0,
+          elevation: 0,
+        },
+      }}
+      tabBar={(props: any) => <BottomTabBar {...props} />}
+    >
       <Tabs.Screen name="home" options={{ headerShown: false }} />
       <Tabs.Screen name="library" options={{ headerShown: false }} />
     </Tabs>

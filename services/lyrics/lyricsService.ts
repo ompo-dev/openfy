@@ -26,6 +26,7 @@ export type LyricsData = {
   segments: LyricSegment[];
   isSynced: boolean;
   source?: 'lrclib' | 'letras' | 'vagalume';
+  timeOffsetMs?: number;
 };
 
 const LYRICS_DIR = `${FileSystem.documentDirectory || ''}openfy_lyrics/`;
@@ -114,7 +115,11 @@ export const fetchLyricsFromLetras = async (
     if (!res.ok) return null;
 
     const raw = await res.text();
-    const cleanJson = raw.replace(/^LetrasSug\(/, '').replace(/\);?$/, '');
+    const startIdx = raw.indexOf('{');
+    const endIdx = raw.lastIndexOf('}');
+    if (startIdx === -1 || endIdx === -1) return null;
+
+    const cleanJson = raw.slice(startIdx, endIdx + 1);
     const data = JSON.parse(cleanJson);
     const docs = data.response?.docs || [];
 
@@ -177,7 +182,7 @@ export const fetchLyrics = async (
   const primaryArtist = isUnknown ? '' : artistName.split(',')[0].split('&')[0].trim();
   const durationMs = durationSeconds ? Math.round(durationSeconds * 1000) : undefined;
 
-  // 1. PRIMARY: Try exact synchronized match on LRCLIB
+  // 1. PRIMARY: Try exact synchronized match on LRCLIB (direct fetch)
   try {
     const params = new URLSearchParams({
       track_name: cleanTrack,
@@ -189,11 +194,7 @@ export const fetchLyrics = async (
       params.append('duration', Math.round(durationSeconds).toString());
     }
 
-    let url = `https://lrclib.net/api/get?${params.toString()}`;
-    if (Platform.OS === 'web') {
-      url = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-    }
-
+    const url = `https://lrclib.net/api/get?${params.toString()}`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Openfy-App/1.0 (https://github.com/openfy)' },
     });
@@ -239,14 +240,10 @@ export const fetchLyrics = async (
     console.warn('[LyricsService] Exact lookup error:', error);
   }
 
-  // 2. SECONDARY: Search query fallback on LRCLIB
+  // 2. SECONDARY: Search query fallback on LRCLIB (direct fetch)
   try {
-    let searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(
-      primaryArtist ? `${primaryArtist} ${cleanTrack}` : cleanTrack
-    )}`;
-    if (Platform.OS === 'web') {
-      searchUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(searchUrl)}`;
-    }
+    const query = primaryArtist ? `${primaryArtist} ${cleanTrack}` : cleanTrack;
+    const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(query)}`;
 
     const sRes = await fetch(searchUrl, {
       headers: { 'User-Agent': 'Openfy-App/1.0 (https://github.com/openfy)' },

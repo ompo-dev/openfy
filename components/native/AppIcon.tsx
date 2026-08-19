@@ -63,5 +63,6 @@ interface AppIconProps {
 }
 
 export function AppIcon({ name, color = '#FFFFFF', size = 24, style }: AppIconProps) {
-  return <Ionicons name={name as any} size={size} color={color} style={style as any} />;
+  const iconName = name === 'cast' ? 'radio-outline' : name;
+  return <Ionicons name={iconName as any} size={size} color={color} style={style as any} />;
 }
