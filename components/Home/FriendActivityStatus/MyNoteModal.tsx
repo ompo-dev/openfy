@@ -161,7 +161,7 @@ const IdenticalNoteBubble = ({
               <MarqueeText
                 text={title}
                 style={[bubbleStyles.titleText, { color: colorTheme.titleColor }]}
-                align="left"
+                align="center"
                 fadeWidth={6}
                 fadeColor={bg}
               />
@@ -173,7 +173,7 @@ const IdenticalNoteBubble = ({
             <MarqueeText
               text={artist}
               style={[bubbleStyles.artistText, { color: colorTheme.artistColor }]}
-              align="left"
+              align="center"
               fadeWidth={6}
               fadeColor={bg}
             />
@@ -184,13 +184,13 @@ const IdenticalNoteBubble = ({
             <MarqueeText
               text={customText.slice(0, NOTE_TEXT_LIMIT)}
               style={[bubbleStyles.customText, { color: colorTheme.customTextColor }]}
-              align="left"
+              align="center"
               fadeWidth={6}
               fadeColor={bg}
             />
           ) : null}
 
-          {/* Speech tail dots */}
+          {/* Speech tail dots pointing inwards towards avatar head */}
           <View style={[bubbleStyles.tailDotMain, { backgroundColor: bg }]} />
           <View style={[bubbleStyles.tailDotSmall, { backgroundColor: bg }]} />
         </View>
@@ -266,8 +266,8 @@ const bubbleStyles = StyleSheet.create({
   },
   tailDotMain: {
     position: 'absolute',
-    bottom: -5,
-    left: 16,
+    bottom: -4,
+    left: 22,
     width: 7,
     height: 7,
     borderRadius: 3.5,
@@ -275,8 +275,8 @@ const bubbleStyles = StyleSheet.create({
   },
   tailDotSmall: {
     position: 'absolute',
-    bottom: -9,
-    left: 11,
+    bottom: -8,
+    left: 27,
     width: 4,
     height: 4,
     borderRadius: 2,
@@ -523,7 +523,13 @@ export const MyNoteModal = ({
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={S.creatorModalContainer}
         >
-          <Pressable style={S.creatorModalCard} onPress={(e) => e.stopPropagation()}>
+          <Pressable
+            style={[
+              S.creatorModalCard,
+              activeBottomSection === 'colorPicker' && S.creatorModalCardExpanded,
+            ]}
+            onPress={(e) => e.stopPropagation()}
+          >
             {/* Top Bar: SwiftUI X close icon on LEFT, SwiftUI Checkmark icon on RIGHT */}
             <View style={S.creatorTopBar}>
               <NativeIconButton
@@ -569,14 +575,14 @@ export const MyNoteModal = ({
                         <MarqueeText
                           text={selectedSong.title}
                           style={[S.editorSongTitle, { color: colorTheme.titleColor }]}
-                          align="left"
+                          align="center"
                           fadeWidth={4}
                           fadeColor={bubbleColor}
                         />
                         <MarqueeText
                           text={selectedSong.artistName}
                           style={[S.editorSongArtist, { color: colorTheme.artistColor }]}
-                          align="left"
+                          align="center"
                           fadeWidth={4}
                           fadeColor={bubbleColor}
                         />
@@ -951,6 +957,9 @@ const S = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
+  creatorModalCardExpanded: {
+    minHeight: 440,
+  },
   creatorTopBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1005,17 +1014,19 @@ const S = StyleSheet.create({
     fontFamily: 'SimplyRounded',
     padding: 0,
     minHeight: 18,
+    textAlign: 'center',
   },
   editorPureInput: {
     fontSize: 12,
     fontFamily: 'SimplyRounded',
     padding: 0,
     minHeight: 28,
+    textAlign: 'center',
   },
   editorDot1: {
     position: 'absolute',
-    bottom: -5,
-    left: 16,
+    bottom: -4,
+    left: 22,
     width: 7,
     height: 7,
     borderRadius: 3.5,
@@ -1023,8 +1034,8 @@ const S = StyleSheet.create({
   },
   editorDot2: {
     position: 'absolute',
-    bottom: -9,
-    left: 11,
+    bottom: -8,
+    left: 27,
     width: 4,
     height: 4,
     borderRadius: 2,

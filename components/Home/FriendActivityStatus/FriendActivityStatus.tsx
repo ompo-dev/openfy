@@ -379,7 +379,7 @@ export const FriendActivityStatus = () => {
                         <MarqueeText
                           text={noteTitle}
                           style={[styles.noteTitle, { color: colorTheme.titleColor }]}
-                          align="left"
+                          align="center"
                           fadeWidth={6}
                           fadeColor={bubbleColor}
                         />
@@ -391,7 +391,7 @@ export const FriendActivityStatus = () => {
                       <MarqueeText
                         text={noteArtist}
                         style={[styles.noteArtist, { color: colorTheme.artistColor }]}
-                        align="left"
+                        align="center"
                         fadeWidth={6}
                         fadeColor={bubbleColor}
                       />
@@ -402,13 +402,13 @@ export const FriendActivityStatus = () => {
                       <MarqueeText
                         text={noteText.slice(0, 30)}
                         style={[styles.noteCustomText, { color: colorTheme.customTextColor }]}
-                        align="left"
+                        align="center"
                         fadeWidth={6}
                         fadeColor={bubbleColor}
                       />
                     ) : null}
 
-                    {/* Speech tail dots */}
+                    {/* Speech tail dots pointing inwards toward avatar head */}
                     <View style={[styles.tailDotMain, { backgroundColor: bubbleColor }]} />
                     <View style={[styles.tailDotSmall, { backgroundColor: bubbleColor }]} />
                   </Animated.View>
@@ -544,8 +544,8 @@ const styles = StyleSheet.create({
   },
   tailDotMain: {
     position: 'absolute',
-    bottom: -5,
-    left: 16,
+    bottom: -4,
+    left: 22,
     width: 7,
     height: 7,
     borderRadius: 3.5,
@@ -553,8 +553,8 @@ const styles = StyleSheet.create({
   },
   tailDotSmall: {
     position: 'absolute',
-    bottom: -9,
-    left: 11,
+    bottom: -8,
+    left: 27,
     width: 4,
     height: 4,
     borderRadius: 2,
