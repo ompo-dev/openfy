@@ -128,8 +128,15 @@ export const fetchLyricsFromLetras = async (
       const docs = data.response?.docs || [];
       if (docs.length === 0) continue;
 
-      for (const doc of docs.slice(0, 2)) {
+      for (const doc of docs.slice(0, 3)) {
         if (!doc.dns || !doc.url) continue;
+
+        // Verify doc title matches requested track name
+        const docTitleNorm = (doc.txt || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const targetTitleNorm = (trackName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const targetWords = targetTitleNorm.split('_').filter(w => w.length > 2);
+        const titleMatches = targetWords.some(w => docTitleNorm.includes(w)) || docTitleNorm.includes(targetTitleNorm) || targetTitleNorm.includes(docTitleNorm);
+        if (!titleMatches) continue;
 
         const pageUrl = `https://www.letras.mus.br/${doc.dns}/${doc.url}/`;
         const pageRes = await fetch(pageUrl, {

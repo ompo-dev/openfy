@@ -85,12 +85,16 @@ const lyricsCache = new Map<string, LyricsData>();
 const STORAGE_STREAM_PREFIX = 'openfy_stream_cache_';
 const STORAGE_LYRICS_PREFIX = 'openfy_lyrics_cache_';
 
-// Helper: Normalize cache key
+const IS_SPOTIFY_ID = /^[a-zA-Z0-9]{22}$/;
+
+// Helper: Normalize cache key to prevent cross-song cache collisions
 const getCacheKey = (track: PlayerTrack) => {
-  if (track.spotifyId && !track.spotifyId.startsWith('target_')) {
+  if (track.spotifyId && IS_SPOTIFY_ID.test(track.spotifyId)) {
     return track.spotifyId;
   }
-  return `${track.artistName}_${track.title}`.toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const cleanTitle = (track.title || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const cleanArtist = (track.artistName || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+  return `${cleanArtist}_${cleanTitle}`;
 };
 
 export const usePlayerStore = create<PlayerStoreState>((set, get) => ({

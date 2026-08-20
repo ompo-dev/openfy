@@ -309,9 +309,17 @@ async function fetchSoundCloudPlayableStream(title, artist, durationMs) {
       const data = await res.json();
       for (const item of (data.collection || [])) {
         if (!item.title) continue;
+
+        // Strict title matching: candidate must contain at least one key word of requested title
+        const normReqTitle = normalizeText(title);
+        const normCandTitle = normalizeText(item.title);
+        const keyWords = normReqTitle.split(' ').filter(w => w.length > 2);
+        const titleMatch = keyWords.some(w => normCandTitle.includes(w)) || normCandTitle.includes(normReqTitle) || normReqTitle.includes(normCandTitle);
+        if (!titleMatch) continue;
+
         const dur = item.duration || 0;
         const diffMs = durationMs > 0 ? Math.abs(dur - durationMs) : 0;
-        if (durationMs > 0 && diffMs > 25000) continue; // within 25s
+        if (durationMs > 0 && diffMs > 30000) continue; // within 30s
 
         const transcodings = item.media?.transcodings || [];
         const nonDrm = transcodings.filter(t => {

@@ -3,9 +3,12 @@
  *
  * Matching Instagram Music Editor (Screenshots 1 & 2):
  * - Top-right blue checkmark button (✓) (confirms snippet selection)
- * - Center: Album art, Title, Artist
+ * - Center: Album art, Title, Artist, and Single Active Synchronized Lyric Line
  * - Timeline: (30) circle indicator on left, full-song timeline bar with active white 30s segment, Play/Pause on right
- * - Fixed Center Rainbow Box: The rainbow gradient frame remains stationary in the center, while the waveform bars scroll horizontally underneath!
+ * - Fixed Center Rainbow Box:
+ *   - Frame is TRANSPARENT inside (only colorful gradient border) showing white waveform bars underneath
+ *   - Left and right respiro padding allows scrolling from start to end without getting stuck
+ *   - Pauses audio playback when user starts dragging, seeks and resumes when released!
  */
 
 import * as React from 'react';
@@ -25,6 +28,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
+import { MarqueeText } from '../../common/MarqueeText';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -52,6 +56,7 @@ const BAR_WIDTH = 3;
 const BAR_GAP = 5;
 const SINGLE_BAR_STEP = BAR_WIDTH + BAR_GAP; // 8px per bar
 const WAVEFORM_TOTAL_WIDTH = TOTAL_BARS * SINGLE_BAR_STEP;
+const RAINBOW_FRAME_WIDTH = 90;
 
 export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = ({
   visible,
@@ -59,17 +64,20 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
   onClose,
   onConfirmSnippet,
 }) => {
-  const { playerState, togglePlayPause, seekToPosition } = usePlayer();
+  const { playerState, togglePlayPause, seekToPosition, playTrack, lyricsData } = usePlayer();
 
   const totalDurationMs = track?.duration_ms || 210000;
   const maxStartMs = Math.max(0, totalDurationMs - SNIPPET_DURATION_MS);
 
-  // Scroll offset of waveform (0 .. maxScroll)
-  const maxScroll = WAVEFORM_TOTAL_WIDTH - (SCREEN_WIDTH - 80);
+  // Maximum scroll distance so the last 30s aligns perfectly with the center box
+  const centerBoxOffset = (SCREEN_WIDTH - 44) / 2 - RAINBOW_FRAME_WIDTH / 2;
+  const maxScroll = Math.max(1, WAVEFORM_TOTAL_WIDTH - RAINBOW_FRAME_WIDTH);
+
   const scrollAnim = React.useRef(new Animated.Value(maxScroll * 0.25)).current;
   const scrollVal = React.useRef(maxScroll * 0.25);
 
   const [startPercent, setStartPercent] = React.useState(0.25);
+  const [isDragging, setIsDragging] = React.useState(false);
 
   const startTimeMs = startPercent * maxStartMs;
 
@@ -77,20 +85,20 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
   React.useEffect(() => {
     const id = scrollAnim.addListener(({ value }) => {
       scrollVal.current = value;
-      const pct = Math.max(0, Math.min(1, value / Math.max(1, maxScroll)));
+      const pct = Math.max(0, Math.min(1, value / maxScroll));
       setStartPercent(pct);
     });
     return () => scrollAnim.removeListener(id);
   }, [scrollAnim, maxScroll]);
 
-  // Audio seek loop
+  // Sync audio seek position on release
   React.useEffect(() => {
-    if (visible && track) {
+    if (visible && track && !isDragging) {
       seekToPosition(Math.round(startTimeMs));
     }
-  }, [visible, track, Math.round(startTimeMs)]);
+  }, [visible, track, isDragging, Math.round(startTimeMs)]);
 
-  // PanResponder to scroll the waveform reel horizontally under the fixed center box
+  // PanResponder to scroll waveform reel under fixed center box
   const panStartVal = React.useRef(0);
 
   const panResponder = React.useRef(
@@ -98,28 +106,53 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
+        setIsDragging(true);
         panStartVal.current = scrollVal.current;
+        // Pause audio while user is dragging
+        if (playerState.isPlaying) {
+          togglePlayPause();
+        }
       },
       onPanResponderMove: (evt, gestureState) => {
         const nextVal = Math.max(0, Math.min(maxScroll, panStartVal.current - gestureState.dx));
         scrollAnim.setValue(nextVal);
       },
       onPanResponderRelease: () => {
+        setIsDragging(false);
         try {
           Haptics.selectionAsync();
         } catch {}
+        // Resume audio after dragging releases
+        seekToPosition(Math.round(scrollVal.current / maxScroll * maxStartMs));
+        if (!playerState.isPlaying) {
+          togglePlayPause();
+        }
       },
     })
   ).current;
 
-  // Generate deterministic bar heights for waveform (Hook called unconditionally)
+  // Generate realistic audio peak heights for waveform
   const trackTitleLength = track?.title?.length || 5;
   const waveformHeights = React.useMemo(() => {
     return Array.from({ length: TOTAL_BARS }, (_, i) => {
-      const seed = (i * 19 + trackTitleLength * 11) % 100;
-      return 12 + (seed % 30);
+      // Realistic song dynamics: lower at intro, peak at chorus (bars 30..60), lower at outro
+      const pos = i / TOTAL_BARS;
+      const envelope = Math.sin(pos * Math.PI) * 0.7 + 0.3;
+      const seed = (i * 23 + trackTitleLength * 13) % 100;
+      const baseHeight = 10 + (seed % 28);
+      return Math.min(42, Math.max(8, Math.round(baseHeight * envelope * 1.2)));
     });
   }, [trackTitleLength]);
+
+  // Find active single lyric line
+  const activeLine = React.useMemo(() => {
+    if (!lyricsData || !lyricsData.segments || lyricsData.segments.length === 0) return null;
+    const currentMs = playerState.positionMs || 0;
+    const found = lyricsData.segments.find(
+      (seg) => currentMs >= seg.startTimeMs && currentMs <= seg.endTimeMs
+    );
+    return found || lyricsData.segments[0];
+  }, [lyricsData, playerState.positionMs]);
 
   // Unconditional hooks declared above
   if (!track) return null;
@@ -150,7 +183,7 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
           {/* Drag Handle */}
           <View style={S.handle} />
 
-          {/* Top Bar: Blue Checkmark Button on Right (No "Música nova" button) */}
+          {/* Top Bar: Blue Checkmark Button on Right */}
           <View style={S.topBar}>
             <View style={{ width: 38 }} />
             <TouchableOpacity style={S.confirmBtn} activeOpacity={0.85} onPress={handleConfirm}>
@@ -172,6 +205,19 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
               {track.artistName}
             </Text>
           </View>
+
+          {/* Single Synchronized Lyric Line below title & artist */}
+          {activeLine ? (
+            <View style={S.lyricPillContainer}>
+              <MarqueeText
+                text={activeLine.text}
+                style={S.lyricPillText}
+                align="center"
+                fadeWidth={8}
+                fadeColor="#1C1C1E"
+              />
+            </View>
+          ) : null}
 
           {/* Timeline Row (Screenshot 1) */}
           <View style={S.timelineRow}>
@@ -218,11 +264,13 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
 
           {/* Waveform Scrubber: Waveform scrolls underneath the FIXED center rainbow box (Screenshot 2) */}
           <View style={S.waveformContainer} {...panResponder.panHandlers}>
-            {/* Scrolling Waveform Reel */}
+            {/* Scrolling Waveform Reel with generous Left and Right Respiro Padding */}
             <Animated.View
               style={[
                 S.waveformReel,
                 {
+                  paddingLeft: centerBoxOffset,
+                  paddingRight: centerBoxOffset,
                   transform: [{ translateX: Animated.multiply(scrollAnim, -1) }],
                 },
               ]}
@@ -232,7 +280,7 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
               ))}
             </Animated.View>
 
-            {/* FIXED CENTER Rainbow Gradient Selection Frame */}
+            {/* FIXED CENTER Rainbow Gradient Selection Frame with TRANSPARENT Inner Overlay */}
             <View style={S.fixedCenterRainbowFrame} pointerEvents="none">
               <LinearGradient
                 colors={['#FF512F', '#DD2476', '#8E2DE2', '#4A00E0']}
@@ -240,7 +288,8 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
                 end={{ x: 1, y: 1 }}
                 style={S.rainbowGradientBorder}
               >
-                <View style={S.rainbowInnerOverlay} />
+                {/* Completely transparent inside so white waveform bars are clearly visible */}
+                <View style={S.transparentInnerOverlay} />
               </LinearGradient>
             </View>
           </View>
@@ -278,7 +327,7 @@ const S = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     width: '100%',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   confirmBtn: {
     width: 38,
@@ -294,7 +343,7 @@ const S = StyleSheet.create({
     elevation: 4,
   },
   coverContainer: {
-    marginVertical: 8,
+    marginVertical: 6,
     elevation: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -302,14 +351,15 @@ const S = StyleSheet.create({
     shadowRadius: 8,
   },
   coverImage: {
-    width: 86,
-    height: 86,
+    width: 84,
+    height: 84,
     borderRadius: 12,
     backgroundColor: '#2C2C2E',
   },
   titleContainer: {
     alignItems: 'center',
-    marginVertical: 10,
+    marginTop: 8,
+    marginBottom: 4,
     paddingHorizontal: 20,
   },
   trackTitle: {
@@ -324,7 +374,23 @@ const S = StyleSheet.create({
     fontSize: 13.5,
     fontFamily: 'SimplyRounded',
     textAlign: 'center',
-    marginTop: 3,
+    marginTop: 2,
+  },
+  lyricPillContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    marginVertical: 6,
+    maxWidth: SCREEN_WIDTH - 80,
+    alignItems: 'center',
+  },
+  lyricPillText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontFamily: 'SimplyRounded-Bold',
+    fontWeight: '600',
+    textAlign: 'center',
   },
   timelineRow: {
     flexDirection: 'row',
@@ -388,17 +454,15 @@ const S = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: BAR_GAP,
-    paddingLeft: (SCREEN_WIDTH - 44) / 2 - 45,
-    paddingRight: (SCREEN_WIDTH - 44) / 2 + 45,
   },
   waveformBar: {
     width: BAR_WIDTH,
     borderRadius: BAR_WIDTH / 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+    backgroundColor: '#FFFFFF',
   },
   fixedCenterRainbowFrame: {
     position: 'absolute',
-    width: 90,
+    width: RAINBOW_FRAME_WIDTH,
     height: 48,
     borderRadius: 12,
     overflow: 'hidden',
@@ -410,7 +474,7 @@ const S = StyleSheet.create({
     padding: 3,
     borderRadius: 12,
   },
-  rainbowInnerOverlay: {
+  transparentInnerOverlay: {
     flex: 1,
     backgroundColor: 'transparent',
   },
