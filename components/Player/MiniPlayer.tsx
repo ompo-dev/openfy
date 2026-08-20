@@ -185,7 +185,7 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
                       onConfirm();
                     }}
                   >
-                    <Ionicons name="checkmark" size={18} color="#FFFFFF" />
+                    <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
                   </TouchableOpacity>
                 )}
               </View>

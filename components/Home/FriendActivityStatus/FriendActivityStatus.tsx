@@ -81,7 +81,7 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       artist: 'Jamiroquai',
       imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27341ea22e92c68e146eb4a7812',
       duration_ms: 330000,
-      bubbleColor: '#1C1E24',
+      bubbleColor: '#EC4899',
     },
   },
   {
@@ -99,7 +99,7 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       artist: 'Alicia Keys',
       imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27376a91eb0625902047ff6535d',
       duration_ms: 242000,
-      bubbleColor: '#1C1E24',
+      bubbleColor: '#0EA5E9',
     },
   },
   {
@@ -117,7 +117,7 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       artist: 'Rubel',
       imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b273d22eb74f32ba56e9cce35b1c',
       duration_ms: 198000,
-      bubbleColor: '#1C1E24',
+      bubbleColor: '#22C55E',
     },
   },
   {
@@ -135,7 +135,7 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       artist: 'System Of A Down',
       imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b273397982f1b4028448ea92c903',
       duration_ms: 167000,
-      bubbleColor: '#1C1E24',
+      bubbleColor: '#F59E0B',
     },
   },
   {
@@ -153,7 +153,7 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       artist: 'Rita Lee',
       imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2738faea51fe535bb1dc74c2d43',
       duration_ms: 195000,
-      bubbleColor: '#1C1E24',
+      bubbleColor: '#8B5CF6',
     },
   },
   {
@@ -172,7 +172,7 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       artist: 'MysticFall27',
       imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b273c52a3be631df815bc1458e0a',
       duration_ms: 215000,
-      bubbleColor: '#1C1E24',
+      bubbleColor: '#EF4444',
     },
   },
 ];
@@ -482,6 +482,7 @@ const styles = StyleSheet.create({
   },
   noteBubble: {
     width: 97,
+    height: 56,
     borderRadius: 16,
     paddingHorizontal: 8,
     paddingVertical: 5,

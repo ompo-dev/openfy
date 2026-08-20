@@ -220,6 +220,7 @@ const bubbleStyles = StyleSheet.create({
   },
   bubble: {
     width: 97,
+    height: 56,
     borderRadius: 16,
     paddingHorizontal: 8,
     paddingVertical: 5,
@@ -774,65 +775,12 @@ export const MyNoteModal = ({
               </TouchableOpacity>
             </View>
 
-            {/* Compact Horizontal Tab Chips */}
-            <View style={S.tabsContainer}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={S.tabsContent}
-              >
-                {MUSIC_TABS.map((tab, i) => (
-                  <TouchableOpacity
-                    key={tab}
-                    style={[S.tabChip, i === musicTab && S.tabChipActive]}
-                    activeOpacity={0.8}
-                    onPress={() => setMusicTab(i)}
-                  >
-                    <Text style={[S.tabChipText, i === musicTab && S.tabChipTextActive]}>
-                      {tab}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-
             {/* Downloaded Tracks List — Triggers App's Native Global Player */}
             <FlatList
               data={filteredTracks}
               keyExtractor={(t) => t.spotifyId}
               style={S.musicList}
               contentContainerStyle={{ paddingBottom: previewTrack ? 90 : 20 }}
-              ListHeaderComponent={
-                currentTrack ? (
-                  <TouchableOpacity
-                    style={[
-                      S.musicRow,
-                      previewTrack?.spotifyId === currentTrack.spotifyId && S.musicRowActive,
-                    ]}
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      setPreviewTrack({
-                        spotifyId: currentTrack.spotifyId,
-                        title: currentTrack.title,
-                        artistName: currentTrack.artistName,
-                        imageURL: currentTrack.imageURL,
-                        duration_ms: currentTrack.duration_ms,
-                      });
-                    }}
-                  >
-                    <Image source={{ uri: currentTrack.imageURL }} style={S.musicCover} />
-                    <View style={S.musicInfo}>
-                      <Text style={S.musicTitle} numberOfLines={1}>
-                        {currentTrack.title}
-                      </Text>
-                      <Text style={S.musicMeta} numberOfLines={1}>
-                        {currentTrack.artistName} · Tocando agora
-                      </Text>
-                    </View>
-                    <Ionicons name="volume-medium" size={18} color="#5B5BD6" />
-                  </TouchableOpacity>
-                ) : null
-              }
               ListEmptyComponent={
                 <View style={S.emptyList}>
                   <Text style={S.emptyText}>
@@ -844,6 +792,10 @@ export const MyNoteModal = ({
               }
               renderItem={({ item }) => {
                 const isSelected = previewTrack?.spotifyId === item.spotifyId;
+                const coverUri =
+                  item.localImagePath ||
+                  item.imageURL ||
+                  'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&auto=format&fit=crop&q=80';
                 return (
                   <TouchableOpacity
                     style={[S.musicRow, isSelected && S.musicRowActive]}
@@ -859,15 +811,12 @@ export const MyNoteModal = ({
                         title: item.title,
                         artistName: item.artistName,
                         albumName: item.albumName || 'Download',
-                        imageURL: item.localImagePath || item.imageURL || '',
+                        imageURL: coverUri,
                         duration_ms: item.duration_ms || 200000,
                       });
                     }}
                   >
-                    <Image
-                      source={{ uri: item.localImagePath || item.imageURL || '' }}
-                      style={S.musicCover}
-                    />
+                    <Image source={{ uri: coverUri }} style={S.musicCover} />
                     <View style={S.musicInfo}>
                       <Text style={S.musicTitle} numberOfLines={1}>
                         {item.title}
@@ -997,7 +946,7 @@ const S = StyleSheet.create({
     paddingBottom: Platform.OS === 'ios' ? 32 : 20,
     paddingHorizontal: 20,
     width: '100%',
-    minHeight: 460,
+    minHeight: 220,
     maxHeight: '88%',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
@@ -1023,6 +972,7 @@ const S = StyleSheet.create({
   },
   editorBubble: {
     width: 97,
+    height: 56,
     borderRadius: 16,
     paddingHorizontal: 8,
     paddingVertical: 5,

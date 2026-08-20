@@ -520,12 +520,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               )}
             </Text>
 
-            {/* Spatial Audio Badge */}
-            <View style={styles.dolbyBadge}>
-              <FontAwesome6 name="tower-broadcast" size={11} color="rgba(255,255,255,0.65)" />
-              <Text style={styles.dolbyBadgeText}>Dolby Atmos</Text>
-            </View>
-
             <Text style={styles.timeText}>
               {formatTime(totalDurationMs)}
             </Text>
