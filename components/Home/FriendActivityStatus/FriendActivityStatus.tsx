@@ -1,8 +1,7 @@
 /**
- * FriendActivityStatus Component
- * Real-time friend listening status with static stable avatar circles,
- * floating speech bubbles with physics tilt/inertia animation,
- * and strictly centered marquee text with lateral fade.
+ * FriendActivityStatus Component — Instagram Music Notes Style
+ * Floating music notes with directional drag physics tilt, audio wave / headphone icons,
+ * speech bubble tail dots, and authentic rounded typography (Simply Rounded).
  */
 
 import * as React from 'react';
@@ -14,145 +13,211 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
 import { LoggedPressable } from '../../native';
 import { MarqueeText } from '../../common/MarqueeText';
 
-export interface FriendStatusItem {
+export interface FriendNoteItem {
   id: string;
   user: {
     name: string;
     username: string;
     avatarUrl: string;
+    nameStyle?: 'normal' | 'italic' | 'star';
     isCurrentUser?: boolean;
   };
-  track: {
-    spotifyId: string;
+  note: {
+    type: 'music' | 'text';
+    iconType?: 'wave' | 'headphone' | 'text';
     title: string;
-    artist: string;
-    albumName?: string;
-    imageUrl: string;
-    duration_ms: number;
-    bubbleColor: string;
-    tiltDeg: number;
+    subtitle?: string;
+    bubbleColor?: string;
+    spotifyId?: string;
+    artist?: string;
+    imageUrl?: string;
+    duration_ms?: number;
+    baseTilt?: number;
   };
 }
 
-const FRIEND_STATUSES: FriendStatusItem[] = [
+const FRIEND_NOTES: FriendNoteItem[] = [
   {
-    id: 'status_user',
+    id: 'note_user',
     user: {
-      name: 'Você',
-      username: 'Your Activity',
-      avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+      name: 'Sua nota',
+      username: 'Sua nota',
+      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
       isCurrentUser: true,
     },
-    track: {
-      spotifyId: '0VjIjW4GlUZAMYd2vXMi3b',
-      title: 'Too Late',
-      artist: 'The Weeknd',
-      albumName: 'After Hours',
-      imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2738863bc11d2aa12b54f5aeb36',
-      duration_ms: 239000,
-      bubbleColor: '#A15D25', // Warm caramel amber
-      tiltDeg: -3,
+    note: {
+      type: 'text',
+      iconType: 'text',
+      title: 'Novo dia,',
+      subtitle: 'nova nota...',
+      bubbleColor: '#25272D',
+      baseTilt: -1.5,
     },
   },
   {
-    id: 'status_tyler',
+    id: 'note_peixe',
     user: {
-      name: 'Tyler',
-      username: 'tylerthedev',
-      avatarUrl: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150&auto=format&fit=crop&q=80',
+      name: 'Peixe',
+      username: 'Peixe',
+      avatarUrl: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=200&auto=format&fit=crop&q=80',
     },
-    track: {
+    note: {
+      type: 'music',
+      iconType: 'wave',
+      title: 'Quando Bate Aquela Saudade',
+      subtitle: 'Rubel',
       spotifyId: '4w47dntseeMeuLPzFTKKB9',
-      title: 'Who Knows',
-      artist: 'Daniel Caesar',
-      albumName: 'NEVER ENOUGH',
-      imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2737e10812d9b103f2656dc91c6',
+      artist: 'Rubel',
+      imageUrl: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=200&auto=format&fit=crop&q=80',
       duration_ms: 198000,
-      bubbleColor: '#7A0C1E', // Deep crimson wine
-      tiltDeg: 2.5,
+      bubbleColor: '#25272D',
+      baseTilt: 2,
     },
   },
   {
-    id: 'status_southwest',
+    id: 'note_flavia',
     user: {
-      name: 'Southwest',
-      username: 'southwest',
-      avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+      name: 'Flavia Helena',
+      username: 'Flavia Helena',
+      nameStyle: 'italic',
+      avatarUrl: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=200&auto=format&fit=crop&q=80',
     },
-    track: {
-      spotifyId: '0d28khcov9ApubBr0GQbfS',
-      title: 'Big Brother',
-      artist: 'Kanye West',
-      albumName: 'Graduation',
-      imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27326f7f19c7f0381e56156c94a',
-      duration_ms: 287000,
-      bubbleColor: '#511C40', // Deep plum/violet
-      tiltDeg: -2.5,
+    note: {
+      type: 'music',
+      iconType: 'headphone',
+      title: 'That\'s The Way Love Goes',
+      subtitle: 'Ouvindo agora',
+      spotifyId: '0VjIjW4GlUZAMYd2vXMi3b',
+      artist: 'Janet Jackson',
+      imageUrl: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=200&auto=format&fit=crop&q=80',
+      duration_ms: 265000,
+      bubbleColor: '#25272D',
+      baseTilt: -2,
     },
   },
   {
-    id: 'status_kali',
+    id: 'note_pedro',
     user: {
-      name: 'Kali',
-      username: 'cowbokali',
-      avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
+      name: 'Pedro Henrique',
+      username: 'Pedro Henrique',
+      avatarUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200&auto=format&fit=crop&q=80',
     },
-    track: {
-      spotifyId: '6dOtVTDmmpzgGQ9qd0RMiZ',
-      title: 'Lose My Cool',
-      artist: 'Kali Uchis',
-      albumName: 'ORQUÍDEAS',
-      imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27371d62ea7ea8a5be92d3c1f62',
-      duration_ms: 195000,
-      bubbleColor: '#A85B6B', // Dusty Rose / Mauve
-      tiltDeg: 3,
-    },
-  },
-  {
-    id: 'status_drake',
-    user: {
-      name: 'Aubrey',
-      username: 'champagnepapi',
-      avatarUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
-    },
-    track: {
+    note: {
+      type: 'music',
+      iconType: 'wave',
+      title: 'My Name Is...',
+      subtitle: 'Alicia Keys',
       spotifyId: '6DCZcSspjsKoFjzjrWoCdn',
-      title: 'Headlines',
-      artist: 'Drake',
-      albumName: 'Take Care',
-      imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27326f7f19c7f0381e56156c94a',
-      duration_ms: 236000,
-      bubbleColor: '#1E3A8A', // Deep Midnight Blue
-      tiltDeg: -2,
+      artist: 'Alicia Keys',
+      imageUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200&auto=format&fit=crop&q=80',
+      duration_ms: 242000,
+      bubbleColor: '#25272D',
+      baseTilt: 2.5,
+    },
+  },
+  {
+    id: 'note_lucas',
+    user: {
+      name: 'Lucas Pontes',
+      username: 'Lucas Pontes',
+      avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
+    },
+    note: {
+      type: 'music',
+      iconType: 'wave',
+      title: 'Lonely Day',
+      subtitle: 'System Of A Down',
+      spotifyId: '0d28khcov9ApubBr0GQbfS',
+      artist: 'System Of A Down',
+      imageUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
+      duration_ms: 167000,
+      bubbleColor: '#25272D',
+      baseTilt: -2,
+    },
+  },
+  {
+    id: 'note_maria',
+    user: {
+      name: 'Maria Duda',
+      username: 'Maria Duda',
+      avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&auto=format&fit=crop&q=80',
+    },
+    note: {
+      type: 'music',
+      iconType: 'wave',
+      title: 'Elvira Pagã',
+      subtitle: 'Rita Lee, Roberto de Carvalho',
+      spotifyId: '6dOtVTDmmpzgGQ9qd0RMiZ',
+      artist: 'Rita Lee',
+      imageUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&auto=format&fit=crop&q=80',
+      duration_ms: 195000,
+      bubbleColor: '#C81423', // Vibrant Red from screenshot
+      baseTilt: 3,
+    },
+  },
+  {
+    id: 'note_igor',
+    user: {
+      name: 'igor★',
+      username: 'igor★',
+      nameStyle: 'star',
+      avatarUrl: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=200&auto=format&fit=crop&q=80',
+    },
+    note: {
+      type: 'music',
+      iconType: 'wave',
+      title: 'Ave Maria',
+      subtitle: 'MysticFall27',
+      spotifyId: '2plbrEY59IikOBB5X7x5eG',
+      artist: 'MysticFall27',
+      imageUrl: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=200&auto=format&fit=crop&q=80',
+      duration_ms: 215000,
+      bubbleColor: '#25272D',
+      baseTilt: -2.5,
     },
   },
 ];
 
-const ITEM_WIDTH = 112; // 96 card width + 16 gap
+const ITEM_WIDTH = 110;
+
+/**
+ * Animated 3-Bar Equalizer Icon
+ */
+const SoundWaveIcon = ({ isPlaying, color = '#FFFFFF' }: { isPlaying: boolean; color?: string }) => {
+  return (
+    <View style={styles.waveContainer}>
+      <View style={[styles.waveBar, { height: isPlaying ? 13 : 8, backgroundColor: color }]} />
+      <View style={[styles.waveBar, { height: isPlaying ? 16 : 14, backgroundColor: color }]} />
+      <View style={[styles.waveBar, { height: isPlaying ? 10 : 9, backgroundColor: color }]} />
+    </View>
+  );
+};
 
 export const FriendActivityStatus = () => {
   const { playTrack, currentTrack, playerState } = usePlayer();
   const scrollX = React.useRef(new Animated.Value(0)).current;
 
-  const handlePressStatus = (item: FriendStatusItem) => {
+  const handlePressNote = (item: FriendNoteItem) => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch {}
 
-    playTrack({
-      spotifyId: item.track.spotifyId,
-      title: item.track.title,
-      artistName: item.track.artist,
-      albumName: item.track.albumName || 'Single',
-      imageURL: item.track.imageUrl,
-      duration_ms: item.track.duration_ms,
-    });
+    if (item.note.spotifyId) {
+      playTrack({
+        spotifyId: item.note.spotifyId,
+        title: item.note.title,
+        artistName: item.note.subtitle || item.note.artist || 'Artista',
+        albumName: 'Instagram Note',
+        imageURL: item.note.imageUrl || item.user.avatarUrl,
+        duration_ms: item.note.duration_ms || 200000,
+      });
+    }
   };
 
   return (
@@ -167,106 +232,128 @@ export const FriendActivityStatus = () => {
           { useNativeDriver: Platform.OS !== 'web' }
         )}
       >
-        {FRIEND_STATUSES.map((item, index) => {
-          const isPlaying =
-            currentTrack?.spotifyId === item.track.spotifyId &&
+        {FRIEND_NOTES.map((item, index) => {
+          const isCurrentNotePlaying =
+            !!item.note.spotifyId &&
+            currentTrack?.spotifyId === item.note.spotifyId &&
             playerState.isPlaying;
 
-          // Physics scroll inertia applied ONLY to the floating speech bubble
+          // Dynamic directional drag tilt: Leans in direction of drag/motion
           const inputRange = [
             (index - 1) * ITEM_WIDTH,
             index * ITEM_WIDTH,
             (index + 1) * ITEM_WIDTH,
           ];
 
-          const baseTilt = item.track.tiltDeg || 0;
+          const baseTilt = item.note.baseTilt || 0;
 
           const dynamicRotate = scrollX.interpolate({
             inputRange,
-            outputRange: [`${baseTilt - 4}deg`, `${baseTilt}deg`, `${baseTilt + 4}deg`],
+            outputRange: [
+              `${baseTilt - 7}deg`,
+              `${baseTilt}deg`,
+              `${baseTilt + 7}deg`,
+            ],
             extrapolate: 'clamp',
           });
 
           const translateY = scrollX.interpolate({
             inputRange,
-            outputRange: [3, 0, 3],
+            outputRange: [2, 0, 2],
             extrapolate: 'clamp',
           });
 
-          const scale = scrollX.interpolate({
-            inputRange,
-            outputRange: [0.94, 1.0, 0.94],
-            extrapolate: 'clamp',
-          });
+          const bubbleBg = isCurrentNotePlaying
+            ? '#C81423'
+            : item.note.bubbleColor || '#25272D';
 
           return (
             <View key={item.id} style={styles.itemWrapper}>
               <LoggedPressable
                 style={styles.pressableItem}
-                onPress={() => handlePressStatus(item)}
+                onPress={() => handlePressNote(item)}
                 accessibilityRole="button"
-                accessibilityLabel={`${item.user.username} está ouvindo ${item.track.title} de ${item.track.artist}`}
+                accessibilityLabel={`${item.user.name}: ${item.note.title}`}
               >
-                {/* Floating Listening Bubble with Dynamic Tilt/Inertia Animation */}
+                {/* Floating Instagram Note Speech Bubble */}
                 <Animated.View
                   style={[
-                    styles.speechBubble,
+                    styles.noteBubble,
                     {
-                      backgroundColor: item.track.bubbleColor,
+                      backgroundColor: bubbleBg,
                       transform: [
                         { rotate: dynamicRotate },
                         { translateY },
-                        { scale },
                       ],
                     },
-                    isPlaying && styles.speechBubblePlaying,
+                    isCurrentNotePlaying && styles.noteBubblePlaying,
                   ]}
                 >
-                  <View style={styles.textContainer}>
-                    <MarqueeText
-                      text={item.track.title}
-                      style={styles.trackTitle}
-                      align="center"
-                      fadeWidth={6}
-                    />
-                    <MarqueeText
-                      text={item.track.artist}
-                      style={styles.artistName}
-                      align="center"
-                      fadeWidth={6}
-                    />
+                  <View style={styles.bubbleInner}>
+                    {/* Left Icon: Sound Wave Equalizer, Headphone or Text */}
+                    {item.note.iconType === 'headphone' ? (
+                      <Ionicons
+                        name="headset"
+                        size={14}
+                        color="#FFFFFF"
+                        style={styles.iconStyle}
+                      />
+                    ) : item.note.iconType === 'wave' || item.note.type === 'music' ? (
+                      <SoundWaveIcon
+                        isPlaying={isCurrentNotePlaying}
+                        color="#FFFFFF"
+                      />
+                    ) : null}
+
+                    {/* Text block: Title + Subtitle */}
+                    <View style={styles.textContainer}>
+                      <MarqueeText
+                        text={item.note.title}
+                        style={styles.noteTitle}
+                        align="left"
+                        fadeWidth={6}
+                      />
+                      {item.note.subtitle ? (
+                        <MarqueeText
+                          text={item.note.subtitle}
+                          style={styles.noteSubtitle}
+                          align="left"
+                          fadeWidth={6}
+                        />
+                      ) : null}
+                    </View>
                   </View>
+
+                  {/* Speech Tail Dots (Instagram Notes style) */}
+                  <View style={[styles.tailDotMain, { backgroundColor: bubbleBg }]} />
+                  <View style={[styles.tailDotSmall, { backgroundColor: bubbleBg }]} />
                 </Animated.View>
 
-                {/* Completely Stable, Upright, Non-Rotated Avatar Circle */}
+                {/* Completely Stable Circular Avatar */}
                 <View style={styles.avatarContainer}>
-                  {item.user.isCurrentUser ? (
-                    <View style={styles.userActivityAvatar}>
-                      <View style={styles.userActivityEyes}>
-                        <View style={styles.eyeCircleOuter}>
-                          <View style={styles.eyeCircleInner} />
-                        </View>
-                        <View style={styles.eyeCircleSolid} />
-                      </View>
-                    </View>
-                  ) : (
-                    <Image
-                      source={{ uri: item.user.avatarUrl }}
-                      style={styles.avatarImage}
-                    />
-                  )}
+                  <Image
+                    source={{ uri: item.user.avatarUrl }}
+                    style={styles.avatarImage}
+                  />
 
-                  {/* Animated listening equalizer badge if playing */}
-                  {isPlaying && (
-                    <View style={styles.playingBadge}>
-                      <Ionicons name="volume-high" size={11} color="#FFFFFF" />
+                  {/* Active soundwave equalizer badge if currently playing */}
+                  {isCurrentNotePlaying && (
+                    <View style={styles.playingDotBadge}>
+                      <View style={styles.playingDotInner} />
                     </View>
                   )}
                 </View>
 
-                {/* Username text */}
-                <Text style={styles.usernameText} numberOfLines={1}>
-                  {item.user.username}
+                {/* User Name Label */}
+                <Text
+                  style={[
+                    styles.userNameText,
+                    item.user.nameStyle === 'italic' && styles.userNameItalic,
+                    item.user.nameStyle === 'star' && styles.userNameBold,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {item.user.name}
                 </Text>
               </LoggedPressable>
             </View>
@@ -279,131 +366,144 @@ export const FriendActivityStatus = () => {
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 14,
+    marginVertical: 10,
   },
   scrollContent: {
     paddingHorizontal: 16,
-    gap: 16,
+    gap: 12,
     alignItems: 'flex-start',
   },
   itemWrapper: {
     alignItems: 'center',
-    width: 96,
+    width: 98,
   },
   pressableItem: {
     alignItems: 'center',
     width: '100%',
   },
-  speechBubble: {
-    width: 92,
-    height: 38,
-    borderRadius: 15,
-    paddingHorizontal: 6,
-    paddingVertical: 4,
+  noteBubble: {
+    width: 100,
+    minHeight: 44,
+    borderRadius: 18,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
     justifyContent: 'center',
-    alignItems: 'center',
     zIndex: 2,
     elevation: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.4,
     shadowRadius: 6,
-    marginBottom: -10, // overlap the top of the avatar circle
+    marginBottom: -6, // overlaps avatar top
+    position: 'relative',
   },
-  speechBubblePlaying: {
-    borderWidth: 1.5,
-    borderColor: '#FFFFFF',
+  noteBubblePlaying: {
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+    borderWidth: 1,
+  },
+  bubbleInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  iconStyle: {
+    flexShrink: 0,
+  },
+  waveContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 2,
+    height: 16,
+    width: 10,
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  waveBar: {
+    width: 2.2,
+    borderRadius: 1,
   },
   textContainer: {
-    width: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flex: 1,
     gap: 1,
+    justifyContent: 'center',
   },
-  trackTitle: {
+  noteTitle: {
     color: '#FFFFFF',
-    fontSize: 10.5,
-    fontFamily: 'SF-Bold',
+    fontSize: 11.5,
+    fontFamily: 'SimplyRounded-Bold',
     fontWeight: '700',
     letterSpacing: 0.1,
-    textAlign: 'center',
   },
-  artistName: {
-    color: 'rgba(255, 255, 255, 0.76)',
+  noteSubtitle: {
+    color: 'rgba(255, 255, 255, 0.62)',
     fontSize: 9.5,
-    fontFamily: 'SF-Regular',
-    textAlign: 'center',
+    fontFamily: 'SimplyRounded',
+  },
+  tailDotMain: {
+    position: 'absolute',
+    bottom: -5,
+    left: 18,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    zIndex: 3,
+  },
+  tailDotSmall: {
+    position: 'absolute',
+    bottom: -9,
+    left: 13,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    zIndex: 3,
   },
   avatarContainer: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: '#1E1E1E',
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#1E1E22',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2.5,
-    borderColor: '#2A2A2E',
+    borderWidth: 2,
+    borderColor: '#1E2024',
     zIndex: 1,
     overflow: 'hidden',
   },
   avatarImage: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
+    width: '100%',
+    height: '100%',
   },
-  userActivityAvatar: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
+  playingDotBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  userActivityEyes: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-  },
-  eyeCircleOuter: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 3,
-    borderColor: '#000000',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  eyeCircleInner: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: '#000000',
-  },
-  eyeCircleSolid: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#000000',
-  },
-  playingBadge: {
-    position: 'absolute',
-    bottom: -1,
-    right: -1,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#1DB954',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#121212',
     zIndex: 4,
   },
-  usernameText: {
+  playingDotInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#C81423',
+  },
+  userNameText: {
     color: '#E4E4E7',
     fontSize: 12,
-    fontFamily: 'SF-Regular',
+    fontFamily: 'SimplyRounded',
     marginTop: 6,
     textAlign: 'center',
+  },
+  userNameItalic: {
+    fontFamily: 'SimplyRounded-Italic',
+    fontStyle: 'italic',
+  },
+  userNameBold: {
+    fontFamily: 'SimplyRounded-Bold',
+    fontWeight: '700',
   },
 });

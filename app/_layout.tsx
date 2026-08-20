@@ -32,9 +32,14 @@ function PlayerOverlay() {
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
-    'SF-Regular': require('@assets/fonts/SF-Pro-Display-Regular.otf'),
-    'SF-Semibold': require('@assets/fonts/SF-Pro-Display-Semibold.otf'),
-    'SF-Thin': require('@assets/fonts/SF-Pro-Display-Thin.otf'),
+    'SF-Regular': require('@assets/fonts/Simply Rounded.ttf'),
+    'SF-Semibold': require('@assets/fonts/Simply Rounded Bold.ttf'),
+    'SF-Bold': require('@assets/fonts/Simply Rounded Bold.ttf'),
+    'SF-Thin': require('@assets/fonts/Simply Rounded.ttf'),
+    'SimplyRounded': require('@assets/fonts/Simply Rounded.ttf'),
+    'SimplyRounded-Bold': require('@assets/fonts/Simply Rounded Bold.ttf'),
+    'SimplyRounded-Italic': require('@assets/fonts/Simply Rounded Italic.ttf'),
+    'SimplyRounded-BoldItalic': require('@assets/fonts/Simply Rounded Bold Italic.ttf'),
   });
 
   React.useEffect(() => {
