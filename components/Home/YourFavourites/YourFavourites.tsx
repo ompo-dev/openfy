@@ -85,6 +85,9 @@ export const YourFavourites = () => {
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        bounces={true}
+        alwaysBounceHorizontal={true}
+        overScrollMode="always"
       >
         {FAVOURITE_ITEMS.map((item) => {
           const isArtist = item.type === 'artist';

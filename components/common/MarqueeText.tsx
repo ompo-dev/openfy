@@ -1,7 +1,10 @@
 /**
  * MarqueeText Component
- * Smooth marquee text that scrolls horizontally when text overflows the container,
- * with customizable alignment (left or center) and subtle left/right gradient alpha fade masks.
+ * Reliable horizontal marquee ticker that scrolls when text exceeds container width.
+ * Features:
+ * - Hidden unconstrained layout measurement to reliably detect overflow
+ * - Smooth continuous back-and-forth marquee animation
+ * - Left and right gradient fade masks (using CSS mask on web or background-matching fade overlays)
  */
 
 import * as React from 'react';
@@ -17,14 +20,16 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 interface MarqueeTextProps {
   text: string;
   style?: StyleProp<TextStyle>;
   containerStyle?: StyleProp<ViewStyle>;
   speed?: number; // pixels per second
-  delay?: number; // ms delay before scroll
+  delay?: number; // ms delay before starting
   fadeWidth?: number;
+  fadeColor?: string; // Optional background color for native fade gradient overlays
   align?: 'left' | 'center';
 }
 
@@ -32,15 +37,17 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
   text,
   style,
   containerStyle,
-  speed = 28,
-  delay = 1800,
-  fadeWidth = 8,
+  speed = 22,
+  delay = 1400,
+  fadeWidth = 10,
+  fadeColor,
   align = 'left',
 }) => {
   const [containerWidth, setContainerWidth] = React.useState(0);
-  const [textWidth, setTextWidth] = React.useState(0);
+  const [measuredTextWidth, setMeasuredTextWidth] = React.useState(0);
   const scrollAnim = React.useRef(new Animated.Value(0)).current;
-  const isOverflowing = textWidth > containerWidth && containerWidth > 0;
+
+  const isOverflowing = measuredTextWidth > containerWidth + 2 && containerWidth > 0;
 
   React.useEffect(() => {
     if (!isOverflowing) {
@@ -48,8 +55,8 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
       return;
     }
 
-    const distance = textWidth - containerWidth + fadeWidth * 2;
-    const duration = Math.max(2000, (distance / speed) * 1000);
+    const distance = measuredTextWidth - containerWidth + fadeWidth * 1.5;
+    const duration = Math.max(1800, (distance / speed) * 1000);
 
     const animation = Animated.loop(
       Animated.sequence([
@@ -57,13 +64,13 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
         Animated.timing(scrollAnim, {
           toValue: -distance,
           duration,
-          easing: Easing.inOut(Easing.quad),
+          easing: Easing.linear,
           useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.delay(delay),
         Animated.timing(scrollAnim, {
           toValue: 0,
-          duration: duration * 0.8,
+          duration: duration * 0.75,
           easing: Easing.inOut(Easing.quad),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -75,14 +82,20 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
     return () => {
       animation.stop();
     };
-  }, [isOverflowing, textWidth, containerWidth, speed, delay, fadeWidth, scrollAnim]);
+  }, [isOverflowing, measuredTextWidth, containerWidth, speed, delay, fadeWidth, scrollAnim]);
 
   const onContainerLayout = (e: LayoutChangeEvent) => {
-    setContainerWidth(e.nativeEvent.layout.width);
+    const w = e.nativeEvent.layout.width;
+    if (Math.abs(w - containerWidth) > 1) {
+      setContainerWidth(w);
+    }
   };
 
-  const onTextLayout = (e: LayoutChangeEvent) => {
-    setTextWidth(e.nativeEvent.layout.width);
+  const onMeasureLayout = (e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    if (Math.abs(w - measuredTextWidth) > 1) {
+      setMeasuredTextWidth(w);
+    }
   };
 
   const isCenter = align === 'center';
@@ -105,21 +118,28 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
           : undefined,
       ]}
     >
+      {/* Hidden full text measurement layer without width restrictions */}
+      <View style={styles.measureContainer} pointerEvents="none">
+        <Text
+          onLayout={onMeasureLayout}
+          numberOfLines={1}
+          style={[styles.text, style, styles.measureText]}
+        >
+          {text}
+        </Text>
+      </View>
+
+      {/* Visible animated marquee text */}
       <Animated.View
         style={{
           transform: [{ translateX: scrollAnim }],
           flexDirection: 'row',
-          justifyContent: isOverflowing
-            ? 'flex-start'
-            : isCenter
-            ? 'center'
-            : 'flex-start',
+          justifyContent: isOverflowing ? 'flex-start' : isCenter ? 'center' : 'flex-start',
           alignItems: 'center',
           width: isOverflowing ? undefined : '100%',
         }}
       >
         <Text
-          onLayout={onTextLayout}
           numberOfLines={1}
           style={[
             styles.text,
@@ -130,6 +150,26 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
           {text}
         </Text>
       </Animated.View>
+
+      {/* Optional native left/right fade gradients */}
+      {isOverflowing && fadeColor && Platform.OS !== 'web' && (
+        <>
+          <LinearGradient
+            colors={[fadeColor, 'transparent']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={[styles.nativeFade, { left: 0, width: fadeWidth }]}
+            pointerEvents="none"
+          />
+          <LinearGradient
+            colors={['transparent', fadeColor]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={[styles.nativeFade, { right: 0, width: fadeWidth }]}
+            pointerEvents="none"
+          />
+        </>
+      )}
     </View>
   );
 };
@@ -138,8 +178,26 @@ const styles = StyleSheet.create({
   container: {
     overflow: 'hidden',
     width: '100%',
+    position: 'relative',
+  },
+  measureContainer: {
+    position: 'absolute',
+    opacity: 0,
+    top: -9999,
+    left: 0,
+    flexDirection: 'row',
+  },
+  measureText: {
+    flexShrink: 0,
+    includeFontPadding: false,
   },
   text: {
     flexShrink: 0,
+  },
+  nativeFade: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    zIndex: 10,
   },
 });

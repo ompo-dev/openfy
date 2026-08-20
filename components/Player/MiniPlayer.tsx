@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
 import { GlassSurface, LoggedPressable } from '../native';
+import { MarqueeText } from '../common/MarqueeText';
 
 type MiniPlayerProps = { onPress: () => void };
 
@@ -111,14 +112,20 @@ export const MiniPlayer = ({ onPress }: MiniPlayerProps) => {
                 )}
               </View>
 
-              {/* Center: Title & Artist Typography */}
+              {/* Center: Title & Artist Typography with Marquee */}
               <View style={styles.infoContainer}>
-                <Text style={styles.titleText} numberOfLines={1}>
-                  {currentTrack.title}
-                </Text>
-                <Text style={styles.artistText} numberOfLines={1}>
-                  {currentTrack.artistName}
-                </Text>
+                <MarqueeText
+                  text={currentTrack.title}
+                  style={styles.titleText}
+                  align="left"
+                  fadeWidth={8}
+                />
+                <MarqueeText
+                  text={currentTrack.artistName}
+                  style={styles.artistText}
+                  align="left"
+                  fadeWidth={8}
+                />
               </View>
 
               {/* Right: Audio Output Device & Play/Pause Button */}

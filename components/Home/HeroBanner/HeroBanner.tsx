@@ -1,33 +1,38 @@
 /**
  * HeroBanner Component
- * Featured hero carousel with compact modern artwork, centered headlines,
- * and horizontally centered Play / My List Liquid Glass action pills with tactile feedback.
- * Uses exact Spotify IDs for authentic playback.
+ * Featured hero carousel with centered compact modern cards,
+ * smooth carousel pass animations with centered snapping,
+ * and animated pagination indicators.
  */
 
 import * as React from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Dimensions,
   ImageBackground,
-  ScrollView,
+  Platform,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
 import { downloadTrack } from '@services';
 import { GlassSurface, LoggedPressable } from '../../native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_WIDTH = SCREEN_WIDTH - 32;
-const CARD_HEIGHT = Math.min(CARD_WIDTH * 0.95, 340); // Slightly more compact
+const CARD_WIDTH = Math.min(SCREEN_WIDTH - 52, 335); // Less wide, nicely centered
+const CARD_HEIGHT = 310;
+const CARD_GAP = 14;
+const SNAP_INTERVAL = CARD_WIDTH + CARD_GAP;
+const SIDE_PADDING = (SCREEN_WIDTH - CARD_WIDTH) / 2;
 
 const FEATURED_ITEMS = [
   {
-    id: '2plbrEY59IikOBB5X7x5eG',
+    id: 'hero_die_with_a_smile',
     spotifyId: '2plbrEY59IikOBB5X7x5eG',
     artist: 'LADY GAGA & BRUNO MARS',
     title: 'DIE WITH A SMILE',
@@ -37,7 +42,7 @@ const FEATURED_ITEMS = [
     duration_ms: 251000,
   },
   {
-    id: '6dOtVTDmmpzgGQ9qd0RMiZ',
+    id: 'hero_birds_of_a_feather',
     spotifyId: '6dOtVTDmmpzgGQ9qd0RMiZ',
     artist: 'BILLIE EILISH',
     title: 'BIRDS OF A FEATHER',
@@ -47,7 +52,7 @@ const FEATURED_ITEMS = [
     duration_ms: 194000,
   },
   {
-    id: '0VjIjW4GlUZAMYd2vXMi3b',
+    id: 'hero_blinding_lights',
     spotifyId: '0VjIjW4GlUZAMYd2vXMi3b',
     artist: 'THE WEEKND',
     title: 'BLINDING LIGHTS',
@@ -59,19 +64,21 @@ const FEATURED_ITEMS = [
 ];
 
 export const HeroBanner = () => {
-  const { playTrack, currentTrack, playerState } = usePlayer();
-  const [activeIndex, setActiveIndex] = React.useState(0);
+  const { playTrack, currentTrack, playerState, togglePlayPause } = usePlayer();
   const [addingId, setAddingId] = React.useState<string | null>(null);
   const [addedIds, setAddedIds] = React.useState<Record<string, boolean>>({});
-
-  const handleScroll = (event: any) => {
-    const slide = Math.round(event.nativeEvent.contentOffset.x / CARD_WIDTH);
-    if (slide !== activeIndex && slide >= 0 && slide < FEATURED_ITEMS.length) {
-      setActiveIndex(slide);
-    }
-  };
+  const scrollX = React.useRef(new Animated.Value(0)).current;
 
   const handlePlay = (item: (typeof FEATURED_ITEMS)[0]) => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch {}
+
+    if (currentTrack?.spotifyId === item.spotifyId) {
+      togglePlayPause();
+      return;
+    }
+
     playTrack({
       spotifyId: item.spotifyId,
       title: item.title,
@@ -85,6 +92,10 @@ export const HeroBanner = () => {
   const handleAddToList = async (item: (typeof FEATURED_ITEMS)[0]) => {
     if (addedIds[item.id] || addingId === item.id) return;
     setAddingId(item.id);
+    try {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {}
+
     try {
       await downloadTrack({
         spotifyId: item.spotifyId,
@@ -104,23 +115,60 @@ export const HeroBanner = () => {
 
   return (
     <View style={styles.container}>
-      <ScrollView
+      <Animated.ScrollView
         horizontal
-        pagingEnabled
         showsHorizontalScrollIndicator={false}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
+        snapToInterval={SNAP_INTERVAL}
+        snapToAlignment="center"
         decelerationRate="fast"
-        contentContainerStyle={styles.scrollContent}
+        bounces={true}
+        alwaysBounceHorizontal={true}
+        overScrollMode="always"
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingHorizontal: SIDE_PADDING },
+        ]}
+        scrollEventThrottle={16}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+          { useNativeDriver: Platform.OS !== 'web' }
+        )}
       >
-        {FEATURED_ITEMS.map((item) => {
+        {FEATURED_ITEMS.map((item, index) => {
           const isCurrentPlaying =
             currentTrack?.spotifyId === item.spotifyId && playerState.isPlaying;
           const isAdded = addedIds[item.id];
           const isAdding = addingId === item.id;
 
+          const inputRange = [
+            (index - 1) * SNAP_INTERVAL,
+            index * SNAP_INTERVAL,
+            (index + 1) * SNAP_INTERVAL,
+          ];
+
+          const scale = scrollX.interpolate({
+            inputRange,
+            outputRange: [0.93, 1.0, 0.93],
+            extrapolate: 'clamp',
+          });
+
+          const opacity = scrollX.interpolate({
+            inputRange,
+            outputRange: [0.75, 1.0, 0.75],
+            extrapolate: 'clamp',
+          });
+
           return (
-            <View key={item.id} style={styles.cardWrapper}>
+            <Animated.View
+              key={item.id}
+              style={[
+                styles.cardWrapper,
+                {
+                  transform: [{ scale }],
+                  opacity,
+                },
+              ]}
+            >
               <ImageBackground
                 source={{ uri: item.imageUrl }}
                 style={styles.cardImage}
@@ -128,16 +176,14 @@ export const HeroBanner = () => {
               >
                 {/* Dark gradient overlay */}
                 <LinearGradient
-                  colors={['rgba(0,0,0,0.5)', 'transparent', 'rgba(0,0,0,0.88)']}
-                  locations={[0, 0.45, 1.0]}
+                  colors={['rgba(0,0,0,0.45)', 'transparent', 'rgba(0,0,0,0.92)']}
+                  locations={[0, 0.42, 1.0]}
                   style={styles.gradientOverlay}
                 >
                   {/* Horizontally centered Header text on artwork */}
                   <View style={styles.headerTextContainer}>
                     <Text style={styles.artistSubtitle}>{item.artist}</Text>
-                    <Text
-                      style={[styles.mainHeadline, { color: item.titleColor }]}
-                    >
+                    <Text style={[styles.mainHeadline, { color: item.titleColor }]}>
                       {item.title}
                     </Text>
                   </View>
@@ -152,7 +198,7 @@ export const HeroBanner = () => {
                     >
                       <Ionicons
                         name={isCurrentPlaying ? 'pause' : 'play'}
-                        size={18}
+                        size={17}
                         color="#000000"
                       />
                       <Text style={styles.playButtonText}>
@@ -178,7 +224,7 @@ export const HeroBanner = () => {
                         ) : (
                           <Ionicons
                             name={isAdded ? 'checkmark' : 'add'}
-                            size={18}
+                            size={17}
                             color="#FFFFFF"
                           />
                         )}
@@ -190,22 +236,45 @@ export const HeroBanner = () => {
                   </View>
                 </LinearGradient>
               </ImageBackground>
-            </View>
+            </Animated.View>
           );
         })}
-      </ScrollView>
+      </Animated.ScrollView>
 
-      {/* Slide Indicators */}
+      {/* Smooth animated slide indicators */}
       <View style={styles.indicatorContainer}>
-        {FEATURED_ITEMS.map((_, index) => (
-          <View
-            key={index}
-            style={[
-              styles.indicatorDot,
-              index === activeIndex && styles.indicatorDotActive,
-            ]}
-          />
-        ))}
+        {FEATURED_ITEMS.map((_, index) => {
+          const inputRange = [
+            (index - 1) * SNAP_INTERVAL,
+            index * SNAP_INTERVAL,
+            (index + 1) * SNAP_INTERVAL,
+          ];
+
+          const dotWidth = scrollX.interpolate({
+            inputRange,
+            outputRange: [6, 18, 6],
+            extrapolate: 'clamp',
+          });
+
+          const dotOpacity = scrollX.interpolate({
+            inputRange,
+            outputRange: [0.3, 1.0, 0.3],
+            extrapolate: 'clamp',
+          });
+
+          return (
+            <Animated.View
+              key={index}
+              style={[
+                styles.indicatorDot,
+                {
+                  width: dotWidth,
+                  opacity: dotOpacity,
+                },
+              ]}
+            />
+          );
+        })}
       </View>
     </View>
   );
@@ -216,13 +285,13 @@ const styles = StyleSheet.create({
     marginVertical: 12,
   },
   scrollContent: {
-    paddingHorizontal: 16,
-    gap: 16,
+    gap: CARD_GAP,
+    alignItems: 'center',
   },
   cardWrapper: {
     width: CARD_WIDTH,
     height: CARD_HEIGHT,
-    borderRadius: 24,
+    borderRadius: 22,
     overflow: 'hidden',
     elevation: 12,
     shadowColor: '#000',
@@ -236,13 +305,13 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   imageBorderRadius: {
-    borderRadius: 24,
+    borderRadius: 22,
   },
   gradientOverlay: {
     ...(StyleSheet.absoluteFill as any),
     justifyContent: 'space-between',
-    padding: 20,
-    borderRadius: 24,
+    padding: 18,
+    borderRadius: 22,
   },
   headerTextContainer: {
     marginTop: 6,
@@ -259,7 +328,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   mainHeadline: {
-    fontSize: 24,
+    fontSize: 23,
     fontFamily: 'SF-Bold',
     fontWeight: '900',
     letterSpacing: -0.5,
@@ -272,7 +341,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
-    marginBottom: 4,
+    marginBottom: 2,
     width: '100%',
   },
   playButton: {
@@ -281,9 +350,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 22,
-    paddingVertical: 11,
+    paddingVertical: 10,
     borderRadius: 22,
-    gap: 7,
+    gap: 6,
     elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -301,7 +370,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 18,
-    paddingVertical: 11,
+    paddingVertical: 10,
     borderRadius: 22,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
@@ -325,14 +394,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   indicatorDot: {
-    width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
-  },
-  indicatorDotActive: {
-    width: 18,
     backgroundColor: '#FFFFFF',
-    borderRadius: 3,
   },
 });

@@ -2,7 +2,7 @@
  * CompactMusicCarousel Component
  * Compact modern track carousel where the album artwork is the FULL background of the card,
  * with dark bottom gradient, in-image circular play button, explicit tag,
- * physics-based scroll inertia, and marquee scrolling titles.
+ * physics-based scroll inertia, bouncy elastic scroll edges, and marquee scrolling titles.
  */
 
 import * as React from 'react';
@@ -35,7 +35,7 @@ export interface CompactTrackItem {
 const COMPACT_TRACKS: CompactTrackItem[] = [
   {
     id: 'compact_headlines',
-    spotifyId: '6DCZcSspjsKoFjzjrWoCdn',
+    spotifyId: '2FY7MXti3Mu8Zt597qSz2i',
     title: 'Headlines',
     artist: 'Drake',
     albumName: 'Take Care',
@@ -45,7 +45,7 @@ const COMPACT_TRACKS: CompactTrackItem[] = [
   },
   {
     id: 'compact_dietrying',
-    spotifyId: '2plbrEY59IikOBB5X7x5eG',
+    spotifyId: '3ZffCQKLFLUvOCuVsxc364',
     title: 'DIE TRYING',
     artist: 'PARTYNEXTDOOR, Drake, Yebba',
     albumName: 'PARTYMOBILE',
@@ -55,7 +55,7 @@ const COMPACT_TRACKS: CompactTrackItem[] = [
   },
   {
     id: 'compact_poetas',
-    spotifyId: '4w47dntseeMeuLPzFTKKB9',
+    spotifyId: '5sIC52iprWHz3f2O22bWkL',
     title: 'Poetas no Topo 4',
     artist: 'PineappleStormTV',
     albumName: 'Poetas no Topo 4',
@@ -118,6 +118,9 @@ export const CompactMusicCarousel = () => {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         scrollEventThrottle={16}
+        bounces={true}
+        alwaysBounceHorizontal={true}
+        overScrollMode="always"
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { x: scrollX } } }],
           { useNativeDriver: Platform.OS !== 'web' }

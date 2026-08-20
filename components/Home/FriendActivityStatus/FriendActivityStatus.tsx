@@ -1,9 +1,12 @@
 /**
  * FriendActivityStatus — Instagram Music Notes
  *
- * Tilt physics: velocity-based — all notes share the same animated tilt value.
- * Notes lean opposite to scroll direction while moving, spring back to 0° when stopped.
- * Bubble: compact, single-line marquee for title/artist/text.
+ * Physics:
+ * - Velocity-based dynamic tilt during movement, springing back to 0° when stopped.
+ * - Elastic horizontal scroll bounce at start/end.
+ * - Bubbles aligned to bottom above avatar head so varying heights remain perfectly anchored.
+ * - Genuine album covers passed to player (never user avatar).
+ * - MarqueeText with edge fades on title, artist, and user note.
  */
 
 import * as React from 'react';
@@ -55,7 +58,11 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
       isCurrentUser: true,
     },
-    note: { type: 'text', title: 'Deixe uma nota...' },
+    note: {
+      type: 'text',
+      title: 'Deixe uma nota...',
+      bubbleColor: '#1C1E24',
+    },
   },
   {
     id: 'note_flavia',
@@ -65,10 +72,15 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       nameStyle: 'italic',
     },
     note: {
-      type: 'music', iconType: 'wave',
-      title: 'Canned Heat', subtitle: 'Jamiroquai',
-      spotifyId: '0VjIjW4GlUZAMYd2vXMi3b',
-      artist: 'Jamiroquai', duration_ms: 397000,
+      type: 'music',
+      iconType: 'wave',
+      title: 'Canned Heat',
+      subtitle: 'Jamiroquai',
+      spotifyId: '1A7ODrG8Zg38f1Aee0wZ11',
+      artist: 'Jamiroquai',
+      imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27341ea22e92c68e146eb4a7812',
+      duration_ms: 330000,
+      bubbleColor: '#1C1E24',
     },
   },
   {
@@ -78,11 +90,15 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       avatarUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200&auto=format&fit=crop&q=80',
     },
     note: {
-      type: 'music', iconType: 'wave',
+      type: 'music',
+      iconType: 'wave',
       title: 'Show Me You Do',
       subtitle: 'Alicia Keys',
-      spotifyId: '6DCZcSspjsKoFjzjrWoCdn',
-      artist: 'Alicia Keys', duration_ms: 242000,
+      spotifyId: '76h9hV2L9L8f5gZ7J99g5a',
+      artist: 'Alicia Keys',
+      imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27376a91eb0625902047ff6535d',
+      duration_ms: 242000,
+      bubbleColor: '#1C1E24',
     },
   },
   {
@@ -92,11 +108,15 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       avatarUrl: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=200&auto=format&fit=crop&q=80',
     },
     note: {
-      type: 'music', iconType: 'wave',
+      type: 'music',
+      iconType: 'wave',
       title: 'Quando Bate Aquela Saudade',
       subtitle: 'Rubel',
-      spotifyId: '4w47dntseeMeuLPzFTKKB9',
-      artist: 'Rubel', duration_ms: 198000,
+      spotifyId: '4g4b4a3N9J9g8s7d8f9a2b',
+      artist: 'Rubel',
+      imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b273d22eb74f32ba56e9cce35b1c',
+      duration_ms: 198000,
+      bubbleColor: '#1C1E24',
     },
   },
   {
@@ -106,10 +126,15 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
     },
     note: {
-      type: 'music', iconType: 'wave',
-      title: 'Lonely Day', subtitle: 'System Of A Down',
-      spotifyId: '0d28khcov9ApubBr0GQbfS',
-      artist: 'System Of A Down', duration_ms: 167000,
+      type: 'music',
+      iconType: 'wave',
+      title: 'Lonely Day',
+      subtitle: 'System Of A Down',
+      spotifyId: '1VNav8g8H9f7r5t4e3w2q1',
+      artist: 'System Of A Down',
+      imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b273397982f1b4028448ea92c903',
+      duration_ms: 167000,
+      bubbleColor: '#1C1E24',
     },
   },
   {
@@ -119,10 +144,15 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&auto=format&fit=crop&q=80',
     },
     note: {
-      type: 'music', iconType: 'wave',
-      title: 'Elvira Pagã', subtitle: 'Rita Lee',
-      spotifyId: '6dOtVTDmmpzgGQ9qd0RMiZ',
-      artist: 'Rita Lee', duration_ms: 195000,
+      type: 'music',
+      iconType: 'wave',
+      title: 'Elvira Pagã',
+      subtitle: 'Rita Lee',
+      spotifyId: '5j8h9g7f6d5s4a3z2x1c9v',
+      artist: 'Rita Lee',
+      imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2738faea51fe535bb1dc74c2d43',
+      duration_ms: 195000,
+      bubbleColor: '#1C1E24',
     },
   },
   {
@@ -133,10 +163,15 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       nameStyle: 'star',
     },
     note: {
-      type: 'music', iconType: 'wave',
-      title: 'Ave Maria', subtitle: 'MysticFall27',
-      spotifyId: '2plbrEY59IikOBB5X7x5eG',
-      artist: 'MysticFall27', duration_ms: 215000,
+      type: 'music',
+      iconType: 'wave',
+      title: 'Ave Maria',
+      subtitle: 'MysticFall27',
+      spotifyId: '9z8y7x6w5v4u3t2s1r0q9p',
+      artist: 'MysticFall27',
+      imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b273c52a3be631df815bc1458e0a',
+      duration_ms: 215000,
+      bubbleColor: '#1C1E24',
     },
   },
 ];
@@ -145,25 +180,28 @@ const MY_NOTE_KEY = 'openfy_my_note';
 
 // ── Animated 3-bar wave icon ─────────────────────────────────────────────────
 const SoundWaveIcon = ({ color = '#FFFFFF' }: { color?: string }) => {
-  const a1 = React.useRef(new Animated.Value(7)).current;
-  const a2 = React.useRef(new Animated.Value(13)).current;
-  const a3 = React.useRef(new Animated.Value(8)).current;
+  const a1 = React.useRef(new Animated.Value(6)).current;
+  const a2 = React.useRef(new Animated.Value(12)).current;
+  const a3 = React.useRef(new Animated.Value(7)).current;
   React.useEffect(() => {
-    const loop = Animated.loop(Animated.sequence([
-      Animated.parallel([
-        Animated.timing(a1, { toValue: 14, duration: 300, useNativeDriver: false }),
-        Animated.timing(a2, { toValue: 7, duration: 280, useNativeDriver: false }),
-        Animated.timing(a3, { toValue: 16, duration: 320, useNativeDriver: false }),
-      ]),
-      Animated.parallel([
-        Animated.timing(a1, { toValue: 7, duration: 300, useNativeDriver: false }),
-        Animated.timing(a2, { toValue: 16, duration: 320, useNativeDriver: false }),
-        Animated.timing(a3, { toValue: 8, duration: 280, useNativeDriver: false }),
-      ]),
-    ]));
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(a1, { toValue: 13, duration: 280, useNativeDriver: false }),
+          Animated.timing(a2, { toValue: 6, duration: 260, useNativeDriver: false }),
+          Animated.timing(a3, { toValue: 15, duration: 300, useNativeDriver: false }),
+        ]),
+        Animated.parallel([
+          Animated.timing(a1, { toValue: 6, duration: 280, useNativeDriver: false }),
+          Animated.timing(a2, { toValue: 14, duration: 300, useNativeDriver: false }),
+          Animated.timing(a3, { toValue: 7, duration: 260, useNativeDriver: false }),
+        ]),
+      ])
+    );
     loop.start();
     return () => loop.stop();
-  }, []);
+  }, [a1, a2, a3]);
+
   return (
     <View style={styles.waveContainer}>
       <Animated.View style={[styles.waveBar, { height: a1, backgroundColor: color }]} />
@@ -183,40 +221,42 @@ export const FriendActivityStatus = () => {
   const lastScrollTime = React.useRef(Date.now());
   const decayTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleScroll = React.useCallback((e: any) => {
-    const x = e.nativeEvent.contentOffset.x;
-    const now = Date.now();
-    const dt = Math.max(1, now - lastScrollTime.current);
-    const velocity = (x - lastScrollX.current) / dt; // px per ms
+  const handleScroll = React.useCallback(
+    (e: any) => {
+      const x = e.nativeEvent.contentOffset.x;
+      const now = Date.now();
+      const dt = Math.max(1, now - lastScrollTime.current);
+      const velocity = (x - lastScrollX.current) / dt; // px per ms
 
-    // Scrolling right → velocity > 0 → lean LEFT (negative deg)
-    // Scrolling left  → velocity < 0 → lean RIGHT (positive deg)
-    // Clamp to ±9 degrees
-    const targetDeg = Math.max(-9, Math.min(9, -velocity * 12));
+      // Scrolling right (v > 0) -> tilt left (negative deg)
+      // Scrolling left  (v < 0) -> tilt right (positive deg)
+      const targetDeg = Math.max(-9, Math.min(9, -velocity * 12));
 
-    Animated.spring(tiltAnim, {
-      toValue: targetDeg,
-      useNativeDriver: true,
-      tension: 500,
-      friction: 22,
-      overshootClamping: true,
-    }).start();
-
-    lastScrollX.current = x;
-    lastScrollTime.current = now;
-
-    // Spring back to 0 when scroll stops
-    if (decayTimer.current) clearTimeout(decayTimer.current);
-    decayTimer.current = setTimeout(() => {
       Animated.spring(tiltAnim, {
-        toValue: 0,
+        toValue: targetDeg,
         useNativeDriver: true,
-        tension: 180,
-        friction: 18,
-        overshootClamping: false,
+        tension: 500,
+        friction: 22,
+        overshootClamping: true,
       }).start();
-    }, 50);
-  }, [tiltAnim]);
+
+      lastScrollX.current = x;
+      lastScrollTime.current = now;
+
+      // Spring back to 0 when scroll stops
+      if (decayTimer.current) clearTimeout(decayTimer.current);
+      decayTimer.current = setTimeout(() => {
+        Animated.spring(tiltAnim, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 180,
+          friction: 18,
+          overshootClamping: false,
+        }).start();
+      }, 50);
+    },
+    [tiltAnim]
+  );
 
   // Rotation string interpolation
   const tiltRotation = tiltAnim.interpolate({
@@ -232,7 +272,9 @@ export const FriendActivityStatus = () => {
 
   React.useEffect(() => {
     AsyncStorage.getItem(MY_NOTE_KEY)
-      .then((raw) => { if (raw) setMyNote(JSON.parse(raw)); })
+      .then((raw) => {
+        if (raw) setMyNote(JSON.parse(raw));
+      })
       .catch(() => {});
   }, []);
 
@@ -247,18 +289,22 @@ export const FriendActivityStatus = () => {
   };
 
   const handlePressNote = (item: FriendNoteItem) => {
-    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch {}
+
     if (item.user.isCurrentUser) {
       setIsNoteModalVisible(true);
       return;
     }
+
     if (item.note.spotifyId) {
       playTrack({
         spotifyId: item.note.spotifyId,
         title: item.note.title,
         artistName: item.note.artist || item.note.subtitle || 'Artista',
         albumName: 'Nota Musical',
-        imageURL: item.user.avatarUrl,
+        imageURL: item.note.imageUrl || 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27341ea22e92c68e146eb4a7812',
         duration_ms: item.note.duration_ms || 200000,
       });
     }
@@ -273,6 +319,9 @@ export const FriendActivityStatus = () => {
         contentContainerStyle={styles.scrollContent}
         scrollEventThrottle={8}
         onScroll={handleScroll}
+        bounces={true}
+        alwaysBounceHorizontal={true}
+        overScrollMode="always"
       >
         {FRIEND_NOTES.map((item) => {
           const isThisSongPlaying =
@@ -292,7 +341,6 @@ export const FriendActivityStatus = () => {
               bubbleColor = myNote.bubbleColor || DEFAULT_BUBBLE_COLOR;
               noteTitle = myNote.songTitle || myNote.text || 'Deixe uma nota...';
               noteArtist = myNote.songSpotifyId ? myNote.songArtist : undefined;
-              // Show custom text below artist only when there's also a song
               noteText = myNote.songSpotifyId && myNote.text ? myNote.text : undefined;
               showWave =
                 !!myNote.songSpotifyId &&
@@ -311,52 +359,57 @@ export const FriendActivityStatus = () => {
                 onPress={() => handlePressNote(item)}
                 accessibilityRole="button"
               >
-                {/* Speech Bubble — tilt shared by all */}
-                <Animated.View
-                  style={[
-                    styles.noteBubble,
-                    { backgroundColor: bubbleColor },
-                    { transform: [{ rotate: tiltRotation }] },
-                    isThisSongPlaying && styles.noteBubblePlaying,
-                  ]}
-                >
-                  {/* Row 1: wave icon + title marquee */}
-                  <View style={styles.bubbleRow}>
-                    {showWave && <SoundWaveIcon color="#FFFFFF" />}
-                    <View style={styles.textFlex}>
-                      <MarqueeText
-                        text={noteTitle}
-                        style={styles.noteTitle}
-                        align="left"
-                        fadeWidth={4}
-                      />
+                {/* Bubble Container: anchored to bottom right above avatar */}
+                <View style={styles.bubbleAnchorContainer}>
+                  <Animated.View
+                    style={[
+                      styles.noteBubble,
+                      { backgroundColor: bubbleColor },
+                      { transform: [{ rotate: tiltRotation }] },
+                      isThisSongPlaying && styles.noteBubblePlaying,
+                    ]}
+                  >
+                    {/* Row 1: wave icon + title marquee */}
+                    <View style={styles.bubbleRow}>
+                      {showWave && <SoundWaveIcon color="#FFFFFF" />}
+                      <View style={styles.textFlex}>
+                        <MarqueeText
+                          text={noteTitle}
+                          style={styles.noteTitle}
+                          align="left"
+                          fadeWidth={6}
+                          fadeColor={bubbleColor}
+                        />
+                      </View>
                     </View>
-                  </View>
 
-                  {/* Row 2: artist marquee */}
-                  {noteArtist ? (
-                    <MarqueeText
-                      text={noteArtist}
-                      style={styles.noteArtist}
-                      align="left"
-                      fadeWidth={4}
-                    />
-                  ) : null}
+                    {/* Row 2: artist marquee */}
+                    {noteArtist ? (
+                      <MarqueeText
+                        text={noteArtist}
+                        style={styles.noteArtist}
+                        align="left"
+                        fadeWidth={6}
+                        fadeColor={bubbleColor}
+                      />
+                    ) : null}
 
-                  {/* Row 3: user custom text (max 30 chars) */}
-                  {noteText ? (
-                    <MarqueeText
-                      text={noteText.slice(0, 30)}
-                      style={styles.noteCustomText}
-                      align="left"
-                      fadeWidth={4}
-                    />
-                  ) : null}
+                    {/* Row 3: user custom text (max 30 chars) */}
+                    {noteText ? (
+                      <MarqueeText
+                        text={noteText.slice(0, 30)}
+                        style={styles.noteCustomText}
+                        align="left"
+                        fadeWidth={6}
+                        fadeColor={bubbleColor}
+                      />
+                    ) : null}
 
-                  {/* Speech tail dots */}
-                  <View style={[styles.tailDotMain, { backgroundColor: bubbleColor }]} />
-                  <View style={[styles.tailDotSmall, { backgroundColor: bubbleColor }]} />
-                </Animated.View>
+                    {/* Speech tail dots */}
+                    <View style={[styles.tailDotMain, { backgroundColor: bubbleColor }]} />
+                    <View style={[styles.tailDotSmall, { backgroundColor: bubbleColor }]} />
+                  </Animated.View>
+                </View>
 
                 {/* Stable circular avatar */}
                 <View style={styles.avatarContainer}>
@@ -399,16 +452,36 @@ export const FriendActivityStatus = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { marginVertical: 10 },
-  scrollContent: { paddingHorizontal: 16, gap: 10, alignItems: 'flex-start' },
-  itemWrapper: { alignItems: 'center', width: 100 },
-  pressableItem: { alignItems: 'center', width: '100%' },
-
+  container: {
+    marginVertical: 8,
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    gap: 10,
+    alignItems: 'flex-start',
+  },
+  itemWrapper: {
+    alignItems: 'center',
+    width: 100,
+  },
+  pressableItem: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  // Anchors all bubbles to bottom right above avatar head
+  bubbleAnchorContainer: {
+    height: 56,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    width: '100%',
+    zIndex: 2,
+    marginBottom: -6,
+  },
   noteBubble: {
     width: 97,
     borderRadius: 16,
     paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingVertical: 5,
     justifyContent: 'center',
     zIndex: 2,
     elevation: 6,
@@ -416,12 +489,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.45,
     shadowRadius: 5,
-    marginBottom: -6,
     position: 'relative',
     overflow: 'visible',
   },
   noteBubblePlaying: {
-    borderColor: 'rgba(255,255,255,0.28)',
+    borderColor: 'rgba(255,255,255,0.3)',
     borderWidth: 1,
   },
   bubbleRow: {
@@ -430,17 +502,22 @@ const styles = StyleSheet.create({
     gap: 4,
     overflow: 'hidden',
   },
-  textFlex: { flex: 1, overflow: 'hidden' },
+  textFlex: {
+    flex: 1,
+    overflow: 'hidden',
+  },
   waveContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 2,
-    height: 16,
+    height: 15,
     width: 11,
     flexShrink: 0,
   },
-  waveBar: { width: 2.5, borderRadius: 1.25 },
-
+  waveBar: {
+    width: 2.2,
+    borderRadius: 1.1,
+  },
   noteTitle: {
     color: '#FFFFFF',
     fontSize: 11.5,
@@ -449,42 +526,65 @@ const styles = StyleSheet.create({
     letterSpacing: 0.05,
   },
   noteArtist: {
-    color: 'rgba(255,255,255,0.6)',
+    color: 'rgba(255,255,255,0.65)',
     fontSize: 10,
     fontFamily: 'SimplyRounded',
     marginTop: 1,
   },
   noteCustomText: {
-    color: 'rgba(255,255,255,0.45)',
+    color: 'rgba(255,255,255,0.5)',
     fontSize: 9.5,
     fontFamily: 'SimplyRounded',
     fontStyle: 'italic',
     marginTop: 1,
   },
-
   tailDotMain: {
-    position: 'absolute', bottom: -5, left: 16,
-    width: 7, height: 7, borderRadius: 3.5, zIndex: 3,
+    position: 'absolute',
+    bottom: -5,
+    left: 16,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    zIndex: 3,
   },
   tailDotSmall: {
-    position: 'absolute', bottom: -9, left: 11,
-    width: 4, height: 4, borderRadius: 2, zIndex: 3,
+    position: 'absolute',
+    bottom: -9,
+    left: 11,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    zIndex: 3,
   },
-
   avatarContainer: {
-    width: 70, height: 70, borderRadius: 35,
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     backgroundColor: '#1E1E22',
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: '#1E2024',
-    zIndex: 1, overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#1E2024',
+    zIndex: 1,
+    overflow: 'hidden',
   },
-  avatarImage: { width: '100%', height: '100%' },
-
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
   userNameText: {
-    color: '#E4E4E7', fontSize: 12,
+    color: '#E4E4E7',
+    fontSize: 12,
     fontFamily: 'SimplyRounded',
-    marginTop: 6, textAlign: 'center',
+    marginTop: 6,
+    textAlign: 'center',
   },
-  userNameItalic: { fontFamily: 'SimplyRounded-Italic', fontStyle: 'italic' },
-  userNameBold: { fontFamily: 'SimplyRounded-Bold', fontWeight: '700' },
+  userNameItalic: {
+    fontFamily: 'SimplyRounded-Italic',
+    fontStyle: 'italic',
+  },
+  userNameBold: {
+    fontFamily: 'SimplyRounded-Bold',
+    fontWeight: '700',
+  },
 });
