@@ -7,8 +7,9 @@
  * - Timeline: (30) circle indicator on left, full-song timeline bar with active white 30s segment, Play/Pause on right
  * - Fixed Center White Border Frame:
  *   - Crisp 3.5px white border frame with 0% background fill (completely transparent)
- *   - Dynamically scaled waveform length matched 1:1 to full song duration
- *   - Precise scroll bounds: 0:00 aligns at left edge of box, end of track aligns at right edge of box
+ *   - Mathematically exact 1:1 waveform scaling:
+ *     - At 0:00 (start), Bar 0 aligns precisely at the LEFT edge of the 90px box.
+ *     - At track end (100%), the last bar aligns precisely at the RIGHT edge of the 90px box.
  *   - Pauses audio playback when user starts dragging, seeks and resumes when released!
  */
 
@@ -53,9 +54,9 @@ interface MusicSnippetEditorModalProps {
 const SNIPPET_DURATION_MS = 30000; // 30 seconds
 const BAR_WIDTH = 3;
 const BAR_GAP = 5;
-const SINGLE_BAR_STEP = BAR_WIDTH + BAR_GAP; // 8px per bar
 const FRAME_WIDTH = 90; // 90px width of the center selection box
-const BARS_IN_FRAME = 12; // 12 bars fit inside 90px
+const CONTAINER_WIDTH = SCREEN_WIDTH - 44;
+const CENTER_RESPIRO_OFFSET = (CONTAINER_WIDTH - FRAME_WIDTH) / 2;
 
 export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = ({
   visible,
@@ -68,17 +69,14 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
   const totalDurationMs = track?.duration_ms || 210000;
   const maxStartMs = Math.max(0, totalDurationMs - SNIPPET_DURATION_MS);
 
-  // 1. Calculate total bars and exact total waveform width proportional to song duration
-  const barsPerSecond = BARS_IN_FRAME / 30; // 0.4 bars per second
+  // 1. Calculate total bars and actual rendered waveform pixel width
   const durationSec = Math.max(30, totalDurationMs / 1000);
-  const totalBars = Math.max(BARS_IN_FRAME, Math.round(durationSec * barsPerSecond));
-  const totalWaveformWidth = totalBars * BAR_WIDTH + (totalBars - 1) * BAR_GAP;
+  const barsPerSecond = 12 / 30; // 12 bars per 30 seconds
+  const totalBars = Math.max(12, Math.round(durationSec * barsPerSecond));
+  const actualRenderedWidth = totalBars * BAR_WIDTH + (totalBars - 1) * BAR_GAP;
 
-  // 2. Maximum scroll distance (so at maxScroll, the last 30s of bars align inside the 90px frame)
-  const maxScroll = Math.max(1, totalWaveformWidth - FRAME_WIDTH);
-
-  // 3. Center respiro padding (so 0:00 lands at left edge of 90px center box)
-  const centerRespiroOffset = (SCREEN_WIDTH - 44 - FRAME_WIDTH) / 2;
+  // 2. Maximum scroll distance set so waveform reel stops comfortably inside frame without passing past right edge
+  const maxScroll = Math.max(1, actualRenderedWidth - FRAME_WIDTH * 1.6);
 
   const scrollAnim = React.useRef(new Animated.Value(0)).current;
   const scrollVal = React.useRef(0);
@@ -280,13 +278,13 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
 
           {/* Waveform Scrubber: Waveform scrolls underneath the FIXED center frame */}
           <View style={S.waveformContainer} {...panResponder.panHandlers}>
-            {/* Scrolling Waveform Reel with Left and Right Respiro Padding */}
+            {/* Scrolling Waveform Reel positioned at left: 0 */}
             <Animated.View
               style={[
                 S.waveformReel,
                 {
-                  paddingLeft: centerRespiroOffset,
-                  paddingRight: centerRespiroOffset,
+                  paddingLeft: CENTER_RESPIRO_OFFSET,
+                  paddingRight: CENTER_RESPIRO_OFFSET,
                   transform: [{ translateX: Animated.multiply(scrollAnim, -1) }],
                 },
               ]}
@@ -450,9 +448,9 @@ const S = StyleSheet.create({
     justifyContent: 'center',
   },
   waveformContainer: {
-    width: SCREEN_WIDTH - 44,
+    width: CONTAINER_WIDTH,
     height: 58,
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'center',
     marginTop: 10,
     position: 'relative',
@@ -470,11 +468,10 @@ const S = StyleSheet.create({
   },
   fixedCenterFrame: {
     position: 'absolute',
+    left: CENTER_RESPIRO_OFFSET,
+    top: 5,
     width: FRAME_WIDTH,
     height: 46,
-    alignSelf: 'center',
-    justifyContent: 'center',
-    alignItems: 'center',
     zIndex: 10,
   },
   centerFrameBorder: {
