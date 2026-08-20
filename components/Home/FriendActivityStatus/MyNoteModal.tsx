@@ -1,26 +1,12 @@
 /**
  * MyNoteModal — Instagram Music Notes Editor & Published Sheet
  *
- * Design Architecture:
- * - Native transparent Modal overlay preserving background depth.
- * - Dynamic comfortable modal card height (minHeight: 460) with spacious breathing room.
- * - Top Bar:
- *    - Left: SwiftUI X close icon button (xmark)
- *    - Right: SwiftUI Confirm checkmark icon button (checkmark) using native UI / GlassSurface
- * - Creator Center:
- *    - Avatar with speech bubble fixed at max 97px width matching carousel notes.
- *    - SwiftUI circular action buttons overlaid on avatar (🎵 Music & 🎨 Palette).
- * - Sectioned Color Palette:
- *    - 5 Sectioned color families (Purples, Blues, Greens, Yellows/Oranges, Reds).
- *    - Full-bleed horizontal section swiper (width: SCREEN_WIDTH) with pagingEnabled={true}.
- *    - SQUARE (1:1) swatches centered in a single row per section page with 0 bleed from adjacent pages.
- *    - Synchronized page dots + Aplicar/Limpar buttons.
- * - Music Picker Modal:
- *    - Search bar with inline X close button.
- *    - Compact horizontal tab chips.
- *    - Track selection triggers audio playback via global player.
- *    - Uses exact native MiniPlayer with Checkmark Confirm button.
- * - Published Note View: Exact same note bubble component as home carousel + auto-plays note song.
+ * Requirements:
+ * - Top Bar: SwiftUI X close icon on Left, SwiftUI Checkmark icon on Right.
+ * - Speech Bubble: 97px width, height fit to content (minHeight: 44, maxHeight: 68), anchored to bottom.
+ * - Remove Song X Button: White circular X button on top-right of bubble when a song is attached.
+ * - Music Snippet Mini-Editor: Selecting a music opens MusicSnippetEditorModal to pick 30s portion.
+ * - Sectioned Color Swatches: Full-bleed horizontal section swiper (SQUARE 1:1 swatches) with dynamic height.
  */
 
 import * as React from 'react';
@@ -49,6 +35,7 @@ import { getNoteColorTheme } from '../../../utils/colorContrast';
 import { NativeIconButton } from '../../native/NativeButtons';
 import { GlassSurface } from '../../native/GlassSurface';
 import { MiniPlayer } from '../../Player/MiniPlayer';
+import { MusicSnippetEditorModal } from './MusicSnippetEditorModal';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -60,6 +47,7 @@ export interface MyNote {
   songDuration?: number;
   bubbleColor: string;
   imageUrl?: string;
+  startTimeMs?: number;
 }
 
 interface MyNoteModalProps {
@@ -75,15 +63,10 @@ interface MyNoteModalProps {
 // 5 Sectioned Analogous Color Families (SQUARE 1:1 swatches per page)
 // ──────────────────────────────────────────────────────────────────────────────
 const COLOR_SECTIONS = [
-  // Section 1: Purples & Pinks
   ['#B57BEE', '#8B5CF6', '#7C3AED', '#EC4899', '#F472B6', '#DB2777'],
-  // Section 2: Blues & Cyans
   ['#0EA5E9', '#0284C7', '#2563EB', '#3B82F6', '#06B6D4', '#0891B2'],
-  // Section 3: Greens
   ['#10B981', '#059669', '#16A34A', '#22C55E', '#84CC16', '#65A30D'],
-  // Section 4: Yellows & Warm Oranges
   ['#F59E0B', '#D97706', '#F97316', '#EA580C', '#EAB308', '#CA8A04'],
-  // Section 5: Reds & Deep Accents
   ['#EF4444', '#DC2626', '#E11D48', '#BE123C', '#991B1B', '#475569'],
 ];
 
@@ -211,7 +194,8 @@ const bubbleStyles = StyleSheet.create({
     marginVertical: 10,
   },
   anchor: {
-    height: 56,
+    minHeight: 44,
+    maxHeight: 68,
     justifyContent: 'flex-end',
     alignItems: 'center',
     width: '100%',
@@ -220,7 +204,8 @@ const bubbleStyles = StyleSheet.create({
   },
   bubble: {
     width: 97,
-    height: 56,
+    minHeight: 44,
+    maxHeight: 68,
     borderRadius: 16,
     paddingHorizontal: 8,
     paddingVertical: 5,
@@ -300,9 +285,6 @@ const bubbleStyles = StyleSheet.create({
   },
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Downloaded track type
-// ──────────────────────────────────────────────────────────────────────────────
 interface DownloadedTrack {
   spotifyId: string;
   title: string;
@@ -313,11 +295,6 @@ interface DownloadedTrack {
   duration_ms?: number;
 }
 
-const MUSIC_TABS = ['Para você', 'Em alta', 'Salvos', 'Áudio original'];
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Main Component
-// ──────────────────────────────────────────────────────────────────────────────
 export const MyNoteModal = ({
   visible,
   onClose,
@@ -326,16 +303,18 @@ export const MyNoteModal = ({
   onSave,
   onDelete,
 }: MyNoteModalProps) => {
-  const { playTrack, currentTrack, playerState } = usePlayer();
+  const { playTrack, currentTrack, playerState, togglePlayPause } = usePlayer();
 
   const [isPublishedView, setIsPublishedView] = React.useState(false);
   const [activeBottomSection, setActiveBottomSection] = React.useState<'none' | 'colorPicker'>('none');
   const [isMusicPickerVisible, setIsMusicPickerVisible] = React.useState(false);
+  const [isSnippetEditorVisible, setIsSnippetEditorVisible] = React.useState(false);
 
   // Editor states
   const [noteText, setNoteText] = React.useState('');
   const [selectedSong, setSelectedSong] = React.useState<DownloadedTrack | null>(null);
   const [bubbleColor, setBubbleColor] = React.useState(DEFAULT_COLOR);
+  const [selectedSnippetStart, setSelectedSnippetStart] = React.useState<number | undefined>(undefined);
 
   // Section page index
   const [colorPage, setColorPage] = React.useState(0);
@@ -343,7 +322,6 @@ export const MyNoteModal = ({
 
   // Music picker search & preview state
   const [searchQuery, setSearchQuery] = React.useState('');
-  const [musicTab, setMusicTab] = React.useState(0);
   const [downloadedTracks, setDownloadedTracks] = React.useState<DownloadedTrack[]>([]);
   const [previewTrack, setPreviewTrack] = React.useState<DownloadedTrack | null>(null);
 
@@ -401,6 +379,7 @@ export const MyNoteModal = ({
       setBubbleColor(DEFAULT_COLOR);
       setSelectedSong(null);
       setPreviewTrack(null);
+      setSelectedSnippetStart(undefined);
     }
   }, [visible, currentNote]);
 
@@ -417,6 +396,7 @@ export const MyNoteModal = ({
       songDuration: selectedSong?.duration_ms,
       bubbleColor,
       imageUrl: selectedSong?.imageURL,
+      startTimeMs: selectedSnippetStart,
     });
     onClose();
   };
@@ -565,8 +545,24 @@ export const MyNoteModal = ({
 
             {/* Center Area: Avatar with Compact 97px Speech Bubble */}
             <View style={S.creatorCenter}>
-              {/* Bubble with 97px max width matching carousel */}
+              {/* Bubble with 97px width matching carousel */}
               <View style={[S.editorBubble, { backgroundColor: bubbleColor }]}>
+                {/* White Circular X Close Button on Top-Right of Bubble when Song is Attached */}
+                {selectedSong && (
+                  <TouchableOpacity
+                    style={S.removeSongXBtn}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      try {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      } catch {}
+                      setSelectedSong(null);
+                    }}
+                  >
+                    <Ionicons name="close" size={12} color="#000000" />
+                  </TouchableOpacity>
+                )}
+
                 <View style={S.editorBubbleInner}>
                   {selectedSong && <SoundWaveIcon size={12} color={colorTheme.waveColor} />}
                   <View style={{ flex: 1, overflow: 'hidden' }}>
@@ -617,7 +613,8 @@ export const MyNoteModal = ({
                     )}
                   </View>
                 </View>
-                {/* Speech tail dots */}
+
+                {/* Speech tail dots pointing inwards toward avatar head */}
                 <View style={[S.editorDot1, { backgroundColor: bubbleColor }]} />
                 <View style={[S.editorDot2, { backgroundColor: bubbleColor }]} />
               </View>
@@ -841,12 +838,12 @@ export const MyNoteModal = ({
               }}
             />
 
-            {/* Exact Native MiniPlayer Rendered Over Music Picker with Checkmark Confirm */}
+            {/* Exact Native MiniPlayer Rendered Over Music Picker with Right Arrow Confirm Button */}
             {previewTrack && (
               <MiniPlayer
                 onConfirm={() => {
-                  setSelectedSong(previewTrack);
                   setIsMusicPickerVisible(false);
+                  setIsSnippetEditorVisible(true);
                 }}
                 style={S.musicPickerMiniPlayer}
               />
@@ -854,6 +851,26 @@ export const MyNoteModal = ({
           </View>
         </View>
       </Modal>
+
+      {/* ────────────────────────────────────────────────────────────────── */}
+      {/* MUSIC 30-SECOND SNIPPET MINI-EDITOR MODAL                           */}
+      {/* ────────────────────────────────────────────────────────────────── */}
+      <MusicSnippetEditorModal
+        visible={isSnippetEditorVisible}
+        track={previewTrack}
+        onClose={() => setIsSnippetEditorVisible(false)}
+        onChangeMusic={() => {
+          setIsSnippetEditorVisible(false);
+          setIsMusicPickerVisible(true);
+        }}
+        onConfirmSnippet={({ startTimeMs }) => {
+          if (previewTrack) {
+            setSelectedSong(previewTrack);
+            setSelectedSnippetStart(startTimeMs);
+          }
+          setIsSnippetEditorVisible(false);
+        }}
+      />
     </Modal>
   );
 };
@@ -981,7 +998,8 @@ const S = StyleSheet.create({
   },
   editorBubble: {
     width: 97,
-    height: 56,
+    minHeight: 44,
+    maxHeight: 68,
     borderRadius: 16,
     paddingHorizontal: 8,
     paddingVertical: 5,
@@ -993,6 +1011,23 @@ const S = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.4,
     shadowRadius: 5,
+  },
+  removeSongXBtn: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
   },
   editorBubbleInner: {
     flexDirection: 'row',
@@ -1197,35 +1232,6 @@ const S = StyleSheet.create({
     backgroundColor: '#2C2C2E',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  tabsContainer: {
-    height: 36,
-    marginBottom: 10,
-  },
-  tabsContent: {
-    paddingHorizontal: 16,
-    gap: 8,
-    alignItems: 'center',
-  },
-  tabChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#2C2C2E',
-    height: 32,
-    justifyContent: 'center',
-  },
-  tabChipActive: {
-    backgroundColor: '#FFFFFF',
-  },
-  tabChipText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 12.5,
-    fontFamily: 'SimplyRounded-Bold',
-    fontWeight: '600',
-  },
-  tabChipTextActive: {
-    color: '#000000',
   },
   musicList: {
     flex: 1,

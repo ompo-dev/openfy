@@ -473,7 +473,8 @@ const styles = StyleSheet.create({
   },
   // Anchors all bubbles to bottom right above avatar head
   bubbleAnchorContainer: {
-    height: 56,
+    minHeight: 44,
+    maxHeight: 68,
     justifyContent: 'flex-end',
     alignItems: 'center',
     width: '100%',
@@ -482,7 +483,8 @@ const styles = StyleSheet.create({
   },
   noteBubble: {
     width: 97,
-    height: 56,
+    minHeight: 44,
+    maxHeight: 68,
     borderRadius: 16,
     paddingHorizontal: 8,
     paddingVertical: 5,

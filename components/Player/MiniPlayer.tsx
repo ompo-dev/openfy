@@ -46,7 +46,10 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
 
   const progress =
     playerState.durationMs > 0
-      ? Math.min(1, Math.max(0, playerState.positionMs / playerState.durationMs))
+      ? Math.min(
+          1,
+          Math.max(0, playerState.positionMs / playerState.durationMs)
+        )
       : 0;
 
   const handlePlayPause = () => {
@@ -136,25 +139,6 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
 
               {/* Right: Audio Output Device & Play/Pause / Confirm Button */}
               <View style={styles.controlsContainer}>
-                {!onConfirm && (
-                  <LoggedPressable
-                    style={styles.deviceBtn}
-                    hitSlop={12}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      handleDevicePress();
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel="Dispositivos de Áudio"
-                  >
-                    <Ionicons
-                      name="tv-outline"
-                      size={22}
-                      color="rgba(255, 255, 255, 0.85)"
-                    />
-                  </LoggedPressable>
-                )}
-
                 <LoggedPressable
                   style={styles.playBtn}
                   hitSlop={12}
@@ -163,13 +147,17 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
                     handlePlayPause();
                   }}
                   accessibilityRole="button"
-                  accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'}
+                  accessibilityLabel={
+                    playerState.isPlaying ? 'Pausar' : 'Tocar'
+                  }
                 >
                   <Ionicons
                     name={playerState.isPlaying ? 'pause' : 'play'}
                     size={24}
                     color="#FFFFFF"
-                    style={!playerState.isPlaying ? { marginLeft: 2 } : undefined}
+                    style={
+                      !playerState.isPlaying ? { marginLeft: 2 } : undefined
+                    }
                   />
                 </LoggedPressable>
 
@@ -180,7 +168,9 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
                     onPress={(e) => {
                       e.stopPropagation();
                       try {
-                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                        Haptics.notificationAsync(
+                          Haptics.NotificationFeedbackType.Success
+                        );
                       } catch {}
                       onConfirm();
                     }}
