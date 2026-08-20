@@ -2,22 +2,31 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
 );
 
-jest.mock('expo-av', () => ({
-  Audio: {
-    setAudioModeAsync: jest.fn(),
-    Sound: {
-      createAsync: jest.fn().mockResolvedValue({
-        sound: {
-          unloadAsync: jest.fn(),
-          playAsync: jest.fn(),
-          pauseAsync: jest.fn(),
-          setPositionAsync: jest.fn(),
-          getStatusAsync: jest.fn().mockResolvedValue({ isLoaded: true, isPlaying: false, positionMillis: 0, durationMillis: 10000 }),
-        },
-      }),
+jest.mock(
+  'expo-av',
+  () => ({
+    Audio: {
+      setAudioModeAsync: jest.fn(),
+      Sound: {
+        createAsync: jest.fn().mockResolvedValue({
+          sound: {
+            unloadAsync: jest.fn(),
+            playAsync: jest.fn(),
+            pauseAsync: jest.fn(),
+            setPositionAsync: jest.fn(),
+            getStatusAsync: jest.fn().mockResolvedValue({
+              isLoaded: true,
+              isPlaying: false,
+              positionMillis: 0,
+              durationMillis: 10000,
+            }),
+          },
+        }),
+      },
     },
-  },
-}));
+  }),
+  { virtual: true }
+);
 
 jest.mock('expo-clipboard', () => ({
   getStringAsync: jest.fn().mockResolvedValue(''),
@@ -37,3 +46,6 @@ jest.mock('expo-file-system', () => ({
   deleteAsync: jest.fn().mockResolvedValue(undefined),
   EncodingType: { UTF8: 'utf8' },
 }));
+const matchers = require('@testing-library/react-native/matchers');
+
+expect.extend(matchers);

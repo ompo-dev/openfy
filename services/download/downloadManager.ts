@@ -37,9 +37,32 @@ export type DownloadProgress = {
   error?: string;
 };
 
+export type DownloadTrackInput = {
+  spotifyId: string;
+  title: string;
+  artistName: string;
+  albumName: string;
+  imageURL: string;
+  duration_ms: number;
+};
+
+export type PendingDownload = {
+  track: DownloadTrackInput;
+  audioUrl?: string;
+  audioFormat: string;
+  queuedAt: string;
+  attempts: number;
+  lastAttemptAt?: string;
+};
+
 const DOWNLOADS_STORAGE_KEY = 'openfy_downloads';
+const PENDING_DOWNLOADS_STORAGE_KEY = 'openfy_pending_downloads';
 const DOWNLOADS_DIR = `${FileSystem.documentDirectory || ''}openfy_downloads/`;
 const COVERS_DIR = `${FileSystem.documentDirectory || ''}openfy_covers/`;
+const activeDownloads = new Map<string, Promise<DownloadedTrack | null>>();
+const BACKGROUND_RETRY_BASE_MS = 15 * 60 * 1000;
+const BACKGROUND_RETRY_MAX_MS = 6 * 60 * 60 * 1000;
+const MAX_BACKGROUND_ATTEMPTS = 8;
 
 /**
  * Ensure download directories exist
@@ -79,6 +102,87 @@ export const getDownloadedTracks = async (): Promise<DownloadedTrack[]> => {
  */
 const saveDownloadedTracks = async (tracks: DownloadedTrack[]): Promise<void> => {
   await AsyncStorage.setItem(DOWNLOADS_STORAGE_KEY, JSON.stringify(tracks));
+};
+
+export const getPendingDownloads = async (): Promise<PendingDownload[]> => {
+  try {
+    const stored = await AsyncStorage.getItem(PENDING_DOWNLOADS_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored) as unknown;
+    return Array.isArray(parsed) ? (parsed as PendingDownload[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+const savePendingDownloads = async (
+  downloads: PendingDownload[]
+): Promise<void> => {
+  await AsyncStorage.setItem(
+    PENDING_DOWNLOADS_STORAGE_KEY,
+    JSON.stringify(downloads)
+  );
+};
+
+const upsertPendingDownload = async (
+  track: DownloadTrackInput,
+  audioUrl?: string,
+  audioFormat = 'mp3'
+): Promise<void> => {
+  const downloads = await getPendingDownloads();
+  const existing = downloads.find(
+    (candidate) => candidate.track.spotifyId === track.spotifyId
+  );
+  const next: PendingDownload = {
+    track,
+    audioUrl,
+    audioFormat,
+    queuedAt: existing?.queuedAt || new Date().toISOString(),
+    attempts: existing?.attempts || 0,
+    lastAttemptAt: new Date().toISOString(),
+  };
+  await savePendingDownloads([
+    ...downloads.filter(
+      (candidate) => candidate.track.spotifyId !== track.spotifyId
+    ),
+    next,
+  ]);
+};
+
+const removePendingDownload = async (spotifyId: string): Promise<void> => {
+  const downloads = await getPendingDownloads();
+  await savePendingDownloads(
+    downloads.filter((candidate) => candidate.track.spotifyId !== spotifyId)
+  );
+};
+
+const recordPendingDownloadFailure = async (spotifyId: string): Promise<void> => {
+  const downloads = await getPendingDownloads();
+  await savePendingDownloads(
+    downloads.map((candidate) =>
+      candidate.track.spotifyId === spotifyId
+        ? {
+            ...candidate,
+            attempts: candidate.attempts + 1,
+            lastAttemptAt: new Date().toISOString(),
+          }
+        : candidate
+    )
+  );
+};
+
+const canRetryPendingDownload = (download: PendingDownload): boolean => {
+  if (download.attempts >= MAX_BACKGROUND_ATTEMPTS) return false;
+  if (!download.lastAttemptAt || download.attempts === 0) return true;
+
+  const previousAttempt = new Date(download.lastAttemptAt).getTime();
+  if (Number.isNaN(previousAttempt)) return true;
+
+  const delay = Math.min(
+    BACKGROUND_RETRY_MAX_MS,
+    BACKGROUND_RETRY_BASE_MS * 2 ** Math.max(0, download.attempts - 1)
+  );
+  return Date.now() - previousAttempt >= delay;
 };
 
 /**
@@ -258,7 +362,7 @@ export const downloadAudio = async (
       const downloadResumable = FileSystem.createDownloadResumable(
         audioUrl,
         localPath,
-        {},
+        { sessionType: FileSystem.FileSystemSessionType.BACKGROUND },
         (downloadProgress) => {
           const progress =
             downloadProgress.totalBytesWritten /
@@ -280,7 +384,9 @@ export const downloadAudio = async (
 
     // 3. Fallback to FileSystem.downloadAsync
     try {
-      const directResult = await FileSystem.downloadAsync(audioUrl, localPath);
+      const directResult = await FileSystem.downloadAsync(audioUrl, localPath, {
+        sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+      });
       if (directResult?.uri) {
         const fileInfo = await FileSystem.getInfoAsync(directResult.uri);
         if (fileInfo.exists && fileInfo.size && fileInfo.size > 50000) {
@@ -310,7 +416,9 @@ export const downloadCover = async (
     await ensureDirectories();
     const localPath = `${COVERS_DIR}${trackId}.jpg`;
 
-    const result = await FileSystem.downloadAsync(imageUrl, localPath);
+    const result = await FileSystem.downloadAsync(imageUrl, localPath, {
+      sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+    });
     return result.uri;
   } catch (error) {
     console.error('[DownloadManager] Cover download failed:', error);
@@ -321,20 +429,14 @@ export const downloadCover = async (
 /**
  * Full download pipeline: audio + cover + lyrics + metadata
  */
-export const downloadTrack = async (
-  track: {
-    spotifyId: string;
-    title: string;
-    artistName: string;
-    albumName: string;
-    imageURL: string;
-    duration_ms: number;
-  },
+const downloadTrackInternal = async (
+  track: DownloadTrackInput,
   audioUrl?: string,
   audioFormat: string = 'mp3',
   onProgress?: (progress: number) => void
 ): Promise<DownloadedTrack | null> => {
   try {
+    await upsertPendingDownload(track, audioUrl, audioFormat);
     const trackId = `track_${track.spotifyId}`;
 
     let resolvedUrl = audioUrl;
@@ -360,12 +462,34 @@ export const downloadTrack = async (
     }
 
     // Download audio file
-    const localAudioPath = await downloadAudio(
+    let localAudioPath = await downloadAudio(
       resolvedUrl,
       trackId,
       format,
       (p) => onProgress?.(p * 0.7)
     );
+
+    // Stream URLs can expire while the OS waits to run a background task.
+    // Resolve once more before marking the queued item as failed.
+    if (!localAudioPath && audioUrl) {
+      const refreshed = await resolveAudioUrl(
+        track.title,
+        track.artistName,
+        track.spotifyId,
+        track.duration_ms
+      );
+      if (refreshed?.url && refreshed.url !== resolvedUrl) {
+        resolvedUrl = refreshed.url;
+        format = refreshed.format || format;
+        await upsertPendingDownload(track, resolvedUrl, format);
+        localAudioPath = await downloadAudio(
+          resolvedUrl,
+          trackId,
+          format,
+          (p) => onProgress?.(p * 0.7)
+        );
+      }
+    }
 
     if (!localAudioPath) {
       throw new Error('Audio file download failed to produce valid local file');
@@ -417,14 +541,76 @@ export const downloadTrack = async (
       (t) => t.spotifyId !== track.spotifyId
     );
     await saveDownloadedTracks([...filtered, downloadedTrack]);
+    await removePendingDownload(track.spotifyId);
 
     onProgress?.(1.0);
     console.log(`[DownloadManager] Successfully downloaded track "${track.title}" to ${localAudioPath}`);
     return downloadedTrack;
   } catch (error) {
+    try {
+      await recordPendingDownloadFailure(track.spotifyId);
+    } catch {}
     console.error('[DownloadManager] Track download failed:', error);
     return null;
   }
+};
+
+/**
+ * Downloads a track while persisting enough context to resume it in the next
+ * system-scheduled background window if the app is suspended mid-transfer.
+ */
+export const downloadTrack = (
+  track: DownloadTrackInput,
+  audioUrl?: string,
+  audioFormat: string = 'mp3',
+  onProgress?: (progress: number) => void
+): Promise<DownloadedTrack | null> => {
+  const active = activeDownloads.get(track.spotifyId);
+  if (active) return active;
+
+  const request = downloadTrackInternal(
+    track,
+    audioUrl,
+    audioFormat,
+    onProgress
+  );
+  activeDownloads.set(track.spotifyId, request);
+  request.finally(() => activeDownloads.delete(track.spotifyId)).catch(() => {});
+  return request;
+};
+
+/**
+ * Processes persisted downloads after Expo wakes the app in a background task.
+ * The OS owns scheduling, so this is deliberately bounded and idempotent.
+ */
+export const processPendingDownloads = async (
+  maxDownloads = 1
+): Promise<{ completed: number; failed: number }> => {
+  const pending = await getPendingDownloads();
+  let completed = 0;
+  let failed = 0;
+
+  const eligible = pending.filter(canRetryPendingDownload);
+  for (const candidate of eligible.slice(0, Math.max(1, maxDownloads))) {
+    if (await isTrackDownloaded(candidate.track.spotifyId)) {
+      await removePendingDownload(candidate.track.spotifyId);
+      completed += 1;
+      continue;
+    }
+
+    const downloaded = await downloadTrack(
+      candidate.track,
+      candidate.audioUrl,
+      candidate.audioFormat
+    );
+    if (downloaded) {
+      completed += 1;
+    } else {
+      failed += 1;
+    }
+  }
+
+  return { completed, failed };
 };
 
 /**

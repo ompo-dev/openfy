@@ -10,6 +10,13 @@ import {
 } from 'expo-audio';
 import type { AudioPlayer } from 'expo-audio/build/AudioModule.types';
 
+export type LockScreenMetadata = {
+  title: string;
+  artist: string;
+  albumTitle?: string;
+  artworkUrl?: string;
+};
+
 export type PlayerState = {
   isPlaying: boolean;
   isBuffering: boolean;
@@ -60,11 +67,15 @@ export const configureAudioSession = async (): Promise<void> => {
  */
 export const loadAndPlay = async (
   uri: string,
-  onStatusUpdate?: (state: PlayerState) => void
+  onStatusUpdate?: (state: PlayerState) => void,
+  lockScreenMetadata?: LockScreenMetadata
 ): Promise<boolean> => {
   try {
     // Unload existing player
     if (playerInstance) {
+      try {
+        playerInstance.clearLockScreenControls();
+      } catch {}
       try {
         playerInstance.remove();
       } catch {}
@@ -78,6 +89,17 @@ export const loadAndPlay = async (
 
     const player = createAudioPlayer(uri, { updateInterval: 100 });
     playerInstance = player;
+
+    if (lockScreenMetadata) {
+      try {
+        player.setActiveForLockScreen(true, lockScreenMetadata, {
+          showSeekBackward: true,
+          showSeekForward: true,
+        });
+      } catch (error) {
+        console.warn('[PlayerService] Lock screen controls unavailable:', error);
+      }
+    }
 
     player.addListener('playbackStatusUpdate', (status: AudioStatus) => {
       const state = toState(status);
@@ -145,6 +167,9 @@ export const unload = async (): Promise<void> => {
   if (!playerInstance) return;
   try {
     playerInstance.pause();
+    try {
+      playerInstance.clearLockScreenControls();
+    } catch {}
     playerInstance.remove();
     playerInstance = null;
     if (typeof window !== 'undefined' && typeof document !== 'undefined') {

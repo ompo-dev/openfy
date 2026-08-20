@@ -11,6 +11,7 @@ import { useFonts } from 'expo-font';
 
 import { LibrarySelectedCategoryProvider, UserDataProvider, PlayerProvider } from '@context';
 import { MiniPlayer, FullPlayer } from '@components';
+import { registerBackgroundDownloadTask } from '@services';
 
 import 'react-native-reanimated';
 
@@ -47,6 +48,10 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [fontsLoaded]);
+
+  React.useEffect(() => {
+    registerBackgroundDownloadTask().catch(() => {});
+  }, []);
 
   if (!fontsLoaded) {
     return null;

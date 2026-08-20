@@ -312,7 +312,12 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       }
     };
 
-    const success = await loadAndPlay(streamUri, handleStatusUpdate);
+    const success = await loadAndPlay(streamUri, handleStatusUpdate, {
+      title: track.title,
+      artist: track.artistName,
+      albumTitle: track.albumName,
+      artworkUrl: track.imageURL,
+    });
 
     if (get().activeRequestId !== requestId) return;
 
@@ -350,7 +355,12 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       );
       if (get().activeRequestId === requestId && fallbackResolved?.url) {
         streamCache.set(cacheKey, fallbackResolved.url);
-        await loadAndPlay(fallbackResolved.url, handleStatusUpdate);
+        await loadAndPlay(fallbackResolved.url, handleStatusUpdate, {
+          title: track.title,
+          artist: track.artistName,
+          albumTitle: track.albumName,
+          artworkUrl: track.imageURL,
+        });
       }
     }
   },

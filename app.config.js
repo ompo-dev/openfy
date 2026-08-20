@@ -10,7 +10,9 @@ module.exports = {
     ios: {
       bundleIdentifier: 'com.openfy.app',
       icon: './assets/images/logo.png',
-      appleTeamId: '0000000000',
+      ...(process.env.IOS_APPLE_TEAM_ID
+        ? { appleTeamId: process.env.IOS_APPLE_TEAM_ID }
+        : {}),
       supportsTablet: false,
     },
     android: {
@@ -27,6 +29,13 @@ module.exports = {
     },
     plugins: [
       'expo-router',
+      [
+        'expo-audio',
+        {
+          enableBackgroundPlayback: true,
+        },
+      ],
+      'expo-background-task',
       [
         'expo-splash-screen',
         {

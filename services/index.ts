@@ -17,12 +17,21 @@ export {
   isTrackDownloaded,
   deleteDownloadedTrack,
   ensureDirectories,
+  getPendingDownloads,
+  processPendingDownloads,
 } from './download/downloadManager';
 export type {
   DownloadedTrack,
   DownloadStatus,
   DownloadProgress,
+  DownloadTrackInput,
+  PendingDownload,
 } from './download/downloadManager';
+
+export {
+  BACKGROUND_DOWNLOAD_TASK,
+  registerBackgroundDownloadTask,
+} from './background/backgroundDownloads';
 
 export {
   loadAndPlay,
