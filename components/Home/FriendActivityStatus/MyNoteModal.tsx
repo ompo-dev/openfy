@@ -1,27 +1,22 @@
 /**
  * MyNoteModal — Instagram Music Notes Editor & Published Sheet
  *
- * Architecture:
- * - Native transparent Modal sheet preserving background depth.
- * - Mathematical font contrast auto-adjustment (getNoteColorTheme) so text is crystal clear on any background.
- * - Inline footer toggle: Default Share Bar <-> Color Palette Selector.
- * - Paged 8-swatch Analogous Color Sections (only 1 section visible at a time, 4x2 grid, smooth horizontal swipe).
- * - Music Picker Modal:
- *    - Search bar with X close button inline on the same row.
- *    - Compact horizontal tab chips (Para você, Em alta, Salvos, Áudio original).
- *    - Uses real MiniPlayer / playTrack for authentic playback.
- *    - Floating preview confirmation bar with play/pause and SwiftUI checkmark confirm button.
- * - Published Note View: Exact same note bubble component as home carousel + auto-plays the note's song.
+ * Requirements:
+ * - Top Bar: X close button on top-left, OK/Confirm button on top-right.
+ * - Speech Bubble: Compact 97px width matching home carousel.
+ * - Text Contrast: Warm amber/charcoal tint for light bubbles (NEVER pure black), pure white for dark.
+ * - Color Swatches: Single horizontal row of SQUARE (1:1) swatches scrolling continuously with bounces.
+ * - Native MiniPlayer: Uses app's global playTrack and native MiniPlayer directly.
+ * - Modal Responsiveness: Dynamic content-based height (minHeight 280, maxHeight 85%).
+ * - Published Note View: Exact same note bubble component as home carousel + auto-plays note song.
  */
 
 import * as React from 'react';
 import {
   Animated,
-  Dimensions,
   FlatList,
   Image,
   KeyboardAvoidingView,
-  LayoutChangeEvent,
   Modal,
   Platform,
   Pressable,
@@ -38,8 +33,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePlayer } from '@context';
 import { MarqueeText } from '../../common/MarqueeText';
 import { getNoteColorTheme } from '../../../utils/colorContrast';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export interface MyNote {
   text: string;
@@ -61,19 +54,15 @@ interface MyNoteModalProps {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// 5 Harmonious Analogous Color Families — Exactly 8 colors per section
+// Square Swatches Color List (Single row, smooth horizontal scroll)
 // ──────────────────────────────────────────────────────────────────────────────
-const COLOR_SECTIONS = [
-  // Section 1: Purples & Pinks (8 analogous shades)
-  ['#D8B4FE', '#C084FC', '#A855F7', '#9333EA', '#7E22CE', '#F472B6', '#EC4899', '#DB2777'],
-  // Section 2: Blues & Cyans (8 analogous shades)
-  ['#7DD3FC', '#38BDF8', '#0EA5E9', '#0284C7', '#0369A1', '#2563EB', '#06B6D4', '#0891B2'],
-  // Section 3: Greens (8 analogous shades)
-  ['#86EFAC', '#4ADE80', '#22C55E', '#16A34A', '#15803D', '#10B981', '#059669', '#84CC16'],
-  // Section 4: Yellows & Warm Oranges (8 analogous shades)
-  ['#FDE047', '#FACC15', '#EAB308', '#CA8A04', '#FB923C', '#F97316', '#EA580C', '#C2410C'],
-  // Section 5: Reds & Deep Accents (8 analogous shades)
-  ['#FCA5A5', '#F87171', '#EF4444', '#DC2626', '#B91C1C', '#FB7185', '#F43F5E', '#E11D48'],
+const COLOR_SWATCHES = [
+  '#1C1E24', '#B57BEE', '#8B5CF6', '#7C3AED', '#6D28D9',
+  '#EC4899', '#F472B6', '#DB2777', '#9D174D',
+  '#0EA5E9', '#0284C7', '#2563EB', '#3B82F6', '#06B6D4',
+  '#10B981', '#059669', '#16A34A', '#22C55E', '#84CC16',
+  '#F59E0B', '#D97706', '#F97316', '#EA580C', '#EAB308',
+  '#EF4444', '#DC2626', '#E11D48', '#BE123C', '#991B1B',
 ];
 
 const DEFAULT_COLOR = '#1C1E24';
@@ -196,7 +185,7 @@ const IdenticalNoteBubble = ({
 const bubbleStyles = StyleSheet.create({
   wrapper: {
     alignItems: 'center',
-    width: 110,
+    width: 100,
     marginVertical: 10,
   },
   anchor: {
@@ -314,11 +303,10 @@ export const MyNoteModal = ({
   onSave,
   onDelete,
 }: MyNoteModalProps) => {
-  const { playTrack, currentTrack, playerState, togglePlayPause } = usePlayer();
+  const { playTrack, currentTrack, playerState } = usePlayer();
 
-  // Mode: 'published' or 'editor'
   const [isPublishedView, setIsPublishedView] = React.useState(false);
-  const [activeBottomSection, setActiveBottomSection] = React.useState<'share' | 'colorPicker'>('share');
+  const [activeBottomSection, setActiveBottomSection] = React.useState<'none' | 'colorPicker'>('none');
   const [isMusicPickerVisible, setIsMusicPickerVisible] = React.useState(false);
 
   // Editor states
@@ -326,18 +314,12 @@ export const MyNoteModal = ({
   const [selectedSong, setSelectedSong] = React.useState<DownloadedTrack | null>(null);
   const [bubbleColor, setBubbleColor] = React.useState(DEFAULT_COLOR);
 
-  // Color picker container width & carousel page
-  const [colorContainerWidth, setColorContainerWidth] = React.useState(SCREEN_WIDTH - 40);
-  const [colorPage, setColorPage] = React.useState(0);
-  const colorScrollRef = React.useRef<ScrollView>(null);
-
-  // Music picker search & preview state
+  // Music picker search
   const [searchQuery, setSearchQuery] = React.useState('');
   const [musicTab, setMusicTab] = React.useState(0);
   const [downloadedTracks, setDownloadedTracks] = React.useState<DownloadedTrack[]>([]);
-  const [previewTrack, setPreviewTrack] = React.useState<DownloadedTrack | null>(null);
 
-  // Load downloaded tracks from AsyncStorage
+  // Load downloaded tracks
   React.useEffect(() => {
     if (isMusicPickerVisible) {
       AsyncStorage.getItem('openfy_downloads')
@@ -373,7 +355,7 @@ export const MyNoteModal = ({
           : null
       );
 
-      // Auto-play the note's song if it exists and isn't playing
+      // Auto-play the note's song via global player
       if (currentNote.songSpotifyId && currentTrack?.spotifyId !== currentNote.songSpotifyId) {
         playTrack({
           spotifyId: currentNote.songSpotifyId,
@@ -386,15 +368,14 @@ export const MyNoteModal = ({
       }
     } else {
       setIsPublishedView(false);
-      setActiveBottomSection('share');
+      setActiveBottomSection('none');
       setNoteText('');
       setBubbleColor(DEFAULT_COLOR);
       setSelectedSong(null);
-      setPreviewTrack(null);
     }
   }, [visible, currentNote]);
 
-  const handleShare = () => {
+  const handleConfirmSave = () => {
     try {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {}
@@ -411,22 +392,7 @@ export const MyNoteModal = ({
     onClose();
   };
 
-  const handleColorLayout = (e: LayoutChangeEvent) => {
-    const w = e.nativeEvent.layout.width;
-    if (w > 0 && Math.abs(w - colorContainerWidth) > 1) {
-      setColorContainerWidth(w);
-    }
-  };
-
-  const handleColorScroll = (e: any) => {
-    const x = e.nativeEvent.contentOffset.x;
-    if (colorContainerWidth > 0) {
-      const page = Math.round(x / colorContainerWidth);
-      setColorPage(Math.max(0, Math.min(COLOR_SECTIONS.length - 1, page)));
-    }
-  };
-
-  const canShare = noteText.trim().length > 0 || selectedSong !== null;
+  const canConfirm = noteText.trim().length > 0 || selectedSong !== null;
 
   const filteredTracks = searchQuery.trim()
     ? downloadedTracks.filter(
@@ -436,7 +402,7 @@ export const MyNoteModal = ({
       )
     : downloadedTracks;
 
-  // Active color theme with mathematical contrast
+  // Active color theme with mathematical contrast (NEVER pure black)
   const colorTheme = getNoteColorTheme(bubbleColor);
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -454,7 +420,7 @@ export const MyNoteModal = ({
           <Pressable style={S.publishedSheet} onPress={(e) => e.stopPropagation()}>
             <View style={S.handle} />
 
-            {/* Identical note bubble as in home carousel */}
+            {/* Identical note bubble component as in home carousel */}
             <IdenticalNoteBubble
               note={currentNote}
               avatarUrl={avatarUrl}
@@ -486,7 +452,7 @@ export const MyNoteModal = ({
                 setNoteText('');
                 setSelectedSong(null);
                 setBubbleColor(DEFAULT_COLOR);
-                setActiveBottomSection('share');
+                setActiveBottomSection('none');
               }}
             >
               <Text style={S.swiftUiPrimaryBtnText}>Deixar uma nova nota</Text>
@@ -513,7 +479,7 @@ export const MyNoteModal = ({
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // SCREEN 2: Note Creator (Centered Transparent Modal)
+  // SCREEN 2: Note Creator (Dynamic Content-Based Responsive Height Modal)
   // ──────────────────────────────────────────────────────────────────────────
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -523,7 +489,7 @@ export const MyNoteModal = ({
           style={S.creatorModalContainer}
         >
           <Pressable style={S.creatorModalCard} onPress={(e) => e.stopPropagation()}>
-            {/* Top Bar with X close */}
+            {/* Top Bar: X close on LEFT, OK/Confirm on RIGHT */}
             <View style={S.creatorTopBar}>
               <TouchableOpacity
                 style={S.swiftUiCloseBtn}
@@ -535,40 +501,53 @@ export const MyNoteModal = ({
                   onClose();
                 }}
               >
-                <Ionicons name="close" size={20} color="#FFFFFF" />
+                <Ionicons name="close" size={18} color="#FFFFFF" />
               </TouchableOpacity>
+
               {noteText.length > 20 && (
                 <Text style={S.charCounter}>{NOTE_TEXT_LIMIT - noteText.length}</Text>
               )}
+
+              {/* OK / Confirm Pill Button on Top-Right */}
+              <TouchableOpacity
+                style={[S.topOkBtn, !canConfirm && S.topOkBtnDisabled]}
+                activeOpacity={0.8}
+                onPress={handleConfirmSave}
+                disabled={!canConfirm}
+              >
+                <Text style={S.topOkBtnText}>OK</Text>
+              </TouchableOpacity>
             </View>
 
-            {/* Center Area: Avatar with Inline Editable Speech Bubble */}
+            {/* Center Area: Avatar with Compact 97px Speech Bubble */}
             <View style={S.creatorCenter}>
-              {/* Bubble with auto-adjusting font colors */}
+              {/* Bubble with 97px max width matching carousel */}
               <View style={[S.editorBubble, { backgroundColor: bubbleColor }]}>
                 <View style={S.editorBubbleInner}>
-                  {selectedSong && <SoundWaveIcon size={13} color={colorTheme.waveColor} />}
-                  <View style={{ flex: 1 }}>
+                  {selectedSong && <SoundWaveIcon size={12} color={colorTheme.waveColor} />}
+                  <View style={{ flex: 1, overflow: 'hidden' }}>
                     {selectedSong ? (
                       <View>
-                        <Text
+                        <MarqueeText
+                          text={selectedSong.title}
                           style={[S.editorSongTitle, { color: colorTheme.titleColor }]}
-                          numberOfLines={1}
-                        >
-                          {selectedSong.title}
-                        </Text>
-                        <Text
+                          align="left"
+                          fadeWidth={4}
+                          fadeColor={bubbleColor}
+                        />
+                        <MarqueeText
+                          text={selectedSong.artistName}
                           style={[S.editorSongArtist, { color: colorTheme.artistColor }]}
-                          numberOfLines={1}
-                        >
-                          {selectedSong.artistName}
-                        </Text>
+                          align="left"
+                          fadeWidth={4}
+                          fadeColor={bubbleColor}
+                        />
                         <TextInput
                           style={[S.editorSongCustomInput, { color: colorTheme.customTextColor }]}
                           placeholder="Escreva algo..."
                           placeholderTextColor={
                             colorTheme.isLightBg
-                              ? 'rgba(15, 23, 42, 0.45)'
+                              ? 'rgba(24, 20, 14, 0.45)'
                               : 'rgba(255, 255, 255, 0.4)'
                           }
                           value={noteText}
@@ -582,7 +561,7 @@ export const MyNoteModal = ({
                         placeholder="Deixe uma nota..."
                         placeholderTextColor={
                           colorTheme.isLightBg
-                            ? 'rgba(15, 23, 42, 0.5)'
+                            ? 'rgba(24, 20, 14, 0.5)'
                             : 'rgba(255, 255, 255, 0.45)'
                         }
                         value={noteText}
@@ -614,7 +593,7 @@ export const MyNoteModal = ({
                     setIsMusicPickerVisible(true);
                   }}
                 >
-                  <Ionicons name="musical-notes" size={17} color="#FA2D7F" />
+                  <Ionicons name="musical-notes" size={16} color="#FA2D7F" />
                 </TouchableOpacity>
 
                 {/* 🎨 Palette Color Button */}
@@ -626,115 +605,76 @@ export const MyNoteModal = ({
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     } catch {}
                     setActiveBottomSection((prev) =>
-                      prev === 'colorPicker' ? 'share' : 'colorPicker'
+                      prev === 'colorPicker' ? 'none' : 'colorPicker'
                     );
                   }}
                 >
                   {bubbleColor !== DEFAULT_COLOR ? (
                     <View style={[S.paletteColorIndicator, { backgroundColor: bubbleColor }]} />
                   ) : (
-                    <MaterialCommunityIcons name="palette" size={17} color="#B57BEE" />
+                    <MaterialCommunityIcons name="palette" size={16} color="#B57BEE" />
                   )}
                 </TouchableOpacity>
               </View>
             </View>
 
-            {/* Dynamic Bottom Section: Color Palette (8 colors per section) OR Share Bar */}
-            {activeBottomSection === 'colorPicker' ? (
-              <View style={S.colorPickerSection} onLayout={handleColorLayout}>
-                {/* Paged Swipable Section — Exactly 8 colors per section in 4x2 grid */}
+            {/* Color Swatches: Single horizontal row of SQUARE (1:1) swatches scrolling continuously */}
+            {activeBottomSection === 'colorPicker' && (
+              <View style={S.colorPickerSection}>
                 <ScrollView
-                  ref={colorScrollRef}
                   horizontal
-                  pagingEnabled
                   showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={S.colorFamiliesScroll}
-                  onScroll={handleColorScroll}
-                  scrollEventThrottle={16}
+                  contentContainerStyle={S.colorSwatchesScroll}
                   bounces={true}
                   alwaysBounceHorizontal={true}
                 >
-                  {COLOR_SECTIONS.map((section, pageIdx) => (
-                    <View
-                      key={pageIdx}
-                      style={[S.colorSectionPage, { width: colorContainerWidth }]}
-                    >
-                      <View style={S.colorSectionGrid}>
-                        {section.map((color) => (
-                          <TouchableOpacity
-                            key={color}
-                            style={[
-                              S.colorSwatch,
-                              { backgroundColor: color },
-                              bubbleColor === color && S.colorSwatchSelected,
-                            ]}
-                            activeOpacity={0.75}
-                            onPress={() => {
-                              try {
-                                Haptics.selectionAsync();
-                              } catch {}
-                              setBubbleColor(color);
-                            }}
-                          />
-                        ))}
-                      </View>
-                    </View>
+                  {COLOR_SWATCHES.map((color) => (
+                    <TouchableOpacity
+                      key={color}
+                      style={[
+                        S.squareColorSwatch,
+                        { backgroundColor: color },
+                        bubbleColor === color && S.squareColorSwatchSelected,
+                      ]}
+                      activeOpacity={0.75}
+                      onPress={() => {
+                        try {
+                          Haptics.selectionAsync();
+                        } catch {}
+                        setBubbleColor(color);
+                      }}
+                    />
                   ))}
                 </ScrollView>
 
-                {/* Page Indicator Dots */}
-                <View style={S.pageDotsRow}>
-                  {COLOR_SECTIONS.map((_, i) => (
-                    <View key={i} style={[S.pageDot, i === colorPage && S.pageDotActive]} />
-                  ))}
+                {/* Aplicar & Limpar buttons */}
+                <View style={S.colorActionsRow}>
+                  <TouchableOpacity
+                    style={S.swiftUiPrimaryBtn}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      try {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      } catch {}
+                      setActiveBottomSection('none');
+                    }}
+                  >
+                    <Text style={S.swiftUiPrimaryBtnText}>Aplicar</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={S.limparBtn}
+                    onPress={() => {
+                      try {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      } catch {}
+                      setBubbleColor(DEFAULT_COLOR);
+                      setActiveBottomSection('none');
+                    }}
+                  >
+                    <Text style={S.limparText}>Limpar</Text>
+                  </TouchableOpacity>
                 </View>
-
-                {/* Aplicar / Limpar Buttons */}
-                <TouchableOpacity
-                  style={S.swiftUiPrimaryBtn}
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    try {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    } catch {}
-                    setActiveBottomSection('share');
-                  }}
-                >
-                  <Text style={S.swiftUiPrimaryBtnText}>Aplicar</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={S.limparBtn}
-                  onPress={() => {
-                    try {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    } catch {}
-                    setBubbleColor(DEFAULT_COLOR);
-                    setActiveBottomSection('share');
-                  }}
-                >
-                  <Text style={S.limparText}>Limpar</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              /* Default Share Bar */
-              <View style={S.shareBar}>
-                <TouchableOpacity
-                  style={S.shareLeftRow}
-                  onPress={() => setActiveBottomSection('colorPicker')}
-                >
-                  <Ionicons name="people-outline" size={15} color="#FFFFFF" />
-                  <Text style={S.shareLeftText}>Compartilhar com amigos ›</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[S.swiftUiShareBtn, !canShare && S.swiftUiShareBtnDisabled]}
-                  activeOpacity={0.8}
-                  onPress={handleShare}
-                  disabled={!canShare}
-                >
-                  <Text style={S.swiftUiShareBtnText}>Compartilhar</Text>
-                </TouchableOpacity>
               </View>
             )}
           </Pressable>
@@ -802,28 +742,29 @@ export const MyNoteModal = ({
               </ScrollView>
             </View>
 
-            {/* Downloaded Tracks List with Authentic Audio Playback */}
+            {/* Downloaded Tracks List — Triggers App's Native Global Player */}
             <FlatList
               data={filteredTracks}
               keyExtractor={(t) => t.spotifyId}
               style={S.musicList}
-              contentContainerStyle={{ paddingBottom: previewTrack ? 90 : 20 }}
+              contentContainerStyle={{ paddingBottom: 30 }}
               ListHeaderComponent={
                 currentTrack ? (
                   <TouchableOpacity
                     style={[
                       S.musicRow,
-                      previewTrack?.spotifyId === currentTrack.spotifyId && S.musicRowActive,
+                      selectedSong?.spotifyId === currentTrack.spotifyId && S.musicRowActive,
                     ]}
                     activeOpacity={0.8}
                     onPress={() => {
-                      setPreviewTrack({
+                      setSelectedSong({
                         spotifyId: currentTrack.spotifyId,
                         title: currentTrack.title,
                         artistName: currentTrack.artistName,
                         imageURL: currentTrack.imageURL,
                         duration_ms: currentTrack.duration_ms,
                       });
+                      setIsMusicPickerVisible(false);
                     }}
                   >
                     <Image source={{ uri: currentTrack.imageURL }} style={S.musicCover} />
@@ -849,7 +790,7 @@ export const MyNoteModal = ({
                 </View>
               }
               renderItem={({ item }) => {
-                const isSelected = previewTrack?.spotifyId === item.spotifyId;
+                const isSelected = selectedSong?.spotifyId === item.spotifyId;
                 return (
                   <TouchableOpacity
                     style={[S.musicRow, isSelected && S.musicRowActive]}
@@ -858,8 +799,8 @@ export const MyNoteModal = ({
                       try {
                         Haptics.selectionAsync();
                       } catch {}
-                      setPreviewTrack(item);
-                      // Authentic playback through global store / MiniPlayer
+                      setSelectedSong(item);
+                      // Triggers app's native MiniPlayer & audio playback directly!
                       playTrack({
                         spotifyId: item.spotifyId,
                         title: item.title,
@@ -868,6 +809,7 @@ export const MyNoteModal = ({
                         imageURL: item.localImagePath || item.imageURL || '',
                         duration_ms: item.duration_ms || 200000,
                       });
+                      setIsMusicPickerVisible(false);
                     }}
                   >
                     <Image
@@ -891,57 +833,6 @@ export const MyNoteModal = ({
                 );
               }}
             />
-
-            {/* Floating Confirmation Mini Bar with Play/Pause & Confirm Checkmark Button */}
-            {previewTrack && (
-              <View style={S.floatingPreviewBar}>
-                <Image
-                  source={{ uri: previewTrack.localImagePath || previewTrack.imageURL || '' }}
-                  style={S.previewCover}
-                />
-                <View style={S.previewInfo}>
-                  <Text style={S.previewTitle} numberOfLines={1}>
-                    {previewTrack.title}
-                  </Text>
-                  <Text style={S.previewArtist} numberOfLines={1}>
-                    {previewTrack.artistName}
-                  </Text>
-                </View>
-
-                {/* Play / Pause Toggle */}
-                <TouchableOpacity
-                  style={S.previewControlBtn}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    try {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    } catch {}
-                    togglePlayPause();
-                  }}
-                >
-                  <Ionicons
-                    name={playerState.isPlaying ? 'pause-circle' : 'play-circle'}
-                    size={32}
-                    color="#FFFFFF"
-                  />
-                </TouchableOpacity>
-
-                {/* Confirm Checkmark Button */}
-                <TouchableOpacity
-                  style={S.confirmArrowBtn}
-                  activeOpacity={0.8}
-                  onPress={() => {
-                    try {
-                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                    } catch {}
-                    setSelectedSong(previewTrack);
-                    setIsMusicPickerVisible(false);
-                  }}
-                >
-                  <Ionicons name="checkmark" size={20} color="#FFFFFF" />
-                </TouchableOpacity>
-              </View>
-            )}
           </View>
         </View>
       </Modal>
@@ -1006,7 +897,7 @@ const S = StyleSheet.create({
     backgroundColor: '#5B5BD6',
     borderRadius: 14,
     width: '100%',
-    paddingVertical: 15,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#5B5BD6',
@@ -1017,12 +908,12 @@ const S = StyleSheet.create({
   },
   swiftUiPrimaryBtnText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 15.5,
     fontFamily: 'SimplyRounded-Bold',
     fontWeight: '700',
   },
   deleteRow: {
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
   deleteText: {
     color: '#4F86F7',
@@ -1030,7 +921,7 @@ const S = StyleSheet.create({
     fontFamily: 'SimplyRounded',
   },
 
-  // Creator Modal Card
+  // Dynamic Content-Based Responsive Creator Modal Card
   creatorModalContainer: {
     justifyContent: 'flex-end',
     width: '100%',
@@ -1040,9 +931,11 @@ const S = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingTop: 14,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 18,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 16,
     paddingHorizontal: 20,
     width: '100%',
+    minHeight: 270,
+    maxHeight: '85%',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
@@ -1051,12 +944,12 @@ const S = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     width: '100%',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   swiftUiCloseBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1066,19 +959,36 @@ const S = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'SimplyRounded',
   },
+  topOkBtn: {
+    backgroundColor: '#5B5BD6',
+    borderRadius: 17,
+    paddingHorizontal: 18,
+    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topOkBtnDisabled: {
+    opacity: 0.35,
+  },
+  topOkBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'SimplyRounded-Bold',
+    fontWeight: '700',
+  },
 
   // Creator Center
   creatorCenter: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 16,
+    marginVertical: 12,
   },
   editorBubble: {
-    width: 140,
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: -8,
+    width: 97,
+    borderRadius: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    marginBottom: -6,
     zIndex: 2,
     position: 'relative',
     elevation: 6,
@@ -1090,68 +1000,68 @@ const S = StyleSheet.create({
   editorBubbleInner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 6,
+    gap: 4,
   },
   editorSongTitle: {
-    fontSize: 12.5,
+    fontSize: 11.5,
     fontFamily: 'SimplyRounded-Bold',
     fontWeight: '700',
   },
   editorSongArtist: {
-    fontSize: 10.5,
+    fontSize: 10,
     fontFamily: 'SimplyRounded',
     marginBottom: 2,
   },
   editorSongCustomInput: {
-    fontSize: 11.5,
+    fontSize: 9.5,
     fontFamily: 'SimplyRounded',
     padding: 0,
-    minHeight: 20,
+    minHeight: 18,
   },
   editorPureInput: {
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: 'SimplyRounded',
     padding: 0,
-    minHeight: 32,
+    minHeight: 28,
   },
   editorDot1: {
     position: 'absolute',
     bottom: -5,
-    left: 20,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    left: 16,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
     zIndex: 3,
   },
   editorDot2: {
     position: 'absolute',
     bottom: -9,
-    left: 14,
-    width: 4.5,
-    height: 4.5,
-    borderRadius: 2.25,
+    left: 11,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
     zIndex: 3,
   },
   creatorAvatarWrap: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     position: 'relative',
     zIndex: 1,
     overflow: 'visible',
   },
   creatorAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     borderWidth: 2,
     borderColor: '#252528',
   },
   swiftUiAvatarBtn: {
     position: 'absolute',
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: '#1E1E24',
     borderWidth: 2,
     borderColor: '#141416',
@@ -1166,11 +1076,11 @@ const S = StyleSheet.create({
   },
   avatarBtnLeft: {
     bottom: 0,
-    left: -6,
+    left: -5,
   },
   avatarBtnRight: {
     bottom: 0,
-    right: -6,
+    right: -5,
   },
   paletteColorIndicator: {
     width: 14,
@@ -1178,100 +1088,40 @@ const S = StyleSheet.create({
     borderRadius: 7,
   },
 
-  // Color Picker Section
+  // Color Swatches Section — SQUARE (1:1) Swatches in a Single Horizontal Row
   colorPickerSection: {
     width: '100%',
     alignItems: 'center',
-    paddingTop: 8,
+    paddingTop: 10,
   },
-  colorFamiliesScroll: {
+  colorSwatchesScroll: {
+    paddingHorizontal: 8,
+    gap: 10,
     alignItems: 'center',
   },
-  colorSectionPage: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
-  },
-  colorSectionGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    width: '100%',
-    gap: 8,
-  },
-  colorSwatch: {
-    width: (SCREEN_WIDTH - 84) / 4,
-    height: 38,
+  squareColorSwatch: {
+    width: 44,
+    height: 44,
     borderRadius: 12,
   },
-  colorSwatchSelected: {
+  squareColorSwatchSelected: {
     borderWidth: 3,
     borderColor: '#FFFFFF',
-    transform: [{ scale: 1.06 }],
+    transform: [{ scale: 1.08 }],
   },
-  pageDotsRow: {
-    flexDirection: 'row',
-    gap: 6,
-    marginVertical: 14,
-  },
-  pageDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#444',
-  },
-  pageDotActive: {
-    backgroundColor: '#FFFFFF',
-    width: 12,
+  colorActionsRow: {
+    width: '100%',
+    alignItems: 'center',
+    marginTop: 14,
+    gap: 8,
   },
   limparBtn: {
-    marginTop: 10,
     paddingVertical: 4,
   },
   limparText: {
     color: '#5B5BD6',
     fontSize: 14,
     fontFamily: 'SimplyRounded',
-  },
-
-  // Share Bar
-  shareBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.1)',
-  },
-  shareLeftRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  shareLeftText: {
-    color: '#FFFFFF',
-    fontSize: 13.5,
-    fontFamily: 'SimplyRounded',
-  },
-  swiftUiShareBtn: {
-    backgroundColor: '#5B5BD6',
-    borderRadius: 22,
-    paddingHorizontal: 22,
-    paddingVertical: 10,
-    shadowColor: '#5B5BD6',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  swiftUiShareBtnDisabled: {
-    opacity: 0.35,
-  },
-  swiftUiShareBtnText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontFamily: 'SimplyRounded-Bold',
-    fontWeight: '700',
   },
 
   // Music Picker Sheet
@@ -1396,63 +1246,5 @@ const S = StyleSheet.create({
     color: 'rgba(255,255,255,0.35)',
     fontSize: 14,
     fontFamily: 'SimplyRounded',
-  },
-
-  // Floating Confirmation Mini Bar
-  floatingPreviewBar: {
-    position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 24 : 14,
-    left: 16,
-    right: 16,
-    backgroundColor: '#252529',
-    borderRadius: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  previewCover: {
-    width: 38,
-    height: 38,
-    borderRadius: 6,
-    backgroundColor: '#1E1E24',
-  },
-  previewInfo: {
-    flex: 1,
-  },
-  previewTitle: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontFamily: 'SimplyRounded-Bold',
-    fontWeight: '700',
-  },
-  previewArtist: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 11,
-    fontFamily: 'SimplyRounded',
-  },
-  previewControlBtn: {
-    padding: 2,
-  },
-  confirmArrowBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#5B5BD6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#5B5BD6',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 4,
-    elevation: 3,
   },
 });
