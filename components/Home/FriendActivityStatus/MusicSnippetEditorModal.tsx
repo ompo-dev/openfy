@@ -57,23 +57,21 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
   onChangeMusic,
   onConfirmSnippet,
 }) => {
-  const { playerState, togglePlayPause, seekToPosition, playTrack } = usePlayer();
+  const { playerState, togglePlayPause, seekToPosition } = usePlayer();
 
   const totalDurationMs = track?.duration_ms || 210000;
   const maxStartMs = Math.max(0, totalDurationMs - SNIPPET_DURATION_MS);
 
   // Position percentage (0..1) of snippet start
-  const [startPercent, setStartPercent] = React.useState(0.2); // default ~20% into track
+  const [startPercent, setStartPercent] = React.useState(0.2);
 
   const waveformWidth = SCREEN_WIDTH - 60;
-  const windowWidth = 90; // width of the rainbow box
+  const windowWidth = 90;
 
-  // Synchronize audio playback loop within 30s snippet window
   const startTimeMs = startPercent * maxStartMs;
 
   React.useEffect(() => {
     if (visible && track) {
-      // Seek to current snippet start time
       seekToPosition(Math.round(startTimeMs));
     }
   }, [visible, track, startPercent]);
@@ -96,6 +94,16 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
     })
   ).current;
 
+  // Generate deterministic bar heights for waveform (Hook called unconditionally)
+  const trackTitleLength = track?.title?.length || 5;
+  const waveformHeights = React.useMemo(() => {
+    return Array.from({ length: WAVEFORM_BAR_COUNT }, (_, i) => {
+      const seed = (i * 17 + trackTitleLength * 7) % 100;
+      return 12 + (seed % 28);
+    });
+  }, [trackTitleLength]);
+
+  // Early exit ONLY after all hooks are declared
   if (!track) return null;
 
   const imageUri =
@@ -112,14 +120,6 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
       durationMs: SNIPPET_DURATION_MS,
     });
   };
-
-  // Generate deterministic bar heights for waveform
-  const waveformHeights = React.useMemo(() => {
-    return Array.from({ length: WAVEFORM_BAR_COUNT }, (_, i) => {
-      const seed = (i * 17 + (track.title.length || 5) * 7) % 100;
-      return 12 + (seed % 28);
-    });
-  }, [track]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
