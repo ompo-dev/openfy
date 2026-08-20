@@ -26,6 +26,7 @@ import { LoggedPressable } from '../../native';
 import { MarqueeText } from '../../common/MarqueeText';
 import { MyNoteModal, MyNote } from './MyNoteModal';
 import { FriendNoteSheet } from './FriendNoteSheet';
+import { getNoteColorTheme } from '../../../utils/colorContrast';
 
 export interface FriendNoteItem {
   id: string;
@@ -352,6 +353,8 @@ export const FriendActivityStatus = () => {
             }
           }
 
+          const colorTheme = getNoteColorTheme(bubbleColor);
+
           return (
             <View key={item.id} style={styles.itemWrapper}>
               <LoggedPressable
@@ -371,11 +374,11 @@ export const FriendActivityStatus = () => {
                   >
                     {/* Row 1: wave icon + title marquee */}
                     <View style={styles.bubbleRow}>
-                      {showWave && <SoundWaveIcon color="#FFFFFF" />}
+                      {showWave && <SoundWaveIcon color={colorTheme.waveColor} />}
                       <View style={styles.textFlex}>
                         <MarqueeText
                           text={noteTitle}
-                          style={styles.noteTitle}
+                          style={[styles.noteTitle, { color: colorTheme.titleColor }]}
                           align="left"
                           fadeWidth={6}
                           fadeColor={bubbleColor}
@@ -387,7 +390,7 @@ export const FriendActivityStatus = () => {
                     {noteArtist ? (
                       <MarqueeText
                         text={noteArtist}
-                        style={styles.noteArtist}
+                        style={[styles.noteArtist, { color: colorTheme.artistColor }]}
                         align="left"
                         fadeWidth={6}
                         fadeColor={bubbleColor}
@@ -398,7 +401,7 @@ export const FriendActivityStatus = () => {
                     {noteText ? (
                       <MarqueeText
                         text={noteText.slice(0, 30)}
-                        style={styles.noteCustomText}
+                        style={[styles.noteCustomText, { color: colorTheme.customTextColor }]}
                         align="left"
                         fadeWidth={6}
                         fadeColor={bubbleColor}

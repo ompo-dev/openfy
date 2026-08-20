@@ -1,18 +1,17 @@
 /**
- * MyNoteModal — Instagram Music Notes Editor
+ * MyNoteModal — Instagram Music Notes Editor & Published Sheet
  *
  * Architecture:
- * - Native transparent Modal overlay keeping the underlying screen visible.
- * - Central avatar with inline editable speech bubble (MarqueeText & text input).
- * - SwiftUI-styled tactile buttons overlaid on the avatar (Music 🎵 & Palette 🎨).
- * - Inline footer switching: Default Share Bar <-> Color Palette Selector.
- * - Swipable harmonious analogous color palette (5 distinct color families with paging & dots).
- * - Music Picker overlay:
+ * - Native transparent Modal sheet preserving background depth.
+ * - Mathematical font contrast auto-adjustment (getNoteColorTheme) so text is crystal clear on any background.
+ * - Inline footer toggle: Default Share Bar <-> Color Palette Selector.
+ * - Paged 8-swatch Analogous Color Sections (only 1 section visible at a time, 4x2 grid, smooth horizontal swipe).
+ * - Music Picker Modal:
  *    - Search bar with X close button inline on the same row.
  *    - Compact horizontal tab chips (Para você, Em alta, Salvos, Áudio original).
- *    - Downloaded tracks list with preview playback.
- *    - Floating preview player bar with Play/Pause and Confirm (arrow/check) button.
- * - Published Note View: Exact same bubble visual as the home carousel + auto-plays the note's song.
+ *    - Uses real MiniPlayer / playTrack for authentic playback.
+ *    - Floating preview confirmation bar with play/pause and SwiftUI checkmark confirm button.
+ * - Published Note View: Exact same note bubble component as home carousel + auto-plays the note's song.
  */
 
 import * as React from 'react';
@@ -22,6 +21,7 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  LayoutChangeEvent,
   Modal,
   Platform,
   Pressable,
@@ -37,6 +37,7 @@ import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePlayer } from '@context';
 import { MarqueeText } from '../../common/MarqueeText';
+import { getNoteColorTheme } from '../../../utils/colorContrast';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -60,19 +61,19 @@ interface MyNoteModalProps {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// 5 Harmonious Analogous Color Families (6 swatches each, page-by-page)
+// 5 Harmonious Analogous Color Families — Exactly 8 colors per section
 // ──────────────────────────────────────────────────────────────────────────────
-const COLOR_FAMILIES = [
-  // Page 1: Purples & Pinks (Lilac, Violet, Deep Purple, Pink, Magenta, Rose)
-  ['#B57BEE', '#8B5CF6', '#7C3AED', '#EC4899', '#F472B6', '#DB2777'],
-  // Page 2: Blues & Cyans (Sky Blue, Cobalt, Royal Blue, Indigo, Cyan, Teal)
-  ['#0EA5E9', '#0284C7', '#2563EB', '#3B82F6', '#06B6D4', '#0891B2'],
-  // Page 3: Greens (Emerald, Forest, Mint, Vibrant Lime, Olive, Sage)
-  ['#10B981', '#059669', '#16A34A', '#22C55E', '#84CC16', '#65A30D'],
-  // Page 4: Oranges & Warm Yellows (Amber, Gold, Sunset Orange, Warm Coral, Peach, Tangerine)
-  ['#F59E0B', '#D97706', '#F97316', '#EA580C', '#EAB308', '#CA8A04'],
-  // Page 5: Reds & Deep Accents (Ruby Red, Crimson, Dark Rose, Maroon, Slate, Wine)
-  ['#EF4444', '#DC2626', '#E11D48', '#BE123C', '#991B1B', '#475569'],
+const COLOR_SECTIONS = [
+  // Section 1: Purples & Pinks (8 analogous shades)
+  ['#D8B4FE', '#C084FC', '#A855F7', '#9333EA', '#7E22CE', '#F472B6', '#EC4899', '#DB2777'],
+  // Section 2: Blues & Cyans (8 analogous shades)
+  ['#7DD3FC', '#38BDF8', '#0EA5E9', '#0284C7', '#0369A1', '#2563EB', '#06B6D4', '#0891B2'],
+  // Section 3: Greens (8 analogous shades)
+  ['#86EFAC', '#4ADE80', '#22C55E', '#16A34A', '#15803D', '#10B981', '#059669', '#84CC16'],
+  // Section 4: Yellows & Warm Oranges (8 analogous shades)
+  ['#FDE047', '#FACC15', '#EAB308', '#CA8A04', '#FB923C', '#F97316', '#EA580C', '#C2410C'],
+  // Section 5: Reds & Deep Accents (8 analogous shades)
+  ['#FCA5A5', '#F87171', '#EF4444', '#DC2626', '#B91C1C', '#FB7185', '#F43F5E', '#E11D48'],
 ];
 
 const DEFAULT_COLOR = '#1C1E24';
@@ -115,7 +116,7 @@ const SoundWaveIcon = ({ size = 13, color = '#fff' }: { size?: number; color?: s
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Identical Carousel Note Bubble Visual (used in Published Sheet)
+// Carousel Identical Note Bubble Visual (Published Sheet)
 // ──────────────────────────────────────────────────────────────────────────────
 const IdenticalNoteBubble = ({
   note,
@@ -127,22 +128,28 @@ const IdenticalNoteBubble = ({
   isPlaying: boolean;
 }) => {
   const bg = note.bubbleColor || DEFAULT_COLOR;
+  const colorTheme = getNoteColorTheme(bg);
   const title = note.songTitle || note.text || 'Deixe uma nota...';
   const artist = note.songSpotifyId ? note.songArtist : undefined;
   const customText = note.songSpotifyId && note.text ? note.text : undefined;
 
   return (
     <View style={bubbleStyles.wrapper}>
-      {/* Anchor container anchored to bottom right above avatar */}
       <View style={bubbleStyles.anchor}>
-        <View style={[bubbleStyles.bubble, { backgroundColor: bg }, isPlaying && bubbleStyles.bubblePlaying]}>
+        <View
+          style={[
+            bubbleStyles.bubble,
+            { backgroundColor: bg },
+            isPlaying && bubbleStyles.bubblePlaying,
+          ]}
+        >
           {/* Row 1: wave icon + title marquee */}
           <View style={bubbleStyles.bubbleRow}>
-            {isPlaying && <SoundWaveIcon color="#FFFFFF" />}
+            {isPlaying && <SoundWaveIcon color={colorTheme.waveColor} />}
             <View style={bubbleStyles.textFlex}>
               <MarqueeText
                 text={title}
-                style={bubbleStyles.titleText}
+                style={[bubbleStyles.titleText, { color: colorTheme.titleColor }]}
                 align="left"
                 fadeWidth={6}
                 fadeColor={bg}
@@ -154,7 +161,7 @@ const IdenticalNoteBubble = ({
           {artist ? (
             <MarqueeText
               text={artist}
-              style={bubbleStyles.artistText}
+              style={[bubbleStyles.artistText, { color: colorTheme.artistColor }]}
               align="left"
               fadeWidth={6}
               fadeColor={bg}
@@ -165,7 +172,7 @@ const IdenticalNoteBubble = ({
           {customText ? (
             <MarqueeText
               text={customText.slice(0, NOTE_TEXT_LIMIT)}
-              style={bubbleStyles.customText}
+              style={[bubbleStyles.customText, { color: colorTheme.customTextColor }]}
               align="left"
               fadeWidth={6}
               fadeColor={bg}
@@ -229,20 +236,17 @@ const bubbleStyles = StyleSheet.create({
     overflow: 'hidden',
   },
   titleText: {
-    color: '#FFFFFF',
     fontSize: 11.5,
     fontFamily: 'SimplyRounded-Bold',
     fontWeight: '700',
     letterSpacing: 0.05,
   },
   artistText: {
-    color: 'rgba(255,255,255,0.65)',
     fontSize: 10,
     fontFamily: 'SimplyRounded',
     marginTop: 1,
   },
   customText: {
-    color: 'rgba(255,255,255,0.5)',
     fontSize: 9.5,
     fontFamily: 'SimplyRounded',
     fontStyle: 'italic',
@@ -322,7 +326,8 @@ export const MyNoteModal = ({
   const [selectedSong, setSelectedSong] = React.useState<DownloadedTrack | null>(null);
   const [bubbleColor, setBubbleColor] = React.useState(DEFAULT_COLOR);
 
-  // Color picker carousel page
+  // Color picker container width & carousel page
+  const [colorContainerWidth, setColorContainerWidth] = React.useState(SCREEN_WIDTH - 40);
   const [colorPage, setColorPage] = React.useState(0);
   const colorScrollRef = React.useRef<ScrollView>(null);
 
@@ -406,10 +411,19 @@ export const MyNoteModal = ({
     onClose();
   };
 
+  const handleColorLayout = (e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    if (w > 0 && Math.abs(w - colorContainerWidth) > 1) {
+      setColorContainerWidth(w);
+    }
+  };
+
   const handleColorScroll = (e: any) => {
     const x = e.nativeEvent.contentOffset.x;
-    const page = Math.round(x / (SCREEN_WIDTH - 40));
-    setColorPage(Math.max(0, Math.min(COLOR_FAMILIES.length - 1, page)));
+    if (colorContainerWidth > 0) {
+      const page = Math.round(x / colorContainerWidth);
+      setColorPage(Math.max(0, Math.min(COLOR_SECTIONS.length - 1, page)));
+    }
   };
 
   const canShare = noteText.trim().length > 0 || selectedSong !== null;
@@ -421,6 +435,9 @@ export const MyNoteModal = ({
           t.artistName.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : downloadedTracks;
+
+  // Active color theme with mathematical contrast
+  const colorTheme = getNoteColorTheme(bubbleColor);
 
   // ──────────────────────────────────────────────────────────────────────────
   // SCREEN 1: Published Note Bottom Sheet
@@ -437,7 +454,7 @@ export const MyNoteModal = ({
           <Pressable style={S.publishedSheet} onPress={(e) => e.stopPropagation()}>
             <View style={S.handle} />
 
-            {/* Same identical note component as on home carousel */}
+            {/* Identical note bubble as in home carousel */}
             <IdenticalNoteBubble
               note={currentNote}
               avatarUrl={avatarUrl}
@@ -457,7 +474,7 @@ export const MyNoteModal = ({
               <Text style={S.publishedMeta}>Compartilhada com amigos · agora</Text>
             </View>
 
-            {/* SwiftUI style Deixar uma nova nota button */}
+            {/* SwiftUI primary button */}
             <TouchableOpacity
               style={S.swiftUiPrimaryBtn}
               activeOpacity={0.8}
@@ -496,7 +513,7 @@ export const MyNoteModal = ({
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // SCREEN 2: Note Creator (Centered Modal with Dynamic Footer)
+  // SCREEN 2: Note Creator (Centered Transparent Modal)
   // ──────────────────────────────────────────────────────────────────────────
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -527,23 +544,33 @@ export const MyNoteModal = ({
 
             {/* Center Area: Avatar with Inline Editable Speech Bubble */}
             <View style={S.creatorCenter}>
-              {/* Bubble */}
+              {/* Bubble with auto-adjusting font colors */}
               <View style={[S.editorBubble, { backgroundColor: bubbleColor }]}>
                 <View style={S.editorBubbleInner}>
-                  {selectedSong && <SoundWaveIcon size={13} color="#FFFFFF" />}
+                  {selectedSong && <SoundWaveIcon size={13} color={colorTheme.waveColor} />}
                   <View style={{ flex: 1 }}>
                     {selectedSong ? (
                       <View>
-                        <Text style={S.editorSongTitle} numberOfLines={1}>
+                        <Text
+                          style={[S.editorSongTitle, { color: colorTheme.titleColor }]}
+                          numberOfLines={1}
+                        >
                           {selectedSong.title}
                         </Text>
-                        <Text style={S.editorSongArtist} numberOfLines={1}>
+                        <Text
+                          style={[S.editorSongArtist, { color: colorTheme.artistColor }]}
+                          numberOfLines={1}
+                        >
                           {selectedSong.artistName}
                         </Text>
                         <TextInput
-                          style={S.editorSongCustomInput}
+                          style={[S.editorSongCustomInput, { color: colorTheme.customTextColor }]}
                           placeholder="Escreva algo..."
-                          placeholderTextColor="rgba(255,255,255,0.4)"
+                          placeholderTextColor={
+                            colorTheme.isLightBg
+                              ? 'rgba(15, 23, 42, 0.45)'
+                              : 'rgba(255, 255, 255, 0.4)'
+                          }
                           value={noteText}
                           onChangeText={(t) => setNoteText(t.slice(0, NOTE_TEXT_LIMIT))}
                           maxLength={NOTE_TEXT_LIMIT}
@@ -551,9 +578,13 @@ export const MyNoteModal = ({
                       </View>
                     ) : (
                       <TextInput
-                        style={S.editorPureInput}
+                        style={[S.editorPureInput, { color: colorTheme.titleColor }]}
                         placeholder="Deixe uma nota..."
-                        placeholderTextColor="rgba(255,255,255,0.45)"
+                        placeholderTextColor={
+                          colorTheme.isLightBg
+                            ? 'rgba(15, 23, 42, 0.5)'
+                            : 'rgba(255, 255, 255, 0.45)'
+                        }
                         value={noteText}
                         onChangeText={(t) => setNoteText(t.slice(0, NOTE_TEXT_LIMIT))}
                         multiline
@@ -572,7 +603,7 @@ export const MyNoteModal = ({
               <View style={S.creatorAvatarWrap}>
                 <Image source={{ uri: avatarUrl }} style={S.creatorAvatar} />
 
-                {/* 🎵 Music Picker Button (Bottom-Left) */}
+                {/* 🎵 Music Picker Button */}
                 <TouchableOpacity
                   style={[S.swiftUiAvatarBtn, S.avatarBtnLeft]}
                   activeOpacity={0.8}
@@ -586,7 +617,7 @@ export const MyNoteModal = ({
                   <Ionicons name="musical-notes" size={17} color="#FA2D7F" />
                 </TouchableOpacity>
 
-                {/* 🎨 Palette Color Button (Bottom-Right) */}
+                {/* 🎨 Palette Color Button */}
                 <TouchableOpacity
                   style={[S.swiftUiAvatarBtn, S.avatarBtnRight]}
                   activeOpacity={0.8}
@@ -594,7 +625,9 @@ export const MyNoteModal = ({
                     try {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     } catch {}
-                    setActiveBottomSection((prev) => (prev === 'colorPicker' ? 'share' : 'colorPicker'));
+                    setActiveBottomSection((prev) =>
+                      prev === 'colorPicker' ? 'share' : 'colorPicker'
+                    );
                   }}
                 >
                   {bubbleColor !== DEFAULT_COLOR ? (
@@ -606,10 +639,10 @@ export const MyNoteModal = ({
               </View>
             </View>
 
-            {/* Dynamic Bottom Section: Color Palette OR Share Bar */}
+            {/* Dynamic Bottom Section: Color Palette (8 colors per section) OR Share Bar */}
             {activeBottomSection === 'colorPicker' ? (
-              <View style={S.colorPickerSection}>
-                {/* Harmonious Color Families Horizontal Scroller */}
+              <View style={S.colorPickerSection} onLayout={handleColorLayout}>
+                {/* Paged Swipable Section — Exactly 8 colors per section in 4x2 grid */}
                 <ScrollView
                   ref={colorScrollRef}
                   horizontal
@@ -621,32 +654,37 @@ export const MyNoteModal = ({
                   bounces={true}
                   alwaysBounceHorizontal={true}
                 >
-                  {COLOR_FAMILIES.map((family, pageIdx) => (
-                    <View key={pageIdx} style={S.colorFamilyPage}>
-                      {family.map((color) => (
-                        <TouchableOpacity
-                          key={color}
-                          style={[
-                            S.colorSwatch,
-                            { backgroundColor: color },
-                            bubbleColor === color && S.colorSwatchSelected,
-                          ]}
-                          activeOpacity={0.75}
-                          onPress={() => {
-                            try {
-                              Haptics.selectionAsync();
-                            } catch {}
-                            setBubbleColor(color);
-                          }}
-                        />
-                      ))}
+                  {COLOR_SECTIONS.map((section, pageIdx) => (
+                    <View
+                      key={pageIdx}
+                      style={[S.colorSectionPage, { width: colorContainerWidth }]}
+                    >
+                      <View style={S.colorSectionGrid}>
+                        {section.map((color) => (
+                          <TouchableOpacity
+                            key={color}
+                            style={[
+                              S.colorSwatch,
+                              { backgroundColor: color },
+                              bubbleColor === color && S.colorSwatchSelected,
+                            ]}
+                            activeOpacity={0.75}
+                            onPress={() => {
+                              try {
+                                Haptics.selectionAsync();
+                              } catch {}
+                              setBubbleColor(color);
+                            }}
+                          />
+                        ))}
+                      </View>
                     </View>
                   ))}
                 </ScrollView>
 
                 {/* Page Indicator Dots */}
                 <View style={S.pageDotsRow}>
-                  {COLOR_FAMILIES.map((_, i) => (
+                  {COLOR_SECTIONS.map((_, i) => (
                     <View key={i} style={[S.pageDot, i === colorPage && S.pageDotActive]} />
                   ))}
                 </View>
@@ -732,7 +770,7 @@ export const MyNoteModal = ({
                 />
               </View>
 
-              {/* X Close Button aligned right beside search */}
+              {/* X Close Button inline on the same row */}
               <TouchableOpacity
                 style={S.musicInlineCloseBtn}
                 activeOpacity={0.7}
@@ -742,7 +780,7 @@ export const MyNoteModal = ({
               </TouchableOpacity>
             </View>
 
-            {/* Compact Horizontal Tab Chips (Para você, Em alta, Salvos, Áudio original) */}
+            {/* Compact Horizontal Tab Chips */}
             <View style={S.tabsContainer}>
               <ScrollView
                 horizontal
@@ -764,7 +802,7 @@ export const MyNoteModal = ({
               </ScrollView>
             </View>
 
-            {/* Downloaded Tracks List */}
+            {/* Downloaded Tracks List with Authentic Audio Playback */}
             <FlatList
               data={filteredTracks}
               keyExtractor={(t) => t.spotifyId}
@@ -821,6 +859,7 @@ export const MyNoteModal = ({
                         Haptics.selectionAsync();
                       } catch {}
                       setPreviewTrack(item);
+                      // Authentic playback through global store / MiniPlayer
                       playTrack({
                         spotifyId: item.spotifyId,
                         title: item.title,
@@ -853,7 +892,7 @@ export const MyNoteModal = ({
               }}
             />
 
-            {/* Floating Mini Player with Play/Pause & Confirm Arrow Button */}
+            {/* Floating Confirmation Mini Bar with Play/Pause & Confirm Checkmark Button */}
             {previewTrack && (
               <View style={S.floatingPreviewBar}>
                 <Image
@@ -869,7 +908,7 @@ export const MyNoteModal = ({
                   </Text>
                 </View>
 
-                {/* Play / Pause */}
+                {/* Play / Pause Toggle */}
                 <TouchableOpacity
                   style={S.previewControlBtn}
                   activeOpacity={0.7}
@@ -887,7 +926,7 @@ export const MyNoteModal = ({
                   />
                 </TouchableOpacity>
 
-                {/* SwiftUI Confirm Arrow Button */}
+                {/* Confirm Checkmark Button */}
                 <TouchableOpacity
                   style={S.confirmArrowBtn}
                   activeOpacity={0.8}
@@ -1054,26 +1093,22 @@ const S = StyleSheet.create({
     gap: 6,
   },
   editorSongTitle: {
-    color: '#FFFFFF',
     fontSize: 12.5,
     fontFamily: 'SimplyRounded-Bold',
     fontWeight: '700',
   },
   editorSongArtist: {
-    color: 'rgba(255,255,255,0.65)',
     fontSize: 10.5,
     fontFamily: 'SimplyRounded',
     marginBottom: 2,
   },
   editorSongCustomInput: {
-    color: '#FFFFFF',
     fontSize: 11.5,
     fontFamily: 'SimplyRounded',
     padding: 0,
     minHeight: 20,
   },
   editorPureInput: {
-    color: '#FFFFFF',
     fontSize: 13,
     fontFamily: 'SimplyRounded',
     padding: 0,
@@ -1150,23 +1185,29 @@ const S = StyleSheet.create({
     paddingTop: 8,
   },
   colorFamiliesScroll: {
-    paddingHorizontal: 10,
+    alignItems: 'center',
   },
-  colorFamilyPage: {
-    width: SCREEN_WIDTH - 60,
+  colorSectionPage: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  colorSectionGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    paddingHorizontal: 4,
+    width: '100%',
+    gap: 8,
   },
   colorSwatch: {
-    width: 44,
-    height: 44,
+    width: (SCREEN_WIDTH - 84) / 4,
+    height: 38,
     borderRadius: 12,
   },
   colorSwatchSelected: {
     borderWidth: 3,
     borderColor: '#FFFFFF',
-    transform: [{ scale: 1.08 }],
+    transform: [{ scale: 1.06 }],
   },
   pageDotsRow: {
     flexDirection: 'row',
@@ -1357,7 +1398,7 @@ const S = StyleSheet.create({
     fontFamily: 'SimplyRounded',
   },
 
-  // Floating Preview Bar
+  // Floating Confirmation Mini Bar
   floatingPreviewBar: {
     position: 'absolute',
     bottom: Platform.OS === 'ios' ? 24 : 14,
