@@ -32,6 +32,7 @@ export {
   unload,
   getStatus,
   configureAudioSession,
+  DEFAULT_STATE,
 } from './audio/playerService';
 export type { PlayerState } from './audio/playerService';
 

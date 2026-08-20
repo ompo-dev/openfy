@@ -57,16 +57,19 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     playNext,
     playPrevious,
     queue,
+    lyricsData,
+    isLoadingLyrics,
+    isShuffle,
+    repeatMode,
+    toggleShuffle,
+    setRepeatMode,
+    updateCustomTrackSource,
   } = usePlayer();
 
   const [seeking, setSeeking] = React.useState(false);
   const [seekValue, setSeekValue] = React.useState(0);
-  const [isShuffle, setIsShuffle] = React.useState(false);
-  const [repeatMode, setRepeatMode] = React.useState<'off' | 'all' | 'one'>('off');
   const [showLyricsFull, setShowLyricsFull] = React.useState(false);
   const [isLiked, setIsLiked] = React.useState(false);
-  const [lyricsData, setLyricsData] = React.useState<LyricsData | null>(null);
-  const [isLoadingLyrics, setIsLoadingLyrics] = React.useState(false);
 
   // YouTube action sheet and custom link edit state
   const [youtubeUrl, setYoutubeUrl] = React.useState<string>('');
@@ -115,37 +118,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
         }
       })
       .catch(() => {});
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentTrack]);
-
-  // Fetch lyrics when track changes
-  React.useEffect(() => {
-    if (!currentTrack) {
-      setLyricsData(null);
-      return;
-    }
-
-    let isMounted = true;
-    setIsLoadingLyrics(true);
-
-    fetchLyrics(
-      currentTrack.title,
-      currentTrack.artistName,
-      currentTrack.duration_ms ? currentTrack.duration_ms / 1000 : undefined
-    )
-      .then((data) => {
-        if (isMounted) {
-          setLyricsData(data);
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsLoadingLyrics(false);
-        }
-      });
 
     return () => {
       isMounted = false;
@@ -272,11 +244,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       : seekValue;
 
   const handleToggleRepeat = () => {
-    setRepeatMode((prev) => {
-      if (prev === 'off') return 'all';
-      if (prev === 'all') return 'one';
-      return 'off';
-    });
+    const nextMode = repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off';
+    setRepeatMode(nextMode);
   };
 
   const handleLyricPress = async (seg: LyricSegment) => {
@@ -615,7 +584,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
           {/* Shuffle / Repeat toggle */}
           <LoggedPressable
-            onPress={() => setIsShuffle(!isShuffle)}
+            onPress={toggleShuffle}
             style={styles.sideControlBtn}
           >
             <MaterialCommunityIcons
