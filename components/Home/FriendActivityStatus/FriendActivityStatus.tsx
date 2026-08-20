@@ -1,13 +1,12 @@
 /**
- * FriendActivityStatus — Instagram Music Notes Component
+ * FriendActivityStatus — Instagram Music Notes
  *
  * Behavior:
- * - Notes default: dark graphite bubble (#1C1E24), NO wave icon visible
- * - Wave icon (animated) appears ONLY when that note's song is currently playing
- * - Note color comes from the user's own setting (no override on playing)
- * - "Sua nota" (current user) → opens MyNoteModal editor/viewer
- * - Other notes → plays the song on press
- * - Drag tilt physics: bubble tilts in scroll direction, avatar stays upright
+ * - Notes tilt ONLY during scroll movement, spring back to 0° when stopped
+ * - Wave icon (animated) ONLY shown when that note's song is playing
+ * - Default bubble: dark graphite (#1C1E24), no color override
+ * - "Sua nota": opens MyNoteModal editor/viewer
+ * - Other notes: plays song + opens FriendNoteSheet with lyrics
  */
 
 import * as React from 'react';
@@ -26,6 +25,7 @@ import { usePlayer } from '@context';
 import { LoggedPressable } from '../../native';
 import { MarqueeText } from '../../common/MarqueeText';
 import { MyNoteModal, MyNote } from './MyNoteModal';
+import { FriendNoteSheet } from './FriendNoteSheet';
 
 export interface FriendNoteItem {
   id: string;
@@ -45,7 +45,6 @@ export interface FriendNoteItem {
     artist?: string;
     imageUrl?: string;
     duration_ms?: number;
-    baseTilt?: number;
   };
 }
 
@@ -59,28 +58,7 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
       isCurrentUser: true,
     },
-    note: {
-      type: 'text',
-      title: 'Toque para adicionar',
-      baseTilt: -2,
-    },
-  },
-  {
-    id: 'note_peixe',
-    user: {
-      name: 'Peixe',
-      avatarUrl: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=200&auto=format&fit=crop&q=80',
-    },
-    note: {
-      type: 'music',
-      iconType: 'wave',
-      title: 'Quando Bate Aquela Saudade',
-      subtitle: 'Rubel',
-      spotifyId: '4w47dntseeMeuLPzFTKKB9',
-      artist: 'Rubel',
-      duration_ms: 198000,
-      baseTilt: 2,
-    },
+    note: { type: 'text', title: 'Toque para adicionar' },
   },
   {
     id: 'note_flavia',
@@ -90,14 +68,10 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       nameStyle: 'italic',
     },
     note: {
-      type: 'music',
-      iconType: 'headphone',
-      title: "That's The Way Love Goes",
-      subtitle: 'Janet Jackson',
+      type: 'music', iconType: 'wave',
+      title: 'Canned Heat', subtitle: 'Jamiroquai',
       spotifyId: '0VjIjW4GlUZAMYd2vXMi3b',
-      artist: 'Janet Jackson',
-      duration_ms: 265000,
-      baseTilt: -2,
+      artist: 'Jamiroquai', duration_ms: 397000,
     },
   },
   {
@@ -107,14 +81,25 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       avatarUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200&auto=format&fit=crop&q=80',
     },
     note: {
-      type: 'music',
-      iconType: 'wave',
-      title: 'My Name Is...',
+      type: 'music', iconType: 'wave',
+      title: 'Show Me You Do',
       subtitle: 'Alicia Keys',
       spotifyId: '6DCZcSspjsKoFjzjrWoCdn',
-      artist: 'Alicia Keys',
-      duration_ms: 242000,
-      baseTilt: 2.5,
+      artist: 'Alicia Keys', duration_ms: 242000,
+    },
+  },
+  {
+    id: 'note_peixe',
+    user: {
+      name: 'Peixe',
+      avatarUrl: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=200&auto=format&fit=crop&q=80',
+    },
+    note: {
+      type: 'music', iconType: 'wave',
+      title: 'Quando Bate Aquela Saudade',
+      subtitle: 'Rubel',
+      spotifyId: '4w47dntseeMeuLPzFTKKB9',
+      artist: 'Rubel', duration_ms: 198000,
     },
   },
   {
@@ -124,14 +109,10 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
     },
     note: {
-      type: 'music',
-      iconType: 'wave',
-      title: 'Lonely Day',
-      subtitle: 'System Of A Down',
+      type: 'music', iconType: 'wave',
+      title: 'Lonely Day', subtitle: 'System Of A Down',
       spotifyId: '0d28khcov9ApubBr0GQbfS',
-      artist: 'System Of A Down',
-      duration_ms: 167000,
-      baseTilt: -2,
+      artist: 'System Of A Down', duration_ms: 167000,
     },
   },
   {
@@ -141,14 +122,10 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&auto=format&fit=crop&q=80',
     },
     note: {
-      type: 'music',
-      iconType: 'wave',
-      title: 'Elvira Pagã',
-      subtitle: 'Rita Lee',
+      type: 'music', iconType: 'wave',
+      title: 'Elvira Pagã', subtitle: 'Rita Lee',
       spotifyId: '6dOtVTDmmpzgGQ9qd0RMiZ',
-      artist: 'Rita Lee',
-      duration_ms: 195000,
-      baseTilt: 3,
+      artist: 'Rita Lee', duration_ms: 195000,
     },
   },
   {
@@ -159,14 +136,10 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       nameStyle: 'star',
     },
     note: {
-      type: 'music',
-      iconType: 'wave',
-      title: 'Ave Maria',
-      subtitle: 'MysticFall27',
+      type: 'music', iconType: 'wave',
+      title: 'Ave Maria', subtitle: 'MysticFall27',
       spotifyId: '2plbrEY59IikOBB5X7x5eG',
-      artist: 'MysticFall27',
-      duration_ms: 215000,
-      baseTilt: -2.5,
+      artist: 'MysticFall27', duration_ms: 215000,
     },
   },
 ];
@@ -174,24 +147,24 @@ const FRIEND_NOTES: FriendNoteItem[] = [
 const ITEM_WIDTH = 112;
 const MY_NOTE_KEY = 'openfy_my_note';
 
-// ── Animated 3-bar equalizer ──────────────────────────────────────────────────
+// ── Animated 3-bar equalizer (always animating when shown) ──────────────────
 const SoundWaveIcon = ({ color = '#FFFFFF' }: { color?: string }) => {
-  const anim1 = React.useRef(new Animated.Value(8)).current;
-  const anim2 = React.useRef(new Animated.Value(14)).current;
-  const anim3 = React.useRef(new Animated.Value(9)).current;
+  const a1 = React.useRef(new Animated.Value(8)).current;
+  const a2 = React.useRef(new Animated.Value(14)).current;
+  const a3 = React.useRef(new Animated.Value(9)).current;
 
   React.useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
         Animated.parallel([
-          Animated.timing(anim1, { toValue: 14, duration: 300, useNativeDriver: false }),
-          Animated.timing(anim2, { toValue: 8, duration: 280, useNativeDriver: false }),
-          Animated.timing(anim3, { toValue: 16, duration: 320, useNativeDriver: false }),
+          Animated.timing(a1, { toValue: 15, duration: 300, useNativeDriver: false }),
+          Animated.timing(a2, { toValue: 8, duration: 280, useNativeDriver: false }),
+          Animated.timing(a3, { toValue: 17, duration: 320, useNativeDriver: false }),
         ]),
         Animated.parallel([
-          Animated.timing(anim1, { toValue: 8, duration: 300, useNativeDriver: false }),
-          Animated.timing(anim2, { toValue: 16, duration: 320, useNativeDriver: false }),
-          Animated.timing(anim3, { toValue: 9, duration: 280, useNativeDriver: false }),
+          Animated.timing(a1, { toValue: 8, duration: 300, useNativeDriver: false }),
+          Animated.timing(a2, { toValue: 17, duration: 320, useNativeDriver: false }),
+          Animated.timing(a3, { toValue: 9, duration: 280, useNativeDriver: false }),
         ]),
       ])
     );
@@ -201,28 +174,28 @@ const SoundWaveIcon = ({ color = '#FFFFFF' }: { color?: string }) => {
 
   return (
     <View style={styles.waveContainer}>
-      <Animated.View style={[styles.waveBar, { height: anim1, backgroundColor: color }]} />
-      <Animated.View style={[styles.waveBar, { height: anim2, backgroundColor: color }]} />
-      <Animated.View style={[styles.waveBar, { height: anim3, backgroundColor: color }]} />
+      <Animated.View style={[styles.waveBar, { height: a1, backgroundColor: color }]} />
+      <Animated.View style={[styles.waveBar, { height: a2, backgroundColor: color }]} />
+      <Animated.View style={[styles.waveBar, { height: a3, backgroundColor: color }]} />
     </View>
   );
 };
 
-// ── Main Component ────────────────────────────────────────────────────────────
+// ── Main Component ──────────────────────────────────────────────────────────
 export const FriendActivityStatus = () => {
   const { playTrack, currentTrack, playerState } = usePlayer();
   const scrollX = React.useRef(new Animated.Value(0)).current;
 
-  // My note state (persisted)
+  // My note persisted state
   const [myNote, setMyNote] = React.useState<MyNote | null>(null);
   const [isNoteModalVisible, setIsNoteModalVisible] = React.useState(false);
 
-  // Load saved note from AsyncStorage
+  // Friend note sheet state
+  const [friendSheetNote, setFriendSheetNote] = React.useState<FriendNoteItem | null>(null);
+
   React.useEffect(() => {
     AsyncStorage.getItem(MY_NOTE_KEY)
-      .then((raw) => {
-        if (raw) setMyNote(JSON.parse(raw));
-      })
+      .then((raw) => { if (raw) setMyNote(JSON.parse(raw)); })
       .catch(() => {});
   }, []);
 
@@ -244,6 +217,7 @@ export const FriendActivityStatus = () => {
       return;
     }
 
+    // Play the song and open friend note sheet
     if (item.note.spotifyId) {
       playTrack({
         spotifyId: item.note.spotifyId,
@@ -254,6 +228,7 @@ export const FriendActivityStatus = () => {
         duration_ms: item.note.duration_ms || 200000,
       });
     }
+    setFriendSheetNote(item);
   };
 
   return (
@@ -270,7 +245,6 @@ export const FriendActivityStatus = () => {
         )}
       >
         {FRIEND_NOTES.map((item, index) => {
-          // Is this note's song currently playing?
           const isThisSongPlaying =
             !!item.note.spotifyId &&
             currentTrack?.spotifyId === item.note.spotifyId &&
@@ -281,11 +255,11 @@ export const FriendActivityStatus = () => {
             index * ITEM_WIDTH,
             (index + 1) * ITEM_WIDTH,
           ];
-          const baseTilt = item.note.baseTilt ?? 0;
 
+          // Tilt ONLY during movement (baseTilt = 0, returns straight when centered/stopped)
           const dynamicRotate = scrollX.interpolate({
             inputRange,
-            outputRange: [`${baseTilt - 8}deg`, `${baseTilt}deg`, `${baseTilt + 8}deg`],
+            outputRange: ['-9deg', '0deg', '9deg'],
             extrapolate: 'clamp',
           });
 
@@ -295,20 +269,19 @@ export const FriendActivityStatus = () => {
             extrapolate: 'clamp',
           });
 
-          // Determine note content for "My Note"
+          // Determine content for "Sua nota"
           const isCurrentUser = item.user.isCurrentUser;
           let bubbleColor = item.note.bubbleColor || DEFAULT_BUBBLE_COLOR;
           let noteTitle = item.note.title;
           let noteSubtitle = item.note.subtitle;
-          let showWaveIcon = isThisSongPlaying;
+          let showWave = isThisSongPlaying;
 
           if (isCurrentUser) {
             if (myNote) {
               bubbleColor = myNote.bubbleColor || DEFAULT_BUBBLE_COLOR;
               noteTitle = myNote.songTitle || myNote.text || 'Toque para editar';
               noteSubtitle = myNote.songArtist;
-              // Show wave if current user's note has the playing song
-              showWaveIcon =
+              showWave =
                 !!myNote.songSpotifyId &&
                 currentTrack?.spotifyId === myNote.songSpotifyId &&
                 playerState.isPlaying;
@@ -325,7 +298,6 @@ export const FriendActivityStatus = () => {
                 style={styles.pressableItem}
                 onPress={() => handlePressNote(item)}
                 accessibilityRole="button"
-                accessibilityLabel={`${item.user.name}: ${noteTitle}`}
               >
                 {/* Speech Bubble */}
                 <Animated.View
@@ -337,14 +309,8 @@ export const FriendActivityStatus = () => {
                   ]}
                 >
                   <View style={styles.bubbleInner}>
-                    {/* Wave icon: ONLY shown when this note's song is actively playing */}
-                    {showWaveIcon && (
-                      <SoundWaveIcon color="#FFFFFF" />
-                    )}
-                    {/* Headphone icon for "Ouvindo agora" style notes (never shown as default) */}
-                    {!showWaveIcon && item.note.iconType === 'headphone' && isThisSongPlaying && (
-                      <Ionicons name="headset" size={13} color="#FFFFFF" style={styles.iconStyle} />
-                    )}
+                    {/* Wave icon: ONLY when this note's song is actively playing */}
+                    {showWave && <SoundWaveIcon color="#FFFFFF" />}
 
                     <View style={styles.textContainer}>
                       <MarqueeText
@@ -364,7 +330,7 @@ export const FriendActivityStatus = () => {
                     </View>
                   </View>
 
-                  {/* Instagram-style speech tail dots */}
+                  {/* Instagram speech tail dots */}
                   <View style={[styles.tailDotMain, { backgroundColor: bubbleColor }]} />
                   <View style={[styles.tailDotSmall, { backgroundColor: bubbleColor }]} />
                 </Animated.View>
@@ -374,7 +340,7 @@ export const FriendActivityStatus = () => {
                   <Image source={{ uri: item.user.avatarUrl }} style={styles.avatarImage} />
                 </View>
 
-                {/* Name label */}
+                {/* Name */}
                 <Text
                   style={[
                     styles.userNameText,
@@ -399,6 +365,13 @@ export const FriendActivityStatus = () => {
         avatarUrl={FRIEND_NOTES[0].user.avatarUrl}
         onSave={handleSaveNote}
         onDelete={handleDeleteNote}
+      />
+
+      {/* Friend Note Sheet */}
+      <FriendNoteSheet
+        visible={!!friendSheetNote}
+        note={friendSheetNote}
+        onClose={() => setFriendSheetNote(null)}
       />
     </View>
   );
@@ -427,15 +400,10 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   noteBubblePlaying: {
-    borderColor: 'rgba(255, 255, 255, 0.35)',
+    borderColor: 'rgba(255,255,255,0.3)',
     borderWidth: 1,
   },
-  bubbleInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  iconStyle: { flexShrink: 0 },
+  bubbleInner: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   waveContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -456,7 +424,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.05,
   },
   noteSubtitle: {
-    color: 'rgba(255, 255, 255, 0.58)',
+    color: 'rgba(255,255,255,0.58)',
     fontSize: 9.5,
     fontFamily: 'SimplyRounded',
   },
@@ -471,32 +439,19 @@ const styles = StyleSheet.create({
   },
 
   avatarContainer: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 72, height: 72, borderRadius: 36,
     backgroundColor: '#1E1E22',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#1E2024',
-    zIndex: 1,
-    overflow: 'hidden',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: '#1E2024',
+    zIndex: 1, overflow: 'hidden',
   },
   avatarImage: { width: '100%', height: '100%' },
 
   userNameText: {
-    color: '#E4E4E7',
-    fontSize: 12,
+    color: '#E4E4E7', fontSize: 12,
     fontFamily: 'SimplyRounded',
-    marginTop: 6,
-    textAlign: 'center',
+    marginTop: 6, textAlign: 'center',
   },
-  userNameItalic: {
-    fontFamily: 'SimplyRounded-Italic',
-    fontStyle: 'italic',
-  },
-  userNameBold: {
-    fontFamily: 'SimplyRounded-Bold',
-    fontWeight: '700',
-  },
+  userNameItalic: { fontFamily: 'SimplyRounded-Italic', fontStyle: 'italic' },
+  userNameBold: { fontFamily: 'SimplyRounded-Bold', fontWeight: '700' },
 });
