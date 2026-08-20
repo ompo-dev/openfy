@@ -11,6 +11,7 @@ import {
   Image,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,9 +21,13 @@ import { usePlayer } from '@context';
 import { GlassSurface, LoggedPressable } from '../native';
 import { MarqueeText } from '../common/MarqueeText';
 
-type MiniPlayerProps = { onPress: () => void };
+export type MiniPlayerProps = {
+  onPress?: () => void;
+  onConfirm?: () => void;
+  style?: any;
+};
 
-export const MiniPlayer = ({ onPress }: MiniPlayerProps) => {
+export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
   const { currentTrack, playerState, togglePlayPause, isPlayerVisible } =
     usePlayer();
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
@@ -61,6 +66,7 @@ export const MiniPlayer = ({ onPress }: MiniPlayerProps) => {
     <Animated.View
       style={[
         styles.container,
+        style,
         {
           opacity: fadeAnim,
           transform: [
@@ -128,24 +134,26 @@ export const MiniPlayer = ({ onPress }: MiniPlayerProps) => {
                 />
               </View>
 
-              {/* Right: Audio Output Device & Play/Pause Button */}
+              {/* Right: Audio Output Device & Play/Pause / Confirm Button */}
               <View style={styles.controlsContainer}>
-                <LoggedPressable
-                  style={styles.deviceBtn}
-                  hitSlop={12}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    handleDevicePress();
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Dispositivos de Áudio"
-                >
-                  <Ionicons
-                    name="tv-outline"
-                    size={22}
-                    color="rgba(255, 255, 255, 0.85)"
-                  />
-                </LoggedPressable>
+                {!onConfirm && (
+                  <LoggedPressable
+                    style={styles.deviceBtn}
+                    hitSlop={12}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleDevicePress();
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Dispositivos de Áudio"
+                  >
+                    <Ionicons
+                      name="tv-outline"
+                      size={22}
+                      color="rgba(255, 255, 255, 0.85)"
+                    />
+                  </LoggedPressable>
+                )}
 
                 <LoggedPressable
                   style={styles.playBtn}
@@ -159,11 +167,27 @@ export const MiniPlayer = ({ onPress }: MiniPlayerProps) => {
                 >
                   <Ionicons
                     name={playerState.isPlaying ? 'pause' : 'play'}
-                    size={26}
+                    size={24}
                     color="#FFFFFF"
                     style={!playerState.isPlaying ? { marginLeft: 2 } : undefined}
                   />
                 </LoggedPressable>
+
+                {onConfirm && (
+                  <TouchableOpacity
+                    style={styles.confirmCheckBtn}
+                    activeOpacity={0.8}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      try {
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                      } catch {}
+                      onConfirm();
+                    }}
+                  >
+                    <Ionicons name="checkmark" size={18} color="#FFFFFF" />
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
 
@@ -262,18 +286,31 @@ const styles = StyleSheet.create({
   controlsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-    paddingRight: 6,
+    gap: 10,
+    paddingRight: 4,
   },
   deviceBtn: {
     padding: 4,
   },
   playBtn: {
     padding: 4,
-    width: 34,
-    height: 34,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  confirmCheckBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#5B5BD6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#5B5BD6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
   },
   progressBarBackground: {
     height: 2.5,

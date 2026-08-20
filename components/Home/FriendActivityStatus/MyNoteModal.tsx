@@ -48,6 +48,7 @@ import { MarqueeText } from '../../common/MarqueeText';
 import { getNoteColorTheme } from '../../../utils/colorContrast';
 import { NativeIconButton } from '../../native/NativeButtons';
 import { GlassSurface } from '../../native/GlassSurface';
+import { MiniPlayer } from '../../Player/MiniPlayer';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -898,55 +899,15 @@ export const MyNoteModal = ({
               }}
             />
 
-            {/* Floating Confirmation Bar — Appears Over Music Picker with Play/Pause & Checkmark Confirm */}
+            {/* Render exact native MiniPlayer with Checkmark Confirm Button */}
             {previewTrack && (
-              <GlassSurface glass="regular" style={S.floatingPreviewBar}>
-                <Image
-                  source={{ uri: previewTrack.localImagePath || previewTrack.imageURL || '' }}
-                  style={S.previewCover}
-                />
-                <View style={S.previewInfo}>
-                  <Text style={S.previewTitle} numberOfLines={1}>
-                    {previewTrack.title}
-                  </Text>
-                  <Text style={S.previewArtist} numberOfLines={1}>
-                    {previewTrack.artistName}
-                  </Text>
-                </View>
-
-                {/* Play / Pause Toggle */}
-                <TouchableOpacity
-                  style={S.previewControlBtn}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    try {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    } catch {}
-                    togglePlayPause();
-                  }}
-                >
-                  <Ionicons
-                    name={playerState.isPlaying ? 'pause-circle' : 'play-circle'}
-                    size={32}
-                    color="#FFFFFF"
-                  />
-                </TouchableOpacity>
-
-                {/* Confirm Checkmark Button */}
-                <TouchableOpacity
-                  style={S.confirmArrowBtn}
-                  activeOpacity={0.8}
-                  onPress={() => {
-                    try {
-                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                    } catch {}
-                    setSelectedSong(previewTrack);
-                    setIsMusicPickerVisible(false);
-                  }}
-                >
-                  <Ionicons name="checkmark" size={20} color="#FFFFFF" />
-                </TouchableOpacity>
-              </GlassSurface>
+              <MiniPlayer
+                onConfirm={() => {
+                  setSelectedSong(previewTrack);
+                  setIsMusicPickerVisible(false);
+                }}
+                style={S.musicPickerMiniPlayer}
+              />
             )}
           </View>
         </View>
@@ -1362,60 +1323,10 @@ const S = StyleSheet.create({
     fontFamily: 'SimplyRounded',
   },
 
-  // Floating Confirmation Mini Player Bar
-  floatingPreviewBar: {
+  musicPickerMiniPlayer: {
     position: 'absolute',
     bottom: Platform.OS === 'ios' ? 24 : 14,
-    left: 16,
-    right: 16,
-    borderRadius: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    gap: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  previewCover: {
-    width: 38,
-    height: 38,
-    borderRadius: 6,
-    backgroundColor: '#1E1E24',
-  },
-  previewInfo: {
-    flex: 1,
-  },
-  previewTitle: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontFamily: 'SimplyRounded-Bold',
-    fontWeight: '700',
-  },
-  previewArtist: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 11,
-    fontFamily: 'SimplyRounded',
-  },
-  previewControlBtn: {
-    padding: 2,
-  },
-  confirmArrowBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#5B5BD6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#5B5BD6',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 4,
-    elevation: 3,
+    left: 12,
+    right: 12,
   },
 });
