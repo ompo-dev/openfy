@@ -158,15 +158,18 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
     });
   }, [totalBars, trackTitleLength]);
 
-  // Find active single lyric line
+  // Find active single lyric line (syncs dynamically during both dragging/scrubbing & live playback)
+  const currentSongPositionMs = playerState.isPlaying && playerState.positionMs
+    ? playerState.positionMs
+    : startTimeMs;
+
   const activeLine = React.useMemo(() => {
     if (!lyricsData || !lyricsData.segments || lyricsData.segments.length === 0) return null;
-    const currentMs = playerState.positionMs || 0;
     const found = lyricsData.segments.find(
-      (seg) => currentMs >= seg.startTimeMs && currentMs <= seg.endTimeMs
+      (seg) => currentSongPositionMs >= seg.startTimeMs && currentSongPositionMs <= seg.endTimeMs
     );
     return found || lyricsData.segments[0];
-  }, [lyricsData, playerState.positionMs]);
+  }, [lyricsData, currentSongPositionMs]);
 
   // Unconditional hooks declared above
   if (!track) return null;
