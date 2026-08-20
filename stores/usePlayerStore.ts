@@ -17,6 +17,7 @@ import {
   pause,
   seekTo,
   unload,
+  getStatus,
   PlayerState,
   DEFAULT_STATE,
   resolveAudioUrl,
@@ -344,15 +345,24 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   },
 
   togglePlayPause: async () => {
-    const { playerState, currentTrack, playTrack } = get();
-    if (!playerState.isLoaded && currentTrack) {
+    const { currentTrack, playTrack } = get();
+
+    // Always read real-time state from playerService (not Zustand state which can be stale)
+    // This ensures pause works from any screen: banners, carrossel, etc.
+    const realState = getStatus();
+
+    if (!realState.isLoaded && currentTrack) {
       await playTrack(currentTrack);
       return;
     }
-    if (playerState.isPlaying) {
+
+    if (realState.isPlaying) {
       await pause();
+      // Sync Zustand state immediately so UI reflects change
+      set((s) => ({ playerState: { ...s.playerState, isPlaying: false } }));
     } else {
       await play();
+      set((s) => ({ playerState: { ...s.playerState, isPlaying: true } }));
     }
   },
 
