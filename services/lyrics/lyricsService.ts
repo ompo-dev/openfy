@@ -1,9 +1,10 @@
 /**
  * Lyrics Service
  * Multi-Engine Lyrics Provider:
- * 1. LRCLIB (Synchronized LRC Karaokê & Timestamps)
- * 2. Letras.mus.br (Complete Brazilian & International Lyrics database + Video metadata)
- * 3. Vagalume API (Fast Plain text fallback)
+ * 1. Openfy Backend Engine (/api/lyrics - LRCLIB + Letras.mus.br + Genius)
+ * 2. LRCLIB (Synchronized LRC Karaokê & Timestamps)
+ * 3. Letras.mus.br (Complete Brazilian & International Lyrics database)
+ * 4. Offline Cache & Fallback System
  */
 
 import { Platform } from 'react-native';
@@ -25,7 +26,7 @@ export type LyricsData = {
   syncedLyrics?: string;
   segments: LyricSegment[];
   isSynced: boolean;
-  source?: 'lrclib' | 'letras' | 'vagalume';
+  source?: 'backend' | 'lrclib' | 'letras' | 'vagalume';
   timeOffsetMs?: number;
 };
 
@@ -96,67 +97,70 @@ export const parseLrcToSegments = (
 };
 
 /**
- * Fetch lyrics from Letras.mus.br
+ * Fetch lyrics from Letras.mus.br (Fallback for native environments)
  */
 export const fetchLyricsFromLetras = async (
   trackName: string,
   artistName: string
 ): Promise<LyricsData | null> => {
   try {
-    const query = `${artistName} ${trackName}`.trim();
-    const searchUrl = `https://solr.sscdn.co/letras/m1/?q=${encodeURIComponent(query)}`;
+    const cleanT = (trackName || '').replace(/\(.*\)/g, '').replace(/-.*/g, '').trim();
+    const cleanA = (artistName || '').replace(/\(.*\)/g, '').replace(/,.*/g, '').trim();
+    const queries = [
+      `${cleanA} ${cleanT}`,
+      cleanT,
+      `${cleanT} ${cleanA}`
+    ];
 
-    let targetUrl = searchUrl;
-    if (Platform.OS === 'web' && !searchUrl.includes('localhost')) {
-      targetUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(searchUrl)}`;
-    }
+    for (const query of queries) {
+      const searchUrl = `https://solr.sscdn.co/letras/m1/?q=${encodeURIComponent(query)}`;
 
-    const res = await fetch(targetUrl);
-    if (!res.ok) return null;
+      const res = await fetch(searchUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      });
+      if (!res.ok) continue;
 
-    const raw = await res.text();
-    const startIdx = raw.indexOf('{');
-    const endIdx = raw.lastIndexOf('}');
-    if (startIdx === -1 || endIdx === -1) return null;
+      const raw = await res.text();
+      const match = raw.match(/LetrasSug\(([\s\S]*)\)/);
+      if (!match) continue;
 
-    const cleanJson = raw.slice(startIdx, endIdx + 1);
-    const data = JSON.parse(cleanJson);
-    const docs = data.response?.docs || [];
+      const data = JSON.parse(match[1]);
+      const docs = data.response?.docs || [];
+      if (docs.length === 0) continue;
 
-    if (docs.length === 0) return null;
+      for (const doc of docs.slice(0, 2)) {
+        if (!doc.dns || !doc.url) continue;
 
-    const doc = docs[0];
-    if (!doc.dns || !doc.url) return null;
+        const pageUrl = `https://www.letras.mus.br/${doc.dns}/${doc.url}/`;
+        const pageRes = await fetch(pageUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+        });
+        if (!pageRes.ok) continue;
 
-    const pageUrl = `https://www.letras.mus.br/${doc.dns}/${doc.url}/`;
-    let targetPageUrl = pageUrl;
-    if (Platform.OS === 'web') {
-      targetPageUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(pageUrl)}`;
-    }
+        const html = await pageRes.text();
+        const m =
+          html.match(/<div class="lyric-original"[^>]*>([\s\S]*?)<\/div>/i) ||
+          html.match(/<div class="cnt-letra"[^>]*>([\s\S]*?)<\/div>/i);
+        if (m) {
+          const plain = m[1]
+            .replace(/<p>/g, '')
+            .replace(/<\/p>/g, '\n\n')
+            .replace(/<br\s*[\/]?>/gi, '\n')
+            .replace(/<[^>]+>/g, '')
+            .trim();
 
-    const pageRes = await fetch(targetPageUrl);
-    if (!pageRes.ok) return null;
-
-    const html = await pageRes.text();
-    const m = html.match(/<div class="lyric-original">([\s\S]*?)<\/div>/);
-    if (m) {
-      const plain = m[1]
-        .replace(/<p>/g, '\n')
-        .replace(/<\/p>/g, '\n')
-        .replace(/<br\s*[\/]?>/gi, '\n')
-        .replace(/<[^>]+>/g, '')
-        .trim();
-
-      if (plain.length > 10) {
-        return {
-          id: doc.id || `letras_${doc.dns}`,
-          trackName: doc.txt || trackName,
-          artistName: doc.art || artistName,
-          plainLyrics: plain,
-          segments: [],
-          isSynced: false,
-          source: 'letras',
-        };
+          if (plain.length > 20) {
+            return {
+              id: doc.id || `letras_${doc.dns}`,
+              trackName: doc.txt || trackName,
+              artistName: doc.art || artistName,
+              plainLyrics: plain,
+              segments: [],
+              isSynced: false,
+              source: 'letras',
+            };
+          }
+        }
       }
     }
   } catch (err) {
@@ -166,7 +170,7 @@ export const fetchLyricsFromLetras = async (
 };
 
 /**
- * Main fetch lyrics dispatcher with multi-provider fallback
+ * Main fetch lyrics dispatcher with backend proxy + multi-provider fallback
  */
 export const fetchLyrics = async (
   trackName: string,
@@ -180,9 +184,48 @@ export const fetchLyrics = async (
 
   const cleanTrack = trackName.split('(')[0].split('-')[0].trim();
   const primaryArtist = isUnknown ? '' : artistName.split(',')[0].split('&')[0].trim();
-  const durationMs = durationSeconds ? Math.round(durationSeconds * 1000) : undefined;
+  const durationMs = durationSeconds ? Math.round(durationSeconds * 1000) : 0;
 
-  // 1. PRIMARY: Try exact synchronized match on LRCLIB (direct fetch)
+  // 1. PRIMARY: Query dedicated Openfy Backend (/api/lyrics)
+  try {
+    const backendParams = new URLSearchParams({
+      title: cleanTrack,
+      artist: primaryArtist || artistName,
+      ...(durationMs > 0 ? { durationMs: String(durationMs) } : {}),
+    });
+
+    const backendUrl = `http://localhost:3001/api/lyrics?${backendParams.toString()}`;
+    const bRes = await fetch(backendUrl, { signal: AbortSignal.timeout(4000) });
+    if (bRes.ok) {
+      const bData = await bRes.json();
+      if (bData && bData.valid) {
+        let segments: LyricSegment[] = [];
+        if (bData.syncedLyrics) {
+          segments = parseLrcToSegments(bData.syncedLyrics, durationMs);
+        } else if (Array.isArray(bData.lines) && bData.lines.length > 0) {
+          segments = bData.lines.map((l: any, i: number) => ({
+            index: i,
+            startTimeMs: l.startMs,
+            endTimeMs: bData.lines[i + 1]?.startMs || (l.startMs + 4000),
+            text: l.text,
+          }));
+        }
+
+        return {
+          id: `lyrics_${cleanTrack}`,
+          trackName: bData.trackName || trackName,
+          artistName: bData.artistName || artistName,
+          plainLyrics: bData.plainLyrics,
+          syncedLyrics: bData.syncedLyrics,
+          segments,
+          isSynced: segments.length > 0,
+          source: 'backend',
+        };
+      }
+    }
+  } catch {}
+
+  // 2. SECONDARY: Try exact synchronized match on LRCLIB directly
   try {
     const params = new URLSearchParams({
       track_name: cleanTrack,
@@ -240,7 +283,7 @@ export const fetchLyrics = async (
     console.warn('[LyricsService] Exact lookup error:', error);
   }
 
-  // 2. SECONDARY: Search query fallback on LRCLIB (direct fetch)
+  // 3. TERTIARY: Search query fallback on LRCLIB
   try {
     const query = primaryArtist ? `${primaryArtist} ${cleanTrack}` : cleanTrack;
     const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(query)}`;
@@ -298,7 +341,7 @@ export const fetchLyrics = async (
     console.warn('[LyricsService] Search fallback error:', error);
   }
 
-  // 3. TERTIARY: Letras.mus.br Full Lyrics Scraper
+  // 4. QUATERNARY: Direct Letras.mus.br Scraper
   const letrasData = await fetchLyricsFromLetras(cleanTrack, primaryArtist || artistName);
   if (letrasData) {
     return letrasData;

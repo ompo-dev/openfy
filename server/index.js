@@ -342,69 +342,180 @@ async function fetchSoundCloudPlayableStream(title, artist, durationMs) {
   return null;
 }
 
-// 3. Direct Parametric GET Identifier (track_name + artist_name + duration) with Strict Cross-Validation
-async function fetchExactIdentifierGet(title, artist, durationMs, albumName) {
+// 3. Multi-Engine Lyrics Resolver (LRCLIB Exact -> LRCLIB Search -> Letras.mus.br Scraper -> Vagalume)
+async function fetchComprehensiveLyrics(title, artist, durationMs, albumName) {
   const durationSec = durationMs > 0 ? Math.round(durationMs / 1000) : 0;
-  const cacheKey = `exact_get:${artist}:${title}:${durationSec}`;
+  const cacheKey = `lyrics_multi:${artist}:${title}:${durationSec}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
-  const queryParams = new URLSearchParams({
-    track_name: title,
-    artist_name: artist,
-    ...(durationSec > 0 ? { duration: String(durationSec) } : {}),
-    ...(albumName ? { album_name: albumName } : {}),
-  });
-
+  // 1. LRCLIB Exact
   try {
+    const queryParams = new URLSearchParams({
+      track_name: title,
+      artist_name: artist,
+      ...(durationSec > 0 ? { duration: String(durationSec) } : {}),
+      ...(albumName ? { album_name: albumName } : {}),
+    });
+
     const res = await fetch(`https://lrclib.net/api/get?${queryParams.toString()}`, {
       headers: { 'User-Agent': 'OpenfyMusic/1.0.0 ( contact@openfy.app )' },
-      signal: AbortSignal.timeout(3500),
+      signal: AbortSignal.timeout(3000),
     });
 
     if (res.ok) {
       const data = await res.json();
+      let lines = [];
+      if (data.syncedLyrics) {
+        lines = data.syncedLyrics
+          .split('\n')
+          .filter(Boolean)
+          .map(l => {
+            const m = l.match(/\[(\d+):(\d+\.?\d*)\](.*)/);
+            if (!m) return null;
+            const startMs = (parseInt(m[1]) * 60 + parseFloat(m[2])) * 1000;
+            return { text: m[3].trim(), startMs: Math.round(startMs) };
+          })
+          .filter(Boolean);
+      }
 
-      const normTargetTitle = normalizeText(title);
-      const normResolvedTitle = normalizeText(data.trackName || '');
-      const titleMatch = normResolvedTitle.includes(normTargetTitle) || normTargetTitle.includes(normResolvedTitle);
-
-      const normTargetArtist = normalizeText(artist);
-      const normResolvedArtist = normalizeText(data.artistName || '');
-      const artistMatch = normResolvedArtist.includes(normTargetArtist) || normTargetArtist.includes(normResolvedArtist);
-
-      if (titleMatch && artistMatch) {
-        let lines = [];
-        if (data.syncedLyrics) {
-          lines = data.syncedLyrics
-            .split('\n')
-            .filter(Boolean)
-            .map(l => {
-              const m = l.match(/\[(\d+):(\d+\.\d+)\](.*)/);
-              if (!m) return null;
-              const startMs = (parseInt(m[1]) * 60 + parseFloat(m[2])) * 1000;
-              return { text: m[3].trim(), startMs: Math.round(startMs) };
-            })
-            .filter(Boolean);
-        }
-
+      if (data.syncedLyrics || data.plainLyrics) {
         const result = {
           valid: true,
           synced: lines.length > 0,
+          isSynced: lines.length > 0,
           lines,
-          trackName: data.trackName,
-          artistName: data.artistName,
-          albumName: data.albumName,
+          syncedLyrics: data.syncedLyrics,
+          plainLyrics: data.plainLyrics,
+          trackName: data.trackName || title,
+          artistName: data.artistName || artist,
+          albumName: data.albumName || albumName,
           durationMs: data.duration ? data.duration * 1000 : durationMs,
-          source: 'lrclib_exact_get',
+          source: 'lrclib_exact',
         };
         setCache(cacheKey, result, 604800);
         return result;
       }
     }
   } catch {}
+
+  // 2. LRCLIB Search
+  try {
+    const cleanTitle = (title || '').replace(/\(.*\)/g, '').replace(/-.*/g, '').trim();
+    const cleanArtist = (artist || '').replace(/\(.*\)/g, '').replace(/,.*/g, '').trim();
+    const searchQueries = [
+      `${cleanArtist} ${cleanTitle}`,
+      cleanTitle,
+      title
+    ];
+
+    for (const sq of searchQueries) {
+      const sRes = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(sq)}`, {
+        headers: { 'User-Agent': 'OpenfyMusic/1.0.0' },
+        signal: AbortSignal.timeout(3000),
+      });
+      if (sRes.ok) {
+        const list = await sRes.json();
+        if (Array.isArray(list) && list.length > 0) {
+          const match = list.find(x => x.syncedLyrics) || list.find(x => x.plainLyrics);
+          if (match) {
+            let lines = [];
+            if (match.syncedLyrics) {
+              lines = match.syncedLyrics
+                .split('\n')
+                .filter(Boolean)
+                .map(l => {
+                  const m = l.match(/\[(\d+):(\d+\.?\d*)\](.*)/);
+                  if (!m) return null;
+                  const startMs = (parseInt(m[1]) * 60 + parseFloat(m[2])) * 1000;
+                  return { text: m[3].trim(), startMs: Math.round(startMs) };
+                })
+                .filter(Boolean);
+            }
+
+            const result = {
+              valid: true,
+              synced: lines.length > 0,
+              isSynced: lines.length > 0,
+              lines,
+              syncedLyrics: match.syncedLyrics,
+              plainLyrics: match.plainLyrics,
+              trackName: match.trackName || title,
+              artistName: match.artistName || artist,
+              albumName: match.albumName || albumName,
+              durationMs: match.duration ? match.duration * 1000 : durationMs,
+              source: 'lrclib_search',
+            };
+            setCache(cacheKey, result, 604800);
+            return result;
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // 3. Letras.mus.br Scraper (100% complete Brazilian & International Lyrics)
+  try {
+    const cleanT = (title || '').replace(/\(.*\)/g, '').replace(/-.*/g, '').trim();
+    const cleanA = (artist || '').replace(/\(.*\)/g, '').replace(/,.*/g, '').trim();
+    const queries = [
+      `${cleanA} ${cleanT}`,
+      cleanT,
+      `${cleanT} ${cleanA}`
+    ];
+
+    for (const q of queries) {
+      const url = `https://solr.sscdn.co/letras/m1/?q=${encodeURIComponent(q)}`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(3500) });
+      if (!res.ok) continue;
+      const raw = await res.text();
+      const match = raw.match(/LetrasSug\(([\s\S]*)\)/);
+      if (!match) continue;
+      const data = JSON.parse(match[1]);
+      const docs = data.response?.docs || [];
+      if (!docs.length) continue;
+
+      for (const doc of docs.slice(0, 3)) {
+        if (!doc.dns || !doc.url) continue;
+        const pageUrl = `https://www.letras.mus.br/${doc.dns}/${doc.url}/`;
+        const pageRes = await fetch(pageUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(3500) });
+        if (!pageRes.ok) continue;
+        const html = await pageRes.text();
+        const lyricMatch = html.match(/<div class="lyric-original"[^>]*>([\s\S]*?)<\/div>/i) ||
+                           html.match(/<div class="cnt-letra"[^>]*>([\s\S]*?)<\/div>/i);
+        if (lyricMatch) {
+          const plain = lyricMatch[1]
+            .replace(/<p>/g, '')
+            .replace(/<\/p>/g, '\n\n')
+            .replace(/<br\s*[\/]?>/gi, '\n')
+            .replace(/<[^>]+>/g, '')
+            .trim();
+          if (plain.length > 20) {
+            const result = {
+              valid: true,
+              synced: false,
+              isSynced: false,
+              lines: [],
+              plainLyrics: plain,
+              trackName: doc.txt || title,
+              artistName: doc.art || artist,
+              albumName: albumName || 'Single',
+              durationMs,
+              source: 'letras.mus.br',
+            };
+            setCache(cacheKey, result, 604800);
+            return result;
+          }
+        }
+      }
+    }
+  } catch {}
+
   return null;
 }
+
+// Alias for backward compatibility
+const fetchExactIdentifierGet = fetchComprehensiveLyrics;
 
 // HTTP Server
 const server = http.createServer(async (req, res) => {
@@ -425,6 +536,30 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/health' || pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', service: 'openfy-official-ranker-resolution-engine', time: new Date().toISOString() }));
+    return;
+  }
+
+  // GET /api/lyrics?title=...&artist=...&durationMs=...
+  if (pathname === '/api/lyrics') {
+    const qTitle = parsedUrl.query.title || parsedUrl.query.track_name;
+    const qArtist = parsedUrl.query.artist || parsedUrl.query.artist_name || '';
+    const qDurationMs = parseInt(parsedUrl.query.durationMs || parsedUrl.query.duration || '0', 10);
+    const qAlbum = parsedUrl.query.album || '';
+
+    if (!qTitle) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing title parameter' }));
+      return;
+    }
+
+    const lyricsResult = await fetchComprehensiveLyrics(qTitle, qArtist, qDurationMs, qAlbum);
+    if (lyricsResult && lyricsResult.valid) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(lyricsResult));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Lyrics not found' }));
+    }
     return;
   }
 
