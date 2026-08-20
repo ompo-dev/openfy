@@ -1,20 +1,21 @@
 /**
  * CompactMusicCarousel Component
- * Compact modern track carousel cards with album art, explicit badge,
- * in-image bottom-right circular play button, physics-based scroll inertia animation,
- * and marquee scrolling titles with lateral fade.
+ * Compact modern track carousel where the album artwork is the FULL background of the card,
+ * with dark bottom gradient, in-image circular play button, explicit tag,
+ * physics-based scroll inertia, and marquee scrolling titles.
  */
 
 import * as React from 'react';
 import {
   Animated,
-  Image,
+  ImageBackground,
   Platform,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
 import { LoggedPressable } from '../../native';
@@ -158,45 +159,59 @@ export const CompactMusicCarousel = () => {
                 accessibilityRole="button"
                 accessibilityLabel={`Tocar ${item.title} de ${item.artist}`}
               >
-                {/* Square Album Cover with Explicit Badge & In-Image Play Button */}
-                <View style={styles.imageContainer}>
-                  <Image
-                    source={{ uri: item.imageUrl }}
-                    style={styles.artworkImage}
-                  />
-
-                  {item.explicit && (
-                    <View style={styles.explicitBadge}>
-                      <Text style={styles.explicitText}>E</Text>
+                {/* Full-bleed Artwork Background */}
+                <ImageBackground
+                  source={{ uri: item.imageUrl }}
+                  style={styles.cardImageBackground}
+                  imageStyle={styles.cardImageRadius}
+                >
+                  <LinearGradient
+                    colors={[
+                      'rgba(0,0,0,0.2)',
+                      'transparent',
+                      'rgba(0,0,0,0.92)',
+                    ]}
+                    locations={[0, 0.35, 1.0]}
+                    style={styles.gradientOverlay}
+                  >
+                    {/* Top Row: Explicit Badge */}
+                    <View style={styles.topRow}>
+                      {item.explicit && (
+                        <View style={styles.explicitBadge}>
+                          <Text style={styles.explicitText}>E</Text>
+                        </View>
+                      )}
                     </View>
-                  )}
 
-                  {/* Circular White Play Button positioned inside the image (bottom-right) */}
-                  <View style={styles.inImagePlayButton}>
-                    <Ionicons
-                      name={isPlaying ? 'pause' : 'play'}
-                      size={16}
-                      color="#000000"
-                      style={{ marginLeft: isPlaying ? 0 : 2 }}
-                    />
-                  </View>
-                </View>
+                    {/* Bottom Row: Left-Aligned Text + Play Button */}
+                    <View style={styles.bottomRow}>
+                      <View style={styles.infoContainer}>
+                        <MarqueeText
+                          text={item.title}
+                          style={styles.titleText}
+                          align="left"
+                          fadeWidth={8}
+                        />
+                        <MarqueeText
+                          text={item.artist}
+                          style={styles.artistText}
+                          align="left"
+                          fadeWidth={8}
+                        />
+                      </View>
 
-                {/* Title & Artist with Lateral Fade Marquee Scroll (Left Aligned) */}
-                <View style={styles.infoContainer}>
-                  <MarqueeText
-                    text={item.title}
-                    style={styles.titleText}
-                    align="left"
-                    fadeWidth={8}
-                  />
-                  <MarqueeText
-                    text={item.artist}
-                    style={styles.artistText}
-                    align="left"
-                    fadeWidth={8}
-                  />
-                </View>
+                      {/* Circular White Play Button */}
+                      <View style={styles.playButton}>
+                        <Ionicons
+                          name={isPlaying ? 'pause' : 'play'}
+                          size={15}
+                          color="#000000"
+                          style={{ marginLeft: isPlaying ? 0 : 2 }}
+                        />
+                      </View>
+                    </View>
+                  </LinearGradient>
+                </ImageBackground>
               </LoggedPressable>
             </Animated.View>
           );
@@ -234,41 +249,47 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   card: {
-    width: 154,
-    backgroundColor: '#161618',
-    borderRadius: 16,
-    padding: 10,
-    paddingBottom: 14,
+    width: 156,
+    height: 195,
+    borderRadius: 18,
+    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
   },
   cardActive: {
-    borderColor: 'rgba(255, 255, 255, 0.35)',
+    borderColor: '#FFFFFF',
   },
-  imageContainer: {
-    width: '100%',
-    aspectRatio: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-    position: 'relative',
-    backgroundColor: '#27272A',
-  },
-  artworkImage: {
+  cardImageBackground: {
     width: '100%',
     height: '100%',
-    borderRadius: 12,
+    justifyContent: 'space-between',
+  },
+  cardImageRadius: {
+    borderRadius: 18,
+  },
+  gradientOverlay: {
+    ...(StyleSheet.absoluteFill as any),
+    justifyContent: 'space-between',
+    padding: 10,
+    borderRadius: 18,
+  },
+  topRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-start',
   },
   explicitBadge: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
     backgroundColor: 'rgba(0, 0, 0, 0.75)',
     paddingHorizontal: 5,
     paddingVertical: 2,
     borderRadius: 4,
     borderWidth: 0.5,
     borderColor: 'rgba(255, 255, 255, 0.3)',
-    zIndex: 2,
   },
   explicitText: {
     color: '#FFFFFF',
@@ -276,38 +297,44 @@ const styles = StyleSheet.create({
     fontFamily: 'SF-Bold',
     fontWeight: '800',
   },
-  inImagePlayButton: {
-    position: 'absolute',
-    bottom: 8,
-    right: 8,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.45,
-    shadowRadius: 5,
-    zIndex: 3,
+  bottomRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 6,
   },
   infoContainer: {
-    marginTop: 10,
+    flex: 1,
+    alignItems: 'flex-start',
     gap: 2,
-    width: '100%',
   },
   titleText: {
     color: '#FFFFFF',
-    fontSize: 14.5,
+    fontSize: 14,
     fontFamily: 'SF-Bold',
     fontWeight: '700',
     letterSpacing: 0.1,
+    textAlign: 'left',
   },
   artistText: {
-    color: 'rgba(255, 255, 255, 0.62)',
-    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.72)',
+    fontSize: 11.5,
     fontFamily: 'SF-Regular',
+    textAlign: 'left',
+  },
+  playButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    flexShrink: 0,
+    marginBottom: 2,
   },
 });

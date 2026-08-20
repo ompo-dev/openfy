@@ -1,7 +1,8 @@
 /**
  * FriendActivityStatus Component
- * Real-time friend listening status with enlarged avatar circles, floating speech bubbles,
- * physics-based scroll inertia animations, and centered marquee titles with lateral fade.
+ * Real-time friend listening status with static stable avatar circles,
+ * floating speech bubbles with physics tilt/inertia animation,
+ * and strictly centered marquee text with lateral fade.
  */
 
 import * as React from 'react';
@@ -35,6 +36,7 @@ export interface FriendStatusItem {
     imageUrl: string;
     duration_ms: number;
     bubbleColor: string;
+    tiltDeg: number;
   };
 }
 
@@ -55,6 +57,7 @@ const FRIEND_STATUSES: FriendStatusItem[] = [
       imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2738863bc11d2aa12b54f5aeb36',
       duration_ms: 239000,
       bubbleColor: '#A15D25', // Warm caramel amber
+      tiltDeg: -3,
     },
   },
   {
@@ -72,6 +75,7 @@ const FRIEND_STATUSES: FriendStatusItem[] = [
       imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2737e10812d9b103f2656dc91c6',
       duration_ms: 198000,
       bubbleColor: '#7A0C1E', // Deep crimson wine
+      tiltDeg: 2.5,
     },
   },
   {
@@ -89,6 +93,7 @@ const FRIEND_STATUSES: FriendStatusItem[] = [
       imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27326f7f19c7f0381e56156c94a',
       duration_ms: 287000,
       bubbleColor: '#511C40', // Deep plum/violet
+      tiltDeg: -2.5,
     },
   },
   {
@@ -106,6 +111,7 @@ const FRIEND_STATUSES: FriendStatusItem[] = [
       imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27371d62ea7ea8a5be92d3c1f62',
       duration_ms: 195000,
       bubbleColor: '#A85B6B', // Dusty Rose / Mauve
+      tiltDeg: 3,
     },
   },
   {
@@ -123,6 +129,7 @@ const FRIEND_STATUSES: FriendStatusItem[] = [
       imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27326f7f19c7f0381e56156c94a',
       duration_ms: 236000,
       bubbleColor: '#1E3A8A', // Deep Midnight Blue
+      tiltDeg: -2,
     },
   },
 ];
@@ -165,22 +172,18 @@ export const FriendActivityStatus = () => {
             currentTrack?.spotifyId === item.track.spotifyId &&
             playerState.isPlaying;
 
-          // Physics-based scroll inertia interpolation
+          // Physics scroll inertia applied ONLY to the floating speech bubble
           const inputRange = [
             (index - 1) * ITEM_WIDTH,
             index * ITEM_WIDTH,
             (index + 1) * ITEM_WIDTH,
           ];
 
-          const scale = scrollX.interpolate({
-            inputRange,
-            outputRange: [0.93, 1.0, 0.93],
-            extrapolate: 'clamp',
-          });
+          const baseTilt = item.track.tiltDeg || 0;
 
-          const rotate = scrollX.interpolate({
+          const dynamicRotate = scrollX.interpolate({
             inputRange,
-            outputRange: ['-2.5deg', '0deg', '2.5deg'],
+            outputRange: [`${baseTilt - 4}deg`, `${baseTilt}deg`, `${baseTilt + 4}deg`],
             extrapolate: 'clamp',
           });
 
@@ -190,27 +193,32 @@ export const FriendActivityStatus = () => {
             extrapolate: 'clamp',
           });
 
+          const scale = scrollX.interpolate({
+            inputRange,
+            outputRange: [0.94, 1.0, 0.94],
+            extrapolate: 'clamp',
+          });
+
           return (
-            <Animated.View
-              key={item.id}
-              style={[
-                styles.itemWrapper,
-                {
-                  transform: [{ scale }, { rotate }, { translateY }],
-                },
-              ]}
-            >
+            <View key={item.id} style={styles.itemWrapper}>
               <LoggedPressable
                 style={styles.pressableItem}
                 onPress={() => handlePressStatus(item)}
                 accessibilityRole="button"
                 accessibilityLabel={`${item.user.username} está ouvindo ${item.track.title} de ${item.track.artist}`}
               >
-                {/* Floating Listening Bubble without Spotify Icon & Strictly Centered */}
-                <View
+                {/* Floating Listening Bubble with Dynamic Tilt/Inertia Animation */}
+                <Animated.View
                   style={[
                     styles.speechBubble,
-                    { backgroundColor: item.track.bubbleColor },
+                    {
+                      backgroundColor: item.track.bubbleColor,
+                      transform: [
+                        { rotate: dynamicRotate },
+                        { translateY },
+                        { scale },
+                      ],
+                    },
                     isPlaying && styles.speechBubblePlaying,
                   ]}
                 >
@@ -228,9 +236,9 @@ export const FriendActivityStatus = () => {
                       fadeWidth={6}
                     />
                   </View>
-                </View>
+                </Animated.View>
 
-                {/* Enlarged Avatar Circle Container */}
+                {/* Completely Stable, Upright, Non-Rotated Avatar Circle */}
                 <View style={styles.avatarContainer}>
                   {item.user.isCurrentUser ? (
                     <View style={styles.userActivityAvatar}>
@@ -261,7 +269,7 @@ export const FriendActivityStatus = () => {
                   {item.user.username}
                 </Text>
               </LoggedPressable>
-            </Animated.View>
+            </View>
           );
         })}
       </Animated.ScrollView>
@@ -287,7 +295,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   speechBubble: {
-    width: 90,
+    width: 92,
     height: 38,
     borderRadius: 15,
     paddingHorizontal: 6,
@@ -300,7 +308,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 6,
-    marginBottom: -12, // overlap the avatar circle
+    marginBottom: -10, // overlap the top of the avatar circle
   },
   speechBubblePlaying: {
     borderWidth: 1.5,
@@ -336,7 +344,7 @@ const styles = StyleSheet.create({
     borderWidth: 2.5,
     borderColor: '#2A2A2E',
     zIndex: 1,
-    overflow: 'visible',
+    overflow: 'hidden',
   },
   avatarImage: {
     width: 70,
@@ -389,6 +397,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#121212',
+    zIndex: 4,
   },
   usernameText: {
     color: '#E4E4E7',
