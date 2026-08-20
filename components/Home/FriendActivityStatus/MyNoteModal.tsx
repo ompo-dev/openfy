@@ -3,6 +3,7 @@
  *
  * Design Architecture:
  * - Native transparent Modal overlay preserving background depth.
+ * - Dynamic comfortable modal card height (minHeight: 460) with spacious breathing room.
  * - Top Bar:
  *    - Left: SwiftUI X close icon button (xmark)
  *    - Right: SwiftUI Confirm checkmark icon button (checkmark) using native UI / GlassSurface
@@ -11,14 +12,14 @@
  *    - SwiftUI circular action buttons overlaid on avatar (🎵 Music & 🎨 Palette).
  * - Sectioned Color Palette:
  *    - 5 Sectioned color families (Purples, Blues, Greens, Yellows/Oranges, Reds).
- *    - SQUARE (1:1) swatches laid out in a single horizontal row per page.
- *    - Smooth horizontal section paging (`pagingEnabled={true}`) showing ONLY the current section page.
+ *    - Full-bleed horizontal section swiper (width: SCREEN_WIDTH) with pagingEnabled={true}.
+ *    - SQUARE (1:1) swatches centered in a single row per section page with 0 bleed from adjacent pages.
  *    - Synchronized page dots + Aplicar/Limpar buttons.
  * - Music Picker Modal:
  *    - Search bar with inline X close button.
  *    - Compact horizontal tab chips.
  *    - Track selection triggers audio playback via global player.
- *    - Floating confirmation MiniPlayer bar appears at bottom with Play/Pause & Checkmark Confirm button.
+ *    - Uses exact native MiniPlayer with Checkmark Confirm button.
  * - Published Note View: Exact same note bubble component as home carousel + auto-plays note song.
  */
 
@@ -29,7 +30,6 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
-  LayoutChangeEvent,
   Modal,
   Platform,
   Pressable,
@@ -325,7 +325,7 @@ export const MyNoteModal = ({
   onSave,
   onDelete,
 }: MyNoteModalProps) => {
-  const { playTrack, currentTrack, playerState, togglePlayPause } = usePlayer();
+  const { playTrack, currentTrack, playerState } = usePlayer();
 
   const [isPublishedView, setIsPublishedView] = React.useState(false);
   const [activeBottomSection, setActiveBottomSection] = React.useState<'none' | 'colorPicker'>('none');
@@ -336,8 +336,7 @@ export const MyNoteModal = ({
   const [selectedSong, setSelectedSong] = React.useState<DownloadedTrack | null>(null);
   const [bubbleColor, setBubbleColor] = React.useState(DEFAULT_COLOR);
 
-  // Color picker container width & section page
-  const [colorContainerWidth, setColorContainerWidth] = React.useState(SCREEN_WIDTH - 40);
+  // Section page index
   const [colorPage, setColorPage] = React.useState(0);
   const colorScrollRef = React.useRef<ScrollView>(null);
 
@@ -421,19 +420,10 @@ export const MyNoteModal = ({
     onClose();
   };
 
-  const handleColorLayout = (e: LayoutChangeEvent) => {
-    const w = e.nativeEvent.layout.width;
-    if (w > 0 && Math.abs(w - colorContainerWidth) > 1) {
-      setColorContainerWidth(w);
-    }
-  };
-
   const handleColorScroll = (e: any) => {
     const x = e.nativeEvent.contentOffset.x;
-    if (colorContainerWidth > 0) {
-      const page = Math.round(x / colorContainerWidth);
-      setColorPage(Math.max(0, Math.min(COLOR_SECTIONS.length - 1, page)));
-    }
+    const page = Math.round(x / SCREEN_WIDTH);
+    setColorPage(Math.max(0, Math.min(COLOR_SECTIONS.length - 1, page)));
   };
 
   const canConfirm = noteText.trim().length > 0 || selectedSong !== null;
@@ -523,7 +513,7 @@ export const MyNoteModal = ({
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // SCREEN 2: Note Creator (Dynamic Content-Based Responsive Height Modal)
+  // SCREEN 2: Note Creator (Spacious Comfortable Height Modal Card)
   // ──────────────────────────────────────────────────────────────────────────
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -665,25 +655,22 @@ export const MyNoteModal = ({
               </View>
             </View>
 
-            {/* Color Swatches: Sectioned Paged Horizontal Scroller (SQUARE 1:1 swatches) */}
+            {/* Color Swatches: Full-Bleed Paged Section Swiper (SQUARE 1:1 swatches) */}
             {activeBottomSection === 'colorPicker' && (
-              <View style={S.colorPickerSection} onLayout={handleColorLayout}>
+              <View style={S.colorPickerSection}>
                 <ScrollView
                   ref={colorScrollRef}
                   horizontal
                   pagingEnabled
                   showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={S.colorFamiliesScroll}
                   onScroll={handleColorScroll}
                   scrollEventThrottle={16}
                   bounces={true}
                   alwaysBounceHorizontal={true}
+                  style={S.fullBleedScroll}
                 >
                   {COLOR_SECTIONS.map((section, pageIdx) => (
-                    <View
-                      key={pageIdx}
-                      style={[S.colorSectionPage, { width: colorContainerWidth }]}
-                    >
+                    <View key={pageIdx} style={S.colorSectionPage}>
                       <View style={S.colorSectionRow}>
                         {section.map((color) => (
                           <TouchableOpacity
@@ -899,7 +886,7 @@ export const MyNoteModal = ({
               }}
             />
 
-            {/* Render exact native MiniPlayer with Checkmark Confirm Button */}
+            {/* Exact Native MiniPlayer Rendered Over Music Picker with Checkmark Confirm */}
             {previewTrack && (
               <MiniPlayer
                 onConfirm={() => {
@@ -997,7 +984,7 @@ const S = StyleSheet.create({
     fontFamily: 'SimplyRounded',
   },
 
-  // Dynamic Content-Based Responsive Creator Modal Card
+  // Spacious Comfortable Height Responsive Creator Modal Card
   creatorModalContainer: {
     justifyContent: 'flex-end',
     width: '100%',
@@ -1006,12 +993,12 @@ const S = StyleSheet.create({
     backgroundColor: '#141416',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    paddingTop: 14,
-    paddingBottom: Platform.OS === 'ios' ? 30 : 16,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 20,
     paddingHorizontal: 20,
     width: '100%',
-    minHeight: 270,
-    maxHeight: '85%',
+    minHeight: 460,
+    maxHeight: '88%',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
@@ -1020,7 +1007,7 @@ const S = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     width: '100%',
-    marginBottom: 6,
+    marginBottom: 10,
   },
   charCounter: {
     color: 'rgba(255,255,255,0.4)',
@@ -1032,7 +1019,7 @@ const S = StyleSheet.create({
   creatorCenter: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 12,
+    marginVertical: 18,
   },
   editorBubble: {
     width: 97,
@@ -1139,25 +1126,27 @@ const S = StyleSheet.create({
     borderRadius: 7,
   },
 
-  // Color Swatches Section — Paged Section Swiper of SQUARE (1:1) Swatches
+  // Color Swatches Section — Full-Bleed Screen Width Paged Swiper
   colorPickerSection: {
     width: '100%',
     alignItems: 'center',
-    paddingTop: 10,
+    paddingTop: 12,
   },
-  colorFamiliesScroll: {
-    alignItems: 'center',
+  fullBleedScroll: {
+    marginHorizontal: -20,
+    width: SCREEN_WIDTH,
   },
   colorSectionPage: {
+    width: SCREEN_WIDTH,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 4,
   },
   colorSectionRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-    paddingHorizontal: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: SCREEN_WIDTH,
+    gap: 10,
   },
   squareColorSwatch: {
     width: 44,
@@ -1172,7 +1161,7 @@ const S = StyleSheet.create({
   pageDotsRow: {
     flexDirection: 'row',
     gap: 6,
-    marginVertical: 12,
+    marginVertical: 14,
   },
   pageDot: {
     width: 6,
@@ -1188,7 +1177,7 @@ const S = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     marginTop: 8,
-    gap: 6,
+    gap: 8,
   },
   limparBtn: {
     paddingVertical: 4,
