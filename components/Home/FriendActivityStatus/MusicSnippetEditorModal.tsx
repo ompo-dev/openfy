@@ -54,7 +54,8 @@ const SNIPPET_DURATION_MS = 30000; // 30 seconds
 const BAR_WIDTH = 3;
 const BAR_GAP = 5;
 const SINGLE_BAR_STEP = BAR_WIDTH + BAR_GAP; // 8px per bar
-const FRAME_WIDTH = 90;
+const FRAME_WIDTH = 90; // 90px width of the center selection box
+const BARS_IN_FRAME = 12; // 12 bars fit inside 90px
 
 export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = ({
   visible,
@@ -67,20 +68,32 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
   const totalDurationMs = track?.duration_ms || 210000;
   const maxStartMs = Math.max(0, totalDurationMs - SNIPPET_DURATION_MS);
 
-  // Dynamically calculate total waveform width & total bars proportional to track duration
-  const snippetRatio = Math.max(1, totalDurationMs / SNIPPET_DURATION_MS);
-  const totalWaveformWidth = snippetRatio * FRAME_WIDTH;
-  const totalBars = Math.max(12, Math.round(totalWaveformWidth / SINGLE_BAR_STEP));
+  // 1. Calculate total bars and exact total waveform width proportional to song duration
+  const barsPerSecond = BARS_IN_FRAME / 30; // 0.4 bars per second
+  const durationSec = Math.max(30, totalDurationMs / 1000);
+  const totalBars = Math.max(BARS_IN_FRAME, Math.round(durationSec * barsPerSecond));
+  const totalWaveformWidth = totalBars * BAR_WIDTH + (totalBars - 1) * BAR_GAP;
+
+  // 2. Maximum scroll distance (so at maxScroll, the last 30s of bars align inside the 90px frame)
   const maxScroll = Math.max(1, totalWaveformWidth - FRAME_WIDTH);
 
-  // Padding left & right so 0:00 starts right at center frame left edge, and track end lands at right edge
-  const centerRespiroOffset = (SCREEN_WIDTH - 44) / 2 - FRAME_WIDTH / 2;
+  // 3. Center respiro padding (so 0:00 lands at left edge of 90px center box)
+  const centerRespiroOffset = (SCREEN_WIDTH - 44 - FRAME_WIDTH) / 2;
 
-  const scrollAnim = React.useRef(new Animated.Value(maxScroll * 0.2)).current;
-  const scrollVal = React.useRef(maxScroll * 0.2);
+  const scrollAnim = React.useRef(new Animated.Value(0)).current;
+  const scrollVal = React.useRef(0);
 
-  const [startPercent, setStartPercent] = React.useState(0.2);
+  const [startPercent, setStartPercent] = React.useState(0);
   const [isDragging, setIsDragging] = React.useState(false);
+
+  // Reset scroll position to 0 whenever a new track or modal opens
+  React.useEffect(() => {
+    if (visible && track) {
+      scrollAnim.setValue(0);
+      scrollVal.current = 0;
+      setStartPercent(0);
+    }
+  }, [visible, track?.spotifyId, track?.title, scrollAnim]);
 
   const startTimeMs = startPercent * maxStartMs;
 
