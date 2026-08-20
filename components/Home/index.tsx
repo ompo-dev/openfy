@@ -7,6 +7,7 @@ import * as React from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { FriendActivityStatus } from './FriendActivityStatus';
+import { ListeningFeed } from './ListeningFeed';
 import { CompactMusicCarousel } from './CompactMusicCarousel';
 import { HeroBanner } from './HeroBanner/HeroBanner';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
@@ -24,10 +25,13 @@ export const Home = () => {
         {/* 1. Friend Activity Listening Status (Stories / Speech Bubbles) */}
         <FriendActivityStatus />
 
-        {/* 2. Compact music banner */}
+        {/* 2. Music posts */}
+        <ListeningFeed />
+
+        {/* 3. Compact music banner */}
         <CompactMusicCarousel />
 
-        {/* 3. Featured music banner */}
+        {/* 4. Featured music banner */}
         <HeroBanner />
       </ScrollView>
     </View>

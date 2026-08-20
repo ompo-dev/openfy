@@ -25,6 +25,7 @@ interface NoteLyricBlocksProps {
 }
 
 const SCRUB_LINE_HEIGHT = 28;
+const BLOCK_TRANSITION_DISTANCE = 54;
 const SCRUB_SIDE_LINES = 3;
 const MIN_VERTICAL_DRAG_PX = 8;
 
@@ -75,14 +76,18 @@ export const NoteLyricBlocks = ({
   const isScrubbing = isPressing || isTimelineScrubbing;
 
   const animateBlockChange = React.useCallback(
-    (previousIndex: number, nextIndex: number) => {
+    (
+      previousIndex: number,
+      nextIndex: number,
+      distance = BLOCK_TRANSITION_DISTANCE
+    ) => {
       if (previousIndex === nextIndex) return;
 
       blockTransition.stopAnimation();
-      blockTransition.setValue((nextIndex - previousIndex) * SCRUB_LINE_HEIGHT);
+      blockTransition.setValue((nextIndex - previousIndex) * distance);
       Animated.timing(blockTransition, {
         toValue: 0,
-        duration: 180,
+        duration: 260,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }).start();
@@ -95,8 +100,11 @@ export const NoteLyricBlocks = ({
       const previousIndex = focusedIndexRef.current;
       focusedIndexRef.current = safeActiveIndex;
       setFocusedIndex(safeActiveIndex);
-      if (isTimelineScrubbing)
-        animateBlockChange(previousIndex, safeActiveIndex);
+      animateBlockChange(
+        previousIndex,
+        safeActiveIndex,
+        isTimelineScrubbing ? SCRUB_LINE_HEIGHT : BLOCK_TRANSITION_DISTANCE
+      );
     }
   }, [animateBlockChange, isTimelineScrubbing, safeActiveIndex]);
 
@@ -107,7 +115,7 @@ export const NoteLyricBlocks = ({
     const previousIndex = focusedIndexRef.current;
     focusedIndexRef.current = nextIndex;
     setFocusedIndex(nextIndex);
-    animateBlockChange(previousIndex, nextIndex);
+    animateBlockChange(previousIndex, nextIndex, SCRUB_LINE_HEIGHT);
     onSeek(segments[nextIndex].startTimeMs);
   };
 
@@ -160,8 +168,10 @@ export const NoteLyricBlocks = ({
     <Animated.View
       style={[
         styles.blocksStack,
-        isScrubbing && {
-          transform: [{ translateY: scrubTranslate }],
+        {
+          transform: [
+            { translateY: isScrubbing ? scrubTranslate : blockTransition },
+          ],
         },
       ]}
     >

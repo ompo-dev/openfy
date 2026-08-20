@@ -88,6 +88,22 @@ const COMPACT_TRACKS: CompactTrackItem[] = [
 const CARD_SNAP_WIDTH = 168; // 154 width + 14 gap
 
 export const CompactMusicCarousel = () => {
+  return (
+    <View style={styles.container}>
+      <View style={styles.headerRow}>
+        <Text style={styles.sectionTitle}>Em Alta Agora</Text>
+        <Text style={styles.seeAllText}>Ver tudo</Text>
+      </View>
+      <CompactMusicCards tracks={COMPACT_TRACKS} />
+    </View>
+  );
+};
+
+export const CompactMusicCards = ({
+  tracks,
+}: {
+  tracks: CompactTrackItem[];
+}) => {
   const { playTrack, currentTrack, playerState } = usePlayer();
   const scrollX = React.useRef(new Animated.Value(0)).current;
 
@@ -107,26 +123,20 @@ export const CompactMusicCarousel = () => {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <Text style={styles.sectionTitle}>Em Alta Agora</Text>
-        <Text style={styles.seeAllText}>Ver tudo</Text>
-      </View>
-
-      <Animated.ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-        scrollEventThrottle={16}
-        bounces={true}
-        alwaysBounceHorizontal={true}
-        overScrollMode="always"
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-          { useNativeDriver: Platform.OS !== 'web' }
-        )}
-      >
-        {COMPACT_TRACKS.map((item, index) => {
+    <Animated.ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.scrollContent}
+      scrollEventThrottle={16}
+      bounces={true}
+      alwaysBounceHorizontal={true}
+      overScrollMode="always"
+      onScroll={Animated.event(
+        [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+        { useNativeDriver: Platform.OS !== 'web' }
+      )}
+    >
+      {tracks.map((item, index) => {
           const isPlaying =
             currentTrack?.spotifyId === item.spotifyId && playerState.isPlaying;
 
@@ -218,9 +228,8 @@ export const CompactMusicCarousel = () => {
               </LoggedPressable>
             </Animated.View>
           );
-        })}
-      </Animated.ScrollView>
-    </View>
+      })}
+    </Animated.ScrollView>
   );
 };
 

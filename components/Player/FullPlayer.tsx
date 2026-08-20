@@ -98,6 +98,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [isUpdatingAudio, setIsUpdatingAudio] = React.useState(false);
 
   const lyricsListRef = React.useRef<FlatList>(null);
+  const lyricScrollRetriedRef = React.useRef(false);
   const currentTrackRef = React.useRef(currentTrack);
   const youtubeTrackKeyRef = React.useRef('');
   const currentTrackKey = getTrackKey(currentTrack);
@@ -171,36 +172,51 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       return -1;
     const currentMs = playerState.positionMs;
 
-    const activeSeg = lyricsData.segments.find(
+    const activeIndex = lyricsData.segments.findIndex(
       (seg) => currentMs >= seg.startTimeMs && currentMs < seg.endTimeMs
     );
 
-    if (activeSeg) return activeSeg.index;
+    if (activeIndex >= 0) return activeIndex;
 
     const lastSeg = lyricsData.segments[lyricsData.segments.length - 1];
-    if (currentMs >= lastSeg.startTimeMs) return lastSeg.index;
+    if (currentMs >= lastSeg.startTimeMs)
+      return lyricsData.segments.length - 1;
 
     return 0;
   }, [lyricsData, playerState.positionMs]);
 
-  // Auto-scroll lyrics to active line
+  const scrollLyricsToActive = React.useCallback(
+    (animated: boolean) => {
+      if (
+        !showLyricsFull ||
+        activeLineIndex < 0 ||
+        !lyricsListRef.current ||
+        !lyricsData?.segments ||
+        activeLineIndex >= lyricsData.segments.length
+      ) {
+        return;
+      }
+
+      lyricsListRef.current.scrollToIndex({
+        index: activeLineIndex,
+        animated,
+        viewPosition: 0.35,
+      });
+    },
+    [activeLineIndex, lyricsData?.segments, showLyricsFull]
+  );
+
   React.useEffect(() => {
-    if (
-      showLyricsFull &&
-      activeLineIndex >= 0 &&
-      lyricsListRef.current &&
-      lyricsData?.segments &&
-      activeLineIndex < lyricsData.segments.length
-    ) {
-      try {
-        lyricsListRef.current.scrollToIndex({
-          index: activeLineIndex,
-          animated: true,
-          viewPosition: 0.35,
-        });
-      } catch {}
-    }
-  }, [activeLineIndex, showLyricsFull, lyricsData]);
+    lyricScrollRetriedRef.current = false;
+  }, [activeLineIndex, showLyricsFull]);
+
+  // Auto-scroll lyrics to active line, including when the lyrics view first mounts.
+  React.useEffect(() => {
+    if (!showLyricsFull || activeLineIndex < 0) return;
+
+    const frame = requestAnimationFrame(() => scrollLyricsToActive(true));
+    return () => cancelAnimationFrame(frame);
+  }, [activeLineIndex, scrollLyricsToActive, showLyricsFull]);
 
   const handleOpenYoutubeMenu = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -414,9 +430,23 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 ref={lyricsListRef}
                 data={lyricsData.segments}
                 keyExtractor={(item) => `${item.startTimeMs}_${item.index}`}
+                initialScrollIndex={activeLineIndex}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.lyricsScrollContent}
-                onScrollToIndexFailed={() => {}}
+                onLayout={() => scrollLyricsToActive(false)}
+                onContentSizeChange={() => scrollLyricsToActive(false)}
+                onScrollToIndexFailed={({ averageItemLength }) => {
+                  if (lyricScrollRetriedRef.current) return;
+                  lyricScrollRetriedRef.current = true;
+                  lyricsListRef.current?.scrollToOffset({
+                    offset: Math.max(
+                      0,
+                      (activeLineIndex - 2) * averageItemLength
+                    ),
+                    animated: false,
+                  });
+                  requestAnimationFrame(() => scrollLyricsToActive(false));
+                }}
                 renderItem={({ item, index }) => {
                   const isActive = index === activeLineIndex;
                   return (
