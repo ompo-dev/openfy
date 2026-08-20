@@ -2,7 +2,13 @@ import { Stack } from 'expo-router';
 
 export default function HomeLayout() {
   return (
-    <Stack screenOptions={{ headerShown: false, headerShadowVisible: false }}>
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        headerShadowVisible: false,
+        contentStyle: { backgroundColor: '#121212' },
+      }}
+    >
       <Stack.Screen
         name="index"
         options={{ headerShown: false, animation: 'default' }}

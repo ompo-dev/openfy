@@ -11,10 +11,7 @@ import { OfflineLibrary } from '../OfflineLibrary';
 
 import { useApplicationDimensions } from '@hooks';
 import {
-  BOTTOM_NAVIGATION_HEIGHT,
   Categories,
-  HEADER_CATEGORIES_HEIGHT,
-  HEADER_HEIGHT,
   Shapes,
   Sizes,
 } from '@config';
@@ -28,7 +25,7 @@ export const Library = () => {
   const [data, setData] = React.useState<LibraryType | null>(null);
   const { librarySelectedCategory, animatedValue } =
     useLibrarySelectedCategory();
-  const { width, height } = useApplicationDimensions();
+  const { width } = useApplicationDimensions();
 
   const numColumns = 3;
   const initRenderAmount = 15;
@@ -118,12 +115,8 @@ export const Library = () => {
       <Animated.View
         style={[
           {
+            flex: 1,
             width,
-            height:
-              height -
-              BOTTOM_NAVIGATION_HEIGHT -
-              HEADER_HEIGHT -
-              HEADER_CATEGORIES_HEIGHT,
           },
           animatedStyle,
         ]}
@@ -138,12 +131,8 @@ export const Library = () => {
       style={[
         styles.container,
         {
+          flex: 1,
           width,
-          height:
-            height -
-            BOTTOM_NAVIGATION_HEIGHT -
-            HEADER_HEIGHT -
-            HEADER_CATEGORIES_HEIGHT,
         },
       ]}
     >

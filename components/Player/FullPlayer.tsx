@@ -9,6 +9,7 @@ import * as React from 'react';
 import {
   ActionSheetIOS,
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   Linking,
@@ -28,7 +29,12 @@ import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import FontAwesome6 from '@expo/vector-icons/FontAwesome6';
 import { usePlayer } from '@context';
-import { fetchLyrics, LyricsData, LyricSegment } from '@services';
+import {
+  fetchLyrics,
+  LyricsData,
+  LyricSegment,
+  parseSpotifyLink,
+} from '@services';
 import { getDynamicColorPalette } from '@utils';
 import { GlassSurface, LoggedPressable } from '../native';
 
@@ -47,6 +53,20 @@ const formatTime = (ms: number): string => {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
+const getTrackKey = (
+  track: {
+    spotifyId: string;
+    title: string;
+    artistName: string;
+    duration_ms: number;
+  } | null
+) =>
+  track
+    ? [track.spotifyId, track.title, track.artistName, track.duration_ms].join(
+        '|'
+      )
+    : '';
+
 export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const {
     currentTrack,
@@ -63,7 +83,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     repeatMode,
     toggleShuffle,
     setRepeatMode,
-    updateCustomTrackSource,
   } = usePlayer();
 
   const [seeking, setSeeking] = React.useState(false);
@@ -79,6 +98,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [isUpdatingAudio, setIsUpdatingAudio] = React.useState(false);
 
   const lyricsListRef = React.useRef<FlatList>(null);
+  const currentTrackRef = React.useRef(currentTrack);
+  const youtubeTrackKeyRef = React.useRef('');
+  const currentTrackKey = getTrackKey(currentTrack);
+
+  React.useEffect(() => {
+    currentTrackRef.current = currentTrack;
+  }, [currentTrack]);
 
   // Dynamic ambient color palette based on track
   const palette = React.useMemo(() => {
@@ -89,12 +115,17 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     );
   }, [currentTrack]);
 
-  // Fetch YouTube URL when track changes
+  // Reset first so an old link can never open while next track resolves.
   React.useEffect(() => {
     if (!currentTrack) {
       setYoutubeUrl('');
+      youtubeTrackKeyRef.current = '';
       return;
     }
+
+    youtubeTrackKeyRef.current = currentTrackKey;
+    setYoutubeUrl(currentTrack.youtubeUrl || '');
+    if (currentTrack.youtubeUrl) return;
 
     let isMounted = true;
     fetch('http://localhost:3001/api/music/resolve', {
@@ -112,7 +143,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
         if (isMounted) {
           if (data.source?.id) {
             setYoutubeUrl(`https://www.youtube.com/watch?v=${data.source.id}`);
-          } else if (data.playback?.url && data.playback.url.includes('youtube.com')) {
+          } else if (
+            data.playback?.url &&
+            data.playback.url.includes('youtube.com')
+          ) {
             setYoutubeUrl(data.playback.url);
           }
         }
@@ -122,7 +156,14 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     return () => {
       isMounted = false;
     };
-  }, [currentTrack]);
+  }, [
+    currentTrack?.artistName,
+    currentTrack?.duration_ms,
+    currentTrack?.spotifyId,
+    currentTrack?.title,
+    currentTrack?.youtubeUrl,
+    currentTrackKey,
+  ]);
 
   // Determine current active lyric segment index
   const activeLineIndex = React.useMemo(() => {
@@ -166,7 +207,11 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          options: ['Cancelar', 'Ir para o vídeo do YouTube', 'Editar link do YouTube'],
+          options: [
+            'Cancelar',
+            'Ir para o vídeo do YouTube',
+            'Editar link do YouTube',
+          ],
           cancelButtonIndex: 0,
           title: currentTrack?.title || 'YouTube',
           message: 'Origem oficial do áudio no YouTube',
@@ -187,8 +232,11 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const handleGoToYoutube = () => {
     Haptics.selectionAsync().catch(() => {});
     setIsActionModalVisible(false);
+    const activeYoutubeUrl =
+      currentTrack?.youtubeUrl ||
+      (youtubeTrackKeyRef.current === currentTrackKey ? youtubeUrl : '');
     const urlToOpen =
-      youtubeUrl ||
+      activeYoutubeUrl ||
       `https://www.youtube.com/results?search_query=${encodeURIComponent(
         `${currentTrack?.artistName || ''} - ${currentTrack?.title || ''}`
       )}`;
@@ -198,8 +246,11 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const handleOpenEditLinkModal = () => {
     Haptics.selectionAsync().catch(() => {});
     setIsActionModalVisible(false);
+    const activeYoutubeUrl =
+      currentTrack?.youtubeUrl ||
+      (youtubeTrackKeyRef.current === currentTrackKey ? youtubeUrl : '');
     setCustomLinkInput(
-      youtubeUrl ||
+      activeYoutubeUrl ||
         `https://www.youtube.com/results?search_query=${encodeURIComponent(
           `${currentTrack?.artistName || ''} - ${currentTrack?.title || ''}`
         )}`
@@ -210,22 +261,65 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const handleConfirmEditLink = async () => {
     if (!customLinkInput.trim() || !currentTrack) return;
     const newUrl = customLinkInput.trim();
+    const parsedLink = parseSpotifyLink(newUrl);
+    if (
+      !parsedLink ||
+      parsedLink.platform !== 'youtube' ||
+      parsedLink.type !== 'track'
+    ) {
+      Alert.alert('Link inválido', 'Informe link de um vídeo do YouTube.');
+      return;
+    }
+
+    const trackBeingEdited = currentTrack;
     setIsUpdatingAudio(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
 
     try {
-      setYoutubeUrl(newUrl);
-
-      // Resolve and update audio stream directly
-      await playTrack({
-        ...currentTrack,
-        streamUrl: newUrl,
-        localAudioPath: undefined,
+      const response = await fetch('http://localhost:3001/api/music/youtube', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: newUrl }),
       });
+      if (!response.ok) throw new Error('Could not resolve YouTube track');
 
+      const data = (await response.json()) as {
+        track?: {
+          videoId: string;
+          youtubeUrl: string;
+          streamUrl: string;
+          title: string;
+          artistName: string;
+          albumName: string;
+          imageURL: string;
+          duration_ms: number;
+        };
+      };
+      const track = data.track;
+      if (!track?.streamUrl || currentTrackRef.current !== trackBeingEdited)
+        return;
+
+      const nextTrack = {
+        spotifyId: `yt_${track.videoId}`,
+        title: track.title,
+        artistName: track.artistName,
+        albumName: track.albumName,
+        imageURL: track.imageURL || trackBeingEdited.imageURL,
+        duration_ms: track.duration_ms || trackBeingEdited.duration_ms,
+        streamUrl: track.streamUrl,
+        youtubeUrl: track.youtubeUrl,
+      };
+      setYoutubeUrl(track.youtubeUrl);
+      youtubeTrackKeyRef.current = getTrackKey(nextTrack);
+      await playTrack(nextTrack);
       setIsEditModalVisible(false);
-    } catch (e) {
-      console.warn('Failed to update audio link:', e);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+        () => {}
+      );
+    } catch {
+      Alert.alert(
+        'Não foi possível atualizar',
+        'Verifique o link e tente novamente.'
+      );
     } finally {
       setIsUpdatingAudio(false);
     }
@@ -244,7 +338,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       : seekValue;
 
   const handleToggleRepeat = () => {
-    const nextMode = repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off';
+    const nextMode =
+      repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off';
     setRepeatMode(nextMode);
   };
 
@@ -312,7 +407,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 : undefined,
             ]}
           >
-            {lyricsData && lyricsData.isSynced && lyricsData.segments.length > 0 ? (
+            {lyricsData &&
+            lyricsData.isSynced &&
+            lyricsData.segments.length > 0 ? (
               <FlatList
                 ref={lyricsListRef}
                 data={lyricsData.segments}
@@ -514,15 +611,11 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           <View style={styles.timeRow}>
             <Text style={styles.timeText}>
               {formatTime(
-                seeking
-                  ? seekValue * totalDurationMs
-                  : playerState.positionMs
+                seeking ? seekValue * totalDurationMs : playerState.positionMs
               )}
             </Text>
 
-            <Text style={styles.timeText}>
-              {formatTime(totalDurationMs)}
-            </Text>
+            <Text style={styles.timeText}>{formatTime(totalDurationMs)}</Text>
           </View>
         </View>
 
@@ -540,10 +633,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           </LoggedPressable>
 
           {/* Previous Track */}
-          <LoggedPressable
-            onPress={playPrevious}
-            style={styles.seekControlBtn}
-          >
+          <LoggedPressable onPress={playPrevious} style={styles.seekControlBtn}>
             <Ionicons name="play-back" size={32} color="#FFFFFF" />
           </LoggedPressable>
 
@@ -569,10 +659,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           </LoggedPressable>
 
           {/* Next Track */}
-          <LoggedPressable
-            onPress={playNext}
-            style={styles.seekControlBtn}
-          >
+          <LoggedPressable onPress={playNext} style={styles.seekControlBtn}>
             <Ionicons name="play-forward" size={32} color="#FFFFFF" />
           </LoggedPressable>
 
@@ -675,9 +762,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   <View style={styles.youtubeCircleBadge}>
                     <Ionicons name="logo-youtube" size={28} color="#FF0000" />
                   </View>
-                  <Text style={styles.editModalTitle}>Editar Link do YouTube</Text>
+                  <Text style={styles.editModalTitle}>
+                    Editar Link do YouTube
+                  </Text>
                   <Text style={styles.editModalSubtitle}>
-                    Altere o link do vídeo para atualizar instantaneamente o áudio e a reprodução desta música.
+                    Altere o link do vídeo para atualizar instantaneamente o
+                    áudio e a reprodução desta música.
                   </Text>
                 </View>
 

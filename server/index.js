@@ -5,6 +5,7 @@
 
 const http = require('http');
 const url = require('url');
+const ytdl = require('@distube/ytdl-core');
 
 const PORT = process.env.PORT || 3001;
 
@@ -44,7 +45,10 @@ function normalizeText(str) {
 
 function parseViewCount(viewText) {
   if (!viewText) return 0;
-  const clean = (viewText || '').toLowerCase().replace(/visualizaç[õo]es|views/g, '').trim();
+  const clean = (viewText || '')
+    .toLowerCase()
+    .replace(/visualizaç[õo]es|views/g, '')
+    .trim();
   if (clean.includes('mi') || clean.includes('m')) {
     return parseFloat(clean.replace(',', '.')) * 1000000;
   }
@@ -108,7 +112,7 @@ async function fetchSpotifyCanonicalTrack(trackId) {
         const parsed = JSON.parse(nextDataMatch[1]);
         const entity = parsed.props?.pageProps?.state?.data?.entity;
         if (entity && entity.name) {
-          const artists = (entity.artists || []).map(a => ({ name: a.name }));
+          const artists = (entity.artists || []).map((a) => ({ name: a.name }));
           const cover =
             entity.visualIdentity?.image?.[0]?.url ||
             entity.album?.coverArt?.sources?.[0]?.url ||
@@ -131,10 +135,116 @@ async function fetchSpotifyCanonicalTrack(trackId) {
       }
     }
   } catch (e) {
-    console.warn(`[Spotify Scraper] Failed to fetch embed for ${trackId}:`, e.message);
+    console.warn(
+      `[Spotify Scraper] Failed to fetch embed for ${trackId}:`,
+      e.message
+    );
   }
 
   return null;
+}
+
+const getYouTubeVideoId = (input) => {
+  if (typeof input !== 'string') return null;
+
+  try {
+    const parsed = new URL(input.trim());
+    const host = parsed.hostname.replace(/^www\./, '');
+    const id =
+      host === 'youtu.be'
+        ? parsed.pathname.slice(1)
+        : host === 'youtube.com' || host === 'music.youtube.com'
+          ? parsed.searchParams.get('v')
+          : null;
+
+    return id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+};
+
+async function fetchYouTubeTrack(videoId) {
+  const cacheKey = `youtube_track:${videoId}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const info = await ytdl.getInfo(youtubeUrl);
+    const details = info.videoDetails;
+    const formats = ytdl.filterFormats(info.formats, 'audioonly');
+    const audio =
+      formats.find((format) => format.mimeType?.includes('audio/mp4')) ||
+      formats.find((format) => format.container === 'mp4') ||
+      formats[0];
+
+    if (!details?.videoId || !audio?.url) return null;
+
+    const thumbnails = details.thumbnails || [];
+    const result = {
+      videoId: details.videoId,
+      youtubeUrl: `https://www.youtube.com/watch?v=${details.videoId}`,
+      streamUrl: audio.url,
+      title: details.title || 'Vídeo do YouTube',
+      artistName: details.author?.name || 'YouTube',
+      albumName: details.author?.name || 'YouTube',
+      imageURL: thumbnails[thumbnails.length - 1]?.url || '',
+      duration_ms: Number(details.lengthSeconds || 0) * 1000,
+    };
+
+    setCache(cacheKey, result, 1800);
+    return result;
+  } catch {}
+
+  try {
+    const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const metadataRes = await fetch(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(youtubeUrl)}&format=json`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!metadataRes.ok) return null;
+
+    const metadata = await metadataRes.json();
+    let durationMs = 0;
+    try {
+      const pageRes = await fetch(youtubeUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+        },
+        signal: AbortSignal.timeout(5000),
+      });
+      const page = await pageRes.text();
+      const durationMatch = page.match(/"lengthSeconds":"(\d+)"/);
+      durationMs = Number(durationMatch?.[1] || 0) * 1000;
+    } catch {}
+
+    const stream = await fetchSoundCloudPlayableStream(
+      metadata.title || 'Vídeo do YouTube',
+      metadata.author_name || 'YouTube',
+      durationMs
+    );
+    if (!stream?.streamUrl) return null;
+
+    const result = {
+      videoId,
+      youtubeUrl,
+      streamUrl: stream.streamUrl,
+      title: metadata.title || stream.title || 'Vídeo do YouTube',
+      artistName: metadata.author_name || 'YouTube',
+      albumName: metadata.author_name || 'YouTube',
+      imageURL: metadata.thumbnail_url || '',
+      duration_ms: durationMs || stream.durationMs || 0,
+    };
+    setCache(cacheKey, result, 1800);
+    return result;
+  } catch (error) {
+    console.warn(
+      `[YouTube Track] Failed to resolve ${videoId}:`,
+      error.message
+    );
+    return null;
+  }
 }
 
 /**
@@ -148,14 +258,17 @@ async function fetchYouTubeOfficialVideo(target) {
   if (cached) return cached;
 
   try {
-    const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-      },
-      signal: AbortSignal.timeout(5000),
-    });
+    const res = await fetch(
+      `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
+      {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        signal: AbortSignal.timeout(5000),
+      }
+    );
 
     if (!res.ok) return null;
 
@@ -168,13 +281,17 @@ async function fetchYouTubeOfficialVideo(target) {
 
     const data = JSON.parse(match[1]);
     const contents =
-      data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer
-        ?.contents?.[0]?.itemSectionRenderer?.contents || [];
+      data.contents?.twoColumnSearchResultsRenderer?.primaryContents
+        ?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents ||
+      [];
 
     const candidates = [];
-    const targetDurationSec = target.durationMs > 0 ? target.durationMs / 1000 : 0;
+    const targetDurationSec =
+      target.durationMs > 0 ? target.durationMs / 1000 : 0;
     const normTargetTitle = normalizeText(target.title);
-    const lockedArtistsNorm = (target.artists || [{ name: primaryArtist }]).map(a => normalizeText(a.name || a));
+    const lockedArtistsNorm = (target.artists || [{ name: primaryArtist }]).map(
+      (a) => normalizeText(a.name || a)
+    );
 
     for (const item of contents) {
       const v = item.videoRenderer;
@@ -190,7 +307,8 @@ async function fetchYouTubeOfficialVideo(target) {
       const parts = durationText.split(':').map(Number);
       let durationSec = 0;
       if (parts.length === 2) durationSec = parts[0] * 60 + parts[1];
-      if (parts.length === 3) durationSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
+      if (parts.length === 3)
+        durationSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
 
       if (durationSec < 40) continue;
 
@@ -295,26 +413,34 @@ async function fetchYouTubeOfficialVideo(target) {
  */
 async function fetchSoundCloudPlayableStream(title, artist, durationMs) {
   const primaryArtist = artist || '';
-  const searchQueries = primaryArtist ? [`${primaryArtist} - ${title}`, title] : [title];
+  const searchQueries = primaryArtist
+    ? [`${primaryArtist} - ${title}`, title]
+    : [title];
   const clientId = 'UMY1dzQ68n2QbCuypNe8JOivmV2FO2Ep';
 
   for (const query of searchQueries) {
     try {
       const searchUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&client_id=${clientId}&limit=8`;
       const res = await fetch(searchUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-        signal: AbortSignal.timeout(4000)
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+        signal: AbortSignal.timeout(4000),
       });
       if (!res.ok) continue;
       const data = await res.json();
-      for (const item of (data.collection || [])) {
+      for (const item of data.collection || []) {
         if (!item.title) continue;
 
         // Strict title matching: candidate must contain at least one key word of requested title
         const normReqTitle = normalizeText(title);
         const normCandTitle = normalizeText(item.title);
-        const keyWords = normReqTitle.split(' ').filter(w => w.length > 2);
-        const titleMatch = keyWords.some(w => normCandTitle.includes(w)) || normCandTitle.includes(normReqTitle) || normReqTitle.includes(normCandTitle);
+        const keyWords = normReqTitle.split(' ').filter((w) => w.length > 2);
+        const titleMatch =
+          keyWords.some((w) => normCandTitle.includes(w)) ||
+          normCandTitle.includes(normReqTitle) ||
+          normReqTitle.includes(normCandTitle);
         if (!titleMatch) continue;
 
         const dur = item.duration || 0;
@@ -322,7 +448,7 @@ async function fetchSoundCloudPlayableStream(title, artist, durationMs) {
         if (durationMs > 0 && diffMs > 30000) continue; // within 30s
 
         const transcodings = item.media?.transcodings || [];
-        const nonDrm = transcodings.filter(t => {
+        const nonDrm = transcodings.filter((t) => {
           const p = (t.format?.protocol || '').toLowerCase();
           return !p.includes('encrypted') && !p.includes('cenc');
         });
@@ -330,7 +456,9 @@ async function fetchSoundCloudPlayableStream(title, artist, durationMs) {
 
         for (const t of nonDrm) {
           if (!t.url) continue;
-          const streamRes = await fetch(`${t.url}?client_id=${clientId}`, { signal: AbortSignal.timeout(3500) });
+          const streamRes = await fetch(`${t.url}?client_id=${clientId}`, {
+            signal: AbortSignal.timeout(3500),
+          });
           if (streamRes.ok) {
             const sData = await streamRes.json();
             if (sData.url) {
@@ -366,10 +494,13 @@ async function fetchComprehensiveLyrics(title, artist, durationMs, albumName) {
       ...(albumName ? { album_name: albumName } : {}),
     });
 
-    const res = await fetch(`https://lrclib.net/api/get?${queryParams.toString()}`, {
-      headers: { 'User-Agent': 'OpenfyMusic/1.0.0 ( contact@openfy.app )' },
-      signal: AbortSignal.timeout(3000),
-    });
+    const res = await fetch(
+      `https://lrclib.net/api/get?${queryParams.toString()}`,
+      {
+        headers: { 'User-Agent': 'OpenfyMusic/1.0.0 ( contact@openfy.app )' },
+        signal: AbortSignal.timeout(3000),
+      }
+    );
 
     if (res.ok) {
       const data = await res.json();
@@ -378,7 +509,7 @@ async function fetchComprehensiveLyrics(title, artist, durationMs, albumName) {
         lines = data.syncedLyrics
           .split('\n')
           .filter(Boolean)
-          .map(l => {
+          .map((l) => {
             const m = l.match(/\[(\d+):(\d+\.?\d*)\](.*)/);
             if (!m) return null;
             const startMs = (parseInt(m[1]) * 60 + parseFloat(m[2])) * 1000;
@@ -409,33 +540,40 @@ async function fetchComprehensiveLyrics(title, artist, durationMs, albumName) {
 
   // 2. LRCLIB Search
   try {
-    const cleanTitle = (title || '').replace(/\(.*\)/g, '').replace(/-.*/g, '').trim();
-    const cleanArtist = (artist || '').replace(/\(.*\)/g, '').replace(/,.*/g, '').trim();
-    const searchQueries = [
-      `${cleanArtist} ${cleanTitle}`,
-      cleanTitle,
-      title
-    ];
+    const cleanTitle = (title || '')
+      .replace(/\(.*\)/g, '')
+      .replace(/-.*/g, '')
+      .trim();
+    const cleanArtist = (artist || '')
+      .replace(/\(.*\)/g, '')
+      .replace(/,.*/g, '')
+      .trim();
+    const searchQueries = [`${cleanArtist} ${cleanTitle}`, cleanTitle, title];
 
     for (const sq of searchQueries) {
-      const sRes = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(sq)}`, {
-        headers: { 'User-Agent': 'OpenfyMusic/1.0.0' },
-        signal: AbortSignal.timeout(3000),
-      });
+      const sRes = await fetch(
+        `https://lrclib.net/api/search?q=${encodeURIComponent(sq)}`,
+        {
+          headers: { 'User-Agent': 'OpenfyMusic/1.0.0' },
+          signal: AbortSignal.timeout(3000),
+        }
+      );
       if (sRes.ok) {
         const list = await sRes.json();
         if (Array.isArray(list) && list.length > 0) {
-          const match = list.find(x => x.syncedLyrics) || list.find(x => x.plainLyrics);
+          const match =
+            list.find((x) => x.syncedLyrics) || list.find((x) => x.plainLyrics);
           if (match) {
             let lines = [];
             if (match.syncedLyrics) {
               lines = match.syncedLyrics
                 .split('\n')
                 .filter(Boolean)
-                .map(l => {
+                .map((l) => {
                   const m = l.match(/\[(\d+):(\d+\.?\d*)\](.*)/);
                   if (!m) return null;
-                  const startMs = (parseInt(m[1]) * 60 + parseFloat(m[2])) * 1000;
+                  const startMs =
+                    (parseInt(m[1]) * 60 + parseFloat(m[2])) * 1000;
                   return { text: m[3].trim(), startMs: Math.round(startMs) };
                 })
                 .filter(Boolean);
@@ -464,17 +602,22 @@ async function fetchComprehensiveLyrics(title, artist, durationMs, albumName) {
 
   // 3. Letras.mus.br Scraper (100% complete Brazilian & International Lyrics)
   try {
-    const cleanT = (title || '').replace(/\(.*\)/g, '').replace(/-.*/g, '').trim();
-    const cleanA = (artist || '').replace(/\(.*\)/g, '').replace(/,.*/g, '').trim();
-    const queries = [
-      `${cleanA} ${cleanT}`,
-      cleanT,
-      `${cleanT} ${cleanA}`
-    ];
+    const cleanT = (title || '')
+      .replace(/\(.*\)/g, '')
+      .replace(/-.*/g, '')
+      .trim();
+    const cleanA = (artist || '')
+      .replace(/\(.*\)/g, '')
+      .replace(/,.*/g, '')
+      .trim();
+    const queries = [`${cleanA} ${cleanT}`, cleanT, `${cleanT} ${cleanA}`];
 
     for (const q of queries) {
       const url = `https://solr.sscdn.co/letras/m1/?q=${encodeURIComponent(q)}`;
-      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(3500) });
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(3500),
+      });
       if (!res.ok) continue;
       const raw = await res.text();
       const match = raw.match(/LetrasSug\(([\s\S]*)\)/);
@@ -486,11 +629,15 @@ async function fetchComprehensiveLyrics(title, artist, durationMs, albumName) {
       for (const doc of docs.slice(0, 3)) {
         if (!doc.dns || !doc.url) continue;
         const pageUrl = `https://www.letras.mus.br/${doc.dns}/${doc.url}/`;
-        const pageRes = await fetch(pageUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(3500) });
+        const pageRes = await fetch(pageUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+          signal: AbortSignal.timeout(3500),
+        });
         if (!pageRes.ok) continue;
         const html = await pageRes.text();
-        const lyricMatch = html.match(/<div class="lyric-original"[^>]*>([\s\S]*?)<\/div>/i) ||
-                           html.match(/<div class="cnt-letra"[^>]*>([\s\S]*?)<\/div>/i);
+        const lyricMatch =
+          html.match(/<div class="lyric-original"[^>]*>([\s\S]*?)<\/div>/i) ||
+          html.match(/<div class="cnt-letra"[^>]*>([\s\S]*?)<\/div>/i);
         if (lyricMatch) {
           const plain = lyricMatch[1]
             .replace(/<p>/g, '')
@@ -543,7 +690,13 @@ const server = http.createServer(async (req, res) => {
   // Health
   if (pathname === '/health' || pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'openfy-official-ranker-resolution-engine', time: new Date().toISOString() }));
+    res.end(
+      JSON.stringify({
+        status: 'ok',
+        service: 'openfy-official-ranker-resolution-engine',
+        time: new Date().toISOString(),
+      })
+    );
     return;
   }
 
@@ -551,7 +704,10 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/lyrics') {
     const qTitle = parsedUrl.query.title || parsedUrl.query.track_name;
     const qArtist = parsedUrl.query.artist || parsedUrl.query.artist_name || '';
-    const qDurationMs = parseInt(parsedUrl.query.durationMs || parsedUrl.query.duration || '0', 10);
+    const qDurationMs = parseInt(
+      parsedUrl.query.durationMs || parsedUrl.query.duration || '0',
+      10
+    );
     const qAlbum = parsedUrl.query.album || '';
 
     if (!qTitle) {
@@ -560,7 +716,12 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const lyricsResult = await fetchComprehensiveLyrics(qTitle, qArtist, qDurationMs, qAlbum);
+    const lyricsResult = await fetchComprehensiveLyrics(
+      qTitle,
+      qArtist,
+      qDurationMs,
+      qAlbum
+    );
     if (lyricsResult && lyricsResult.valid) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(lyricsResult));
@@ -617,23 +778,75 @@ const server = http.createServer(async (req, res) => {
       return;
     } catch (err) {
       res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Failed to proxy audio stream', details: err.message }));
+      res.end(
+        JSON.stringify({
+          error: 'Failed to proxy audio stream',
+          details: err.message,
+        })
+      );
       return;
     }
+  }
+
+  // POST /api/music/youtube - exact metadata and playable audio for an edited YouTube link
+  if (pathname === '/api/music/youtube' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', async () => {
+      try {
+        const { url: youtubeUrl } = JSON.parse(body || '{}');
+        const videoId = getYouTubeVideoId(youtubeUrl);
+        if (!videoId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid YouTube video URL' }));
+          return;
+        }
+
+        const track = await fetchYouTubeTrack(videoId);
+        if (!track) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Could not resolve YouTube track' }));
+          return;
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ track }));
+      } catch (error) {
+        console.error('[YouTube Track] Request failed:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Could not resolve YouTube track' }));
+      }
+    });
+    return;
   }
 
   // POST /api/music/resolve (End-to-End Canonical Spotify + YouTube Official Ranker + Playable Audio Stream Pipeline)
   if (pathname === '/api/music/resolve' && req.method === 'POST') {
     let body = '';
-    req.on('data', chunk => { body += chunk; });
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
     req.on('end', async () => {
       try {
         const payload = JSON.parse(body || '{}');
-        let { title, artist, artists, albumName, durationMs, spotifyId, isrc, imageURL } = payload;
+        let {
+          title,
+          artist,
+          artists,
+          albumName,
+          durationMs,
+          spotifyId,
+          isrc,
+          imageURL,
+        } = payload;
 
         // If spotifyId is provided and details are missing or need validation, extract canonical track directly
         if (spotifyId && (!title || !artists || artists.length === 0)) {
-          const cleanSpotifyId = spotifyId.replace(/^spotify:track:/, '').split('?')[0];
+          const cleanSpotifyId = spotifyId
+            .replace(/^spotify:track:/, '')
+            .split('?')[0];
           const spCanonical = await fetchSpotifyCanonicalTrack(cleanSpotifyId);
           if (spCanonical) {
             title = spCanonical.title;
@@ -652,9 +865,10 @@ const server = http.createServer(async (req, res) => {
         }
 
         // STEP 1: IDENTITY LOCK 🔒
-        const parsedArtists = Array.isArray(artists) && artists.length > 0
-          ? artists.map(a => typeof a === 'string' ? { name: a } : a)
-          : [{ name: artist || 'Artista' }];
+        const parsedArtists =
+          Array.isArray(artists) && artists.length > 0
+            ? artists.map((a) => (typeof a === 'string' ? { name: a } : a))
+            : [{ name: artist || 'Artista' }];
 
         const lockedTarget = {
           title: title.trim(),
@@ -667,16 +881,24 @@ const server = http.createServer(async (req, res) => {
           spotifyId: spotifyId || '',
         };
 
-        console.log(`[Official Resolution] Target: "${lockedTarget.artistName} - ${lockedTarget.title}" (${lockedTarget.durationMs}ms)`);
+        console.log(
+          `[Official Resolution] Target: "${lockedTarget.artistName} - ${lockedTarget.title}" (${lockedTarget.durationMs}ms)`
+        );
 
         // STEP 2: YOUTUBE OFFICIAL ARTIST RANKER
         const ytOfficial = await fetchYouTubeOfficialVideo(lockedTarget);
         if (ytOfficial) {
-          console.log(`  ✅ [YouTube Official Video Found] "${ytOfficial.title}" by channel "${ytOfficial.channel}" (${ytOfficial.durationSec}s)`);
+          console.log(
+            `  ✅ [YouTube Official Video Found] "${ytOfficial.title}" by channel "${ytOfficial.channel}" (${ytOfficial.durationSec}s)`
+          );
         }
 
         // STEP 3: SOUNDCLOUD PLAYABLE AUDIO STREAM RESOLVER
-        const scStream = await fetchSoundCloudPlayableStream(lockedTarget.title, lockedTarget.artistName, lockedTarget.durationMs);
+        const scStream = await fetchSoundCloudPlayableStream(
+          lockedTarget.title,
+          lockedTarget.artistName,
+          lockedTarget.durationMs
+        );
 
         // STEP 4: EXACT PARAMETRIC GET IDENTIFIER (Lyrics)
         const exactGet = await fetchExactIdentifierGet(
@@ -686,7 +908,9 @@ const server = http.createServer(async (req, res) => {
           lockedTarget.albumName
         );
 
-        let resolvedLyrics = exactGet?.valid ? { synced: exactGet.synced, lines: exactGet.lines } : null;
+        let resolvedLyrics = exactGet?.valid
+          ? { synced: exactGet.synced, lines: exactGet.lines }
+          : null;
 
         const responseData = {
           confidence: ytOfficial || scStream ? 'VERY_HIGH' : 'UNCERTAIN',
@@ -694,7 +918,7 @@ const server = http.createServer(async (req, res) => {
           identity: {
             id: lockedTarget.spotifyId || `target_${Date.now()}`,
             title: lockedTarget.title,
-            artists: lockedTarget.artists.map(a => a.name),
+            artists: lockedTarget.artists.map((a) => a.name),
             durationMs: lockedTarget.durationMs,
             isrc: lockedTarget.isrc,
             anchorProvider: 'spotify',
@@ -702,9 +926,11 @@ const server = http.createServer(async (req, res) => {
           metadata: {
             album: lockedTarget.albumName,
           },
-          artwork: lockedTarget.imageURL ? {
-            url: lockedTarget.imageURL,
-          } : undefined,
+          artwork: lockedTarget.imageURL
+            ? {
+                url: lockedTarget.imageURL,
+              }
+            : undefined,
           lyrics: resolvedLyrics,
           playback: {
             type: scStream ? 'DIRECT_AUDIO' : 'EXTERNAL',

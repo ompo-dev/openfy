@@ -24,7 +24,11 @@ import {
   downloadTrack,
   recordInteraction,
 } from '@services';
-import { fetchLyrics, LyricsData, LyricSegment } from '../services/lyrics/lyricsService';
+import {
+  fetchLyrics,
+  LyricsData,
+  LyricSegment,
+} from '../services/lyrics/lyricsService';
 
 export type PlayerTrack = {
   spotifyId: string;
@@ -60,7 +64,10 @@ export interface PlayerStoreState {
   activeRequestId: number;
 
   // Actions
-  playTrack: (track: PlayerTrack, options?: { showPlayer?: boolean; setQueue?: boolean }) => Promise<void>;
+  playTrack: (
+    track: PlayerTrack,
+    options?: { showPlayer?: boolean; setQueue?: boolean }
+  ) => Promise<void>;
   playWithQueue: (tracks: PlayerTrack[], startIndex?: number) => Promise<void>;
   playDownloadedTrack: (track: any) => Promise<void>;
   togglePlayPause: () => Promise<void>;
@@ -75,7 +82,6 @@ export interface PlayerStoreState {
   setIsPlayerVisible: (visible: boolean) => void;
   closePlayer: () => Promise<void>;
   refreshLyrics: () => Promise<void>;
-  updateCustomTrackSource: (newUrl: string) => Promise<void>;
 }
 
 // In-Memory Fast Caches
@@ -92,8 +98,12 @@ const getCacheKey = (track: PlayerTrack) => {
   if (track.spotifyId && IS_SPOTIFY_ID.test(track.spotifyId)) {
     return track.spotifyId;
   }
-  const cleanTitle = (track.title || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-  const cleanArtist = (track.artistName || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const cleanTitle = (track.title || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '_');
+  const cleanArtist = (track.artistName || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '_');
   return `${cleanArtist}_${cleanTitle}`;
 };
 
@@ -122,7 +132,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const requestId = get().activeRequestId + 1;
     const cacheKey = getCacheKey(track);
 
-    console.log(`[PlayerStore #${requestId}] Requested: "${track.artistName} - ${track.title}"`);
+    console.log(
+      `[PlayerStore #${requestId}] Requested: "${track.artistName} - ${track.title}"`
+    );
 
     // Check if we have cached lyrics in memory
     const cachedLyrics = lyricsCache.get(cacheKey) || null;
@@ -169,7 +181,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
       // Check Persistent AsyncStorage Cache
       try {
-        const stored = await AsyncStorage.getItem(`${STORAGE_STREAM_PREFIX}${cacheKey}`);
+        const stored = await AsyncStorage.getItem(
+          `${STORAGE_STREAM_PREFIX}${cacheKey}`
+        );
         if (stored) {
           streamCache.set(cacheKey, stored);
           return stored;
@@ -186,7 +200,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
       if (resolved?.url) {
         streamCache.set(cacheKey, resolved.url);
-        AsyncStorage.setItem(`${STORAGE_STREAM_PREFIX}${cacheKey}`, resolved.url).catch(() => {});
+        AsyncStorage.setItem(
+          `${STORAGE_STREAM_PREFIX}${cacheKey}`,
+          resolved.url
+        ).catch(() => {});
         return resolved.url;
       }
 
@@ -198,7 +215,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       if (cachedLyrics) return cachedLyrics;
 
       try {
-        const stored = await AsyncStorage.getItem(`${STORAGE_LYRICS_PREFIX}${cacheKey}`);
+        const stored = await AsyncStorage.getItem(
+          `${STORAGE_LYRICS_PREFIX}${cacheKey}`
+        );
         if (stored) {
           const parsed = JSON.parse(stored) as LyricsData;
           lyricsCache.set(cacheKey, parsed);
@@ -214,7 +233,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
       if (fetched) {
         lyricsCache.set(cacheKey, fetched);
-        AsyncStorage.setItem(`${STORAGE_LYRICS_PREFIX}${cacheKey}`, JSON.stringify(fetched)).catch(() => {});
+        AsyncStorage.setItem(
+          `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
+          JSON.stringify(fetched)
+        ).catch(() => {});
         return fetched;
       }
 
@@ -236,15 +258,22 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     // RACE CONDITION CHECK: Discard if user clicked another track in the meantime
     if (get().activeRequestId !== requestId) {
-      console.log(`[PlayerStore #${requestId}] Discarding stale playback response for "${track.title}"`);
+      console.log(
+        `[PlayerStore #${requestId}] Discarding stale playback response for "${track.title}"`
+      );
       return;
     }
 
     if (!streamUri) {
-      console.warn(`[PlayerStore #${requestId}] Failed to resolve audio for: "${track.title}"`);
+      console.warn(
+        `[PlayerStore #${requestId}] Failed to resolve audio for: "${track.title}"`
+      );
       set({
         isLoadingAudio: false,
-        playerState: { ...DEFAULT_STATE, error: 'Não foi possível carregar o áudio desta faixa.' },
+        playerState: {
+          ...DEFAULT_STATE,
+          error: 'Não foi possível carregar o áudio desta faixa.',
+        },
       });
       return;
     }
@@ -310,7 +339,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         ).catch(() => {});
       }
     } else {
-      console.warn(`[PlayerStore #${requestId}] Initial playback failed, retrying fresh resolution...`);
+      console.warn(
+        `[PlayerStore #${requestId}] Initial playback failed, retrying fresh resolution...`
+      );
       const fallbackResolved = await resolveAudioUrl(
         track.title,
         track.artistName,
@@ -420,7 +451,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     set((state) => {
       const newQueue = [...state.queue];
       newQueue.splice(index, 1);
-      const newIndex = state.queueIndex >= newQueue.length ? Math.max(0, newQueue.length - 1) : state.queueIndex;
+      const newIndex =
+        state.queueIndex >= newQueue.length
+          ? Math.max(0, newQueue.length - 1)
+          : state.queueIndex;
       return {
         queue: newQueue,
         queueIndex: newIndex,
@@ -468,36 +502,15 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       const cacheKey = getCacheKey(currentTrack);
       if (lyrics) {
         lyricsCache.set(cacheKey, lyrics);
-        AsyncStorage.setItem(`${STORAGE_LYRICS_PREFIX}${cacheKey}`, JSON.stringify(lyrics)).catch(() => {});
+        AsyncStorage.setItem(
+          `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
+          JSON.stringify(lyrics)
+        ).catch(() => {});
       }
       set({
         lyricsData: lyrics,
         isLoadingLyrics: false,
       });
     }
-  },
-
-  updateCustomTrackSource: async (newUrl: string) => {
-    const { currentTrack, activeRequestId } = get();
-    if (!currentTrack || !newUrl) return;
-
-    const cacheKey = getCacheKey(currentTrack);
-    streamCache.set(cacheKey, newUrl);
-    AsyncStorage.setItem(`${STORAGE_STREAM_PREFIX}${cacheKey}`, newUrl).catch(() => {});
-
-    currentTrack.streamUrl = newUrl;
-    currentTrack.youtubeUrl = newUrl;
-
-    const handleStatusUpdate = (state: PlayerState) => {
-      if (get().activeRequestId !== activeRequestId) return;
-      set({
-        playerState: {
-          ...state,
-          durationMs: state.durationMs || currentTrack.duration_ms || 0,
-        },
-      });
-    };
-
-    await loadAndPlay(newUrl, handleStatusUpdate);
   },
 }));

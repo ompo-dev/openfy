@@ -59,7 +59,12 @@ export default function RootLayout() {
           <PlayerProvider>
             <GestureHandlerRootView style={styles.gestureHandlerRootView}>
               <View style={styles.gestureHandlerRootView}>
-                <Stack screenOptions={{ headerShown: false }}>
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    contentStyle: styles.stackContent,
+                  }}
+                >
                   <Stack.Screen
                     name="index"
                     options={{ headerShown: false, animation: 'fade' }}
@@ -87,6 +92,9 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   gestureHandlerRootView: {
     flex: 1,
-    backgroundColor: '#0a0a0c',
+    backgroundColor: '#121212',
+  },
+  stackContent: {
+    backgroundColor: '#121212',
   },
 });

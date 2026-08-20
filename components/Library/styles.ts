@@ -1,5 +1,5 @@
 import { StyleSheet } from 'react-native';
-import { COLORS } from '@config';
+import { BOTTOM_NAVIGATION_HEIGHT, COLORS } from '@config';
 
 export const styles = StyleSheet.create({
   container: {
@@ -13,7 +13,8 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   flatList: {
-    paddingVertical: 26,
+    paddingTop: 26,
+    paddingBottom: BOTTOM_NAVIGATION_HEIGHT + 80,
   },
   flatListColumnWrapper: {
     alignItems: 'flex-start',

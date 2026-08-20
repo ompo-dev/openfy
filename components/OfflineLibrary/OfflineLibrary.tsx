@@ -18,6 +18,7 @@ import { getDownloadedTracks, deleteDownloadedTrack, DownloadedTrack } from '@se
 import { usePlayer } from '@context';
 import { useFocusEffect } from 'expo-router';
 import { GlassSurface, LoggedPressable } from '../native';
+import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 
 export const OfflineLibrary = () => {
   const [tracks, setTracks] = React.useState<DownloadedTrack[]>([]);
@@ -163,7 +164,7 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingHorizontal: 16,
-    paddingBottom: 110,
+    paddingBottom: BOTTOM_NAVIGATION_HEIGHT + 80,
     gap: 8,
   },
   trackItem: {

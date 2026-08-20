@@ -3,7 +3,7 @@
  *
  * Matching Instagram Music Editor (Screenshots 1 & 2):
  * - Top-right blue checkmark button (✓) (confirms snippet selection)
- * - Center: Album art, Title, Artist, and Single Active Synchronized Lyric Line
+ * - Blurred album art background, title and artist at top, lyric centered.
  * - Timeline: (30) circle indicator on left, full-song timeline bar with active white 30s segment, Play/Pause on right
  * - Fixed Center White Border Frame:
  *   - Crisp 3.5px white border frame with 0% background fill (completely transparent)
@@ -28,10 +28,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { usePlayer } from '@context';
-import { MarqueeText } from '../../common/MarqueeText';
+import { NoteLyricBlocks } from './NoteLyricLine';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface DownloadedTrack {
   spotifyId: string;
@@ -48,23 +49,31 @@ interface MusicSnippetEditorModalProps {
   track: DownloadedTrack | null;
   onClose: () => void;
   onChangeMusic?: () => void;
-  onConfirmSnippet: (snippet: { startTimeMs: number; durationMs: number }) => void;
+  onConfirmSnippet: (snippet: {
+    startTimeMs: number;
+    durationMs: number;
+  }) => void;
 }
 
 const SNIPPET_DURATION_MS = 30000; // 30 seconds
 const BAR_WIDTH = 3;
 const BAR_GAP = 5;
 const FRAME_WIDTH = 90; // 90px width of the center selection box
+const FRAME_BORDER_WIDTH = 3.5;
 const CONTAINER_WIDTH = SCREEN_WIDTH - 44;
 const CENTER_RESPIRO_OFFSET = (CONTAINER_WIDTH - FRAME_WIDTH) / 2;
+const EDITOR_HEIGHT = Math.min(500, SCREEN_HEIGHT - 24);
 
-export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = ({
-  visible,
-  track,
-  onClose,
-  onConfirmSnippet,
-}) => {
-  const { playerState, togglePlayPause, seekToPosition, lyricsData } = usePlayer();
+export const MusicSnippetEditorModal: React.FC<
+  MusicSnippetEditorModalProps
+> = ({ visible, track, onClose, onConfirmSnippet }) => {
+  const {
+    playerState,
+    currentTrack,
+    togglePlayPause,
+    seekToPosition,
+    lyricsData,
+  } = usePlayer();
 
   const totalDurationMs = track?.duration_ms || 210000;
   const maxStartMs = Math.max(0, totalDurationMs - SNIPPET_DURATION_MS);
@@ -75,14 +84,57 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
   const totalBars = Math.max(12, Math.round(durationSec * barsPerSecond));
   const actualRenderedWidth = totalBars * BAR_WIDTH + (totalBars - 1) * BAR_GAP;
 
-  // 2. Maximum scroll distance set so waveform reel stops comfortably inside frame without passing past right edge
-  const maxScroll = Math.max(1, actualRenderedWidth - FRAME_WIDTH * 1.6);
+  // 2. At the end, final waveform bar aligns with the frame's right edge.
+  const maxScroll = Math.max(1, actualRenderedWidth - FRAME_WIDTH);
 
   const scrollAnim = React.useRef(new Animated.Value(0)).current;
   const scrollVal = React.useRef(0);
+  const shouldResumeAfterDrag = React.useRef(false);
+  const isScrubbingRef = React.useRef(false);
+  const interactionValues = React.useRef({
+    maxScroll,
+    maxStartMs,
+    isPlaying: playerState.isPlaying,
+  });
+  const playerActions = React.useRef({ togglePlayPause, seekToPosition });
+
+  interactionValues.current = {
+    maxScroll,
+    maxStartMs,
+    isPlaying: playerState.isPlaying,
+  };
+  playerActions.current = { togglePlayPause, seekToPosition };
 
   const [startPercent, setStartPercent] = React.useState(0);
-  const [isDragging, setIsDragging] = React.useState(false);
+  const [isScrubbing, setIsScrubbing] = React.useState(false);
+  const [isWaveformScrubbing, setIsWaveformScrubbing] = React.useState(false);
+
+  const beginScrubbing = React.useCallback(() => {
+    if (isScrubbingRef.current) return;
+
+    isScrubbingRef.current = true;
+    setIsScrubbing(true);
+    shouldResumeAfterDrag.current = interactionValues.current.isPlaying;
+    if (shouldResumeAfterDrag.current) {
+      playerActions.current.togglePlayPause();
+    }
+  }, []);
+
+  const endScrubbing = React.useCallback(() => {
+    if (!isScrubbingRef.current) return;
+
+    isScrubbingRef.current = false;
+    setIsScrubbing(false);
+    const { maxScroll: latestMaxScroll, maxStartMs: latestMaxStartMs } =
+      interactionValues.current;
+    playerActions.current.seekToPosition(
+      Math.round((scrollVal.current / latestMaxScroll) * latestMaxStartMs)
+    );
+    if (shouldResumeAfterDrag.current) {
+      playerActions.current.togglePlayPause();
+    }
+    shouldResumeAfterDrag.current = false;
+  }, []);
 
   // Reset scroll position to 0 whenever a new track or modal opens
   React.useEffect(() => {
@@ -95,6 +147,20 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
 
   const startTimeMs = startPercent * maxStartMs;
 
+  const handleLyricSeek = React.useCallback(
+    (positionMs: number) => {
+      const nextStartMs = Math.max(0, Math.min(positionMs, maxStartMs));
+      const nextPercent = maxStartMs === 0 ? 0 : nextStartMs / maxStartMs;
+      const nextScroll = nextPercent * maxScroll;
+
+      scrollVal.current = nextScroll;
+      setStartPercent(nextPercent);
+      scrollAnim.setValue(nextScroll);
+      seekToPosition(nextStartMs);
+    },
+    [maxScroll, maxStartMs, scrollAnim, seekToPosition]
+  );
+
   // Track scroll position changes
   React.useEffect(() => {
     const id = scrollAnim.addListener(({ value }) => {
@@ -105,12 +171,12 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
     return () => scrollAnim.removeListener(id);
   }, [scrollAnim, maxScroll]);
 
-  // Sync audio seek position on release
+  // Sync audio seek position after any scrub ends.
   React.useEffect(() => {
-    if (visible && track && !isDragging) {
+    if (visible && track && !isScrubbing) {
       seekToPosition(Math.round(startTimeMs));
     }
-  }, [visible, track, isDragging, Math.round(startTimeMs)]);
+  }, [visible, track, isScrubbing, Math.round(startTimeMs)]);
 
   // PanResponder to scroll waveform reel under fixed center box
   const panStartVal = React.useRef(0);
@@ -120,27 +186,30 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
-        setIsDragging(true);
         panStartVal.current = scrollVal.current;
-        // Pause audio while user is dragging
-        if (playerState.isPlaying) {
-          togglePlayPause();
-        }
+        setIsWaveformScrubbing(true);
+        beginScrubbing();
       },
       onPanResponderMove: (evt, gestureState) => {
-        const nextVal = Math.max(0, Math.min(maxScroll, panStartVal.current - gestureState.dx));
+        const nextVal = Math.max(
+          0,
+          Math.min(
+            interactionValues.current.maxScroll,
+            panStartVal.current - gestureState.dx
+          )
+        );
         scrollAnim.setValue(nextVal);
       },
       onPanResponderRelease: () => {
-        setIsDragging(false);
         try {
           Haptics.selectionAsync();
         } catch {}
-        // Resume audio after dragging releases
-        seekToPosition(Math.round((scrollVal.current / maxScroll) * maxStartMs));
-        if (!playerState.isPlaying) {
-          togglePlayPause();
-        }
+        setIsWaveformScrubbing(false);
+        endScrubbing();
+      },
+      onPanResponderTerminate: () => {
+        setIsWaveformScrubbing(false);
+        endScrubbing();
       },
     })
   ).current;
@@ -158,18 +227,26 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
     });
   }, [totalBars, trackTitleLength]);
 
-  // Find active single lyric line (syncs dynamically during both dragging/scrubbing & live playback)
-  const currentSongPositionMs = playerState.isPlaying && playerState.positionMs
-    ? playerState.positionMs
-    : startTimeMs;
+  // Resolve active lyric only when player is on editor's selected track.
+  const currentSongPositionMs =
+    isScrubbing || !playerState.isPlaying || !playerState.positionMs
+      ? startTimeMs
+      : playerState.positionMs;
 
-  const activeLine = React.useMemo(() => {
-    if (!lyricsData || !lyricsData.segments || lyricsData.segments.length === 0) return null;
-    const found = lyricsData.segments.find(
-      (seg) => currentSongPositionMs >= seg.startTimeMs && currentSongPositionMs <= seg.endTimeMs
+  const lyricSegments = React.useMemo(() => {
+    if (currentTrack?.spotifyId !== track?.spotifyId) return [];
+    return lyricsData?.segments ?? [];
+  }, [currentTrack?.spotifyId, track?.spotifyId, lyricsData?.segments]);
+
+  const activeLyricIndex = React.useMemo(() => {
+    if (lyricSegments.length === 0) return 0;
+    const index = lyricSegments.findIndex(
+      (seg) =>
+        currentSongPositionMs >= seg.startTimeMs &&
+        currentSongPositionMs <= seg.endTimeMs
     );
-    return found || lyricsData.segments[0];
-  }, [lyricsData, currentSongPositionMs]);
+    return index >= 0 ? index : 0;
+  }, [lyricSegments, currentSongPositionMs]);
 
   // Unconditional hooks declared above
   if (!track) return null;
@@ -191,133 +268,180 @@ export const MusicSnippetEditorModal: React.FC<MusicSnippetEditorModalProps> = (
 
   // Timeline segment calculations for Screenshot 1
   const activeSegmentLeftPct = (startTimeMs / totalDurationMs) * 100;
-  const activeSegmentWidthPct = Math.min(100 - activeSegmentLeftPct, (SNIPPET_DURATION_MS / totalDurationMs) * 100);
+  const activeSegmentWidthPct = Math.min(
+    100 - activeSegmentLeftPct,
+    (SNIPPET_DURATION_MS / totalDurationMs) * 100
+  );
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={S.overlay} onPress={onClose}>
-        <Pressable style={S.sheet} onPress={(e) => e.stopPropagation()}>
-          {/* Drag Handle */}
-          <View style={S.handle} />
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <GestureHandlerRootView style={S.gestureHandlerRoot}>
+        <Pressable style={S.overlay} onPress={onClose}>
+          <Pressable style={S.sheet} onPress={(e) => e.stopPropagation()}>
+            <Image
+              source={{ uri: imageUri }}
+              style={S.backgroundCover}
+              blurRadius={22}
+              resizeMode="cover"
+            />
+            <View pointerEvents="none" style={S.backgroundScrim} />
 
-          {/* Top Bar: Blue Checkmark Button on Right */}
-          <View style={S.topBar}>
-            <View style={{ width: 38 }} />
-            <TouchableOpacity style={S.confirmBtn} activeOpacity={0.85} onPress={handleConfirm}>
-              <Ionicons name="checkmark" size={20} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
+            <View style={S.content}>
+              <View style={S.handle} />
 
-          {/* Center Cover Art */}
-          <View style={S.coverContainer}>
-            <Image source={{ uri: imageUri }} style={S.coverImage} />
-          </View>
+              <View style={S.topBar}>
+                <View style={{ width: 38 }} />
+                <View style={S.topTrackInfo}>
+                  <Text style={S.trackTitle} numberOfLines={1}>
+                    {track.title}
+                  </Text>
+                  <Text style={S.trackArtist} numberOfLines={1}>
+                    {track.artistName}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={S.confirmBtn}
+                  activeOpacity={0.85}
+                  onPress={handleConfirm}
+                >
+                  <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
 
-          {/* Title & Artist */}
-          <View style={S.titleContainer}>
-            <Text style={S.trackTitle} numberOfLines={1}>
-              {track.title}
-            </Text>
-            <Text style={S.trackArtist} numberOfLines={1}>
-              {track.artistName}
-            </Text>
-          </View>
-
-          {/* Single Synchronized Lyric Line below title & artist */}
-          {activeLine ? (
-            <View style={S.lyricPillContainer}>
-              <MarqueeText
-                text={activeLine.text}
-                style={S.lyricPillText}
-                align="center"
-                fadeWidth={8}
-                fadeColor="#1C1C1E"
+              <NoteLyricBlocks
+                segments={lyricSegments}
+                activeIndex={activeLyricIndex}
+                onSeek={handleLyricSeek}
+                onScrubStart={beginScrubbing}
+                onScrubEnd={endScrubbing}
+                isTimelineScrubbing={isWaveformScrubbing}
+                style={S.lyricStage}
               />
-            </View>
-          ) : null}
 
-          {/* Timeline Row (Screenshot 1) */}
-          <View style={S.timelineRow}>
-            {/* 30s Circle Indicator */}
-            <View style={S.durationBadge}>
-              <Text style={S.durationBadgeText}>30</Text>
-            </View>
+              <View style={S.timelineRow}>
+                <View style={S.durationBadge}>
+                  <Text style={S.durationBadgeText}>30</Text>
+                </View>
 
-            {/* Timeline Line with White Segment representing current 30s position */}
-            <View style={S.progressLineContainer}>
-              <View style={S.progressLineBg}>
-                {/* Active 30s white segment */}
-                <View
+                <View style={S.progressLineContainer}>
+                  <View style={S.progressLineBg}>
+                    <View
+                      style={[
+                        S.activeSnippetSegment,
+                        {
+                          left: `${activeSegmentLeftPct}%`,
+                          width: `${activeSegmentWidthPct}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={S.playBtn}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    try {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    } catch {}
+                    togglePlayPause();
+                  }}
+                >
+                  <Ionicons
+                    name={playerState.isPlaying ? 'pause' : 'play'}
+                    size={18}
+                    color="#000000"
+                    style={
+                      !playerState.isPlaying ? { marginLeft: 2 } : undefined
+                    }
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <View style={S.waveformContainer} {...panResponder.panHandlers}>
+                <Animated.View
                   style={[
-                    S.activeSnippetSegment,
+                    S.waveformReel,
                     {
-                      left: `${activeSegmentLeftPct}%`,
-                      width: `${activeSegmentWidthPct}%`,
+                      paddingLeft: CENTER_RESPIRO_OFFSET,
+                      paddingRight: CENTER_RESPIRO_OFFSET,
+                      transform: [
+                        { translateX: Animated.multiply(scrollAnim, -1) },
+                      ],
                     },
                   ]}
-                />
+                >
+                  {waveformHeights.map((h, i) => (
+                    <View key={i} style={[S.waveformBar, { height: h }]} />
+                  ))}
+                </Animated.View>
+
+                <View style={S.fixedCenterFrame} pointerEvents="none">
+                  <View style={S.selectionWaveformClip}>
+                    <Animated.View
+                      style={[
+                        S.selectionWaveformReel,
+                        {
+                          left: -FRAME_BORDER_WIDTH,
+                          width: actualRenderedWidth,
+                          transform: [
+                            { translateX: Animated.multiply(scrollAnim, -1) },
+                          ],
+                        },
+                      ]}
+                    >
+                      {waveformHeights.map((height, index) => (
+                        <View
+                          key={index}
+                          style={[S.selectionWaveformBar, { height }]}
+                        />
+                      ))}
+                    </Animated.View>
+                  </View>
+                  <View style={S.centerFrameBorder} />
+                </View>
               </View>
             </View>
-
-            {/* Play/Pause Button */}
-            <TouchableOpacity
-              style={S.playBtn}
-              activeOpacity={0.8}
-              onPress={() => {
-                try {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                } catch {}
-                togglePlayPause();
-              }}
-            >
-              <Ionicons
-                name={playerState.isPlaying ? 'pause' : 'play'}
-                size={18}
-                color="#000000"
-                style={!playerState.isPlaying ? { marginLeft: 2 } : undefined}
-              />
-            </TouchableOpacity>
-          </View>
-
-          {/* Waveform Scrubber: Waveform scrolls underneath the FIXED center frame */}
-          <View style={S.waveformContainer} {...panResponder.panHandlers}>
-            {/* Scrolling Waveform Reel positioned at left: 0 */}
-            <Animated.View
-              style={[
-                S.waveformReel,
-                {
-                  paddingLeft: CENTER_RESPIRO_OFFSET,
-                  paddingRight: CENTER_RESPIRO_OFFSET,
-                  transform: [{ translateX: Animated.multiply(scrollAnim, -1) }],
-                },
-              ]}
-            >
-              {waveformHeights.map((h, i) => (
-                <View key={i} style={[S.waveformBar, { height: h }]} />
-              ))}
-            </Animated.View>
-
-            {/* FIXED CENTER White Border Frame (Clean 3.5px border, 0% background fill) */}
-            <View style={S.fixedCenterFrame} pointerEvents="none">
-              <View style={S.centerFrameBorder} />
-            </View>
-          </View>
+          </Pressable>
         </Pressable>
-      </Pressable>
+      </GestureHandlerRootView>
     </Modal>
   );
 };
 
 const S = StyleSheet.create({
+  gestureHandlerRoot: {
+    flex: 1,
+  },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: '#1C1C1E',
+    backgroundColor: '#101116',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
+    height: EDITOR_HEIGHT,
+    overflow: 'hidden',
+  },
+  backgroundCover: {
+    ...StyleSheet.absoluteFill,
+    opacity: 0.64,
+    transform: [{ scale: 1.1 }],
+  },
+  backgroundScrim: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(8, 10, 16, 0.60)',
+  },
+  content: {
+    flex: 1,
+    width: '100%',
     paddingHorizontal: 22,
     paddingTop: 12,
     paddingBottom: 42,
@@ -336,7 +460,7 @@ const S = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     width: '100%',
-    marginBottom: 14,
+    marginBottom: 4,
   },
   confirmBtn: {
     width: 38,
@@ -351,25 +475,10 @@ const S = StyleSheet.create({
     shadowRadius: 6,
     elevation: 4,
   },
-  coverContainer: {
-    marginVertical: 6,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-  },
-  coverImage: {
-    width: 84,
-    height: 84,
-    borderRadius: 12,
-    backgroundColor: '#2C2C2E',
-  },
-  titleContainer: {
+  topTrackInfo: {
+    flex: 1,
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 4,
-    paddingHorizontal: 20,
+    paddingHorizontal: 12,
   },
   trackTitle: {
     color: '#FFFFFF',
@@ -385,27 +494,19 @@ const S = StyleSheet.create({
     textAlign: 'center',
     marginTop: 2,
   },
-  lyricPillContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    marginVertical: 6,
-    maxWidth: SCREEN_WIDTH - 80,
+  lyricStage: {
+    flex: 1,
+    width: '100%',
     alignItems: 'center',
-  },
-  lyricPillText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontFamily: 'SimplyRounded-Bold',
-    fontWeight: '600',
-    textAlign: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
   },
   timelineRow: {
     flexDirection: 'row',
     alignItems: 'center',
     width: '100%',
-    marginVertical: 14,
+    marginTop: 12,
+    marginBottom: 0,
     paddingHorizontal: 4,
     gap: 12,
   },
@@ -472,16 +573,41 @@ const S = StyleSheet.create({
   fixedCenterFrame: {
     position: 'absolute',
     left: CENTER_RESPIRO_OFFSET,
-    top: 5,
+    top: 4,
     width: FRAME_WIDTH,
-    height: 46,
+    height: 50,
     zIndex: 10,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
+  selectionWaveformReel: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: BAR_GAP,
+  },
+  selectionWaveformBar: {
+    width: BAR_WIDTH,
+    borderRadius: BAR_WIDTH / 2,
+    backgroundColor: '#101116',
+  },
+  selectionWaveformClip: {
+    position: 'absolute',
+    top: FRAME_BORDER_WIDTH,
+    right: FRAME_BORDER_WIDTH,
+    bottom: FRAME_BORDER_WIDTH,
+    left: FRAME_BORDER_WIDTH,
+    borderRadius: 10 - FRAME_BORDER_WIDTH,
+    overflow: 'hidden',
   },
   centerFrameBorder: {
-    width: '100%',
-    height: '100%',
+    ...StyleSheet.absoluteFill,
     borderRadius: 10,
-    borderWidth: 3.5,
+    borderWidth: FRAME_BORDER_WIDTH,
     borderColor: '#FFFFFF',
     backgroundColor: 'transparent',
     shadowColor: '#000',

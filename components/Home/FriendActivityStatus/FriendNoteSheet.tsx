@@ -1,25 +1,101 @@
 /**
  * FriendNoteSheet — Bottom sheet when clicking on a friend's note
- * Shows: Header (name · time · "Ouvindo no Spotify"), avatar with green dot,
- * track pill with interactive play/pause button, title marquee (top row), artist marquee (bottom row),
- * and ONLY 1 line of lyrics (active line or first line). Stops audio when closing.
+ * Shows: Header, avatar at the left, full-width note at the right, inline lyrics,
+ * playback/download controls and final tail calibration.
  */
 
 import * as React from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Image,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Circle } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
-import { FriendNoteItem } from './FriendActivityStatus';
-import { MarqueeText } from '../../common/MarqueeText';
+import { downloadTrack, isTrackDownloaded, resolveAudioUrl } from '@services';
+import type { FriendNoteItem } from './FriendActivityStatus';
+import { NoteLyricInline } from './NoteLyricLine';
+import { NoteBubbleFullWidth } from './NoteBubble';
+import { resolveNoteTailTuning } from './noteTailTuning';
+import type { NoteTailTuning } from './noteTailTuning';
+
+const PLAYBACK_BUTTON_SIZE = 36;
+const PLAYBACK_RING_RADIUS = 15;
+const PLAYBACK_RING_LENGTH = 2 * Math.PI * PLAYBACK_RING_RADIUS;
+
+const FRIEND_NOTE_SHEET_TAIL_TUNING: Partial<NoteTailTuning> = {
+  colorReferenceInset: 0,
+  mainStartFine: -0.182,
+  mainEndFine: -0.15,
+  smallStartFine: -0.2,
+  smallEndFine: -0.2,
+  orbitAngle: 174,
+  mainDistance: 1,
+  smallAngleOffset: 2,
+  smallDistance: 18,
+};
+
+const clamp = (value: number) => Math.max(0, Math.min(value, 1));
+
+const PlaybackButton = ({
+  isPlaying,
+  progress,
+  onPress,
+}: {
+  isPlaying: boolean;
+  progress: number;
+  onPress: () => void;
+}) => (
+  <TouchableOpacity
+    style={S.playbackButton}
+    activeOpacity={0.78}
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityLabel={isPlaying ? 'Pausar música' : 'Tocar música'}
+  >
+    <Svg
+      width={PLAYBACK_BUTTON_SIZE}
+      height={PLAYBACK_BUTTON_SIZE}
+      style={S.playbackRing}
+    >
+      <Circle
+        cx={PLAYBACK_BUTTON_SIZE / 2}
+        cy={PLAYBACK_BUTTON_SIZE / 2}
+        r={PLAYBACK_RING_RADIUS}
+        stroke="rgba(255,255,255,0.24)"
+        strokeWidth={2}
+        fill="transparent"
+      />
+      <Circle
+        cx={PLAYBACK_BUTTON_SIZE / 2}
+        cy={PLAYBACK_BUTTON_SIZE / 2}
+        r={PLAYBACK_RING_RADIUS}
+        stroke="#FFFFFF"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeDasharray={`${PLAYBACK_RING_LENGTH} ${PLAYBACK_RING_LENGTH}`}
+        strokeDashoffset={PLAYBACK_RING_LENGTH * (1 - clamp(progress))}
+        fill="transparent"
+        transform={`rotate(-90 ${PLAYBACK_BUTTON_SIZE / 2} ${PLAYBACK_BUTTON_SIZE / 2})`}
+      />
+    </Svg>
+    <Ionicons
+      name={isPlaying ? 'pause' : 'play'}
+      size={14}
+      color="#FFFFFF"
+      style={!isPlaying ? S.playIcon : undefined}
+    />
+  </TouchableOpacity>
+);
 
 interface FriendNoteSheetProps {
   visible: boolean;
@@ -27,8 +103,52 @@ interface FriendNoteSheetProps {
   onClose: () => void;
 }
 
-export const FriendNoteSheet = ({ visible, note, onClose }: FriendNoteSheetProps) => {
-  const { playerState, currentTrack, lyricsData, togglePlayPause, playTrack } = usePlayer();
+export const FriendNoteSheet = ({
+  visible,
+  note,
+  onClose,
+}: FriendNoteSheetProps) => {
+  const { playerState, currentTrack, lyricsData, togglePlayPause, playTrack } =
+    usePlayer();
+  const [isDownloaded, setIsDownloaded] = React.useState(false);
+  const [isDownloading, setIsDownloading] = React.useState(false);
+  const noteSpotifyId = note?.note.spotifyId;
+  const sheetTailTuning = resolveNoteTailTuning(FRIEND_NOTE_SHEET_TAIL_TUNING);
+
+  React.useEffect(() => {
+    let isCurrent = true;
+    setIsDownloaded(false);
+    setIsDownloading(false);
+
+    if (!noteSpotifyId)
+      return () => {
+        isCurrent = false;
+      };
+
+    isTrackDownloaded(noteSpotifyId)
+      .then((downloaded) => {
+        if (isCurrent) setIsDownloaded(downloaded);
+      })
+      .catch(() => {});
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [noteSpotifyId]);
+
+  const segments =
+    currentTrack?.spotifyId === note?.note.spotifyId
+      ? (lyricsData?.segments ?? [])
+      : [];
+  const displayLyric = React.useMemo(() => {
+    if (segments.length === 0) return null;
+    const active = segments.find(
+      (s) =>
+        playerState.positionMs >= s.startTimeMs &&
+        playerState.positionMs < s.endTimeMs
+    );
+    return active ? active.text : segments[0]?.text;
+  }, [segments, playerState.positionMs]);
 
   if (!note) return null;
 
@@ -36,17 +156,6 @@ export const FriendNoteSheet = ({ visible, note, onClose }: FriendNoteSheetProps
     !!note.note.spotifyId &&
     currentTrack?.spotifyId === note.note.spotifyId &&
     playerState.isPlaying;
-
-  // Active lyric line or first line (Display ONLY 1 line at a time)
-  const segments = lyricsData?.segments ?? [];
-
-  const displayLyric = React.useMemo(() => {
-    if (!segments || segments.length === 0) return null;
-    const active = segments.find(
-      (s) => playerState.positionMs >= s.startTimeMs && playerState.positionMs < s.endTimeMs
-    );
-    return active ? active.text : segments[0]?.text;
-  }, [segments, playerState.positionMs]);
 
   const handleClose = () => {
     try {
@@ -77,6 +186,70 @@ export const FriendNoteSheet = ({ visible, note, onClose }: FriendNoteSheetProps
     }
   };
 
+  const handleDownload = async () => {
+    if (!note.note.spotifyId || isDownloaded || isDownloading) return;
+
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch {}
+
+    setIsDownloading(true);
+    try {
+      if (await isTrackDownloaded(note.note.spotifyId)) {
+        setIsDownloaded(true);
+        return;
+      }
+
+      const resolved = await resolveAudioUrl(
+        note.note.title,
+        note.note.artist || note.note.subtitle || 'Artista',
+        note.note.spotifyId,
+        note.note.duration_ms
+      );
+      if (!resolved) {
+        Alert.alert(
+          'Música indisponível',
+          'Não foi possível localizar o áudio.'
+        );
+        return;
+      }
+
+      const savedTrack = await downloadTrack(
+        {
+          spotifyId: note.note.spotifyId,
+          title: note.note.title,
+          artistName: note.note.artist || note.note.subtitle || 'Artista',
+          albumName: 'Nota',
+          imageURL: note.note.imageUrl || note.user.avatarUrl,
+          duration_ms: note.note.duration_ms || 0,
+        },
+        resolved.url,
+        resolved.format
+      );
+      if (savedTrack) {
+        setIsDownloaded(true);
+        Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Success
+        ).catch(() => {});
+      } else {
+        Alert.alert('Download falhou', 'Tente salvar a música novamente.');
+      }
+    } catch {
+      Alert.alert('Download falhou', 'Tente salvar a música novamente.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const isThisTrackActive = currentTrack?.spotifyId === note.note.spotifyId;
+  const playbackDurationMs =
+    (isThisTrackActive ? playerState.durationMs : 0) ||
+    note.note.duration_ms ||
+    1;
+  const playbackProgress = isThisTrackActive
+    ? clamp(playerState.positionMs / playbackDurationMs)
+    : 0;
+
   return (
     <Modal
       visible={visible}
@@ -86,74 +259,74 @@ export const FriendNoteSheet = ({ visible, note, onClose }: FriendNoteSheetProps
     >
       <Pressable style={S.overlay} onPress={handleClose}>
         <Pressable style={S.sheet} onPress={(e) => e.stopPropagation()}>
-          {/* Drag handle */}
-          <View style={S.handle} />
+          <ScrollView
+            contentContainerStyle={S.sheetContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Drag handle */}
+            <View style={S.handle} />
 
-          {/* Header: "Flavia Helena · 4 h · Ouvindo no Spotify" */}
-          <Text style={S.header} numberOfLines={1}>
-            <Text style={S.headerName}>{note.user.name}</Text>
-            <Text style={S.headerMeta}>{' · 4 h · Ouvindo no '}</Text>
-            <Text style={S.headerSpotify}>Spotify</Text>
-          </Text>
+            {/* Header: "Flavia Helena · 4 h · Ouvindo no Spotify" */}
+            <Text style={S.header} numberOfLines={1}>
+              <Text style={S.headerName}>{note.user.name}</Text>
+              <Text style={S.headerMeta}>{' · 4 h · Ouvindo no '}</Text>
+              <Text style={S.headerSpotify}>Spotify</Text>
+            </Text>
 
-          {/* Avatar + Track pill row */}
-          <View style={S.avatarRow}>
-            {/* Avatar with green dot */}
-            <View style={S.avatarWrap}>
-              <Image source={{ uri: note.user.avatarUrl }} style={S.avatar} />
-              <View style={S.greenDot} />
+            {/* Avatar left, full note right; tail points toward the avatar. */}
+            <View style={S.avatarRow}>
+              <View style={S.avatarWrap}>
+                <Image source={{ uri: note.user.avatarUrl }} style={S.avatar} />
+                <View style={S.greenDot} />
+              </View>
+
+              <View style={S.notePressable}>
+                <NoteBubbleFullWidth
+                  color={note.note.bubbleColor || '#1C1E24'}
+                  title={note.note.title}
+                  subtitle={note.note.artist || note.note.subtitle}
+                  tailTuning={sheetTailTuning}
+                  leading={
+                    note.note.type === 'music' ? (
+                      <PlaybackButton
+                        isPlaying={isThisSongPlaying}
+                        progress={playbackProgress}
+                        onPress={handlePlayPauseTap}
+                      />
+                    ) : undefined
+                  }
+                  trailing={
+                    note.note.type === 'music' ? (
+                      <TouchableOpacity
+                        style={S.downloadButton}
+                        activeOpacity={0.78}
+                        onPress={handleDownload}
+                        disabled={isDownloaded || isDownloading}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          isDownloaded
+                            ? 'Música salva em downloads'
+                            : 'Salvar música em downloads'
+                        }
+                      >
+                        {isDownloading ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <Ionicons
+                            name={isDownloaded ? 'heart' : 'heart-outline'}
+                            size={19}
+                            color={isDownloaded ? '#FF5575' : '#FFFFFF'}
+                          />
+                        )}
+                      </TouchableOpacity>
+                    ) : undefined
+                  }
+                />
+              </View>
             </View>
 
-            {/* Track pill with interactive play/pause and two-line typography */}
-            {note.note.type === 'music' ? (
-              <View style={S.trackPill}>
-                <TouchableOpacity
-                  style={S.playBtnWrap}
-                  activeOpacity={0.7}
-                  onPress={handlePlayPauseTap}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Ionicons
-                    name={isThisSongPlaying ? 'pause-circle' : 'play-circle'}
-                    size={32}
-                    color="#FFFFFF"
-                  />
-                </TouchableOpacity>
-
-                <View style={S.trackInfoContainer}>
-                  {/* Top row: Title marquee */}
-                  <MarqueeText
-                    text={note.note.title}
-                    style={S.trackTitleText}
-                    align="left"
-                    fadeWidth={8}
-                  />
-                  {/* Bottom row: Artist marquee */}
-                  <MarqueeText
-                    text={note.note.artist || note.note.subtitle || ''}
-                    style={S.trackArtistText}
-                    align="left"
-                    fadeWidth={8}
-                  />
-                </View>
-              </View>
-            ) : null}
-          </View>
-
-          {/* Display ONLY 1 line of lyrics (active or first) */}
-          <View style={S.lyricsArea}>
-            {displayLyric ? (
-              <Text style={S.singleLyricText} numberOfLines={2}>
-                {displayLyric}
-              </Text>
-            ) : (
-              <View style={S.notesRow}>
-                <Text style={S.musicNote}>♪</Text>
-                <Text style={S.musicNote}>♪</Text>
-                <Text style={S.musicNote}>♪</Text>
-              </View>
-            )}
-          </View>
+            <NoteLyricInline text={displayLyric} />
+          </ScrollView>
         </Pressable>
       </Pressable>
     </Modal>
@@ -170,10 +343,14 @@ const S = StyleSheet.create({
     backgroundColor: '#1C1C1E',
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-    paddingTop: 12,
     minHeight: 240,
+    maxHeight: '82%',
+    overflow: 'hidden',
+  },
+  sheetContent: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 40,
   },
   handle: {
     width: 36,
@@ -206,8 +383,32 @@ const S = StyleSheet.create({
   avatarRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 16,
     marginBottom: 24,
+  },
+  notePressable: {
+    flex: 1,
+    borderRadius: 16,
+  },
+  playbackButton: {
+    width: PLAYBACK_BUTTON_SIZE,
+    height: PLAYBACK_BUTTON_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  playbackRing: {
+    position: 'absolute',
+  },
+  playIcon: {
+    marginLeft: 2,
+  },
+  downloadButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   avatarWrap: {
     width: 60,
@@ -231,61 +432,5 @@ const S = StyleSheet.create({
     backgroundColor: '#2ECC40',
     borderWidth: 2,
     borderColor: '#1C1C1E',
-  },
-  trackPill: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#2C2C2E',
-    borderRadius: 24,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 10,
-    overflow: 'hidden',
-  },
-  playBtnWrap: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  trackInfoContainer: {
-    flex: 1,
-    gap: 2,
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  trackTitleText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontFamily: 'SimplyRounded-Bold',
-    fontWeight: '700',
-  },
-  trackArtistText: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 12,
-    fontFamily: 'SimplyRounded',
-  },
-  lyricsArea: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 50,
-    paddingHorizontal: 10,
-  },
-  singleLyricText: {
-    color: 'rgba(255, 255, 255, 0.88)',
-    fontSize: 14.5,
-    fontFamily: 'SimplyRounded-Bold',
-    fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  notesRow: {
-    flexDirection: 'row',
-    gap: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  musicNote: {
-    color: 'rgba(255,255,255,0.55)',
-    fontSize: 26,
   },
 });

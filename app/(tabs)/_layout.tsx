@@ -6,6 +6,9 @@ export default function Layout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        sceneStyle: {
+          backgroundColor: '#121212',
+        },
         tabBarStyle: {
           position: 'absolute',
           backgroundColor: 'transparent',

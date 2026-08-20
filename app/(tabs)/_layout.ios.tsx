@@ -10,12 +10,18 @@ const { Label, Icon } = NativeTabs.Trigger;
 export default function TabLayout() {
   return (
     <NativeTabs>
-      <NativeTabs.Trigger name="home">
+      <NativeTabs.Trigger
+        name="home"
+        contentStyle={{ backgroundColor: '#121212' }}
+      >
         <Label>Home</Label>
         <Icon sf={{ default: 'house', selected: 'house.fill' }} />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="library">
+      <NativeTabs.Trigger
+        name="library"
+        contentStyle={{ backgroundColor: '#121212' }}
+      >
         <Label>Your Library</Label>
         <Icon sf={{ default: 'books.vertical', selected: 'books.vertical.fill' }} />
       </NativeTabs.Trigger>

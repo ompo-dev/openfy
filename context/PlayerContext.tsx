@@ -34,7 +34,6 @@ export const usePlayer = () => {
   const setRepeatMode = usePlayerStore((s) => s.setRepeatMode);
   const closePlayer = usePlayerStore((s) => s.closePlayer);
   const refreshLyrics = usePlayerStore((s) => s.refreshLyrics);
-  const updateCustomTrackSource = usePlayerStore((s) => s.updateCustomTrackSource);
 
   return {
     currentTrack,
@@ -59,14 +58,9 @@ export const usePlayer = () => {
     setRepeatMode,
     closePlayer,
     refreshLyrics,
-    updateCustomTrackSource,
   };
 };
 
-export const PlayerProvider = ({
-  children,
-}: {
-  children: React.ReactNode;
-}) => {
+export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
