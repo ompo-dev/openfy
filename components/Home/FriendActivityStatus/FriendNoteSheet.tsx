@@ -1,23 +1,25 @@
 /**
  * FriendNoteSheet — Bottom sheet when clicking on a friend's note
  * Shows: Header (name · time · "Ouvindo no Spotify"), avatar with green dot,
- * track pill with pause icon, and lyrics (♪ ♪ ♪ or synced lines)
+ * track pill with interactive play/pause button, title marquee (top row), artist marquee (bottom row),
+ * and ONLY 1 line of lyrics (active line or first line). Stops audio when closing.
  */
 
 import * as React from 'react';
 import {
-  Animated,
   Image,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
 import { FriendNoteItem } from './FriendActivityStatus';
+import { MarqueeText } from '../../common/MarqueeText';
 
 interface FriendNoteSheetProps {
   visible: boolean;
@@ -26,7 +28,7 @@ interface FriendNoteSheetProps {
 }
 
 export const FriendNoteSheet = ({ visible, note, onClose }: FriendNoteSheetProps) => {
-  const { playerState, currentTrack, lyricsData } = usePlayer();
+  const { playerState, currentTrack, lyricsData, togglePlayPause, playTrack } = usePlayer();
 
   if (!note) return null;
 
@@ -35,26 +37,54 @@ export const FriendNoteSheet = ({ visible, note, onClose }: FriendNoteSheetProps
     currentTrack?.spotifyId === note.note.spotifyId &&
     playerState.isPlaying;
 
-  // Get active lyric segments from the store
+  // Active lyric line or first line (Display ONLY 1 line at a time)
   const segments = lyricsData?.segments ?? [];
-  const hasLyrics = segments.length > 0;
 
-  // Active lyric line
-  const activeLine = React.useMemo(() => {
-    if (!hasLyrics) return null;
-    return segments.find(
+  const displayLyric = React.useMemo(() => {
+    if (!segments || segments.length === 0) return null;
+    const active = segments.find(
       (s) => playerState.positionMs >= s.startTimeMs && playerState.positionMs < s.endTimeMs
-    ) ?? null;
-  }, [segments, playerState.positionMs, hasLyrics]);
+    );
+    return active ? active.text : segments[0]?.text;
+  }, [segments, playerState.positionMs]);
+
+  const handleClose = () => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch {}
+    // Pause audio when closing friend note sheet
+    if (playerState.isPlaying) {
+      togglePlayPause();
+    }
+    onClose();
+  };
+
+  const handlePlayPauseTap = () => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch {}
+    if (currentTrack?.spotifyId === note.note.spotifyId) {
+      togglePlayPause();
+    } else if (note.note.spotifyId) {
+      playTrack({
+        spotifyId: note.note.spotifyId,
+        title: note.note.title,
+        artistName: note.note.artist || note.note.subtitle || 'Artista',
+        albumName: 'Nota',
+        imageURL: note.note.imageUrl || note.user.avatarUrl,
+        duration_ms: note.note.duration_ms || 200000,
+      });
+    }
+  };
 
   return (
     <Modal
       visible={visible}
       transparent
       animationType="slide"
-      onRequestClose={onClose}
+      onRequestClose={handleClose}
     >
-      <Pressable style={S.overlay} onPress={onClose}>
+      <Pressable style={S.overlay} onPress={handleClose}>
         <Pressable style={S.sheet} onPress={(e) => e.stopPropagation()}>
           {/* Drag handle */}
           <View style={S.handle} />
@@ -74,40 +104,48 @@ export const FriendNoteSheet = ({ visible, note, onClose }: FriendNoteSheetProps
               <View style={S.greenDot} />
             </View>
 
-            {/* Track pill */}
+            {/* Track pill with interactive play/pause and two-line typography */}
             {note.note.type === 'music' ? (
               <View style={S.trackPill}>
-                <Ionicons
-                  name={isThisSongPlaying ? 'pause-circle' : 'play-circle'}
-                  size={20}
-                  color="#FFFFFF"
-                />
-                <Text style={S.trackPillText} numberOfLines={1}>
-                  {note.note.title}
-                  {note.note.subtitle || note.note.artist
-                    ? ` · ${note.note.subtitle || note.note.artist}`
-                    : ''}
-                </Text>
+                <TouchableOpacity
+                  style={S.playBtnWrap}
+                  activeOpacity={0.7}
+                  onPress={handlePlayPauseTap}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Ionicons
+                    name={isThisSongPlaying ? 'pause-circle' : 'play-circle'}
+                    size={32}
+                    color="#FFFFFF"
+                  />
+                </TouchableOpacity>
+
+                <View style={S.trackInfoContainer}>
+                  {/* Top row: Title marquee */}
+                  <MarqueeText
+                    text={note.note.title}
+                    style={S.trackTitleText}
+                    align="left"
+                    fadeWidth={8}
+                  />
+                  {/* Bottom row: Artist marquee */}
+                  <MarqueeText
+                    text={note.note.artist || note.note.subtitle || ''}
+                    style={S.trackArtistText}
+                    align="left"
+                    fadeWidth={8}
+                  />
+                </View>
               </View>
             ) : null}
           </View>
 
-          {/* Lyrics or musical note icons */}
+          {/* Display ONLY 1 line of lyrics (active or first) */}
           <View style={S.lyricsArea}>
-            {hasLyrics ? (
-              <ScrollView style={S.lyricsScroll} showsVerticalScrollIndicator={false}>
-                {segments.slice(0, 12).map((seg, i) => (
-                  <Text
-                    key={i}
-                    style={[
-                      S.lyricLine,
-                      activeLine === seg && S.lyricLineActive,
-                    ]}
-                  >
-                    {seg.text}
-                  </Text>
-                ))}
-              </ScrollView>
+            {displayLyric ? (
+              <Text style={S.singleLyricText} numberOfLines={2}>
+                {displayLyric}
+              </Text>
             ) : (
               <View style={S.notesRow}>
                 <Text style={S.musicNote}>♪</Text>
@@ -125,7 +163,7 @@ export const FriendNoteSheet = ({ visible, note, onClose }: FriendNoteSheetProps
 const S = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'flex-end',
   },
   sheet: {
@@ -133,17 +171,21 @@ const S = StyleSheet.create({
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     paddingHorizontal: 20,
-    paddingBottom: 48,
+    paddingBottom: 40,
     paddingTop: 12,
-    minHeight: 260,
+    minHeight: 240,
   },
   handle: {
-    width: 36, height: 4, backgroundColor: '#48484A',
-    borderRadius: 2, alignSelf: 'center', marginBottom: 18,
+    width: 36,
+    height: 4,
+    backgroundColor: '#48484A',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 16,
   },
   header: {
     fontSize: 14,
-    marginBottom: 20,
+    marginBottom: 18,
     textAlign: 'left',
   },
   headerName: {
@@ -164,18 +206,18 @@ const S = StyleSheet.create({
   avatarRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    marginBottom: 28,
+    gap: 12,
+    marginBottom: 24,
   },
   avatarWrap: {
-    width: 64,
-    height: 64,
+    width: 60,
+    height: 60,
     position: 'relative',
   },
   avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     borderWidth: 2,
     borderColor: '#2C2C2E',
   },
@@ -196,48 +238,54 @@ const S = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#2C2C2E',
     borderRadius: 24,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     gap: 10,
+    overflow: 'hidden',
   },
-  trackPillText: {
+  playBtnWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trackInfoContainer: {
+    flex: 1,
+    gap: 2,
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  trackTitleText: {
     color: '#FFFFFF',
     fontSize: 14,
     fontFamily: 'SimplyRounded-Bold',
     fontWeight: '700',
-    flex: 1,
+  },
+  trackArtistText: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 12,
+    fontFamily: 'SimplyRounded',
   },
   lyricsArea: {
     alignItems: 'center',
-    minHeight: 80,
+    justifyContent: 'center',
+    minHeight: 50,
+    paddingHorizontal: 10,
   },
-  lyricsScroll: {
-    width: '100%',
-    maxHeight: 180,
-  },
-  lyricLine: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 14,
-    fontFamily: 'SimplyRounded',
-    textAlign: 'center',
-    lineHeight: 24,
-    paddingVertical: 2,
-  },
-  lyricLineActive: {
-    color: '#FFFFFF',
+  singleLyricText: {
+    color: 'rgba(255, 255, 255, 0.88)',
+    fontSize: 14.5,
     fontFamily: 'SimplyRounded-Bold',
-    fontWeight: '700',
-    fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 22,
   },
   notesRow: {
     flexDirection: 'row',
     gap: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 8,
   },
   musicNote: {
     color: 'rgba(255,255,255,0.55)',
-    fontSize: 28,
+    fontSize: 26,
   },
 });
