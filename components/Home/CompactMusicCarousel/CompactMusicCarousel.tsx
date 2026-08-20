@@ -182,16 +182,18 @@ export const CompactMusicCarousel = () => {
                   </View>
                 </View>
 
-                {/* Title & Artist with Lateral Fade Marquee Scroll */}
+                {/* Title & Artist with Lateral Fade Marquee Scroll (Left Aligned) */}
                 <View style={styles.infoContainer}>
                   <MarqueeText
                     text={item.title}
                     style={styles.titleText}
+                    align="left"
                     fadeWidth={8}
                   />
                   <MarqueeText
                     text={item.artist}
                     style={styles.artistText}
+                    align="left"
                     fadeWidth={8}
                   />
                 </View>

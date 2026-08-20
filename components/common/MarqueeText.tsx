@@ -1,7 +1,7 @@
 /**
  * MarqueeText Component
  * Smooth marquee text that scrolls horizontally when text overflows the container,
- * perfectly centered when static, with subtle left and right gradient alpha fade masks.
+ * with customizable alignment (left or center) and subtle left/right gradient alpha fade masks.
  */
 
 import * as React from 'react';
@@ -25,6 +25,7 @@ interface MarqueeTextProps {
   speed?: number; // pixels per second
   delay?: number; // ms delay before scroll
   fadeWidth?: number;
+  align?: 'left' | 'center';
 }
 
 export const MarqueeText: React.FC<MarqueeTextProps> = ({
@@ -34,6 +35,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
   speed = 28,
   delay = 1800,
   fadeWidth = 8,
+  align = 'left',
 }) => {
   const [containerWidth, setContainerWidth] = React.useState(0);
   const [textWidth, setTextWidth] = React.useState(0);
@@ -83,11 +85,17 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
     setTextWidth(e.nativeEvent.layout.width);
   };
 
+  const isCenter = align === 'center';
+
   return (
     <View
       onLayout={onContainerLayout}
       style={[
         styles.container,
+        {
+          alignItems: isCenter ? 'center' : 'flex-start',
+          justifyContent: isCenter ? 'center' : 'flex-start',
+        },
         containerStyle,
         isOverflowing && Platform.OS === 'web'
           ? ({
@@ -101,7 +109,11 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
         style={{
           transform: [{ translateX: scrollAnim }],
           flexDirection: 'row',
-          justifyContent: isOverflowing ? 'flex-start' : 'center',
+          justifyContent: isOverflowing
+            ? 'flex-start'
+            : isCenter
+            ? 'center'
+            : 'flex-start',
           alignItems: 'center',
           width: isOverflowing ? undefined : '100%',
         }}
@@ -112,7 +124,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
           style={[
             styles.text,
             style,
-            !isOverflowing && { textAlign: 'center' },
+            !isOverflowing && { textAlign: isCenter ? 'center' : 'left' },
           ]}
         >
           {text}
@@ -126,11 +138,8 @@ const styles = StyleSheet.create({
   container: {
     overflow: 'hidden',
     width: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   text: {
     flexShrink: 0,
-    textAlign: 'center',
   },
 });

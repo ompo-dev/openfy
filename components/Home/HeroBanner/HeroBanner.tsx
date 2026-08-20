@@ -1,6 +1,7 @@
 /**
  * HeroBanner Component
- * Featured hero carousel with huge artwork, Play / My List Liquid Glass action pills with tactile feedback.
+ * Featured hero carousel with compact modern artwork, centered headlines,
+ * and horizontally centered Play / My List Liquid Glass action pills with tactile feedback.
  * Uses exact Spotify IDs for authentic playback.
  */
 
@@ -22,7 +23,7 @@ import { GlassSurface, LoggedPressable } from '../../native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 32;
-const CARD_HEIGHT = CARD_WIDTH * 1.15;
+const CARD_HEIGHT = Math.min(CARD_WIDTH * 0.95, 340); // Slightly more compact
 
 const FEATURED_ITEMS = [
   {
@@ -127,11 +128,11 @@ export const HeroBanner = () => {
               >
                 {/* Dark gradient overlay */}
                 <LinearGradient
-                  colors={['rgba(0,0,0,0.4)', 'transparent', 'rgba(0,0,0,0.85)']}
+                  colors={['rgba(0,0,0,0.5)', 'transparent', 'rgba(0,0,0,0.88)']}
                   locations={[0, 0.45, 1.0]}
                   style={styles.gradientOverlay}
                 >
-                  {/* Header text on artwork */}
+                  {/* Horizontally centered Header text on artwork */}
                   <View style={styles.headerTextContainer}>
                     <Text style={styles.artistSubtitle}>{item.artist}</Text>
                     <Text
@@ -141,7 +142,7 @@ export const HeroBanner = () => {
                     </Text>
                   </View>
 
-                  {/* Bottom Action Pills with Liquid Glass & Touch Feedback */}
+                  {/* Horizontally centered Bottom Action Pills */}
                   <View style={styles.actionsContainer}>
                     <LoggedPressable
                       onPress={() => handlePlay(item)}
@@ -151,7 +152,7 @@ export const HeroBanner = () => {
                     >
                       <Ionicons
                         name={isCurrentPlaying ? 'pause' : 'play'}
-                        size={20}
+                        size={18}
                         color="#000000"
                       />
                       <Text style={styles.playButtonText}>
@@ -177,7 +178,7 @@ export const HeroBanner = () => {
                         ) : (
                           <Ionicons
                             name={isAdded ? 'checkmark' : 'add'}
-                            size={20}
+                            size={18}
                             color="#FFFFFF"
                           />
                         )}
@@ -244,29 +245,35 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
   headerTextContainer: {
-    marginTop: 8,
+    marginTop: 6,
+    alignItems: 'center',
+    width: '100%',
   },
   artistSubtitle: {
     color: '#E5E5E5',
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: 'SF-Bold',
     fontWeight: '700',
     letterSpacing: 1.5,
     textTransform: 'uppercase',
+    textAlign: 'center',
   },
   mainHeadline: {
-    fontSize: 28,
+    fontSize: 24,
     fontFamily: 'SF-Bold',
     fontWeight: '900',
     letterSpacing: -0.5,
-    marginTop: 4,
+    marginTop: 3,
     textTransform: 'uppercase',
+    textAlign: 'center',
   },
   actionsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 12,
     marginBottom: 4,
+    width: '100%',
   },
   playButton: {
     flexDirection: 'row',
@@ -274,9 +281,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 22,
-    paddingVertical: 12,
+    paddingVertical: 11,
     borderRadius: 22,
-    gap: 8,
+    gap: 7,
     elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -285,7 +292,7 @@ const styles = StyleSheet.create({
   },
   playButtonText: {
     color: '#000000',
-    fontSize: 14,
+    fontSize: 13.5,
     fontFamily: 'SF-Bold',
     fontWeight: '700',
   },
@@ -294,7 +301,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingVertical: 11,
     borderRadius: 22,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
@@ -306,7 +313,7 @@ const styles = StyleSheet.create({
   },
   myListButtonText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 13.5,
     fontFamily: 'SF-Bold',
     fontWeight: '700',
   },

@@ -218,11 +218,13 @@ export const FriendActivityStatus = () => {
                     <MarqueeText
                       text={item.track.title}
                       style={styles.trackTitle}
+                      align="center"
                       fadeWidth={6}
                     />
                     <MarqueeText
                       text={item.track.artist}
                       style={styles.artistName}
+                      align="center"
                       fadeWidth={6}
                     />
                   </View>
