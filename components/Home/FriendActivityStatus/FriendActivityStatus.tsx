@@ -1,12 +1,9 @@
 /**
  * FriendActivityStatus — Instagram Music Notes
  *
- * Behavior:
- * - Notes tilt ONLY during scroll movement, spring back to 0° when stopped
- * - Wave icon (animated) ONLY shown when that note's song is playing
- * - Default bubble: dark graphite (#1C1E24), no color override
- * - "Sua nota": opens MyNoteModal editor/viewer
- * - Other notes: plays song + opens FriendNoteSheet with lyrics
+ * Tilt physics: velocity-based — all notes share the same animated tilt value.
+ * Notes lean opposite to scroll direction while moving, spring back to 0° when stopped.
+ * Bubble: compact, single-line marquee for title/artist/text.
  */
 
 import * as React from 'react';
@@ -14,11 +11,11 @@ import {
   Animated,
   Image,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePlayer } from '@context';
@@ -58,7 +55,7 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
       isCurrentUser: true,
     },
-    note: { type: 'text', title: 'Toque para adicionar' },
+    note: { type: 'text', title: 'Deixe uma nota...' },
   },
   {
     id: 'note_flavia',
@@ -144,34 +141,29 @@ const FRIEND_NOTES: FriendNoteItem[] = [
   },
 ];
 
-const ITEM_WIDTH = 112;
 const MY_NOTE_KEY = 'openfy_my_note';
 
-// ── Animated 3-bar equalizer (always animating when shown) ──────────────────
+// ── Animated 3-bar wave icon ─────────────────────────────────────────────────
 const SoundWaveIcon = ({ color = '#FFFFFF' }: { color?: string }) => {
-  const a1 = React.useRef(new Animated.Value(8)).current;
-  const a2 = React.useRef(new Animated.Value(14)).current;
-  const a3 = React.useRef(new Animated.Value(9)).current;
-
+  const a1 = React.useRef(new Animated.Value(7)).current;
+  const a2 = React.useRef(new Animated.Value(13)).current;
+  const a3 = React.useRef(new Animated.Value(8)).current;
   React.useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(a1, { toValue: 15, duration: 300, useNativeDriver: false }),
-          Animated.timing(a2, { toValue: 8, duration: 280, useNativeDriver: false }),
-          Animated.timing(a3, { toValue: 17, duration: 320, useNativeDriver: false }),
-        ]),
-        Animated.parallel([
-          Animated.timing(a1, { toValue: 8, duration: 300, useNativeDriver: false }),
-          Animated.timing(a2, { toValue: 17, duration: 320, useNativeDriver: false }),
-          Animated.timing(a3, { toValue: 9, duration: 280, useNativeDriver: false }),
-        ]),
-      ])
-    );
+    const loop = Animated.loop(Animated.sequence([
+      Animated.parallel([
+        Animated.timing(a1, { toValue: 14, duration: 300, useNativeDriver: false }),
+        Animated.timing(a2, { toValue: 7, duration: 280, useNativeDriver: false }),
+        Animated.timing(a3, { toValue: 16, duration: 320, useNativeDriver: false }),
+      ]),
+      Animated.parallel([
+        Animated.timing(a1, { toValue: 7, duration: 300, useNativeDriver: false }),
+        Animated.timing(a2, { toValue: 16, duration: 320, useNativeDriver: false }),
+        Animated.timing(a3, { toValue: 8, duration: 280, useNativeDriver: false }),
+      ]),
+    ]));
     loop.start();
     return () => loop.stop();
   }, []);
-
   return (
     <View style={styles.waveContainer}>
       <Animated.View style={[styles.waveBar, { height: a1, backgroundColor: color }]} />
@@ -181,16 +173,61 @@ const SoundWaveIcon = ({ color = '#FFFFFF' }: { color?: string }) => {
   );
 };
 
-// ── Main Component ──────────────────────────────────────────────────────────
+// ── Main Component ────────────────────────────────────────────────────────────
 export const FriendActivityStatus = () => {
   const { playTrack, currentTrack, playerState } = usePlayer();
-  const scrollX = React.useRef(new Animated.Value(0)).current;
 
-  // My note persisted state
+  // Velocity-based tilt: single Animated.Value shared by all notes
+  const tiltAnim = React.useRef(new Animated.Value(0)).current;
+  const lastScrollX = React.useRef(0);
+  const lastScrollTime = React.useRef(Date.now());
+  const decayTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleScroll = React.useCallback((e: any) => {
+    const x = e.nativeEvent.contentOffset.x;
+    const now = Date.now();
+    const dt = Math.max(1, now - lastScrollTime.current);
+    const velocity = (x - lastScrollX.current) / dt; // px per ms
+
+    // Scrolling right → velocity > 0 → lean LEFT (negative deg)
+    // Scrolling left  → velocity < 0 → lean RIGHT (positive deg)
+    // Clamp to ±9 degrees
+    const targetDeg = Math.max(-9, Math.min(9, -velocity * 12));
+
+    Animated.spring(tiltAnim, {
+      toValue: targetDeg,
+      useNativeDriver: true,
+      tension: 500,
+      friction: 22,
+      overshootClamping: true,
+    }).start();
+
+    lastScrollX.current = x;
+    lastScrollTime.current = now;
+
+    // Spring back to 0 when scroll stops
+    if (decayTimer.current) clearTimeout(decayTimer.current);
+    decayTimer.current = setTimeout(() => {
+      Animated.spring(tiltAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 180,
+        friction: 18,
+        overshootClamping: false,
+      }).start();
+    }, 50);
+  }, [tiltAnim]);
+
+  // Rotation string interpolation
+  const tiltRotation = tiltAnim.interpolate({
+    inputRange: [-9, 0, 9],
+    outputRange: ['-9deg', '0deg', '9deg'],
+    extrapolate: 'clamp',
+  });
+
+  // My note persistent state
   const [myNote, setMyNote] = React.useState<MyNote | null>(null);
   const [isNoteModalVisible, setIsNoteModalVisible] = React.useState(false);
-
-  // Friend note sheet state
   const [friendSheetNote, setFriendSheetNote] = React.useState<FriendNoteItem | null>(null);
 
   React.useEffect(() => {
@@ -211,13 +248,10 @@ export const FriendActivityStatus = () => {
 
   const handlePressNote = (item: FriendNoteItem) => {
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
-
     if (item.user.isCurrentUser) {
       setIsNoteModalVisible(true);
       return;
     }
-
-    // Play the song and open friend note sheet
     if (item.note.spotifyId) {
       playTrack({
         spotifyId: item.note.spotifyId,
@@ -233,54 +267,33 @@ export const FriendActivityStatus = () => {
 
   return (
     <View style={styles.container}>
-      <Animated.ScrollView
+      <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
-        scrollEventThrottle={16}
-        decelerationRate="fast"
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-          { useNativeDriver: Platform.OS !== 'web' }
-        )}
+        scrollEventThrottle={8}
+        onScroll={handleScroll}
       >
-        {FRIEND_NOTES.map((item, index) => {
+        {FRIEND_NOTES.map((item) => {
           const isThisSongPlaying =
             !!item.note.spotifyId &&
             currentTrack?.spotifyId === item.note.spotifyId &&
             playerState.isPlaying;
 
-          const inputRange = [
-            (index - 1) * ITEM_WIDTH,
-            index * ITEM_WIDTH,
-            (index + 1) * ITEM_WIDTH,
-          ];
-
-          // Tilt ONLY during movement (baseTilt = 0, returns straight when centered/stopped)
-          const dynamicRotate = scrollX.interpolate({
-            inputRange,
-            outputRange: ['-9deg', '0deg', '9deg'],
-            extrapolate: 'clamp',
-          });
-
-          const translateY = scrollX.interpolate({
-            inputRange,
-            outputRange: [3, 0, 3],
-            extrapolate: 'clamp',
-          });
-
-          // Determine content for "Sua nota"
           const isCurrentUser = item.user.isCurrentUser;
           let bubbleColor = item.note.bubbleColor || DEFAULT_BUBBLE_COLOR;
           let noteTitle = item.note.title;
-          let noteSubtitle = item.note.subtitle;
+          let noteArtist = item.note.subtitle;
+          let noteText: string | undefined;
           let showWave = isThisSongPlaying;
 
           if (isCurrentUser) {
             if (myNote) {
               bubbleColor = myNote.bubbleColor || DEFAULT_BUBBLE_COLOR;
-              noteTitle = myNote.songTitle || myNote.text || 'Toque para editar';
-              noteSubtitle = myNote.songArtist;
+              noteTitle = myNote.songTitle || myNote.text || 'Deixe uma nota...';
+              noteArtist = myNote.songSpotifyId ? myNote.songArtist : undefined;
+              // Show custom text below artist only when there's also a song
+              noteText = myNote.songSpotifyId && myNote.text ? myNote.text : undefined;
               showWave =
                 !!myNote.songSpotifyId &&
                 currentTrack?.spotifyId === myNote.songSpotifyId &&
@@ -288,7 +301,6 @@ export const FriendActivityStatus = () => {
             } else {
               bubbleColor = DEFAULT_BUBBLE_COLOR;
               noteTitle = 'Deixe uma nota...';
-              noteSubtitle = undefined;
             }
           }
 
@@ -299,38 +311,49 @@ export const FriendActivityStatus = () => {
                 onPress={() => handlePressNote(item)}
                 accessibilityRole="button"
               >
-                {/* Speech Bubble */}
+                {/* Speech Bubble — tilt shared by all */}
                 <Animated.View
                   style={[
                     styles.noteBubble,
                     { backgroundColor: bubbleColor },
-                    { transform: [{ rotate: dynamicRotate }, { translateY }] },
+                    { transform: [{ rotate: tiltRotation }] },
                     isThisSongPlaying && styles.noteBubblePlaying,
                   ]}
                 >
-                  <View style={styles.bubbleInner}>
-                    {/* Wave icon: ONLY when this note's song is actively playing */}
+                  {/* Row 1: wave icon + title marquee */}
+                  <View style={styles.bubbleRow}>
                     {showWave && <SoundWaveIcon color="#FFFFFF" />}
-
-                    <View style={styles.textContainer}>
+                    <View style={styles.textFlex}>
                       <MarqueeText
                         text={noteTitle}
                         style={styles.noteTitle}
                         align="left"
-                        fadeWidth={5}
+                        fadeWidth={4}
                       />
-                      {noteSubtitle ? (
-                        <MarqueeText
-                          text={noteSubtitle}
-                          style={styles.noteSubtitle}
-                          align="left"
-                          fadeWidth={5}
-                        />
-                      ) : null}
                     </View>
                   </View>
 
-                  {/* Instagram speech tail dots */}
+                  {/* Row 2: artist marquee */}
+                  {noteArtist ? (
+                    <MarqueeText
+                      text={noteArtist}
+                      style={styles.noteArtist}
+                      align="left"
+                      fadeWidth={4}
+                    />
+                  ) : null}
+
+                  {/* Row 3: user custom text (max 30 chars) */}
+                  {noteText ? (
+                    <MarqueeText
+                      text={noteText.slice(0, 30)}
+                      style={styles.noteCustomText}
+                      align="left"
+                      fadeWidth={4}
+                    />
+                  ) : null}
+
+                  {/* Speech tail dots */}
                   <View style={[styles.tailDotMain, { backgroundColor: bubbleColor }]} />
                   <View style={[styles.tailDotSmall, { backgroundColor: bubbleColor }]} />
                 </Animated.View>
@@ -355,9 +378,8 @@ export const FriendActivityStatus = () => {
             </View>
           );
         })}
-      </Animated.ScrollView>
+      </ScrollView>
 
-      {/* My Note Modal */}
       <MyNoteModal
         visible={isNoteModalVisible}
         onClose={() => setIsNoteModalVisible(false)}
@@ -367,7 +389,6 @@ export const FriendActivityStatus = () => {
         onDelete={handleDeleteNote}
       />
 
-      {/* Friend Note Sheet */}
       <FriendNoteSheet
         visible={!!friendSheetNote}
         note={friendSheetNote}
@@ -384,37 +405,41 @@ const styles = StyleSheet.create({
   pressableItem: { alignItems: 'center', width: '100%' },
 
   noteBubble: {
-    width: 102,
-    minHeight: 46,
-    borderRadius: 18,
+    width: 97,
+    borderRadius: 16,
     paddingHorizontal: 8,
     paddingVertical: 6,
     justifyContent: 'center',
     zIndex: 2,
     elevation: 6,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.45,
+    shadowRadius: 5,
     marginBottom: -6,
     position: 'relative',
+    overflow: 'visible',
   },
   noteBubblePlaying: {
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.28)',
     borderWidth: 1,
   },
-  bubbleInner: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  bubbleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    overflow: 'hidden',
+  },
+  textFlex: { flex: 1, overflow: 'hidden' },
   waveContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 2,
-    height: 18,
-    width: 12,
-    justifyContent: 'center',
+    height: 16,
+    width: 11,
     flexShrink: 0,
   },
   waveBar: { width: 2.5, borderRadius: 1.25 },
-  textContainer: { flex: 1, gap: 1, justifyContent: 'center' },
 
   noteTitle: {
     color: '#FFFFFF',
@@ -423,23 +448,31 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.05,
   },
-  noteSubtitle: {
-    color: 'rgba(255,255,255,0.58)',
+  noteArtist: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 10,
+    fontFamily: 'SimplyRounded',
+    marginTop: 1,
+  },
+  noteCustomText: {
+    color: 'rgba(255,255,255,0.45)',
     fontSize: 9.5,
     fontFamily: 'SimplyRounded',
+    fontStyle: 'italic',
+    marginTop: 1,
   },
 
   tailDotMain: {
-    position: 'absolute', bottom: -5, left: 18,
+    position: 'absolute', bottom: -5, left: 16,
     width: 7, height: 7, borderRadius: 3.5, zIndex: 3,
   },
   tailDotSmall: {
-    position: 'absolute', bottom: -9, left: 13,
+    position: 'absolute', bottom: -9, left: 11,
     width: 4, height: 4, borderRadius: 2, zIndex: 3,
   },
 
   avatarContainer: {
-    width: 72, height: 72, borderRadius: 36,
+    width: 70, height: 70, borderRadius: 35,
     backgroundColor: '#1E1E22',
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 2, borderColor: '#1E2024',
