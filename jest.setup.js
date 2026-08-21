@@ -51,6 +51,13 @@ jest.mock('expo-clipboard', () => ({
   setStringAsync: jest.fn(),
 }));
 
+jest.mock('expo-notifications', () => ({
+  getPermissionsAsync: jest.fn().mockResolvedValue({ granted: false }),
+  requestPermissionsAsync: jest.fn().mockResolvedValue({ granted: false }),
+  scheduleNotificationAsync: jest.fn(),
+  setNotificationHandler: jest.fn(),
+}));
+
 jest.mock('expo-file-system', () => ({
   documentDirectory: 'file:///mock_dir/',
   getInfoAsync: jest.fn().mockResolvedValue({ exists: true }),

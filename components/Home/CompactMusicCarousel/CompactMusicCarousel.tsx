@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
+import { useHomeTrackRefresh } from '@hooks';
 import { LoggedPressable } from '../../native';
 import { MarqueeText } from '../../common/MarqueeText';
 
@@ -30,6 +31,7 @@ export interface CompactTrackItem {
   imageUrl: string;
   duration_ms: number;
   explicit?: boolean;
+  streamUrl?: string;
 }
 
 const COMPACT_TRACKS: CompactTrackItem[] = [
@@ -45,12 +47,12 @@ const COMPACT_TRACKS: CompactTrackItem[] = [
   },
   {
     id: 'compact_dietrying',
-    spotifyId: '3ZffCQKLFLUvOCuVsxc364',
-    title: 'DIE TRYING',
-    artist: 'PARTYNEXTDOOR, Drake, Yebba',
-    albumName: 'PARTYMOBILE',
-    imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2738278b782c429712cf757e754',
-    duration_ms: 204000,
+    spotifyId: '6DCZcSspjsKoFjzjrWoCdn',
+    title: "God's Plan",
+    artist: 'Drake',
+    albumName: 'Scorpion',
+    imageUrl: 'https://i.ytimg.com/vi/m1a_GqJf02M/maxresdefault.jpg',
+    duration_ms: 198000,
     explicit: true,
   },
   {
@@ -87,14 +89,44 @@ const COMPACT_TRACKS: CompactTrackItem[] = [
 
 const CARD_SNAP_WIDTH = 168; // 154 width + 14 gap
 
+const COMPACT_TRACK_SEEDS = COMPACT_TRACKS.map((track) => ({
+  key: track.id,
+  spotifyId: track.spotifyId,
+  title: track.title,
+  artistName: track.artist,
+  albumName: track.albumName || 'Single',
+  imageURL: track.imageUrl,
+  duration_ms: track.duration_ms,
+}));
+
 export const CompactMusicCarousel = () => {
+  const refreshedTracks = useHomeTrackRefresh(COMPACT_TRACK_SEEDS);
+  const tracks = React.useMemo(
+    () =>
+      COMPACT_TRACKS.map((track) => {
+        const refreshed = refreshedTracks[track.id];
+        return refreshed
+          ? {
+              ...track,
+              title: refreshed.title,
+              artist: refreshed.artistName,
+              albumName: refreshed.albumName,
+              imageUrl: refreshed.imageURL,
+              duration_ms: refreshed.duration_ms,
+              streamUrl: refreshed.streamUrl,
+            }
+          : track;
+      }),
+    [refreshedTracks]
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.sectionTitle}>Em Alta Agora</Text>
         <Text style={styles.seeAllText}>Ver tudo</Text>
       </View>
-      <CompactMusicCards tracks={COMPACT_TRACKS} />
+      <CompactMusicCards tracks={tracks} />
     </View>
   );
 };
@@ -119,6 +151,7 @@ export const CompactMusicCards = ({
       albumName: item.albumName || 'Single',
       imageURL: item.imageUrl,
       duration_ms: item.duration_ms,
+      streamUrl: item.streamUrl,
     });
   };
 

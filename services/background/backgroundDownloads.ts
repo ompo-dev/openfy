@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 import { processPendingDownloads } from '../download/downloadManager';
+import { notifyDownloadResult } from './downloadNotifications';
 
 export const BACKGROUND_DOWNLOAD_TASK = 'openfy-pending-downloads';
 const BACKGROUND_DOWNLOAD_INTERVAL_MINUTES = 15;
@@ -12,7 +13,8 @@ if (
 ) {
   TaskManager.defineTask(BACKGROUND_DOWNLOAD_TASK, async () => {
     try {
-      const { failed } = await processPendingDownloads(1);
+      const { completed, failed } = await processPendingDownloads(1);
+      await notifyDownloadResult(completed, failed);
       return failed > 0
         ? BackgroundTask.BackgroundTaskResult.Failed
         : BackgroundTask.BackgroundTaskResult.Success;

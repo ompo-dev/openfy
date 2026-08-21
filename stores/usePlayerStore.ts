@@ -20,6 +20,7 @@ import {
   getStatus,
   PlayerState,
   DEFAULT_STATE,
+  getPlayableAudioUrl,
   resolveAudioUrl,
   downloadTrack,
   recordInteraction,
@@ -28,7 +29,9 @@ import {
   fetchLyrics,
   LyricsData,
   LyricSegment,
+  saveLyricsOffline,
 } from '../services/lyrics/lyricsService';
+import { normalizeLyricSegments } from '../services/lyrics/lyricTimeline';
 
 export type PlayerTrack = {
   spotifyId: string;
@@ -88,16 +91,18 @@ export interface PlayerStoreState {
   setIsPlayerVisible: (visible: boolean) => void;
   closePlayer: () => Promise<void>;
   refreshLyrics: () => Promise<void>;
+  updateLyricsSegments: (segments: LyricSegment[]) => Promise<boolean>;
 }
 
 // In-Memory Fast Caches
 const streamCache = new Map<string, string>();
 const lyricsCache = new Map<string, LyricsData>();
 
-const STORAGE_STREAM_PREFIX = 'openfy_stream_cache_';
-// Version cache when lyric source selection changes so prior false negatives
-// are replaced by validated synchronized data.
-const LYRICS_CACHE_VERSION = 'v6';
+// Existing entries were created by native fallback providers. Start new caches
+// on canonical backend so iPhone cannot reuse a different song or expired URL.
+const STREAM_CACHE_VERSION = 'v2';
+const STORAGE_STREAM_PREFIX = `openfy_stream_cache_${STREAM_CACHE_VERSION}_`;
+const LYRICS_CACHE_VERSION = 'v7';
 const STORAGE_LYRICS_PREFIX = `openfy_lyrics_cache_${LYRICS_CACHE_VERSION}_`;
 
 const IS_SPOTIFY_ID = /^[a-zA-Z0-9]{22}$/;
@@ -190,12 +195,12 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       }
 
       if (track.streamUrl && track.streamUrl.startsWith('http')) {
-        return track.streamUrl;
+        return getPlayableAudioUrl(track.streamUrl);
       }
 
       // Check Memory Cache
       if (streamCache.has(cacheKey)) {
-        return streamCache.get(cacheKey)!;
+        return getPlayableAudioUrl(streamCache.get(cacheKey)!);
       }
 
       // Check Persistent AsyncStorage Cache
@@ -204,8 +209,15 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           `${STORAGE_STREAM_PREFIX}${cacheKey}`
         );
         if (stored) {
-          streamCache.set(cacheKey, stored);
-          return stored;
+          const playableUrl = getPlayableAudioUrl(stored);
+          streamCache.set(cacheKey, playableUrl);
+          if (playableUrl !== stored) {
+            AsyncStorage.setItem(
+              `${STORAGE_STREAM_PREFIX}${cacheKey}`,
+              playableUrl
+            ).catch(() => {});
+          }
+          return playableUrl;
         }
       } catch {}
 
@@ -548,6 +560,42 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         lyricsData: lyrics,
         isLoadingLyrics: false,
       });
+    }
+  },
+
+  updateLyricsSegments: async (segments: LyricSegment[]) => {
+    const { currentTrack, lyricsData, activeRequestId } = get();
+    if (!currentTrack || !lyricsData) return false;
+
+    const updatedLyrics: LyricsData = {
+      ...lyricsData,
+      isSynced: true,
+      segments: normalizeLyricSegments(segments),
+    };
+    const cacheKey = getCacheKey(currentTrack);
+    lyricsCache.set(getLyricsCacheKey(currentTrack), updatedLyrics);
+    set({ lyricsData: updatedLyrics });
+
+    try {
+      await AsyncStorage.setItem(
+        `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
+        JSON.stringify(updatedLyrics)
+      );
+      const offlineCopy = await saveLyricsOffline(
+        currentTrack.spotifyId,
+        updatedLyrics
+      );
+      if (!offlineCopy) {
+        console.warn('[PlayerStore] Could not save offline lyric copy.');
+      }
+      return true;
+    } catch (error) {
+      console.warn('[PlayerStore] Could not save edited lyrics:', error);
+      if (get().activeRequestId === activeRequestId) {
+        set({ lyricsData });
+        lyricsCache.set(getLyricsCacheKey(currentTrack), lyricsData);
+      }
+      return false;
     }
   },
 }));

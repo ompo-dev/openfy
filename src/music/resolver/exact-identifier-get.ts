@@ -8,6 +8,7 @@
 
 import { normalizeText } from '../identity/normalizer';
 import type { TrackIdentity, TrackLyricsData } from '../identity/canonical-track-model';
+import { fetchWithTimeout } from '@utils';
 
 export interface ExactGetResult {
   valid: boolean;
@@ -40,10 +41,13 @@ export class ExactIdentifierGet {
     const endpoint = `https://lrclib.net/api/get?${queryParams.toString()}`;
 
     try {
-      const res = await fetch(endpoint, {
-        headers: { 'User-Agent': 'OpenfyMusic/1.0.0 ( contact@openfy.app )' },
-        signal: AbortSignal.timeout(4000),
-      });
+      const res = await fetchWithTimeout(
+        endpoint,
+        {
+          headers: { 'User-Agent': 'OpenfyMusic/1.0.0 ( contact@openfy.app )' },
+        },
+        4000
+      );
 
       if (!res.ok) {
         return { valid: false, rejectionReason: `HTTP ${res.status} not found` };

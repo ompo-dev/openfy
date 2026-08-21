@@ -7,6 +7,7 @@ export type { GlassSurfaceProps, GlassKind } from './GlassSurfaceFallback';
 export { LoggedPressable, LoggedTextInput, LoggedScrollView } from './Logged';
 export { NativeIconButton, glassCircleModifiers } from './NativeButtons';
 export { SheetFrame } from './SheetFrame';
+export { OpenfyMark } from './OpenfyMark';
 export {
   SwiftHost,
   SwiftButton,

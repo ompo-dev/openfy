@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
+import { useHomeTrackRefresh } from '@hooks';
 import { downloadTrack } from '@services';
 import { GlassSurface, LoggedPressable } from '../../native';
 
@@ -30,16 +31,26 @@ const CARD_GAP = 14;
 const SNAP_INTERVAL = CARD_WIDTH + CARD_GAP;
 const SIDE_PADDING = (SCREEN_WIDTH - CARD_WIDTH) / 2;
 
-const FEATURED_ITEMS = [
+type FeaturedItem = {
+  id: string;
+  spotifyId: string;
+  artist: string;
+  title: string;
+  imageUrl: string;
+  titleColor: string;
+  duration_ms: number;
+  streamUrl?: string;
+};
+
+const FEATURED_ITEMS: FeaturedItem[] = [
   {
     id: 'hero_die_with_a_smile',
-    spotifyId: '2plbrEY59IikOBB5X7x5eG',
-    artist: 'LADY GAGA & BRUNO MARS',
-    title: 'DIE WITH A SMILE',
-    imageUrl:
-      'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2738278b782c429712cf757e754',
+    spotifyId: '0SiywuOBRcynK0uKGWdCnn',
+    artist: 'LADY GAGA',
+    title: 'BAD ROMANCE',
+    imageUrl: 'https://i.ytimg.com/vi/NlK9u6a69Dg/maxresdefault.jpg',
     titleColor: '#FF1E27',
-    duration_ms: 251000,
+    duration_ms: 295000,
   },
   {
     id: 'hero_birds_of_a_feather',
@@ -63,13 +74,41 @@ const FEATURED_ITEMS = [
   },
 ];
 
+const FEATURED_TRACK_SEEDS = FEATURED_ITEMS.map((item) => ({
+  key: item.id,
+  spotifyId: item.spotifyId,
+  title: item.title,
+  artistName: item.artist,
+  albumName: 'Featured Single',
+  imageURL: item.imageUrl,
+  duration_ms: item.duration_ms,
+}));
+
 export const HeroBanner = () => {
   const { playTrack, currentTrack, playerState, togglePlayPause } = usePlayer();
+  const refreshedTracks = useHomeTrackRefresh(FEATURED_TRACK_SEEDS);
+  const featuredItems = React.useMemo(
+    () =>
+      FEATURED_ITEMS.map((item) => {
+        const refreshed = refreshedTracks[item.id];
+        return refreshed
+          ? {
+              ...item,
+              title: refreshed.title,
+              artist: refreshed.artistName,
+              imageUrl: refreshed.imageURL,
+              duration_ms: refreshed.duration_ms,
+              streamUrl: refreshed.streamUrl,
+            }
+          : item;
+      }),
+    [refreshedTracks]
+  );
   const [addingId, setAddingId] = React.useState<string | null>(null);
   const [addedIds, setAddedIds] = React.useState<Record<string, boolean>>({});
   const scrollX = React.useRef(new Animated.Value(0)).current;
 
-  const handlePlay = (item: (typeof FEATURED_ITEMS)[0]) => {
+  const handlePlay = (item: FeaturedItem) => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch {}
@@ -86,10 +125,11 @@ export const HeroBanner = () => {
       albumName: 'Featured Single',
       imageURL: item.imageUrl,
       duration_ms: item.duration_ms,
+      streamUrl: item.streamUrl,
     });
   };
 
-  const handleAddToList = async (item: (typeof FEATURED_ITEMS)[0]) => {
+  const handleAddToList = async (item: FeaturedItem) => {
     if (addedIds[item.id] || addingId === item.id) return;
     setAddingId(item.id);
     try {
@@ -104,7 +144,7 @@ export const HeroBanner = () => {
         albumName: 'Featured Single',
         imageURL: item.imageUrl,
         duration_ms: item.duration_ms,
-      });
+      }, item.streamUrl);
       setAddedIds((prev) => ({ ...prev, [item.id]: true }));
     } catch {
       // ignore
@@ -134,7 +174,7 @@ export const HeroBanner = () => {
           { useNativeDriver: Platform.OS !== 'web' }
         )}
       >
-        {FEATURED_ITEMS.map((item, index) => {
+        {featuredItems.map((item, index) => {
           const isCurrentPlaying =
             currentTrack?.spotifyId === item.spotifyId && playerState.isPlaying;
           const isAdded = addedIds[item.id];
@@ -243,7 +283,7 @@ export const HeroBanner = () => {
 
       {/* Smooth animated slide indicators */}
       <View style={styles.indicatorContainer}>
-        {FEATURED_ITEMS.map((_, index) => {
+        {featuredItems.map((_, index) => {
           const inputRange = [
             (index - 1) * SNAP_INTERVAL,
             index * SNAP_INTERVAL,

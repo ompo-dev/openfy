@@ -6,6 +6,7 @@
 
 import { normalizeText } from '../identity/normalizer';
 import type { TrackIdentity } from '../identity/canonical-track-model';
+import { fetchWithTimeout } from '@utils';
 
 export interface VerifiedYouTubeCandidate {
   videoId: string;
@@ -60,14 +61,17 @@ export class YouTubeOfficialRanker {
     const query = `${target.title} ${primaryArtist}`.trim();
 
     try {
-      const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+      const res = await fetchWithTimeout(
+        `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
+        {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+          },
         },
-        signal: AbortSignal.timeout(5000),
-      });
+        5000
+      );
 
       if (!res.ok) return null;
 

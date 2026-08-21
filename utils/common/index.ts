@@ -4,3 +4,4 @@ export { getDisplayTime } from './getDisplayTime';
 export { getFallbackImage } from './getFallbackImage';
 export { getDisplayCopyrightText } from './getDisplayCopyrightText';
 export { getRandomColor } from './getRandomColor';
+export { createTimeoutSignal, fetchWithTimeout } from './timeoutSignal';

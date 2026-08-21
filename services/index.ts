@@ -1,12 +1,19 @@
 export { parseSpotifyLink, isValidSpotifyLink } from './spotify/linkParser';
-export type { ParsedSpotifyLink, SpotifyResourceType } from './spotify/linkParser';
+export type {
+  ParsedSpotifyLink,
+  SpotifyResourceType,
+} from './spotify/linkParser';
 
 export {
   resolveAudioUrl,
+  getPlayableAudioUrl,
   resolveViaSoundCloud,
   resolveViaYouTubeTopic,
 } from './audio/audioResolver';
 export type { ResolvedAudio } from './audio/audioResolver';
+
+export { refreshHomeTracks } from './home/homeTrackRefresh';
+export type { HomeTrackSeed, RefreshedHomeTrack } from './home/homeTrackRefresh';
 
 export {
   downloadTrack,
@@ -16,9 +23,11 @@ export {
   getDownloadedTrack,
   isTrackDownloaded,
   deleteDownloadedTrack,
+  cancelDownload,
   ensureDirectories,
   getPendingDownloads,
   processPendingDownloads,
+  queueDownloads,
 } from './download/downloadManager';
 export type {
   DownloadedTrack,
@@ -43,6 +52,10 @@ export {
   BACKGROUND_DOWNLOAD_TASK,
   registerBackgroundDownloadTask,
 } from './background/backgroundDownloads';
+export {
+  notifyDownloadResult,
+  requestDownloadNotificationPermission,
+} from './background/downloadNotifications';
 
 export {
   loadAndPlay,
@@ -63,6 +76,21 @@ export {
   getOfflineLyrics,
 } from './lyrics/lyricsService';
 export type { LyricSegment, LyricsData } from './lyrics/lyricsService';
+export {
+  getLyricTimelineBlocks,
+  getLyricGapRange,
+  moveLyricGap,
+  moveLyricSegment,
+  normalizeLyricSegments,
+  resizeLyricGapEnd,
+  resizeLyricGapStart,
+  resizeLyricSegmentEnd,
+  resizeLyricSegmentStart,
+} from './lyrics/lyricTimeline';
+export type {
+  LyricGapTarget,
+  LyricTimelineBlock,
+} from './lyrics/lyricTimeline';
 
 export {
   evaluateCandidateMatch,
@@ -78,4 +106,7 @@ export {
   getExplainableRecommendations,
   preWarmStream,
 } from './recommendation/recommendationEngine';
-export type { UserProfile, InteractionType } from './recommendation/recommendationEngine';
+export type {
+  UserProfile,
+  InteractionType,
+} from './recommendation/recommendationEngine';

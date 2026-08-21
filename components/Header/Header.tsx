@@ -8,21 +8,24 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ImportModal } from '../ImportModal';
+import { DownloadsModal } from '../DownloadsModal';
 import { AppIcon, GlassSurface, NativeIconButton } from '../native';
-import { useLibrarySelectedCategory } from '@context';
+import { useDownloads, useLibrarySelectedCategory } from '@context';
 import { LibraryControlsPicker } from './LibraryControlsPicker';
 
 const libraryCopy = {
-  songs: { search: 'músicas', title: 'Songs' },
-  playlists: { search: 'playlists', title: 'Playlists' },
-  albums: { search: 'álbuns', title: 'Álbuns' },
-  artists: { search: 'artistas', title: 'Artistas' },
+  songs: 'músicas',
+  playlists: 'playlists',
+  albums: 'álbuns',
+  artists: 'artistas',
 } as const;
 
 export const Header = () => {
   const { top: statusBarOffset } = useSafeAreaInsets();
   const [importModalVisible, setImportModalVisible] = React.useState(false);
+  const [downloadsModalVisible, setDownloadsModalVisible] = React.useState(false);
   const [searchVisible, setSearchVisible] = React.useState(false);
+  const { activeDownloadsCount } = useDownloads();
   const {
     librarySearchQuery,
     setLibrarySearchQuery,
@@ -32,7 +35,7 @@ export const Header = () => {
     setLibraryView,
     refreshLibrary,
   } = useLibrarySelectedCategory();
-  const copy = libraryCopy[libraryView];
+  const searchCopy = libraryCopy[libraryView];
 
   return (
     <View style={[styles.container, { paddingTop: statusBarOffset + 8 }]}>
@@ -44,25 +47,51 @@ export const Header = () => {
           size={38}
           onPress={() => setImportModalVisible(true)}
         />
-        <Text style={styles.titleText}>
-          {copy.title}
-        </Text>
-        <LibraryControlsPicker
-          sort={librarySort}
-          view={libraryView}
-          onSortChange={setLibrarySort}
-          onViewChange={setLibraryView}
-        />
-        <GlassSurface glass="clear" isInteractive style={styles.controls}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Pesquisar ${copy.search}`}
-            onPress={() => setSearchVisible((visible) => !visible)}
-            style={styles.controlButton}
-          >
-            <AppIcon name="search" size={18} color="#B8B8B8" />
-          </Pressable>
-        </GlassSurface>
+        <View style={styles.centerPicker}>
+          <LibraryControlsPicker
+            kind="view"
+            sort={librarySort}
+            view={libraryView}
+            onSortChange={setLibrarySort}
+            onViewChange={setLibraryView}
+          />
+        </View>
+        <View style={styles.trailingControls}>
+          <View style={styles.downloadControl}>
+            <GlassSurface glass="clear" isInteractive style={styles.controls}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Ver downloads"
+                onPress={() => setDownloadsModalVisible(true)}
+                style={styles.controlButton}
+              >
+                <AppIcon name="download" size={18} color="#B8B8B8" />
+              </Pressable>
+            </GlassSurface>
+            {activeDownloadsCount > 0 ? (
+              <View style={styles.downloadBadge}>
+                <Text style={styles.downloadBadgeText}>{activeDownloadsCount}</Text>
+              </View>
+            ) : null}
+          </View>
+          <LibraryControlsPicker
+            kind="sort"
+            sort={librarySort}
+            view={libraryView}
+            onSortChange={setLibrarySort}
+            onViewChange={setLibraryView}
+          />
+          <GlassSurface glass="clear" isInteractive style={styles.controls}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Pesquisar ${searchCopy}`}
+              onPress={() => setSearchVisible((visible) => !visible)}
+              style={styles.controlButton}
+            >
+              <AppIcon name="search" size={18} color="#B8B8B8" />
+            </Pressable>
+          </GlassSurface>
+        </View>
       </View>
 
       {searchVisible ? (
@@ -70,7 +99,7 @@ export const Header = () => {
           autoFocus
           value={librarySearchQuery}
           onChangeText={setLibrarySearchQuery}
-          placeholder={`Pesquisar ${copy.search}`}
+          placeholder={`Pesquisar ${searchCopy}`}
           placeholderTextColor="#777"
           style={styles.searchInput}
         />
@@ -80,6 +109,10 @@ export const Header = () => {
         visible={importModalVisible}
         onClose={() => setImportModalVisible(false)}
         onLibraryChanged={refreshLibrary}
+      />
+      <DownloadsModal
+        visible={downloadsModalVisible}
+        onClose={() => setDownloadsModalVisible(false)}
       />
     </View>
   );
@@ -96,13 +129,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 52,
     gap: 10,
+    position: 'relative',
   },
-  titleText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontFamily: 'SF-Semibold',
-    fontWeight: '600',
+  centerPicker: {
+    alignItems: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    pointerEvents: 'box-none',
   },
+  trailingControls: { flexDirection: 'row', gap: 8, marginLeft: 'auto' },
   controls: {
     height: 36,
     borderRadius: 18,
@@ -110,11 +146,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     overflow: 'hidden',
   },
+  downloadControl: {
+    height: 36,
+    position: 'relative',
+    width: 35,
+  },
   controlButton: {
     width: 35,
     height: 36,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+  },
+  downloadBadge: {
+    alignItems: 'center',
+    backgroundColor: '#1ED760',
+    borderColor: '#121212',
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 16,
+    justifyContent: 'center',
+    minWidth: 16,
+    paddingHorizontal: 3,
+    position: 'absolute',
+    pointerEvents: 'none',
+    right: -5,
+    top: -5,
+  },
+  downloadBadgeText: {
+    color: '#07120A',
+    fontFamily: 'SF-Bold',
+    fontSize: 9,
   },
   searchInput: {
     height: 40,

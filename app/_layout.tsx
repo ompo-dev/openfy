@@ -9,7 +9,12 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useFonts } from 'expo-font';
 
-import { LibrarySelectedCategoryProvider, UserDataProvider, PlayerProvider } from '@context';
+import {
+  DownloadProvider,
+  LibrarySelectedCategoryProvider,
+  PlayerProvider,
+  UserDataProvider,
+} from '@context';
 import { MiniPlayer, FullPlayer } from '@components';
 import { registerBackgroundDownloadTask } from '@services';
 
@@ -61,33 +66,35 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <UserDataProvider>
         <LibrarySelectedCategoryProvider>
-          <PlayerProvider>
-            <GestureHandlerRootView style={styles.gestureHandlerRootView}>
-              <View style={styles.gestureHandlerRootView}>
-                <Stack
-                  screenOptions={{
-                    headerShown: false,
-                    contentStyle: styles.stackContent,
-                  }}
-                >
-                  <Stack.Screen
-                    name="index"
-                    options={{ headerShown: false, animation: 'fade' }}
-                  />
-                  <Stack.Screen
-                    name="(tabs)"
-                    options={{ headerShown: false, animation: 'fade' }}
-                  />
-                  <Stack.Screen
-                    name="+not-found"
-                    options={{ headerShown: false, animation: 'fade' }}
-                  />
-                </Stack>
-                <PlayerOverlay />
-              </View>
-              <StatusBar style="light" />
-            </GestureHandlerRootView>
-          </PlayerProvider>
+          <DownloadProvider>
+            <PlayerProvider>
+              <GestureHandlerRootView style={styles.gestureHandlerRootView}>
+                <View style={styles.gestureHandlerRootView}>
+                  <Stack
+                    screenOptions={{
+                      headerShown: false,
+                      contentStyle: styles.stackContent,
+                    }}
+                  >
+                    <Stack.Screen
+                      name="index"
+                      options={{ headerShown: false, animation: 'fade' }}
+                    />
+                    <Stack.Screen
+                      name="(tabs)"
+                      options={{ headerShown: false, animation: 'fade' }}
+                    />
+                    <Stack.Screen
+                      name="+not-found"
+                      options={{ headerShown: false, animation: 'fade' }}
+                    />
+                  </Stack>
+                  <PlayerOverlay />
+                </View>
+                <StatusBar style="light" />
+              </GestureHandlerRootView>
+            </PlayerProvider>
+          </DownloadProvider>
         </LibrarySelectedCategoryProvider>
       </UserDataProvider>
     </SafeAreaProvider>

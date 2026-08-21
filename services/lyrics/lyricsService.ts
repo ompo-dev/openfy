@@ -10,6 +10,8 @@
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { MUSIC_SERVER_URL } from '@config';
+import { fetchWithTimeout } from '@utils';
 import {
   hasCanonicalArtistMatch,
   hasConflictingNumberedTitleInLyrics,
@@ -99,10 +101,14 @@ const isCanonicalLyricsCandidate = (
     return false;
   }
 
-  const candidateDurationMs = candidate.durationMs || (candidate.duration || 0) * 1000;
+  const candidateDurationMs =
+    candidate.durationMs || (candidate.duration || 0) * 1000;
   if (!durationMs || !candidateDurationMs) return true;
 
-  return Math.abs(candidateDurationMs - durationMs) <= Math.max(10000, durationMs * 0.1);
+  return (
+    Math.abs(candidateDurationMs - durationMs) <=
+    Math.max(10000, durationMs * 0.1)
+  );
 };
 
 export const ensureLyricsDirectory = async (): Promise<void> => {
@@ -157,8 +163,8 @@ export const parseLrcToSegments = (
     const endTimeMs = nextItem
       ? nextItem.timeMs
       : totalDurationMs && totalDurationMs > startTimeMs
-      ? totalDurationMs
-      : startTimeMs + 5000;
+        ? totalDurationMs
+        : startTimeMs + 5000;
 
     return {
       index: i,
@@ -178,13 +184,15 @@ export const fetchLyricsFromLetras = async (
   durationSeconds?: number
 ): Promise<LyricsData | null> => {
   try {
-    const cleanT = (trackName || '').replace(/\(.*\)/g, '').replace(/-.*/g, '').trim();
-    const cleanA = (artistName || '').replace(/\(.*\)/g, '').replace(/,.*/g, '').trim();
-    const queries = [
-      `${cleanA} ${cleanT}`,
-      cleanT,
-      `${cleanT} ${cleanA}`
-    ];
+    const cleanT = (trackName || '')
+      .replace(/\(.*\)/g, '')
+      .replace(/-.*/g, '')
+      .trim();
+    const cleanA = (artistName || '')
+      .replace(/\(.*\)/g, '')
+      .replace(/,.*/g, '')
+      .trim();
+    const queries = [`${cleanA} ${cleanT}`, cleanT, `${cleanT} ${cleanA}`];
 
     for (const query of queries) {
       const searchUrl = `https://solr.sscdn.co/letras/m1/?q=${encodeURIComponent(query)}`;
@@ -275,7 +283,9 @@ export const fetchLyrics = async (
     artistName.toLowerCase().includes('unknown');
 
   const cleanTrack = trackName.split('(')[0].split('-')[0].trim();
-  const primaryArtist = isUnknown ? '' : artistName.split(',')[0].split('&')[0].trim();
+  const primaryArtist = isUnknown
+    ? ''
+    : artistName.split(',')[0].split('&')[0].trim();
   const durationMs = durationSeconds ? Math.round(durationSeconds * 1000) : 0;
 
   // 1. PRIMARY: Query dedicated Openfy Backend (/api/lyrics)
@@ -286,8 +296,9 @@ export const fetchLyrics = async (
       ...(durationMs > 0 ? { durationMs: String(durationMs) } : {}),
     });
 
-    const backendUrl = `http://localhost:3001/api/lyrics?${backendParams.toString()}`;
-    const bRes = await fetch(backendUrl, { signal: AbortSignal.timeout(4000) });
+    if (!MUSIC_SERVER_URL) throw new Error('Music server unavailable');
+    const backendUrl = `${MUSIC_SERVER_URL}/api/lyrics?${backendParams.toString()}`;
+    const bRes = await fetchWithTimeout(backendUrl, {}, 8000);
     if (bRes.ok) {
       const bData = await bRes.json();
       if (
@@ -314,7 +325,7 @@ export const fetchLyrics = async (
           segments = bData.lines.map((l: any, i: number) => ({
             index: i,
             startTimeMs: l.startMs,
-            endTimeMs: bData.lines[i + 1]?.startMs || (l.startMs + 4000),
+            endTimeMs: bData.lines[i + 1]?.startMs || l.startMs + 4000,
             text: l.text,
           }));
         }
@@ -440,23 +451,27 @@ export const fetchLyrics = async (
       }[];
 
       if (Array.isArray(sData) && sData.length > 0) {
-        const matchedCandidates = sData.filter((item) =>
-          isCanonicalLyricsCandidate(
-            item,
-            cleanTrack,
-            primaryArtist || artistName,
-            durationMs
-          ) &&
-          !hasConflictingNumberedTitleInLyrics(
-            item.syncedLyrics || item.plainLyrics,
-            cleanTrack
-          )
+        const matchedCandidates = sData.filter(
+          (item) =>
+            isCanonicalLyricsCandidate(
+              item,
+              cleanTrack,
+              primaryArtist || artistName,
+              durationMs
+            ) &&
+            !hasConflictingNumberedTitleInLyrics(
+              item.syncedLyrics || item.plainLyrics,
+              cleanTrack
+            )
         );
         const matchedSynced = matchedCandidates.find(
           (item) => item.syncedLyrics && item.syncedLyrics.trim().length > 0
         );
         if (matchedSynced?.syncedLyrics) {
-          const segments = parseLrcToSegments(matchedSynced.syncedLyrics, durationMs);
+          const segments = parseLrcToSegments(
+            matchedSynced.syncedLyrics,
+            durationMs
+          );
           if (segments.length > 0) {
             return {
               id: matchedSynced.id,

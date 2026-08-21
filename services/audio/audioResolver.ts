@@ -7,6 +7,7 @@
 
 import { Platform } from 'react-native';
 import { MUSIC_SERVER_URL } from '@config';
+import { fetchWithTimeout as fetchWithHermesTimeout } from '@utils';
 import {
   evaluateCandidateMatch,
   hasUnwantedForbiddenWords,
@@ -21,10 +22,28 @@ export type ResolvedAudio = {
   imageURL?: string;
 };
 
-const getPlayableAudioUrl = (streamUrl: string): string =>
-  Platform.OS === 'web' && MUSIC_SERVER_URL
-    ? `${MUSIC_SERVER_URL}/api/audio/proxy?url=${encodeURIComponent(streamUrl)}`
-    : streamUrl;
+/**
+ * The backend proxy refreshes compatibility with provider streams for every
+ * client. Native must use it too: signed provider URLs behave differently in
+ * AVFoundation and may expire while a background download waits.
+ */
+export const getPlayableAudioUrl = (streamUrl: string): string =>
+  (() => {
+    if (!MUSIC_SERVER_URL) return streamUrl;
+
+    try {
+      const input = new URL(streamUrl);
+      const proxiedSource =
+        input.pathname === '/api/audio/proxy'
+          ? input.searchParams.get('url') || ''
+          : streamUrl;
+      return /^https:\/\//i.test(proxiedSource)
+        ? `${MUSIC_SERVER_URL}/api/audio/proxy?url=${encodeURIComponent(proxiedSource)}`
+        : streamUrl;
+    } catch {
+      return streamUrl;
+    }
+  })();
 
 const getYouTubeVideoIdFromTrackId = (trackId?: string): string | null => {
   const match = trackId?.match(/^yt_([A-Za-z0-9_-]{11})$/);
@@ -37,14 +56,17 @@ const resolveExactYouTubeVideo = async (
   if (!MUSIC_SERVER_URL) return null;
 
   try {
-    const response = await fetch(`${MUSIC_SERVER_URL}/api/music/youtube`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: `https://www.youtube.com/watch?v=${videoId}`,
-      }),
-      signal: AbortSignal.timeout(8000),
-    });
+    const response = await fetchWithHermesTimeout(
+      `${MUSIC_SERVER_URL}/api/music/youtube`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: `https://www.youtube.com/watch?v=${videoId}`,
+        }),
+      },
+      8000
+    );
     if (!response.ok) return null;
 
     const data = (await response.json()) as {
@@ -103,7 +125,11 @@ const fetchWithTimeout = async (
         ...options,
         signal: controller.signal,
       });
-      if (directRes.ok || directRes.status === 304 || directRes.status === 401) {
+      if (
+        directRes.ok ||
+        directRes.status === 304 ||
+        directRes.status === 401
+      ) {
         return directRes;
       }
     } catch (e: any) {
@@ -111,7 +137,11 @@ const fetchWithTimeout = async (
     }
 
     // 2. On Web: Fallback through public CORS proxies
-    if (Platform.OS === 'web' && !url.includes('localhost') && !url.includes('127.0.0.1')) {
+    if (
+      Platform.OS === 'web' &&
+      !url.includes('localhost') &&
+      !url.includes('127.0.0.1')
+    ) {
       const proxies = [
         `https://corsproxy.io/?${encodeURIComponent(url)}`,
         `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
@@ -155,9 +185,9 @@ export const refreshSoundCloudClientId = async (): Promise<string> => {
 
     if (pageRes.ok) {
       const html = await pageRes.text();
-      const scriptUrls = [
-        ...html.matchAll(/src="(https:\/\/[^"]+\.js)"/g),
-      ].map((m) => m[1]);
+      const scriptUrls = [...html.matchAll(/src="(https:\/\/[^"]+\.js)"/g)].map(
+        (m) => m[1]
+      );
 
       for (const url of scriptUrls.slice(-6)) {
         const jsRes = await fetchWithTimeout(url, {}, 3000);
@@ -257,7 +287,9 @@ export const resolveViaYouTubeTopic = async (
 
         // 2. Official artist channel / topic channel (+800)
         const normAuthor = author.replace(/[^a-z0-9]/g, '');
-        const normArtist = primaryArtist.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normArtist = primaryArtist
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '');
         if (
           normAuthor.includes(normArtist) ||
           normAuthor.includes('vevo') ||
@@ -488,8 +520,11 @@ export const resolveAudioUrl = async (
   const youtubeVideoId = getYouTubeVideoIdFromTrackId(spotifyId);
   if (youtubeVideoId) {
     // A pasted YouTube URL is an exact source. Never replace it with a text
-    // search result, even when a similar track is more popular.
-    return resolveExactYouTubeVideo(youtubeVideoId);
+    // search result while its stream endpoint is available. If that signed
+    // stream cannot be obtained, continue through the strict title/artist
+    // resolver instead of making the track impossible to download.
+    const exactResult = await resolveExactYouTubeVideo(youtubeVideoId);
+    if (exactResult) return exactResult;
   }
 
   const isUnknownArtist =
@@ -512,17 +547,20 @@ export const resolveAudioUrl = async (
   let backendFallback: ResolvedAudio | null = null;
   try {
     if (!MUSIC_SERVER_URL) throw new Error('Music server unavailable');
-    const backendRes = await fetch(`${MUSIC_SERVER_URL}/api/music/resolve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: trackName,
-        artist: primaryArtist,
-        durationMs,
-        spotifyId,
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
+    const backendRes = await fetchWithHermesTimeout(
+      `${MUSIC_SERVER_URL}/api/music/resolve`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: trackName,
+          artist: primaryArtist,
+          durationMs,
+          spotifyId,
+        }),
+      },
+      15000
+    );
 
     if (backendRes.ok) {
       const data = await backendRes.json();

@@ -82,6 +82,7 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
         <GlassSurface
           glass="regular"
           isInteractive={!!onPress}
+          tintColor="rgba(20, 22, 26, 0.64)"
           style={styles.glassContainer}
         >
           <View style={styles.contentRow}>
@@ -134,7 +135,9 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
                     name={playerState.isPlaying ? 'pause' : 'play'}
                     size={19}
                     color="#FFFFFF"
-                    style={!playerState.isPlaying ? { marginLeft: 2 } : undefined}
+                    style={
+                      !playerState.isPlaying ? { marginLeft: 2 } : undefined
+                    }
                   />
                 </GlassSurface>
               </LoggedPressable>
@@ -169,10 +172,7 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
 
           <View style={styles.progressBarBackground}>
             <View
-              style={[
-                styles.progressBarFill,
-                { width: `${progress * 100}%` },
-              ]}
+              style={[styles.progressBarFill, { width: `${progress * 100}%` }]}
             />
           </View>
         </GlassSurface>
@@ -184,7 +184,7 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 84,
+    bottom: Platform.OS === 'ios' ? 89 : 84,
     left: 14,
     right: 14,
     zIndex: 9999,
@@ -199,6 +199,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   glassContainer: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.22)',
     borderRadius: 36,
     overflow: 'hidden',
     minHeight: 64,

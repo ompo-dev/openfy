@@ -6,11 +6,8 @@
 import * as React from 'react';
 import {
   ActivityIndicator,
-  Alert,
-  Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -22,16 +19,17 @@ import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import {
-  downloadTrack,
   getDownloadedTracks,
   isTrackDownloaded,
   parseSpotifyLink,
-  resolveAudioUrl,
   upsertLocalPlaylist,
 } from '@services';
+import { useDownloads } from '@context';
+import { SheetFrame } from '../native';
 
 import { getPlaylist, getPlaylistItems } from '@api';
 import { MUSIC_SERVER_URL } from '@config';
+import { fetchWithTimeout } from '@utils';
 import axios from 'axios';
 
 type TrackPreview = {
@@ -42,9 +40,9 @@ type TrackPreview = {
   imageURL: string;
   duration_ms: number;
   youtubeUrl?: string;
+  audioUrl?: string;
+  audioFormat?: string;
   isDownloaded?: boolean;
-  downloadStatus?: 'idle' | 'resolving' | 'downloading' | 'done' | 'error';
-  downloadProgress?: number;
 };
 
 type ImportModalProps = {
@@ -77,7 +75,8 @@ type SpotifyEmbedEntity = {
   trackList?: SpotifyEmbedEntity[];
 };
 
-const NEXT_DATA_PATTERN = /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/;
+const NEXT_DATA_PATTERN =
+  /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/;
 
 const getCoverUrl = (entity: SpotifyEmbedEntity): string =>
   entity.imageURL ||
@@ -91,7 +90,9 @@ const toTrackPreview = (
   fallback: Partial<TrackPreview> = {}
 ): TrackPreview | null => {
   const spotifyId =
-    entity.spotifyId || entity.uri?.replace(/^spotify:track:/, '') || fallback.spotifyId;
+    entity.spotifyId ||
+    entity.uri?.replace(/^spotify:track:/, '') ||
+    fallback.spotifyId;
   const title = entity.name || entity.title || fallback.title;
   if (!spotifyId || !title) return null;
 
@@ -99,20 +100,32 @@ const toTrackPreview = (
     spotifyId,
     title,
     artistName:
-      entity.artists?.map((artist) => artist.name).filter(Boolean).join(', ') ||
+      entity.artists
+        ?.map((artist) => artist.name)
+        .filter(Boolean)
+        .join(', ') ||
       entity.artistName ||
       entity.subtitle ||
       fallback.artistName ||
       'Artista',
-    albumName: entity.albumName || entity.album?.name || fallback.albumName || 'Spotify',
+    albumName:
+      entity.albumName || entity.album?.name || fallback.albumName || 'Spotify',
     imageURL: getCoverUrl(entity) || fallback.imageURL || '',
-    duration_ms: entity.duration_ms || entity.duration || fallback.duration_ms || 0,
+    duration_ms:
+      entity.duration_ms || entity.duration || fallback.duration_ms || 0,
   };
 };
 
-const withDownloadState = async (tracks: TrackPreview[]): Promise<TrackPreview[]> => {
-  const downloadedIds = new Set((await getDownloadedTracks()).map((track) => track.spotifyId));
-  return tracks.map((track) => ({ ...track, isDownloaded: downloadedIds.has(track.spotifyId) }));
+const withDownloadState = async (
+  tracks: TrackPreview[]
+): Promise<TrackPreview[]> => {
+  const downloadedIds = new Set(
+    (await getDownloadedTracks()).map((track) => track.spotifyId)
+  );
+  return tracks.map((track) => ({
+    ...track,
+    isDownloaded: downloadedIds.has(track.spotifyId),
+  }));
 };
 
 const fetchSpotifyEmbedEntity = async (
@@ -120,10 +133,13 @@ const fetchSpotifyEmbedEntity = async (
   id: string
 ): Promise<SpotifyEmbedEntity | null> => {
   try {
-    const response = await fetch(`https://open.spotify.com/embed/${type}/${id}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(12_000),
-    });
+    const response = await fetchWithTimeout(
+      `https://open.spotify.com/embed/${type}/${id}`,
+      {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      },
+      12_000
+    );
     if (!response.ok) return null;
     const match = (await response.text()).match(NEXT_DATA_PATTERN);
     return match?.[1]
@@ -137,7 +153,11 @@ const fetchSpotifyEmbedEntity = async (
 const fetchCollectionOnDevice = async (
   id: string,
   type: 'playlist' | 'album'
-): Promise<{ title: string; coverUrl: string; tracks: TrackPreview[] } | null> => {
+): Promise<{
+  title: string;
+  coverUrl: string;
+  tracks: TrackPreview[];
+} | null> => {
   const collection = await fetchSpotifyEmbedEntity(type, id);
   const entries = collection?.trackList ?? [];
   if (!collection?.name || entries.length === 0) return null;
@@ -147,9 +167,14 @@ const fetchCollectionOnDevice = async (
     tracks.push(
       ...(await Promise.all(
         entries.slice(index, index + 4).map(async (entry) => {
-          const fallback = toTrackPreview(entry, { albumName: collection.name });
+          const fallback = toTrackPreview(entry, {
+            albumName: collection.name,
+          });
           if (!fallback) return null;
-          const canonical = await fetchSpotifyEmbedEntity('track', fallback.spotifyId);
+          const canonical = await fetchSpotifyEmbedEntity(
+            'track',
+            fallback.spotifyId
+          );
           return toTrackPreview(canonical ?? {}, fallback);
         })
       ))
@@ -159,18 +184,26 @@ const fetchCollectionOnDevice = async (
   return {
     title: collection.name,
     coverUrl: getCoverUrl(collection),
-    tracks: await withDownloadState(tracks.filter((track): track is TrackPreview => track !== null)),
+    tracks: await withDownloadState(
+      tracks.filter((track): track is TrackPreview => track !== null)
+    ),
   };
 };
 
 const fetchCollectionFromServer = async (
   id: string,
   type: 'playlist' | 'album'
-): Promise<{ title: string; coverUrl: string; tracks: TrackPreview[] } | null> => {
+): Promise<{
+  title: string;
+  coverUrl: string;
+  tracks: TrackPreview[];
+} | null> => {
   try {
-    const response = await fetch(`${MUSIC_SERVER_URL}/api/spotify/${type}/${id}`, {
-      signal: AbortSignal.timeout(30_000),
-    });
+    const response = await fetchWithTimeout(
+      `${MUSIC_SERVER_URL}/api/spotify/${type}/${id}`,
+      {},
+      30_000
+    );
     if (!response.ok) return null;
     const collection = (await response.json()) as {
       title?: string;
@@ -181,35 +214,40 @@ const fetchCollectionFromServer = async (
       .map((track) => toTrackPreview(track))
       .filter((track): track is TrackPreview => track !== null);
     return collection.title && tracks.length
-      ? { title: collection.title, coverUrl: collection.coverUrl || '', tracks: await withDownloadState(tracks) }
+      ? {
+          title: collection.title,
+          coverUrl: collection.coverUrl || '',
+          tracks: await withDownloadState(tracks),
+        }
       : null;
   } catch {
     return null;
   }
 };
 
-const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => {
+const fetchTrackById = async (
+  trackId: string
+): Promise<TrackPreview | null> => {
   const cleanTrackId = trackId.replace(/^spotify:track:/, '').split('?')[0];
 
-  if (Platform.OS !== 'web') {
-    return toTrackPreview(
-      (await fetchSpotifyEmbedEntity('track', cleanTrackId)) ?? {},
-      { spotifyId: cleanTrackId }
-    );
-  }
-
-  // 0. PRIMARY: Dedicated Local / Cloud Node.js Resolution Backend (CORS-free, 100% accurate)
+  // PRIMARY: same canonical backend on web and native. Native scraping alone
+  // loses per-track metadata and sends it down a different resolver path.
   try {
-    const backendRes = await fetch(`${MUSIC_SERVER_URL}/api/spotify/track/${cleanTrackId}`, {
-      signal: AbortSignal.timeout(3000),
-    });
+    if (!MUSIC_SERVER_URL) throw new Error('Music server unavailable');
+    const backendRes = await fetchWithTimeout(
+      `${MUSIC_SERVER_URL}/api/spotify/track/${cleanTrackId}`,
+      {},
+      3000
+    );
     if (backendRes.ok) {
       const data = await backendRes.json();
       if (data && data.title) {
         return {
           spotifyId: cleanTrackId,
           title: data.title,
-          artistName: Array.isArray(data.artists) ? data.artists.map((a: any) => a.name).join(', ') : data.artistName,
+          artistName: Array.isArray(data.artists)
+            ? data.artists.map((a: any) => a.name).join(', ')
+            : data.artistName,
           albumName: data.albumName || 'Spotify',
           imageURL: data.imageURL || '',
           duration_ms: data.duration_ms || 0,
@@ -217,6 +255,13 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
       }
     }
   } catch {}
+
+  if (Platform.OS !== 'web') {
+    return toTrackPreview(
+      (await fetchSpotifyEmbedEntity('track', cleanTrackId)) ?? {},
+      { spotifyId: cleanTrackId }
+    );
+  }
 
   const spotifyUrl = `https://open.spotify.com/track/${cleanTrackId}`;
 
@@ -247,8 +292,9 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
             const entity = parsed.props?.pageProps?.state?.data?.entity;
             if (entity && entity.name) {
               const artists =
-                entity.artists?.map((a: { name: string }) => a.name).join(', ') ||
-                '';
+                entity.artists
+                  ?.map((a: { name: string }) => a.name)
+                  .join(', ') || '';
               const cover =
                 entity.visualIdentity?.image?.[0]?.url ||
                 entity.album?.coverArt?.sources?.[0]?.url ||
@@ -284,7 +330,9 @@ const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => 
       author_name?: string;
     };
 
-    let title = (data.title || 'Unknown Track').replace(/^[\s\-–—]+/, '').trim();
+    let title = (data.title || 'Unknown Track')
+      .replace(/^[\s\-–—]+/, '')
+      .trim();
     let artistName = (data.author_name || '').trim();
 
     return {
@@ -306,11 +354,18 @@ const fetchPlaylistOrAlbum = async (
   id: string,
   type: 'playlist' | 'album'
 ): Promise<{ title: string; coverUrl: string; tracks: TrackPreview[] }> => {
-  if (Platform.OS === 'web') {
-    return (await fetchCollectionFromServer(id, type)) ?? { title: '', coverUrl: '', tracks: [] };
-  }
+  const fromServer = MUSIC_SERVER_URL
+    ? await fetchCollectionFromServer(id, type)
+    : null;
+  if (fromServer) return fromServer;
 
-  return (await fetchCollectionOnDevice(id, type)) ?? { title: '', coverUrl: '', tracks: [] };
+  return (
+    (await fetchCollectionOnDevice(id, type)) ?? {
+      title: '',
+      coverUrl: '',
+      tracks: [],
+    }
+  );
 
   const spotifyUrl = `https://open.spotify.com/${type}/${id}`;
 
@@ -333,14 +388,14 @@ const fetchPlaylistOrAlbum = async (
           (await getDownloadedTracks()).map((track) => track.spotifyId)
         );
         const tracks = spotifyTracks.map((track) => ({
-            spotifyId: track.id,
-            title: track.title,
-            artistName: track.subtitle,
-            albumName: track.albumName || playlist.title,
-            imageURL: track.imageURL || '',
-            duration_ms: track.durationMs || 0,
-            isDownloaded: downloadedIds.has(track.id),
-          }));
+          spotifyId: track.id,
+          title: track.title,
+          artistName: track.subtitle,
+          albumName: track.albumName || playlist.title,
+          imageURL: track.imageURL || '',
+          duration_ms: track.durationMs || 0,
+          isDownloaded: downloadedIds.has(track.id),
+        }));
 
         return {
           title: playlist.title,
@@ -349,7 +404,10 @@ const fetchPlaylistOrAlbum = async (
         };
       }
     } catch (error) {
-      console.warn('[ImportModal] Spotify playlist metadata lookup failed:', error);
+      console.warn(
+        '[ImportModal] Spotify playlist metadata lookup failed:',
+        error
+      );
     }
   }
 
@@ -367,15 +425,23 @@ const fetchPlaylistOrAlbum = async (
       }
     );
     const post = res.data?.post;
-    if (post && post.tracks && Array.isArray(post.tracks) && post.tracks.length > 0) {
+    if (
+      post &&
+      post.tracks &&
+      Array.isArray(post.tracks) &&
+      post.tracks.length > 0
+    ) {
       const albumTitle = post.name || (type === 'album' ? 'Álbum' : 'Playlist');
       const coverUrl = post.image || '';
       const list: TrackPreview[] = [];
 
       for (const t of post.tracks) {
-        const trackId = t.id || t.url?.split('/').pop() || Math.random().toString();
+        const trackId =
+          t.id || t.url?.split('/').pop() || Math.random().toString();
         const already = await isTrackDownloaded(trackId);
-        const artist = Array.isArray(t.artists) ? t.artists.join(', ') : (t.artist || 'Unknown Artist');
+        const artist = Array.isArray(t.artists)
+          ? t.artists.join(', ')
+          : t.artist || 'Unknown Artist';
         list.push({
           spotifyId: trackId,
           title: t.name || t.title || 'Música',
@@ -397,30 +463,43 @@ const fetchPlaylistOrAlbum = async (
       }
     }
   } catch (err) {
-    console.warn('[ImportModal] Spotyloader playlist/album lookup failed:', err);
+    console.warn(
+      '[ImportModal] Spotyloader playlist/album lookup failed:',
+      err
+    );
   }
 
   // 2. Try Spotify Embed HTML scraper (__NEXT_DATA__)
   try {
-    const embedRes = await axios.get(`https://open.spotify.com/embed/${type}/${id}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
-      timeout: 7000,
-    });
+    const embedRes = await axios.get(
+      `https://open.spotify.com/embed/${type}/${id}`,
+      {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+        timeout: 7000,
+      }
+    );
     const html = embedRes.data as string;
-    const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/);
+    const match = html.match(
+      /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/
+    );
     const nextDataPayload = match?.[1];
     if (nextDataPayload) {
       const nextData = JSON.parse(nextDataPayload!);
       const entity = nextData.props?.pageProps?.state?.data?.entity;
       if (entity && entity.trackList && entity.trackList.length > 0) {
-        const albumTitle = entity.name || (type === 'album' ? 'Álbum' : 'Playlist');
+        const albumTitle =
+          entity.name || (type === 'album' ? 'Álbum' : 'Playlist');
         const coverUrl = entity.coverArt?.sources?.[0]?.url || '';
         const list: TrackPreview[] = [];
 
         for (const t of entity.trackList) {
-          const trackId = t.uri?.replace('spotify:track:', '') || t.id || Math.random().toString();
+          const trackId =
+            t.uri?.replace('spotify:track:', '') ||
+            t.id ||
+            Math.random().toString();
           const already = await isTrackDownloaded(trackId);
           list.push({
             spotifyId: trackId,
@@ -439,7 +518,10 @@ const fetchPlaylistOrAlbum = async (
       }
     }
   } catch (embedErr) {
-    console.warn('[ImportModal] Spotify Embed playlist/album lookup failed:', embedErr);
+    console.warn(
+      '[ImportModal] Spotify Embed playlist/album lookup failed:',
+      embedErr
+    );
   }
 
   // 3. Fallback: Songlink + Deezer for albums
@@ -452,7 +534,10 @@ const fetchPlaylistOrAlbum = async (
       const deezerAlbumUrl = songlinkRes.data?.linksByPlatform?.deezer?.url;
       if (deezerAlbumUrl) {
         const deezerAlbumId = deezerAlbumUrl.split('/').pop();
-        const dRes = await axios.get(`https://api.deezer.com/album/${deezerAlbumId}`, { timeout: 5000 });
+        const dRes = await axios.get(
+          `https://api.deezer.com/album/${deezerAlbumId}`,
+          { timeout: 5000 }
+        );
         const albumData = dRes.data;
         if (albumData && albumData.tracks?.data) {
           const list: TrackPreview[] = [];
@@ -462,7 +547,8 @@ const fetchPlaylistOrAlbum = async (
             list.push({
               spotifyId: trackSpotifyId,
               title: t.title,
-              artistName: t.artist?.name || albumData.artist?.name || 'Unknown Artist',
+              artistName:
+                t.artist?.name || albumData.artist?.name || 'Unknown Artist',
               albumName: albumData.title || 'Álbum',
               imageURL: albumData.cover_big || albumData.cover_medium || '',
               duration_ms: (t.duration || 0) * 1000,
@@ -470,7 +556,11 @@ const fetchPlaylistOrAlbum = async (
             });
           }
           if (list.length > 0) {
-            return { title: albumData.title, coverUrl: albumData.cover_big || '', tracks: list };
+            return {
+              title: albumData.title,
+              coverUrl: albumData.cover_big || '',
+              tracks: list,
+            };
           }
         }
       }
@@ -480,7 +570,9 @@ const fetchPlaylistOrAlbum = async (
   return { title: '', coverUrl: '', tracks: [] };
 };
 
-const fetchYouTubeTrack = async (videoId: string): Promise<TrackPreview | null> => {
+const fetchYouTubeTrack = async (
+  videoId: string
+): Promise<TrackPreview | null> => {
   const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
   try {
@@ -498,9 +590,12 @@ const fetchYouTubeTrack = async (videoId: string): Promise<TrackPreview | null> 
         title: track.title,
         artistName: track.artistName || 'YouTube Music',
         albumName: track.albumName || 'YouTube Track',
-        imageURL: track.imageURL || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        imageURL:
+          track.imageURL || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
         duration_ms: track.duration_ms || 0,
         youtubeUrl: track.youtubeUrl || youtubeUrl,
+        audioUrl: track.streamUrl,
+        audioFormat: track.format || 'm4a',
         isDownloaded: already,
       };
     }
@@ -559,14 +654,16 @@ export const ImportModal = ({
   const [inputText, setInputText] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
   const [tracks, setTracks] = React.useState<TrackPreview[]>([]);
-  const [importedPlaylist, setImportedPlaylist] =
-    React.useState<ImportedPlaylist | null>(null);
   const [error, setError] = React.useState('');
+  const { downloads, enqueueDownloads } = useDownloads();
+  const downloadsById = React.useMemo(
+    () => new Map(downloads.map((download) => [download.spotifyId, download])),
+    [downloads]
+  );
 
   const reset = () => {
     setInputText('');
     setTracks([]);
-    setImportedPlaylist(null);
     setError('');
     setIsLoading(false);
   };
@@ -602,7 +699,6 @@ export const ImportModal = ({
     setIsLoading(true);
     setError('');
     setTracks([]);
-    setImportedPlaylist(null);
 
     try {
       let tracksToShow: TrackPreview[] = [];
@@ -643,7 +739,9 @@ export const ImportModal = ({
       }
 
       if (tracksToShow.length === 0) {
-        setError('Nenhuma música encontrada. Verifique o link e tente novamente.');
+        setError(
+          'Nenhuma música encontrada. Verifique o link e tente novamente.'
+        );
       } else {
         setTracks(tracksToShow);
         if (playlistToSave) {
@@ -654,7 +752,6 @@ export const ImportModal = ({
               .map((track) => track.imageURL)
               .filter(Boolean),
           });
-          setImportedPlaylist(playlistToSave);
           onLibraryChanged?.();
         }
       }
@@ -666,133 +763,45 @@ export const ImportModal = ({
     }
   };
 
-  const handleDownloadTrack = async (index: number) => {
-    const track = tracks[index];
-    if (!track || track.isDownloaded || track.downloadStatus === 'done') return;
+  const toDownloadInput = React.useCallback(
+    (track: TrackPreview) => ({
+      spotifyId: track.spotifyId,
+      title: track.title,
+      artistName: track.artistName,
+      albumName: track.albumName,
+      imageURL: track.imageURL,
+      duration_ms: track.duration_ms,
+      audioUrl: track.audioUrl,
+      audioFormat: track.audioFormat,
+    }),
+    []
+  );
 
-    // Update status to resolving
-    setTracks((prev) =>
-      prev.map((t, i) =>
-        i === index ? { ...t, downloadStatus: 'resolving', downloadProgress: 0 } : t
-      )
+  const handleDownloadTrack = (track: TrackPreview) => {
+    const download = downloadsById.get(track.spotifyId);
+    if (track.isDownloaded || download?.status === 'completed') return;
+    enqueueDownloads([toDownloadInput(track)]);
+  };
+
+  const handleDownloadAll = () => {
+    enqueueDownloads(
+      tracks
+        .filter((track) => {
+          const download = downloadsById.get(track.spotifyId);
+          return !track.isDownloaded && download?.status !== 'completed';
+        })
+        .map(toDownloadInput)
     );
-
-    try {
-      // Resolve audio URL
-      const resolved = await resolveAudioUrl(
-        track.title,
-        track.artistName,
-        track.spotifyId,
-        track.duration_ms
-      );
-      if (!resolved) {
-        throw new Error('Não foi possível encontrar a faixa de áudio.');
-      }
-
-      // Update to downloading
-      setTracks((prev) =>
-        prev.map((t, i) =>
-          i === index ? { ...t, downloadStatus: 'downloading', downloadProgress: 0 } : t
-        )
-      );
-
-      // Download
-      const result = await downloadTrack(
-        {
-          spotifyId: track.spotifyId,
-          title: track.title,
-          artistName: track.artistName,
-          albumName: track.albumName,
-          imageURL: track.imageURL || resolved.imageURL || '',
-          duration_ms: track.duration_ms,
-        },
-        resolved.url,
-        resolved.format,
-        (progress) => {
-          setTracks((prev) =>
-            prev.map((t, i) =>
-              i === index ? { ...t, downloadProgress: progress } : t
-            )
-          );
-        }
-      );
-
-      if (result) {
-        setTracks((prev) =>
-          prev.map((t, i) =>
-            i === index
-              ? {
-                  ...t,
-                  imageURL: result.imageURL || t.imageURL,
-                  downloadStatus: 'done',
-                  isDownloaded: true,
-                  downloadProgress: 1,
-                }
-              : t
-          )
-        );
-        if (importedPlaylist) {
-          await upsertLocalPlaylist({
-            ...importedPlaylist,
-            trackIds: tracks.map((item) => item.spotifyId),
-            coverImageURLs: tracks
-              .map((item, itemIndex) =>
-                itemIndex === index
-                  ? result.imageURL || item.imageURL
-                  : item.imageURL
-              )
-              .filter(Boolean),
-          });
-        }
-        onLibraryChanged?.();
-      } else {
-        throw new Error('Download falhou.');
-      }
-    } catch (err) {
-      console.error('[ImportModal] download error:', err);
-      setTracks((prev) =>
-        prev.map((t, i) =>
-          i === index ? { ...t, downloadStatus: 'error', downloadProgress: 0 } : t
-        )
-      );
-      Alert.alert('Erro no Download', String(err));
-    }
   };
 
-  const handleDownloadAll = async () => {
-    const indicesToDownload = tracks
-      .map((t, idx) => ({ t, idx }))
-      .filter(({ t }) => !t.isDownloaded && t.downloadStatus !== 'done')
-      .map(({ idx }) => idx);
-
-    const CONCURRENCY = 3;
-    for (let i = 0; i < indicesToDownload.length; i += CONCURRENCY) {
-      const batch = indicesToDownload.slice(i, i + CONCURRENCY);
-      await Promise.allSettled(batch.map((idx) => handleDownloadTrack(idx)));
-    }
-  };
-
-  const downloadableCount = tracks.filter((t) => !t.isDownloaded && t.downloadStatus !== 'done').length;
+  const downloadableCount = tracks.filter((track) => {
+    const download = downloadsById.get(track.spotifyId);
+    return !track.isDownloaded && download?.status !== 'completed';
+  }).length;
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={handleClose}
-    >
-      <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Pressable onPress={handleClose} style={styles.closeButton}>
-            <Ionicons name="close" size={24} color="#FFFFFF" />
-          </Pressable>
-          <Text style={styles.title}>Adicionar músicas</Text>
-          <View style={styles.headerRight} />
-        </View>
-
-        {/* Input Section */}
-        <View style={styles.inputSection}>
+    <SheetFrame visible={visible} title="Adicionar músicas" onClose={handleClose}>
+      <View style={styles.inputSection}>
           <Text style={styles.label}>Cole um link do Spotify ou YouTube:</Text>
           <View style={styles.inputRow}>
             <TextInput
@@ -808,8 +817,15 @@ export const ImportModal = ({
               autoCapitalize="none"
               autoCorrect={false}
             />
-            <Pressable onPress={handlePasteFromClipboard} style={styles.pasteButton}>
-              <MaterialCommunityIcons name="clipboard-text-outline" size={20} color="#1DB954" />
+            <Pressable
+              onPress={handlePasteFromClipboard}
+              style={styles.pasteButton}
+            >
+              <MaterialCommunityIcons
+                name="clipboard-text-outline"
+                size={20}
+                color="#1DB954"
+              />
             </Pressable>
           </View>
 
@@ -817,7 +833,10 @@ export const ImportModal = ({
 
           <Pressable
             onPress={handleImport}
-            style={[styles.importButton, isLoading && styles.importButtonDisabled]}
+            style={[
+              styles.importButton,
+              isLoading && styles.importButtonDisabled,
+            ]}
             disabled={isLoading}
           >
             {isLoading ? (
@@ -826,30 +845,45 @@ export const ImportModal = ({
               <Text style={styles.importButtonText}>Buscar Músicas</Text>
             )}
           </Pressable>
-        </View>
+      </View>
 
-        {/* Results */}
-        {tracks.length > 0 && (
-          <>
-            <View style={styles.resultsHeader}>
-              <Text style={styles.resultsCount}>
-                {tracks.length} {tracks.length === 1 ? 'música' : 'músicas'} encontrada{tracks.length !== 1 ? 's' : ''}
-              </Text>
-              {downloadableCount > 0 && (
-                <Pressable onPress={handleDownloadAll} style={styles.downloadAllButton}>
-                  <Ionicons name="download-outline" size={16} color="#000" />
-                  <Text style={styles.downloadAllText}>Baixar Todas</Text>
-                </Pressable>
-              )}
-            </View>
+      {tracks.length > 0 ? (
+        <View style={styles.resultsSection}>
+          <View style={styles.resultsHeader}>
+            <Text style={styles.resultsCount}>
+              {tracks.length} {tracks.length === 1 ? 'música' : 'músicas'}{' '}
+              encontrada{tracks.length !== 1 ? 's' : ''}
+            </Text>
+            {downloadableCount > 0 ? (
+              <Pressable
+                onPress={handleDownloadAll}
+                style={styles.downloadAllButton}
+              >
+                <Ionicons name="download-outline" size={16} color="#000" />
+                <Text style={styles.downloadAllText}>Baixar Todas</Text>
+              </Pressable>
+            ) : null}
+          </View>
 
-            <ScrollView style={styles.trackList} showsVerticalScrollIndicator={false}>
-              {tracks.map((track, index) => (
+          <View style={styles.trackList}>
+            {tracks.map((track, index) => {
+              const download = downloadsById.get(track.spotifyId);
+              const isComplete = track.isDownloaded || download?.status === 'completed';
+              const isActive =
+                download?.status === 'queued' ||
+                download?.status === 'resolving' ||
+                download?.status === 'downloading';
+              return (
                 <View key={track.spotifyId + index} style={styles.trackItem}>
                   {track.imageURL ? (
-                    <Image source={{ uri: track.imageURL }} style={styles.trackImage} />
+                    <Image
+                      source={{ uri: track.imageURL }}
+                      style={styles.trackImage}
+                    />
                   ) : (
-                    <View style={[styles.trackImage, styles.trackImageFallback]}>
+                    <View
+                      style={[styles.trackImage, styles.trackImageFallback]}
+                    >
                       <Ionicons name="musical-note" size={16} color="#555" />
                     </View>
                   )}
@@ -861,12 +895,14 @@ export const ImportModal = ({
                     <Text style={styles.trackArtist} numberOfLines={1}>
                       {track.artistName}
                     </Text>
-                    {track.downloadStatus === 'downloading' && (
+                    {download?.status === 'downloading' && (
                       <View style={styles.progressBarContainer}>
                         <View
                           style={[
                             styles.progressBar,
-                            { width: `${Math.round((track.downloadProgress || 0) * 100)}%` },
+                            {
+                              width: `${Math.round(download.progress * 100)}%`,
+                            },
                           ]}
                         />
                       </View>
@@ -874,66 +910,40 @@ export const ImportModal = ({
                   </View>
 
                   <Pressable
-                    onPress={() => handleDownloadTrack(index)}
+                    onPress={() => handleDownloadTrack(track)}
                     style={styles.downloadButton}
-                    disabled={
-                      track.isDownloaded ||
-                      track.downloadStatus === 'done' ||
-                      track.downloadStatus === 'downloading' ||
-                      track.downloadStatus === 'resolving'
-                    }
+                    disabled={isComplete || isActive}
                   >
-                    {track.isDownloaded || track.downloadStatus === 'done' ? (
-                      <Ionicons name="checkmark-circle" size={22} color="#1DB954" />
-                    ) : track.downloadStatus === 'resolving' ? (
+                    {isComplete ? (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={22}
+                        color="#1DB954"
+                      />
+                    ) : isActive ? (
                       <ActivityIndicator size="small" color="#1DB954" />
-                    ) : track.downloadStatus === 'downloading' ? (
-                      <ActivityIndicator size="small" color="#1DB954" />
-                    ) : track.downloadStatus === 'error' ? (
+                    ) : download?.status === 'error' ? (
                       <Ionicons name="alert-circle" size={22} color="#FF4444" />
                     ) : (
-                      <Ionicons name="download-outline" size={22} color="#FFFFFF" />
+                      <Ionicons
+                        name="download-outline"
+                        size={22}
+                        color="#FFFFFF"
+                      />
                     )}
                   </Pressable>
                 </View>
-              ))}
-            </ScrollView>
-          </>
-        )}
-      </View>
-    </Modal>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
+    </SheetFrame>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#121212',
-    paddingTop: 20,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#282828',
-  },
-  closeButton: {
-    padding: 4,
-  },
-  title: {
-    flex: 1,
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontFamily: 'SF-Semibold',
-    textAlign: 'center',
-  },
-  headerRight: {
-    width: 32,
-  },
   inputSection: {
-    padding: 20,
     gap: 12,
   },
   label: {
@@ -984,10 +994,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#282828',
+    paddingBottom: 4,
   },
   resultsCount: {
     color: '#A0A0A0',
@@ -1009,8 +1016,10 @@ const styles = StyleSheet.create({
     fontFamily: 'SF-Semibold',
   },
   trackList: {
-    flex: 1,
-    paddingHorizontal: 20,
+    gap: 0,
+  },
+  resultsSection: {
+    gap: 8,
   },
   trackItem: {
     flexDirection: 'row',

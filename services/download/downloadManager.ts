@@ -9,6 +9,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchLyrics, saveLyricsOffline } from '../lyrics/lyricsService';
 import {
+  getPlayableAudioUrl,
   resolveAudioUrl,
   resolveViaSoundCloud,
   resolveViaYouTubeTopic,
@@ -44,6 +45,8 @@ export type DownloadTrackInput = {
   albumName: string;
   imageURL: string;
   duration_ms: number;
+  audioUrl?: string;
+  audioFormat?: string;
 };
 
 export type PendingDownload = {
@@ -60,6 +63,11 @@ const PENDING_DOWNLOADS_STORAGE_KEY = 'openfy_pending_downloads';
 const DOWNLOADS_DIR = `${FileSystem.documentDirectory || ''}openfy_downloads/`;
 const COVERS_DIR = `${FileSystem.documentDirectory || ''}openfy_covers/`;
 const activeDownloads = new Map<string, Promise<DownloadedTrack | null>>();
+const activeResumables = new Map<
+  string,
+  ReturnType<typeof FileSystem.createDownloadResumable>
+>();
+const cancelledDownloads = new Set<string>();
 const BACKGROUND_RETRY_BASE_MS = 15 * 60 * 1000;
 const BACKGROUND_RETRY_MAX_MS = 6 * 60 * 60 * 1000;
 const MAX_BACKGROUND_ATTEMPTS = 8;
@@ -187,10 +195,31 @@ const upsertPendingDownload = async (
   });
 };
 
+/** Persist a batch before work starts so iOS can resume it after suspension. */
+export const queueDownloads = async (
+  tracks: DownloadTrackInput[]
+): Promise<void> => {
+  await Promise.all(
+    tracks.map((track) =>
+      upsertPendingDownload(track, track.audioUrl, track.audioFormat || 'mp3')
+    )
+  );
+};
+
 const removePendingDownload = async (spotifyId: string): Promise<void> => {
   await updatePendingDownloads((downloads) =>
     downloads.filter((candidate) => candidate.track.spotifyId !== spotifyId)
   );
+};
+
+/** Stops an active native transfer and removes its persisted retry entry. */
+export const cancelDownload = async (spotifyId: string): Promise<void> => {
+  cancelledDownloads.add(spotifyId);
+  const resumable = activeResumables.get(`track_${spotifyId}`);
+  if (resumable) {
+    await resumable.cancelAsync().catch(() => {});
+  }
+  await removePendingDownload(spotifyId);
 };
 
 const recordPendingDownloadFailure = async (spotifyId: string): Promise<void> => {
@@ -406,6 +435,7 @@ export const downloadAudio = async (
           onProgress?.(isNaN(progress) ? 0 : progress);
         }
       );
+      activeResumables.set(trackId, downloadResumable);
 
       const result = await downloadResumable.downloadAsync();
       if (result?.uri) {
@@ -472,12 +502,20 @@ const downloadTrackInternal = async (
   onProgress?: (progress: number) => void
 ): Promise<DownloadedTrack | null> => {
   try {
-    await upsertPendingDownload(track, audioUrl, audioFormat);
+    if (cancelledDownloads.has(track.spotifyId)) return null;
+    await upsertPendingDownload(
+      track,
+      audioUrl || track.audioUrl,
+      audioFormat || track.audioFormat || 'mp3'
+    );
     const trackId = `track_${track.spotifyId}`;
     let effectiveTrack = track;
 
-    let resolvedUrl = audioUrl;
-    let format = audioFormat;
+    let resolvedUrl = audioUrl || track.audioUrl;
+    let format = audioFormat || track.audioFormat || 'mp3';
+    if (resolvedUrl) {
+      resolvedUrl = getPlayableAudioUrl(resolvedUrl);
+    }
 
     // If no URL provided, resolve audio source
     if (!resolvedUrl) {
@@ -488,15 +526,32 @@ const downloadTrackInternal = async (
         track.spotifyId,
         track.duration_ms
       );
-      if (mainResult?.url) {
-        resolvedUrl = mainResult.url;
-        format = mainResult.format || 'mp3';
-        if (!effectiveTrack.imageURL && mainResult.imageURL) {
-          effectiveTrack = { ...effectiveTrack, imageURL: mainResult.imageURL };
+      // Imported metadata can retain an obsolete or provider-specific id.
+      // The second pass deliberately resolves only the canonical title/artist
+      // so downloads never fail solely because that id no longer has a stream.
+      const fallbackResult =
+        mainResult?.url || !track.spotifyId
+          ? mainResult
+          : await resolveAudioUrl(
+              track.title,
+              track.artistName,
+              undefined,
+              track.duration_ms
+            );
+      if (fallbackResult?.url) {
+        resolvedUrl = fallbackResult.url;
+        format = fallbackResult.format || 'mp3';
+        if (!effectiveTrack.imageURL && fallbackResult.imageURL) {
+          effectiveTrack = {
+            ...effectiveTrack,
+            imageURL: fallbackResult.imageURL,
+          };
           await upsertPendingDownload(effectiveTrack, resolvedUrl, format);
         }
       }
     }
+
+    if (cancelledDownloads.has(track.spotifyId)) return null;
 
     if (!resolvedUrl) {
       throw new Error('Could not resolve audio stream URL');
@@ -510,9 +565,11 @@ const downloadTrackInternal = async (
       (p) => onProgress?.(p * 0.7)
     );
 
+    if (cancelledDownloads.has(track.spotifyId)) return null;
+
     // Stream URLs can expire while the OS waits to run a background task.
     // Resolve once more before marking the queued item as failed.
-    if (!localAudioPath && audioUrl) {
+    if (!localAudioPath && (audioUrl || track.audioUrl)) {
       const refreshed = await resolveAudioUrl(
         track.title,
         track.artistName,
@@ -589,6 +646,7 @@ const downloadTrackInternal = async (
     console.log(`[DownloadManager] Successfully downloaded track "${track.title}" to ${localAudioPath}`);
     return downloadedTrack;
   } catch (error) {
+    if (cancelledDownloads.has(track.spotifyId)) return null;
     try {
       await recordPendingDownloadFailure(track.spotifyId);
     } catch {}
@@ -610,6 +668,7 @@ export const downloadTrack = (
   const active = activeDownloads.get(track.spotifyId);
   if (active) return active;
 
+  cancelledDownloads.delete(track.spotifyId);
   const request = downloadTrackInternal(
     track,
     audioUrl,
@@ -617,7 +676,13 @@ export const downloadTrack = (
     onProgress
   );
   activeDownloads.set(track.spotifyId, request);
-  request.finally(() => activeDownloads.delete(track.spotifyId)).catch(() => {});
+  request
+    .finally(() => {
+      activeDownloads.delete(track.spotifyId);
+      activeResumables.delete(`track_${track.spotifyId}`);
+      cancelledDownloads.delete(track.spotifyId);
+    })
+    .catch(() => {});
   return request;
 };
 

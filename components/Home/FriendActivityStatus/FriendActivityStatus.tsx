@@ -22,6 +22,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePlayer } from '@context';
+import { useHomeTrackRefresh } from '@hooks';
 import { LoggedPressable } from '../../native';
 import { MyNoteModal, MyNote } from './MyNoteModal';
 import { FriendNoteSheet } from './FriendNoteSheet';
@@ -49,6 +50,7 @@ export interface FriendNoteItem {
     artist?: string;
     imageUrl?: string;
     duration_ms?: number;
+    streamUrl?: string;
   };
 }
 
@@ -101,13 +103,13 @@ const FRIEND_NOTES: FriendNoteItem[] = [
     note: {
       type: 'music',
       iconType: 'wave',
-      title: 'Show Me You Do',
+      title: "If I Ain't Got You",
       subtitle: 'Alicia Keys',
-      spotifyId: '76h9hV2L9L8f5gZ7J99g5a',
+      spotifyId: 'yt_h5EwdeOwcGU',
       artist: 'Alicia Keys',
       imageUrl:
         'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27376a91eb0625902047ff6535d',
-      duration_ms: 242000,
+      duration_ms: 228000,
       bubbleColor: '#0EA5E9',
     },
   },
@@ -143,7 +145,7 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       iconType: 'wave',
       title: 'Lonely Day',
       subtitle: 'System Of A Down',
-      spotifyId: '1VNav8g8H9f7r5t4e3w2q1',
+      spotifyId: 'yt_DnGdoEa1tPg',
       artist: 'System Of A Down',
       imageUrl:
         'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b273397982f1b4028448ea92c903',
@@ -163,7 +165,7 @@ const FRIEND_NOTES: FriendNoteItem[] = [
       iconType: 'wave',
       title: 'Elvira Pagã',
       subtitle: 'Rita Lee',
-      spotifyId: '5j8h9g7f6d5s4a3z2x1c9v',
+      spotifyId: 'yt_c6jDf1r_de0',
       artist: 'Rita Lee',
       imageUrl:
         'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2738faea51fe535bb1dc74c2d43',
@@ -182,17 +184,33 @@ const FRIEND_NOTES: FriendNoteItem[] = [
     note: {
       type: 'music',
       iconType: 'wave',
-      title: 'Ave Maria',
-      subtitle: 'MysticFall27',
-      spotifyId: '9z8y7x6w5v4u3t2s1r0q9p',
-      artist: 'MysticFall27',
+      title: 'Willy Wonka',
+      subtitle: 'Akashi Cruz',
+      spotifyId: 'yt_b14l17iFqyI',
+      artist: 'Akashi Cruz',
       imageUrl:
         'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b273c52a3be631df815bc1458e0a',
-      duration_ms: 215000,
+      duration_ms: 185000,
       bubbleColor: '#EF4444',
     },
   },
 ];
+
+const FRIEND_NOTE_TRACKS = FRIEND_NOTES.flatMap((item) =>
+  item.note.spotifyId
+    ? [
+        {
+          key: item.id,
+          spotifyId: item.note.spotifyId,
+          title: item.note.title,
+          artistName: item.note.artist || item.note.subtitle || 'Artista',
+          albumName: 'Nota Musical',
+          imageURL: item.note.imageUrl || '',
+          duration_ms: item.note.duration_ms || 0,
+        },
+      ]
+    : []
+);
 
 const MY_NOTE_KEY = 'openfy_my_note';
 
@@ -207,12 +225,80 @@ export const FriendActivityStatus = ({
   tailTuningByNoteId,
 }: FriendActivityStatusProps) => {
   const { playTrack, currentTrack, playerState } = usePlayer();
+  const refreshedNotes = useHomeTrackRefresh(FRIEND_NOTE_TRACKS);
+  const notes = React.useMemo(
+    () =>
+      FRIEND_NOTES.map((item) => {
+        const refreshed = refreshedNotes[item.id];
+        if (!refreshed) return item;
 
-  // Velocity-based tilt: single Animated.Value shared by all notes
-  const tiltAnim = React.useRef(new Animated.Value(0)).current;
+        return {
+          ...item,
+          note: {
+            ...item.note,
+            title: refreshed.title,
+            subtitle: refreshed.artistName,
+            artist: refreshed.artistName,
+            imageUrl: refreshed.imageURL,
+            duration_ms: refreshed.duration_ms,
+            streamUrl: refreshed.streamUrl,
+          },
+        };
+      }),
+    [refreshedNotes]
+  );
+
+  // Each note has its own native-driven spring so drag inertia travels through
+  // the row instead of rotating every bubble at the same instant.
+  const tiltAnimations = React.useRef(
+    FRIEND_NOTES.map(() => new Animated.Value(0))
+  ).current;
   const lastScrollX = React.useRef(0);
   const lastScrollTime = React.useRef(Date.now());
+  const lastTiltDirection = React.useRef(0);
+  const lastTiltTarget = React.useRef(0);
   const decayTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const animateTilt = React.useCallback(
+    (velocity: number) => {
+      const isIos = Platform.OS === 'ios';
+      const maximumTilt = isIos ? 8 : 4.5;
+      const velocityScale = isIos ? 25 : 10;
+      const targetDeg = Math.max(
+        -maximumTilt,
+        Math.min(maximumTilt, -velocity * velocityScale)
+      );
+      const direction = Math.sign(targetDeg);
+      const orderedAnimations =
+        direction < 0 ? [...tiltAnimations].reverse() : tiltAnimations;
+      const createSpring = (animation: Animated.Value, toValue: number) =>
+        Animated.spring(animation, {
+          toValue,
+          useNativeDriver: Platform.OS !== 'web',
+          tension: isIos ? 460 : 360,
+          friction: isIos ? 17 : 20,
+          overshootClamping: true,
+        });
+
+      const shouldCascade =
+        direction !== 0 &&
+        (direction !== lastTiltDirection.current ||
+          Math.abs(targetDeg - lastTiltTarget.current) >= 1.25);
+      const animation =
+        shouldCascade
+          ? Animated.stagger(
+              isIos ? 24 : 16,
+              orderedAnimations.map((value) => createSpring(value, targetDeg))
+            )
+          : Animated.parallel(
+              tiltAnimations.map((value) => createSpring(value, targetDeg))
+            );
+      animation.start();
+      lastTiltDirection.current = direction;
+      lastTiltTarget.current = targetDeg;
+    },
+    [tiltAnimations]
+  );
 
   const handleScroll = React.useCallback(
     (e: any) => {
@@ -221,17 +307,8 @@ export const FriendActivityStatus = ({
       const dt = Math.max(1, now - lastScrollTime.current);
       const velocity = (x - lastScrollX.current) / dt; // px per ms
 
-      // Scrolling right (v > 0) -> tilt left (negative deg)
-      // Scrolling left  (v < 0) -> tilt right (positive deg)
-      const targetDeg = Math.max(-9, Math.min(9, -velocity * 12));
-
-      Animated.spring(tiltAnim, {
-        toValue: targetDeg,
-        useNativeDriver: Platform.OS !== 'web',
-        tension: 500,
-        friction: 22,
-        overshootClamping: true,
-      }).start();
+      // Scrolling right tilts left; scrolling left tilts right.
+      animateTilt(velocity);
 
       lastScrollX.current = x;
       lastScrollTime.current = now;
@@ -239,24 +316,32 @@ export const FriendActivityStatus = ({
       // Spring back to 0 when scroll stops
       if (decayTimer.current) clearTimeout(decayTimer.current);
       decayTimer.current = setTimeout(() => {
-        Animated.spring(tiltAnim, {
-          toValue: 0,
-          useNativeDriver: Platform.OS !== 'web',
-          tension: 180,
-          friction: 18,
-          overshootClamping: false,
-        }).start();
-      }, 50);
+        Animated.stagger(
+          10,
+          tiltAnimations.map((animation) =>
+            Animated.spring(animation, {
+              toValue: 0,
+              useNativeDriver: Platform.OS !== 'web',
+              tension: 180,
+              friction: 18,
+              overshootClamping: false,
+            })
+          )
+        ).start();
+        lastTiltDirection.current = 0;
+        lastTiltTarget.current = 0;
+      }, 90);
     },
-    [tiltAnim]
+    [animateTilt, tiltAnimations]
   );
 
-  // Rotation string interpolation
-  const tiltRotation = tiltAnim.interpolate({
-    inputRange: [-9, 0, 9],
-    outputRange: ['-9deg', '0deg', '9deg'],
-    extrapolate: 'clamp',
-  });
+  const tiltRotations = tiltAnimations.map((animation) =>
+    animation.interpolate({
+      inputRange: [-8, 0, 8],
+      outputRange: ['-8deg', '0deg', '8deg'],
+      extrapolate: 'clamp',
+    })
+  );
 
   // My note persistent state
   const [myNote, setMyNote] = React.useState<MyNote | null>(null);
@@ -308,6 +393,7 @@ export const FriendActivityStatus = ({
           item.note.imageUrl ||
           'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27341ea22e92c68e146eb4a7812',
         duration_ms: item.note.duration_ms || 200000,
+        streamUrl: item.note.streamUrl,
       });
     }
     setFriendSheetNote(item);
@@ -325,7 +411,7 @@ export const FriendActivityStatus = ({
         alwaysBounceHorizontal={true}
         overScrollMode="always"
       >
-        {FRIEND_NOTES.map((item) => {
+        {notes.map((item, index) => {
           const isThisSongPlaying =
             !!item.note.spotifyId &&
             currentTrack?.spotifyId === item.note.spotifyId &&
@@ -368,7 +454,10 @@ export const FriendActivityStatus = ({
                 <View style={styles.bubbleAnchorContainer}>
                   <Animated.View
                     style={{
-                      transform: [{ translateY: 5 }, { rotate: tiltRotation }],
+                      transform: [
+                        { translateY: 5 },
+                        { rotate: tiltRotations[index] },
+                      ],
                     }}
                   >
                     <NoteBubble
@@ -411,7 +500,7 @@ export const FriendActivityStatus = ({
         visible={isNoteModalVisible}
         onClose={() => setIsNoteModalVisible(false)}
         currentNote={myNote}
-        avatarUrl={FRIEND_NOTES[0].user.avatarUrl}
+        avatarUrl={notes[0].user.avatarUrl}
         onSave={handleSaveNote}
         onDelete={handleDeleteNote}
       />

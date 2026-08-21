@@ -72,16 +72,70 @@ export const RECENTLY_PLAYED_COVER_SIZE = 55;
 export const BROWSE_CATEGORY_IMAGE_SIZE = 75;
 export const BROWSE_CATEGORY_HEIGHT = 55;
 
-const configuredMusicServerUrl =
-  Constants.expoConfig?.extra?.musicServerUrl as string | undefined;
-const isLoopbackMusicServer = /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(
-  configuredMusicServerUrl || ''
-);
+type MusicServerUrlOptions = {
+  configuredUrl?: string;
+  developmentHost?: string;
+  platform: string;
+};
 
-// A phone's localhost is the phone, never the computer running Metro.
-export const MUSIC_SERVER_URL =
-  configuredMusicServerUrl && (Platform.OS === 'web' || !isLoopbackMusicServer)
-    ? configuredMusicServerUrl
-    : Platform.OS === 'web'
-      ? 'http://localhost:3001'
+const isLoopbackHost = (hostname: string) =>
+  hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+
+const normalizeServerUrl = (value?: string) => {
+  if (!value) return '';
+  try {
+    const url = new URL(value.trim());
+    return /^https?:$/.test(url.protocol)
+      ? `${url.origin}${url.pathname.replace(/\/$/, '')}`
       : '';
+  } catch {
+    return '';
+  }
+};
+
+const serverUrlFromDevelopmentHost = (value?: string) => {
+  if (!value) return '';
+  try {
+    const url = new URL(value.includes('://') ? value : `http://${value}`);
+    if (!url.hostname || isLoopbackHost(url.hostname)) return '';
+    const host = url.hostname.includes(':')
+      ? `[${url.hostname}]`
+      : url.hostname;
+    return `http://${host}:3001`;
+  } catch {
+    return '';
+  }
+};
+
+/** Uses Metro's LAN address on a physical device when local backend is selected. */
+export const resolveMusicServerUrl = ({
+  configuredUrl,
+  developmentHost,
+  platform,
+}: MusicServerUrlOptions) => {
+  const configured = normalizeServerUrl(configuredUrl);
+  const configuredHost = configured ? new URL(configured).hostname : '';
+
+  if (configured && (platform === 'web' || !isLoopbackHost(configuredHost))) {
+    return configured;
+  }
+
+  if (platform === 'web') return configured || 'http://localhost:3001';
+
+  return serverUrlFromDevelopmentHost(developmentHost);
+};
+
+const configuredMusicServerUrl = Constants.expoConfig?.extra?.musicServerUrl as
+  string | undefined;
+const developmentHost =
+  Constants.expoConfig?.hostUri ||
+  (Constants.expoGoConfig as { debuggerHost?: string } | null)?.debuggerHost ||
+  Constants.experienceUrl;
+
+// A phone's localhost is the phone. Expo Go provides Metro's LAN host, so
+// iPhone reaches the same local Node backend that web uses.
+export const MUSIC_SERVER_URL = resolveMusicServerUrl({
+  configuredUrl: configuredMusicServerUrl,
+  developmentHost,
+  platform: Platform.OS,
+});

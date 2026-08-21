@@ -1,6 +1,6 @@
 import { ArtistModel } from '@models';
 import { ArtistResponseType } from '@config';
-import { parseToArtist } from '@utils';
+import { fetchWithTimeout, parseToArtist } from '@utils';
 import { Platform } from 'react-native';
 
 import { BASE_URL, MUSIC_SERVER_URL, spotifyGet } from '../config';
@@ -9,27 +9,30 @@ export const getYouTubeArtistImage = async (artistName: string) => {
   const handle = artistName.trim().replace(/\s+/g, '');
   if (Platform.OS !== 'web' && handle) {
     try {
-      const response = await fetch(`https://www.youtube.com/@${encodeURIComponent(handle)}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(8000),
-      });
+      const response = await fetchWithTimeout(
+        `https://www.youtube.com/@${encodeURIComponent(handle)}`,
+        { headers: { 'User-Agent': 'Mozilla/5.0' } },
+        8000
+      );
       const html = response.ok ? await response.text() : '';
       const imageURL = html.match(/<meta property="og:image" content="([^"]+)"/i)?.[1];
       if (imageURL) return imageURL.replace(/\\u0026/g, '&');
     } catch {}
 
     try {
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `https://www.youtube.com/results?search_query=${encodeURIComponent(`${artistName} official`)}`,
-        { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(8000) }
+        { headers: { 'User-Agent': 'Mozilla/5.0' } },
+        8000
       );
       const html = response.ok ? await response.text() : '';
       const channelPath = html.match(/"channelRenderer":\{[\s\S]{0,4000}?"canonicalBaseUrl":"([^"]+)"/)?.[1];
       if (!channelPath) return '';
-      const channel = await fetch(`https://www.youtube.com${channelPath}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(8000),
-      });
+      const channel = await fetchWithTimeout(
+        `https://www.youtube.com${channelPath}`,
+        { headers: { 'User-Agent': 'Mozilla/5.0' } },
+        8000
+      );
       const channelHtml = channel.ok ? await channel.text() : '';
       return (
         channelHtml.match(/<meta property="og:image" content="([^"]+)"/i)?.[1]?.replace(/\\u0026/g, '&') ||

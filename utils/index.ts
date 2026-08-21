@@ -25,6 +25,8 @@ export {
   getDisplayCopyrightText,
   getFallbackImage,
   getRandomColor,
+  createTimeoutSignal,
+  fetchWithTimeout,
 } from './common';
 export { formatCollectionMeta } from './collection/collectionPresentation';
 export { getDynamicColorPalette } from './colorExtractor';

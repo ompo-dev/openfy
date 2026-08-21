@@ -5,6 +5,8 @@
  * eliminating the need for blind, noisy multi-platform fuzzy searching.
  */
 
+import { fetchWithTimeout } from '@utils';
+
 export interface DiscoveredEntity {
   source: 'letras' | 'musicbrainz' | 'deezer';
   pageUrl: string;
@@ -47,7 +49,7 @@ export class EntityPageResolver {
 
     for (const pageUrl of candidateUrls) {
       try {
-        const res = await fetch(pageUrl, { signal: AbortSignal.timeout(3500) });
+        const res = await fetchWithTimeout(pageUrl, {}, 3500);
         if (res.ok) {
           const html = await res.text();
           const ytMatch =

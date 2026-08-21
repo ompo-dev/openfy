@@ -12,6 +12,7 @@ import { Image } from 'expo-image';
 
 import { COLORS } from '@config';
 import { translations } from '@data';
+import { OpenfyMark } from '../native';
 
 import { styles } from './styles';
 
@@ -52,10 +53,7 @@ export const Login = ({ isPressableDisabled, handlePress }: LoginPropsType) => {
 
       <View style={styles.container}>
         <View style={styles.logo}>
-          <Image
-            style={styles.backgroundImage}
-            source={require('@assets/images/logo.png')}
-          />
+          <OpenfyMark color="#FFFFFF" style={styles.openfyMark} />
         </View>
         <View style={styles.content}>
           <Text style={styles.title}>{translations.loginWelcome}</Text>

@@ -3,17 +3,12 @@
  */
 
 import * as React from 'react';
-import {
-  Image,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { usePlayer, type PlayerTrack } from '@context';
+import { useHomeTrackRefresh } from '@hooks';
 import {
   CompactMusicCards,
   type CompactTrackItem,
@@ -43,46 +38,43 @@ const DRAKE_TRACKS: CompactTrackItem[] = [
   },
   {
     id: 'post_die_trying',
-    spotifyId: '3ZffCQKLFLUvOCuVsxc364',
-    title: 'DIE TRYING',
-    artist: 'PARTYNEXTDOOR, Drake, Yebba',
-    albumName: 'PARTYMOBILE',
-    imageUrl:
-      'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2738278b782c429712cf757e754',
-    duration_ms: 204000,
+    spotifyId: '6DCZcSspjsKoFjzjrWoCdn',
+    title: "God's Plan",
+    artist: 'Drake',
+    albumName: 'Scorpion',
+    imageUrl: 'https://i.ytimg.com/vi/m1a_GqJf02M/maxresdefault.jpg',
+    duration_ms: 198000,
     explicit: true,
   },
   {
     id: 'post_jungle',
-    spotifyId: '1i4ZHCpdAH2iPgq8YQx0lU',
-    title: 'Jungle',
+    spotifyId: '5mCPDVBb16L4XQwDdbRUpz',
+    title: 'Passionfruit',
     artist: 'Drake',
-    albumName: 'If You’re Reading This It’s Too Late',
-    imageUrl:
-      'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2735a0d43a4a2f61c0b347a3f21',
-    duration_ms: 205000,
+    albumName: 'More Life',
+    imageUrl: 'https://i.ytimg.com/vi/COz9lDCFHjw/maxresdefault.jpg',
+    duration_ms: 298000,
     explicit: false,
   },
 ];
 
 const PARTY_TRACKS: PlayerTrack[] = [
   {
-    spotifyId: '76h9hV2L9L8f5gZ7J99g5a',
-    title: 'Show Me You Do',
+    spotifyId: 'yt_h5EwdeOwcGU',
+    title: "If I Ain't Got You",
     artistName: 'Alicia Keys',
     albumName: 'Listening Party',
     imageURL:
       'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27376a91eb0625902047ff6535d',
-    duration_ms: 242000,
+    duration_ms: 228000,
   },
   {
-    spotifyId: '1A7ODrG8Zg38f1Aee0wZ11',
-    title: 'Canned Heat',
-    artistName: 'Jamiroquai',
+    spotifyId: 'home_7minutoz_aladdin',
+    title: 'Aladdin',
+    artistName: '7 Minutoz',
     albumName: 'Listening Party',
-    imageURL:
-      'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27341ea22e92c68e146eb4a7812',
-    duration_ms: 330000,
+    imageURL: 'https://i.ytimg.com/vi_webp/U_OHtl-DESg/maxresdefault.webp',
+    duration_ms: 200188,
   },
   {
     spotifyId: '6dOtVTDmmpzgGQ9qd0RMiZ',
@@ -104,6 +96,36 @@ const LYRIC_TRACK: PlayerTrack = {
     'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27371d62ea7ea8a5be92d3c1f62',
   duration_ms: 298000,
 };
+
+const LISTENING_FEED_TRACK_SEEDS = [
+  ...DRAKE_TRACKS.map((track) => ({
+    key: track.id,
+    spotifyId: track.spotifyId,
+    title: track.title,
+    artistName: track.artist,
+    albumName: track.albumName || 'Single',
+    imageURL: track.imageUrl,
+    duration_ms: track.duration_ms,
+  })),
+  ...PARTY_TRACKS.map((track) => ({
+    key: `party_${track.spotifyId}`,
+    spotifyId: track.spotifyId,
+    title: track.title,
+    artistName: track.artistName,
+    albumName: track.albumName,
+    imageURL: track.imageURL,
+    duration_ms: track.duration_ms,
+  })),
+  {
+    key: 'lyric_track',
+    spotifyId: LYRIC_TRACK.spotifyId,
+    title: LYRIC_TRACK.title,
+    artistName: LYRIC_TRACK.artistName,
+    albumName: LYRIC_TRACK.albumName,
+    imageURL: LYRIC_TRACK.imageURL,
+    duration_ms: LYRIC_TRACK.duration_ms,
+  },
+];
 
 const MUSIC_AUTHOR: PostAuthor = {
   name: 'sdymoondesign',
@@ -206,7 +228,10 @@ const PostActions = ({ initialLikes }: { initialLikes: number }) => {
           <Ionicons name="chatbubble-outline" size={21} color="#A3A3A3" />
           <Text style={styles.actionCount}>44</Text>
         </View>
-        <View style={styles.actionButton} accessibilityLabel="3 compartilhamentos">
+        <View
+          style={styles.actionButton}
+          accessibilityLabel="3 compartilhamentos"
+        >
           <Ionicons name="paper-plane-outline" size={21} color="#A3A3A3" />
           <Text style={styles.actionCount}>3</Text>
         </View>
@@ -227,13 +252,13 @@ const PostActions = ({ initialLikes }: { initialLikes: number }) => {
   );
 };
 
-const MusicShelfPost = () => {
+const MusicShelfPost = ({ tracks }: { tracks: CompactTrackItem[] }) => {
   return (
     <View style={styles.post}>
       <PostHeader author={MUSIC_AUTHOR} />
       <Text style={styles.postTitle}>Minhas faixas favoritas do Drake</Text>
       <View style={styles.postCards}>
-        <CompactMusicCards tracks={DRAKE_TRACKS} />
+        <CompactMusicCards tracks={tracks} />
       </View>
       <PostActions initialLikes={161} />
     </View>
@@ -241,12 +266,7 @@ const MusicShelfPost = () => {
 };
 
 const PostLyrics = ({ track }: { track: PlayerTrack }) => {
-  const {
-    currentTrack,
-    lyricsData,
-    playerState,
-    seekToPosition,
-  } = usePlayer();
+  const { currentTrack, lyricsData, playerState, seekToPosition } = usePlayer();
   const isCurrentTrack = currentTrack?.spotifyId === track.spotifyId;
   const lyricSegments =
     isCurrentTrack && lyricsData?.isSynced ? lyricsData.segments : [];
@@ -263,15 +283,9 @@ const PostLyrics = ({ track }: { track: PlayerTrack }) => {
 
   return (
     <View style={styles.postLyrics}>
-      <Text style={styles.postLyricsTrack} numberOfLines={1}>
-        Tocando: {track.title}
-      </Text>
       <NoteLyricBlocks
         segments={lyricSegments}
-        activeIndex={getActiveLyricIndex(
-          lyricSegments,
-          playerState.positionMs
-        )}
+        activeIndex={getActiveLyricIndex(lyricSegments, playerState.positionMs)}
         onSeek={(positionMs) => void seekToPosition(positionMs)}
         style={styles.lyricBlocks}
       />
@@ -279,10 +293,11 @@ const PostLyrics = ({ track }: { track: PlayerTrack }) => {
   );
 };
 
-const ListeningPartyPost = () => {
-  const { currentTrack, playerState, playWithQueue, togglePlayPause } = usePlayer();
+const ListeningPartyPost = ({ tracks }: { tracks: PlayerTrack[] }) => {
+  const { currentTrack, playerState, playWithQueue, togglePlayPause } =
+    usePlayer();
   const [joined, setJoined] = React.useState(false);
-  const partyHasCurrentTrack = PARTY_TRACKS.some(
+  const partyHasCurrentTrack = tracks.some(
     (track) => track.spotifyId === currentTrack?.spotifyId
   );
   const partyIsPlaying = partyHasCurrentTrack && playerState.isPlaying;
@@ -293,7 +308,7 @@ const ListeningPartyPost = () => {
       void togglePlayPause();
       return;
     }
-    void playWithQueue(PARTY_TRACKS);
+    void playWithQueue(tracks);
   };
 
   return (
@@ -332,7 +347,7 @@ const ListeningPartyPost = () => {
             style={styles.partySummaryRow}
           >
             <View style={styles.partyCovers}>
-              {PARTY_TRACKS.map((track, index) => (
+              {tracks.map((track, index) => (
                 <Image
                   key={track.spotifyId}
                   source={{ uri: track.imageURL }}
@@ -359,7 +374,9 @@ const ListeningPartyPost = () => {
               />
             </View>
           </Pressable>
-          {partyIsPlaying && currentTrack ? <PostLyrics track={currentTrack} /> : null}
+          {partyIsPlaying && currentTrack ? (
+            <PostLyrics track={currentTrack} />
+          ) : null}
         </LinearGradient>
       </View>
       <PostActions initialLikes={92} />
@@ -367,9 +384,9 @@ const ListeningPartyPost = () => {
   );
 };
 
-const LyricPost = () => {
+const LyricPost = ({ track }: { track: PlayerTrack }) => {
   const { currentTrack, playerState, playTrack, togglePlayPause } = usePlayer();
-  const isCurrentTrack = currentTrack?.spotifyId === LYRIC_TRACK.spotifyId;
+  const isCurrentTrack = currentTrack?.spotifyId === track.spotifyId;
   const isPlaying = isCurrentTrack && playerState.isPlaying;
 
   const handlePlay = () => {
@@ -377,7 +394,7 @@ const LyricPost = () => {
       void togglePlayPause();
       return;
     }
-    void playTrack(LYRIC_TRACK);
+    void playTrack(track);
   };
 
   return (
@@ -386,22 +403,28 @@ const LyricPost = () => {
       <Text style={styles.postTitle}>Essa parte sempre me pega.</Text>
       <View style={[styles.lyricCard, isPlaying && styles.lyricCardExpanded]}>
         <Image
-          source={{ uri: LYRIC_TRACK.imageURL }}
+          source={{ uri: track.imageURL }}
           style={styles.lyricArtworkBackground}
           blurRadius={22}
         />
         <LinearGradient
           colors={['rgba(8, 17, 18, 0.48)', 'rgba(4, 12, 13, 0.93)']}
-          style={[styles.lyricGradient, isPlaying && styles.lyricGradientExpanded]}
+          style={[
+            styles.lyricGradient,
+            isPlaying && styles.lyricGradientExpanded,
+          ]}
         >
           <View style={styles.lyricTrackRow}>
-            <Image source={{ uri: LYRIC_TRACK.imageURL }} style={styles.lyricCover} />
+            <Image
+              source={{ uri: track.imageURL }}
+              style={styles.lyricCover}
+            />
             <View style={styles.lyricTrackCopy}>
               <Text style={styles.lyricTrackTitle} numberOfLines={1}>
-                {LYRIC_TRACK.title}
+                {track.title}
               </Text>
               <Text style={styles.lyricTrackArtist} numberOfLines={1}>
-                {LYRIC_TRACK.artistName}
+                {track.artistName}
               </Text>
             </View>
             <Pressable
@@ -418,7 +441,7 @@ const LyricPost = () => {
               />
             </Pressable>
           </View>
-          {isPlaying ? <PostLyrics track={LYRIC_TRACK} /> : null}
+          {isPlaying ? <PostLyrics track={track} /> : null}
         </LinearGradient>
       </View>
       <PostActions initialLikes={238} />
@@ -426,13 +449,67 @@ const LyricPost = () => {
   );
 };
 
-export const ListeningFeed = () => (
-  <View style={styles.feed}>
-    <MusicShelfPost />
-    <ListeningPartyPost />
-    <LyricPost />
-  </View>
-);
+export const ListeningFeed = () => {
+  const refreshedTracks = useHomeTrackRefresh(LISTENING_FEED_TRACK_SEEDS);
+  const drakeTracks = React.useMemo(
+    () =>
+      DRAKE_TRACKS.map((track) => {
+        const refreshed = refreshedTracks[track.id];
+        return refreshed
+          ? {
+              ...track,
+              title: refreshed.title,
+              artist: refreshed.artistName,
+              albumName: refreshed.albumName,
+              imageUrl: refreshed.imageURL,
+              duration_ms: refreshed.duration_ms,
+              streamUrl: refreshed.streamUrl,
+            }
+          : track;
+      }),
+    [refreshedTracks]
+  );
+  const partyTracks = React.useMemo(
+    () =>
+      PARTY_TRACKS.map((track) => {
+        const refreshed = refreshedTracks[`party_${track.spotifyId}`];
+        return refreshed
+          ? {
+              ...track,
+              title: refreshed.title,
+              artistName: refreshed.artistName,
+              albumName: refreshed.albumName,
+              imageURL: refreshed.imageURL,
+              duration_ms: refreshed.duration_ms,
+              streamUrl: refreshed.streamUrl,
+            }
+          : track;
+      }),
+    [refreshedTracks]
+  );
+  const lyricTrack = React.useMemo(() => {
+    const refreshed = refreshedTracks.lyric_track;
+    return refreshed
+      ? {
+          ...LYRIC_TRACK,
+          title: refreshed.title,
+          artistName: refreshed.artistName,
+          albumName: refreshed.albumName,
+          imageURL: refreshed.imageURL,
+          duration_ms: refreshed.duration_ms,
+          streamUrl: refreshed.streamUrl,
+        }
+      : LYRIC_TRACK;
+  }, [refreshedTracks]);
+
+  return (
+    <View style={styles.feed}>
+      <MusicShelfPost tracks={drakeTracks} />
+      <ListeningPartyPost tracks={partyTracks} />
+      <LyricPost track={lyricTrack} />
+    </View>
+  );
+};
 
 const styles = StyleSheet.create({
   feed: {

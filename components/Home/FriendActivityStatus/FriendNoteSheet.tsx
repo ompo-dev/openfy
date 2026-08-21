@@ -182,6 +182,7 @@ export const FriendNoteSheet = ({
         albumName: 'Nota',
         imageURL: note.note.imageUrl || note.user.avatarUrl,
         duration_ms: note.note.duration_ms || 200000,
+        streamUrl: note.note.streamUrl,
       });
     }
   };

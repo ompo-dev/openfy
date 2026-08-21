@@ -9,6 +9,13 @@ module.exports = {
     userInterfaceStyle: 'automatic',
     ios: {
       bundleIdentifier: 'com.openfy.app',
+      infoPlist: {
+        NSAppTransportSecurity: {
+          NSAllowsLocalNetworking: true,
+        },
+        NSLocalNetworkUsageDescription:
+          'Openfy usa rede local durante desenvolvimento para buscar música e letras no seu computador.',
+      },
       icon: {
         light: './assets/images/app-icon/openfy-light.png',
         dark: './assets/images/app-icon/openfy-dark.png',
@@ -23,8 +30,10 @@ module.exports = {
       icon: './assets/images/app-icon/openfy-dark.png',
       softwareKeyboardLayoutMode: 'pan',
       adaptiveIcon: {
-        foregroundImage: './assets/images/app-icon/openfy-android-foreground.png',
-        monochromeImage: './assets/images/app-icon/openfy-android-foreground.png',
+        foregroundImage:
+          './assets/images/app-icon/openfy-android-foreground.png',
+        monochromeImage:
+          './assets/images/app-icon/openfy-android-foreground.png',
         backgroundColor: '#000000',
       },
     },
@@ -42,14 +51,20 @@ module.exports = {
       ],
       'expo-background-task',
       [
+        'expo-notifications',
+        {
+          color: '#1ED760',
+        },
+      ],
+      [
         'expo-splash-screen',
         {
           backgroundColor: '#121212',
-          image: './assets/images/logo.png',
+          image: './icon.svg',
           imageWidth: 120,
           dark: {
             backgroundColor: '#121212',
-            image: './assets/images/logo.png',
+            image: './icon.svg',
             imageWidth: 120,
           },
         },
@@ -63,8 +78,7 @@ module.exports = {
       clientID: process.env.CLIENT_ID || '',
       clientSecret: process.env.CLIENT_SECRET || '',
       tokenKey: process.env.TOKEN_KEY || 'spotify_token',
-      musicServerUrl:
-        process.env.EXPO_PUBLIC_MUSIC_SERVER_URL || 'http://localhost:3001',
+      musicServerUrl: process.env.EXPO_PUBLIC_MUSIC_SERVER_URL || '',
       refreshTokenKey: process.env.REFRESH_TOKEN_KEY || 'spotify_refresh_token',
       expirationKey: process.env.EXPIRATION_KEY || 'spotify_expiration_key',
       authorizationEndpoint:

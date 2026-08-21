@@ -1,5 +1,9 @@
 import * as React from 'react';
 import { render, RenderResult } from '@testing-library/react-native';
+import {
+  DownloadProvider,
+  LibrarySelectedCategoryProvider,
+} from '@context';
 import { BottomTabBar } from '../BottomTabBar';
 
 jest.mock('expo-router', () => ({
@@ -30,8 +34,17 @@ describe('BottomTabBar', () => {
     },
   };
 
+  const renderTabBar = () =>
+    render(
+      <LibrarySelectedCategoryProvider>
+        <DownloadProvider>
+          <BottomTabBar {...mockProps} />
+        </DownloadProvider>
+      </LibrarySelectedCategoryProvider>
+    );
+
   beforeEach(async () => {
-    container = await render(<BottomTabBar {...mockProps} />);
+    container = await renderTabBar();
   });
 
   afterEach(() => {

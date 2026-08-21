@@ -1,6 +1,10 @@
 import { PlaylistModel, TrackModel } from '@models';
 import { PlaylistItemResponseType, PlaylistResponseType } from '@config';
-import { parseFromPlaylistItemsToTracks, parseToPlaylist } from '@utils';
+import {
+  fetchWithTimeout,
+  parseFromPlaylistItemsToTracks,
+  parseToPlaylist,
+} from '@utils';
 
 import { BASE_URL, MUSIC_SERVER_URL, spotifyGet } from '../config';
 
@@ -19,9 +23,10 @@ type BackendPlaylist = {
 };
 
 const getBackendPlaylist = async (playlistId: string): Promise<BackendPlaylist> => {
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${MUSIC_SERVER_URL}/api/spotify/playlist/${playlistId}`,
-    { signal: AbortSignal.timeout(15_000) }
+    {},
+    15_000
   );
   if (!response.ok) throw new Error('Não foi possível buscar a playlist no servidor local.');
 

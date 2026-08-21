@@ -13,6 +13,12 @@ export const styles = StyleSheet.create({
     width: 53,
     height: 53,
     marginBottom: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  openfyMark: {
+    width: 34,
+    height: 53,
   },
   container: {
     paddingHorizontal: 35,

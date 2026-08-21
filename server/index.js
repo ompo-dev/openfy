@@ -699,15 +699,20 @@ async function fetchYouTubeOfficialVideo(target, searchQuery) {
     const officialCandidates = candidates.filter(
       (candidate) => candidate.isOfficialArtistChannel
     );
-    if (officialCandidates.length > 0) {
-      officialCandidates.sort((a, b) => {
+    // Not every official release lives on an Artist/Topic/VEVO channel. Every
+    // candidate above already passed title, artist and duration identity checks,
+    // so use that exact set when no channel carries the official marker.
+    const rankedCandidates =
+      officialCandidates.length > 0 ? officialCandidates : candidates;
+    if (rankedCandidates.length > 0) {
+      rankedCandidates.sort((a, b) => {
         if (a.score !== b.score) return b.score - a.score;
         if (a.durationDiffSec !== b.durationDiffSec)
           return a.durationDiffSec - b.durationDiffSec;
         return b.views - a.views;
       });
 
-      const top = officialCandidates[0];
+      const top = rankedCandidates[0];
       const result = {
         provider: 'youtube',
         id: top.videoId,
@@ -1305,6 +1310,7 @@ const server = http.createServer(async (req, res) => {
           spotifyId,
           isrc,
           imageURL,
+          includeLyrics = true,
         } = payload;
 
         // If spotifyId is provided and details are missing or need validation, extract canonical track directly
@@ -1406,12 +1412,14 @@ const server = http.createServer(async (req, res) => {
         const artworkUrl = lockedTarget.imageURL || ytStream?.imageURL || '';
 
         // STEP 4: EXACT PARAMETRIC GET IDENTIFIER (Lyrics)
-        const exactGet = await fetchExactIdentifierGet(
-          lockedTarget.title,
-          lockedTarget.artistName,
-          lockedTarget.durationMs,
-          lockedTarget.albumName
-        );
+        const exactGet = includeLyrics
+          ? await fetchExactIdentifierGet(
+              lockedTarget.title,
+              lockedTarget.artistName,
+              lockedTarget.durationMs,
+              lockedTarget.albumName
+            )
+          : null;
 
         let resolvedLyrics = exactGet?.valid
           ? { synced: exactGet.synced, lines: exactGet.lines }
