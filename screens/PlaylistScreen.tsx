@@ -115,6 +115,7 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
   return (
     <CollectionDetail
       kind="playlist"
+      collectionId={playlist.id}
       title={playlist.title}
       imageURL={playlist.imageURL}
       description={playlist.description}

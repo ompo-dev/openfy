@@ -40,6 +40,7 @@ export type PlayerTrack = {
   streamUrl?: string;
   duration_ms: number;
   youtubeUrl?: string;
+  artists?: { id: string; name: string }[];
 };
 
 export type RepeatMode = 'off' | 'all' | 'one';
@@ -56,6 +57,7 @@ export interface PlayerStoreState {
   // Queue & Navigation
   queue: PlayerTrack[];
   queueIndex: number;
+  queueSourceId: string | null;
   history: PlayerTrack[];
   isShuffle: boolean;
   repeatMode: RepeatMode;
@@ -68,7 +70,11 @@ export interface PlayerStoreState {
     track: PlayerTrack,
     options?: { showPlayer?: boolean; setQueue?: boolean }
   ) => Promise<void>;
-  playWithQueue: (tracks: PlayerTrack[], startIndex?: number) => Promise<void>;
+  playWithQueue: (
+    tracks: PlayerTrack[],
+    startIndex?: number,
+    sourceId?: string
+  ) => Promise<void>;
   playDownloadedTrack: (track: any) => Promise<void>;
   togglePlayPause: () => Promise<void>;
   seekToPosition: (ms: number) => Promise<void>;
@@ -122,6 +128,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   lyricsData: null,
   queue: [],
   queueIndex: 0,
+  queueSourceId: null,
   history: [],
   isShuffle: false,
   repeatMode: 'off',
@@ -132,7 +139,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   },
 
   playTrack: async (track: PlayerTrack, options = {}) => {
-    const { showPlayer = true, setQueue = false } = options;
+    // A direct selection is a new one-track session. Queue navigation paths
+    // explicitly preserve their queue below so the controls never point at
+    // tracks selected previously on another screen.
+    const { showPlayer = true, setQueue = true } = options;
 
     // 1. ATOMIC GENERATION LOCK 🔒: Increments request counter to cancel any stale in-flight fetches
     const requestId = get().activeRequestId + 1;
@@ -159,7 +169,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         isBuffering: true,
         durationMs: track.duration_ms || 0,
       },
-      ...(setQueue ? { queue: [track], queueIndex: 0 } : {}),
+      ...(setQueue
+        ? { queue: [track], queueIndex: 0, queueSourceId: null }
+        : {}),
     });
 
     // Record interaction metric
@@ -372,14 +384,15 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     }
   },
 
-  playWithQueue: async (tracks: PlayerTrack[], startIndex = 0) => {
+  playWithQueue: async (tracks: PlayerTrack[], startIndex = 0, sourceId) => {
     if (!tracks || tracks.length === 0) return;
     const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
     set({
       queue: tracks,
       queueIndex: safeIndex,
+      queueSourceId: sourceId ?? null,
     });
-    await get().playTrack(tracks[safeIndex]);
+    await get().playTrack(tracks[safeIndex], { setQueue: false });
   },
 
   playDownloadedTrack: async (downloaded: any) => {
@@ -404,7 +417,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const realState = getStatus();
 
     if (!realState.isLoaded && currentTrack) {
-      await playTrack(currentTrack);
+      await playTrack(currentTrack, { setQueue: false });
       return;
     }
 
@@ -440,11 +453,11 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     }
 
     set({ queueIndex: nextIndex });
-    await playTrack(queue[nextIndex]);
+    await playTrack(queue[nextIndex], { setQueue: false });
   },
 
   playPrevious: async () => {
-    const { queue, queueIndex, playerState, playTrack } = get();
+    const { queue, queueIndex, playerState, repeatMode, playTrack } = get();
     if (queue.length === 0) return;
 
     // If already playing for more than 3 seconds, restart current track
@@ -453,9 +466,14 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       return;
     }
 
-    const prevIndex = queueIndex > 0 ? queueIndex - 1 : queue.length - 1;
+    let prevIndex = queueIndex - 1;
+    if (prevIndex < 0) {
+      if (repeatMode !== 'all') return;
+      prevIndex = queue.length - 1;
+    }
+
     set({ queueIndex: prevIndex });
-    await playTrack(queue[prevIndex]);
+    await playTrack(queue[prevIndex], { setQueue: false });
   },
 
   addToQueue: (tracks: PlayerTrack[]) => {
@@ -483,6 +501,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     set({
       queue: [],
       queueIndex: 0,
+      queueSourceId: null,
     });
   },
 
@@ -500,6 +519,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       currentTrack: null,
       isPlayerVisible: false,
       lyricsData: null,
+      queueSourceId: null,
       playerState: DEFAULT_STATE,
     });
   },

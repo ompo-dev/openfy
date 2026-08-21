@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { Href, useFocusEffect, useRouter } from 'expo-router';
 import { Swipeable } from 'react-native-gesture-handler';
 
 import {
@@ -26,11 +26,30 @@ import { LoggedPressable } from '../native';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
 
+type LocalCollection = {
+  id: string;
+  title: string;
+  subtitle: string;
+  imageURL: string;
+  tracks: DownloadedTrack[];
+};
+
+const toPlayerTrack = (track: DownloadedTrack) => ({
+  spotifyId: track.spotifyId,
+  title: track.title,
+  artistName: track.artistName,
+  albumName: track.albumName,
+  imageURL: track.localImagePath || track.imageURL,
+  localAudioPath: track.localAudioPath,
+  streamUrl: track.audioUrl,
+  duration_ms: track.duration_ms,
+});
+
 export const OfflineLibrary = () => {
   const router = useRouter();
   const [tracks, setTracks] = React.useState<DownloadedTrack[]>([]);
   const [playlists, setPlaylists] = React.useState<LocalPlaylist[]>([]);
-  const { playDownloadedTrack, currentTrack, playerState } = usePlayer();
+  const { playDownloadedTrack, playWithQueue, currentTrack, playerState } = usePlayer();
   const {
     libraryRevision,
     librarySearchQuery,
@@ -100,6 +119,66 @@ export const OfflineLibrary = () => {
     () => new Map(tracks.map((track) => [track.spotifyId, track])),
     [tracks]
   );
+  const localAlbums = React.useMemo<LocalCollection[]>(() => {
+    const grouped = new Map<string, LocalCollection>();
+    tracks.forEach((track) => {
+      const title = track.albumName.trim() || 'Singles';
+      const id = `${title}\u0000${track.artistName}`.toLocaleLowerCase();
+      const current = grouped.get(id);
+      grouped.set(
+        id,
+        current
+          ? { ...current, tracks: [...current.tracks, track] }
+          : {
+              id,
+              title,
+              subtitle: track.artistName,
+              imageURL: track.localImagePath || track.imageURL,
+              tracks: [track],
+            }
+      );
+    });
+    return [...grouped.values()];
+  }, [tracks]);
+  const localArtists = React.useMemo<LocalCollection[]>(() => {
+    const grouped = new Map<string, LocalCollection>();
+    tracks.forEach((track) => {
+      track.artistName
+        .split(/\s*(?:,|&| feat\.?)\s*/i)
+        .filter(Boolean)
+        .forEach((artistName) => {
+          const title = artistName.trim();
+          const id = title.toLocaleLowerCase();
+          const current = grouped.get(id);
+          grouped.set(
+            id,
+            current
+              ? { ...current, tracks: [...current.tracks, track] }
+              : {
+                  id,
+                  title,
+                  subtitle: `${track.albumName || 'Single'}`,
+                  imageURL: track.localImagePath || track.imageURL,
+                  tracks: [track],
+                }
+          );
+        });
+    });
+    return [...grouped.values()];
+  }, [tracks]);
+  const visibleCollections = React.useMemo(() => {
+    const collections = libraryView === 'albums' ? localAlbums : localArtists;
+    const filtered = normalizedQuery
+      ? collections.filter((collection) =>
+          `${collection.title} ${collection.subtitle}`
+            .toLocaleLowerCase()
+            .includes(normalizedQuery)
+        )
+      : collections;
+    return librarySort === 'title'
+      ? [...filtered].sort((first, second) => first.title.localeCompare(second.title))
+      : filtered;
+  }, [librarySort, libraryView, localAlbums, localArtists, normalizedQuery]);
 
   const renderTrack = ({ item }: { item: DownloadedTrack }) => {
     const isCurrentTrack = currentTrack?.spotifyId === item.spotifyId;
@@ -189,12 +268,49 @@ export const OfflineLibrary = () => {
     );
   };
 
+  const renderCollection = ({ item }: { item: LocalCollection }) => {
+    const isArtist = libraryView === 'artists';
+    return (
+      <LoggedPressable
+        accessibilityRole="button"
+        accessibilityLabel={`${isArtist ? 'Abrir artista' : 'Tocar álbum'} ${item.title}`}
+        onPress={() => {
+          if (isArtist) {
+            router.push(`/library/artist/local_artist_${encodeURIComponent(item.title)}` as Href);
+            return;
+          }
+          void playWithQueue(item.tracks.map(toPlayerTrack));
+        }}
+        style={styles.playlistItem}
+      >
+        {item.imageURL ? (
+          <Image source={{ uri: item.imageURL }} style={[styles.collectionCover, isArtist && styles.artistCover]} />
+        ) : (
+          <View style={[styles.collectionCover, styles.coverFallback, isArtist && styles.artistCover]}>
+            <Ionicons name={isArtist ? 'person' : 'disc'} size={22} color="#888" />
+          </View>
+        )}
+        <View style={styles.playlistInfo}>
+          <Text style={styles.playlistTitle} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.playlistMeta} numberOfLines={1}>
+            {isArtist ? `${item.tracks.length} músicas` : item.subtitle}
+          </Text>
+        </View>
+        <Ionicons name={isArtist ? 'chevron-forward' : 'play'} size={18} color={isArtist ? '#8B8B8B' : '#1DB954'} />
+      </LoggedPressable>
+    );
+  };
+
   const noResults = (
     <View style={styles.searchEmpty}>
       <Text style={styles.searchEmptyText}>
         {libraryView === 'songs'
           ? 'Nenhuma música encontrada'
-          : 'Nenhuma playlist encontrada'}
+          : libraryView === 'playlists'
+            ? 'Nenhuma playlist encontrada'
+            : libraryView === 'albums'
+              ? 'Nenhum álbum encontrado'
+              : 'Nenhum artista encontrado'}
       </Text>
     </View>
   );
@@ -225,7 +341,7 @@ export const OfflineLibrary = () => {
           ListEmptyComponent={noResults}
           showsVerticalScrollIndicator={false}
         />
-      ) : (
+      ) : libraryView === 'playlists' ? (
         <FlatList
           data={visiblePlaylists}
           renderItem={renderPlaylist}
@@ -233,6 +349,18 @@ export const OfflineLibrary = () => {
           contentContainerStyle={[
             styles.list,
             visiblePlaylists.length === 0 && styles.listEmpty,
+          ]}
+          ListEmptyComponent={noResults}
+          showsVerticalScrollIndicator={false}
+        />
+      ) : (
+        <FlatList
+          data={visibleCollections}
+          renderItem={renderCollection}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={[
+            styles.list,
+            visibleCollections.length === 0 && styles.listEmpty,
           ]}
           ListEmptyComponent={noResults}
           showsVerticalScrollIndicator={false}
@@ -269,6 +397,14 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 4,
+  },
+  collectionCover: {
+    width: 62,
+    height: 62,
+    borderRadius: 5,
+  },
+  artistCover: {
+    borderRadius: 31,
   },
   coverFallback: {
     backgroundColor: '#282828',

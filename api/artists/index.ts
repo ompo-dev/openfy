@@ -1,4 +1,4 @@
-export { getArtist } from './artist';
+export { findArtistIdByName, getArtist, getYouTubeArtistImage } from './artist';
 export { getArtistTopTracks } from './artistTopTracks';
 export { getUserTopArtists } from './topArtists';
 export { getUserFollowedArtists } from './followedArtists';

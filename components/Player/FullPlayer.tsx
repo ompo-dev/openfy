@@ -24,10 +24,10 @@ import {
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import Slider from '@react-native-community/slider';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import FontAwesome6 from '@expo/vector-icons/FontAwesome6';
+import { Href, useRouter, useSegments } from 'expo-router';
+import { findArtistIdByName } from '@api';
 import { usePlayer } from '@context';
 import {
   fetchLyrics,
@@ -35,7 +35,6 @@ import {
   LyricSegment,
   parseSpotifyLink,
 } from '@services';
-import { getDynamicColorPalette } from '@utils';
 import { GlassSurface, LoggedPressable } from '../native';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -86,7 +85,51 @@ const getTrackYouTubeUrl = (
     : '';
 };
 
+type PlayerGlassButtonProps = {
+  accessibilityLabel: string;
+  children: React.ReactNode;
+  disabled?: boolean;
+  glass?: 'regular' | 'clear' | 'thick';
+  onPress?: () => void;
+  style?: any;
+  surfaceStyle?: any;
+  tintColor?: string;
+};
+
+function PlayerGlassButton({
+  accessibilityLabel,
+  children,
+  disabled = false,
+  glass = 'regular',
+  onPress,
+  style,
+  surfaceStyle,
+  tintColor,
+}: PlayerGlassButtonProps) {
+  return (
+    <LoggedPressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={[style, disabled && styles.glassButtonDisabled]}
+    >
+      <GlassSurface
+        glass={glass}
+        tintColor={tintColor}
+        isInteractive={!!onPress && !disabled}
+        style={[styles.glassButtonSurface, surfaceStyle]}
+      >
+        {children}
+      </GlassSurface>
+    </LoggedPressable>
+  );
+}
+
 export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
+  const router = useRouter();
+  const segments = useSegments();
   const {
     currentTrack,
     playerState,
@@ -96,6 +139,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     playNext,
     playPrevious,
     queue,
+    queueIndex,
     lyricsData,
     isLoadingLyrics,
     isShuffle,
@@ -122,17 +166,30 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const youtubeTrackKeyRef = React.useRef('');
   const currentTrackKey = getTrackKey(currentTrack);
 
-  React.useEffect(() => {
-    currentTrackRef.current = currentTrack;
+  const artistLinks = React.useMemo(() => {
+    if (!currentTrack) return [];
+    if (currentTrack.artists?.length) return currentTrack.artists;
+    return currentTrack.artistName
+      .split(/\s*(?:,|&| feat\.?)\s*/i)
+      .filter(Boolean)
+      .map((name) => ({ id: '', name: name.trim() }));
   }, [currentTrack]);
 
-  // Dynamic ambient color palette based on track
-  const palette = React.useMemo(() => {
-    if (!currentTrack)
-      return { primary: '#1e3a8a', secondary: '#0f172a', accent: '#38bdf8' };
-    return getDynamicColorPalette(
-      `${currentTrack.artistName} - ${currentTrack.title}`
-    );
+  const handleArtistPress = React.useCallback(
+    async (artistId: string, artistName: string) => {
+      const targetArtistId =
+        artistId ||
+        (await findArtistIdByName(artistName)) ||
+        `local_artist_${encodeURIComponent(artistName)}`;
+      const section = segments.join('/').includes('library') ? 'library' : 'home';
+      router.push(`/(tabs)/${section}/artist/${targetArtistId}` as Href);
+      requestAnimationFrame(onClose);
+    },
+    [onClose, router, segments]
+  );
+
+  React.useEffect(() => {
+    currentTrackRef.current = currentTrack;
   }, [currentTrack]);
 
   // Reset first so an old link can never open while next track resolves.
@@ -341,7 +398,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       };
       setYoutubeUrl(track.youtubeUrl);
       youtubeTrackKeyRef.current = getTrackKey(nextTrack);
-      await playTrack(nextTrack);
+      await playTrack(nextTrack, { setQueue: false });
       setIsEditModalVisible(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => {}
@@ -378,6 +435,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     await seekToPosition(seg.startTimeMs);
   };
 
+  const canGoPrevious =
+    queue.length > 1 &&
+    (isShuffle || repeatMode === 'all' || queueIndex > 0);
+  const canGoNext =
+    queue.length > 1 &&
+    (isShuffle || repeatMode === 'all' || queueIndex < queue.length - 1);
+
   return (
     <Modal
       visible={visible}
@@ -385,11 +449,16 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <LinearGradient
-        colors={[palette.primary, palette.secondary, '#0a0d14']}
-        locations={[0, 0.45, 1.0]}
-        style={styles.container}
-      >
+      <View style={styles.container}>
+        {currentTrack.imageURL ? (
+          <Image
+            source={{ uri: currentTrack.imageURL }}
+            style={styles.backgroundCover}
+            blurRadius={28}
+            resizeMode="cover"
+          />
+        ) : null}
+        <View style={[styles.backgroundScrim, { pointerEvents: 'none' }]} />
         {/* Grab Handle Header */}
         <View style={styles.topGrabRow}>
           <View style={styles.grabBar} />
@@ -397,28 +466,35 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
         {/* Top Navigation Bar */}
         <View style={styles.header}>
-          <LoggedPressable onPress={onClose} style={styles.headerIconButton}>
+          <PlayerGlassButton
+            accessibilityLabel="Fechar player"
+            onPress={onClose}
+            style={styles.headerIconButton}
+          >
             <Ionicons name="chevron-down" size={26} color="#FFFFFF" />
-          </LoggedPressable>
+          </PlayerGlassButton>
           <View style={styles.headerInfo}>
             <Text style={styles.headerFrom}>OPENFY MUSIC</Text>
             <Text style={styles.headerContext} numberOfLines={1}>
               {currentTrack.albumName || 'Reproduzindo'}
             </Text>
           </View>
-          <LoggedPressable
+          <PlayerGlassButton
+            accessibilityLabel={
+              showLyricsFull ? 'Fechar letras sincronizadas' : 'Abrir letras sincronizadas'
+            }
             onPress={() => setShowLyricsFull(!showLyricsFull)}
-            style={[
-              styles.headerIconButton,
-              showLyricsFull && styles.headerIconButtonActive,
-            ]}
+            style={styles.headerIconButton}
+            tintColor={
+              showLyricsFull ? 'rgba(255,255,255,0.28)' : undefined
+            }
           >
             <Ionicons
               name="chatbubble-ellipses-outline"
               size={22}
               color={showLyricsFull ? '#FFFFFF' : 'rgba(255,255,255,0.7)'}
             />
-          </LoggedPressable>
+          </PlayerGlassButton>
         </View>
 
         {showLyricsFull ? (
@@ -539,9 +615,19 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               <Text style={styles.trackTitle} numberOfLines={1}>
                 {currentTrack.title}
               </Text>
-              <Text style={styles.trackArtist} numberOfLines={1}>
-                {currentTrack.artistName}
-              </Text>
+              <View style={styles.trackArtistLinks}>
+                {artistLinks.map((artist, index) => (
+                  <LoggedPressable
+                    key={`${artist.id}-${artist.name}`}
+                    accessibilityLabel={`Abrir artista ${artist.name}`}
+                    onPress={() => void handleArtistPress(artist.id, artist.name)}
+                  >
+                    <Text style={styles.trackArtist} numberOfLines={1}>
+                      {artist.name}{index < artistLinks.length - 1 ? ' · ' : ''}
+                    </Text>
+                  </LoggedPressable>
+                ))}
+              </View>
             </View>
           </View>
         )}
@@ -551,29 +637,53 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
          * ========================================================= */}
         <View style={styles.actionPillRow}>
           {/* Left Pill: Lyrics Toggle */}
-          <LoggedPressable
+          <PlayerGlassButton
+            accessibilityLabel={
+              showLyricsFull ? 'Fechar letras sincronizadas' : 'Abrir letras sincronizadas'
+            }
             onPress={() => setShowLyricsFull(!showLyricsFull)}
-            style={[
-              styles.circleActionBtn,
-              showLyricsFull && styles.circleActionBtnActive,
-            ]}
+            style={styles.circleActionBtn}
+            tintColor={
+              showLyricsFull ? 'rgba(255,255,255,0.28)' : undefined
+            }
           >
             <Ionicons
               name="chatbubble-ellipses-outline"
               size={20}
               color={showLyricsFull ? '#FFFFFF' : 'rgba(255,255,255,0.75)'}
             />
-          </LoggedPressable>
+          </PlayerGlassButton>
 
           {/* Center Pill: Quick Controls or Track Info */}
           {showLyricsFull ? (
-            <GlassSurface glass="regular" style={styles.lyricsTrackPill}>
+            <GlassSurface
+              glass="regular"
+              isInteractive
+              style={styles.lyricsTrackPill}
+            >
               <Text style={styles.lyricsTrackPillText} numberOfLines={1}>
-                {currentTrack.title} • {currentTrack.artistName}
+                {currentTrack.title} •
               </Text>
+              <View style={styles.lyricsArtistLinks}>
+                {artistLinks.map((artist, index) => (
+                  <LoggedPressable
+                    key={`${artist.id}-${artist.name}`}
+                    accessibilityLabel={`Abrir artista ${artist.name}`}
+                    onPress={() => void handleArtistPress(artist.id, artist.name)}
+                  >
+                    <Text style={styles.lyricsTrackPillText} numberOfLines={1}>
+                      {artist.name}{index < artistLinks.length - 1 ? ' · ' : ''}
+                    </Text>
+                  </LoggedPressable>
+                ))}
+              </View>
             </GlassSurface>
           ) : (
-            <GlassSurface glass="regular" style={styles.centerActionPill}>
+            <GlassSurface
+              glass="regular"
+              isInteractive
+              style={styles.centerActionPill}
+            >
               <LoggedPressable
                 onPress={() => setIsLiked(!isLiked)}
                 style={styles.pillSegment}
@@ -616,18 +726,17 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           )}
 
           {/* Right Pill: YouTube Button with Clean Glass Theme */}
-          <LoggedPressable
+          <PlayerGlassButton
+            accessibilityLabel="Opções do YouTube"
             onPress={handleOpenYoutubeMenu}
             style={styles.circleActionBtn}
-            accessibilityRole="button"
-            accessibilityLabel="Opções do YouTube"
           >
             <Ionicons
               name="logo-youtube"
               size={20}
               color="rgba(255,255,255,0.85)"
             />
-          </LoggedPressable>
+          </PlayerGlassButton>
         </View>
 
         {/* =========================================================
@@ -669,56 +778,81 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
          * ========================================================= */}
         <View style={styles.controlsRow}>
           {/* AirPlay / Output icon */}
-          <LoggedPressable style={styles.sideControlBtn}>
+          <PlayerGlassButton
+            accessibilityLabel="Dispositivo de saída"
+            style={styles.sideControlBtn}
+          >
             <Ionicons
               name="radio-outline"
               size={24}
               color="rgba(255,255,255,0.75)"
             />
-          </LoggedPressable>
+          </PlayerGlassButton>
 
           {/* Previous Track */}
-          <LoggedPressable onPress={playPrevious} style={styles.seekControlBtn}>
-            <Ionicons name="play-back" size={32} color="#FFFFFF" />
-          </LoggedPressable>
+          <PlayerGlassButton
+            accessibilityLabel="Faixa anterior"
+            disabled={!canGoPrevious}
+            onPress={playPrevious}
+            style={styles.seekControlBtn}
+          >
+            <Ionicons
+              name="play-back"
+              size={32}
+              color={canGoPrevious ? '#FFFFFF' : 'rgba(255,255,255,0.42)'}
+            />
+          </PlayerGlassButton>
 
-          {/* Solid White Play/Pause Button */}
-          <LoggedPressable
+          {/* Primary control keeps the light Liquid Glass treatment from iOS Music. */}
+          <PlayerGlassButton
+            accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'}
+            glass="thick"
             onPress={togglePlayPause}
             style={styles.playPauseCircle}
+            tintColor="rgba(255,255,255,0.92)"
           >
             {playerState.isBuffering ? (
               <MaterialCommunityIcons
                 name="loading"
                 size={34}
-                color="#000000"
+                color="#FFFFFF"
               />
             ) : (
               <Ionicons
                 name={playerState.isPlaying ? 'pause' : 'play'}
                 size={34}
-                color="#000000"
+                color="#FFFFFF"
                 style={playerState.isPlaying ? undefined : { marginLeft: 3 }}
               />
             )}
-          </LoggedPressable>
+          </PlayerGlassButton>
 
           {/* Next Track */}
-          <LoggedPressable onPress={playNext} style={styles.seekControlBtn}>
-            <Ionicons name="play-forward" size={32} color="#FFFFFF" />
-          </LoggedPressable>
+          <PlayerGlassButton
+            accessibilityLabel="Próxima faixa"
+            disabled={!canGoNext}
+            onPress={playNext}
+            style={styles.seekControlBtn}
+          >
+            <Ionicons
+              name="play-forward"
+              size={32}
+              color={canGoNext ? '#FFFFFF' : 'rgba(255,255,255,0.42)'}
+            />
+          </PlayerGlassButton>
 
           {/* Shuffle / Repeat toggle */}
-          <LoggedPressable
+          <PlayerGlassButton
+            accessibilityLabel="Alternar reprodução aleatória"
             onPress={toggleShuffle}
             style={styles.sideControlBtn}
           >
             <MaterialCommunityIcons
               name="shuffle-variant"
               size={24}
-              color={isShuffle ? palette.accent : 'rgba(255,255,255,0.75)'}
+              color={isShuffle ? '#1ED760' : 'rgba(255,255,255,0.75)'}
             />
-          </LoggedPressable>
+          </PlayerGlassButton>
         </View>
 
         {/* =========================================================
@@ -861,18 +995,28 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             </Pressable>
           </Pressable>
         </Modal>
-      </LinearGradient>
+      </View>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
+    backgroundColor: '#101116',
     flex: 1,
     paddingHorizontal: 24,
     paddingTop: Platform.OS === 'ios' ? 12 : 20,
     paddingBottom: Platform.OS === 'ios' ? 36 : 24,
     justifyContent: 'space-between',
+  },
+  backgroundCover: {
+    ...(StyleSheet.absoluteFill as any),
+    opacity: 0.64,
+    transform: [{ scale: 1.1 }],
+  },
+  backgroundScrim: {
+    ...(StyleSheet.absoluteFill as any),
+    backgroundColor: 'rgba(8, 10, 16, 0.60)',
   },
   topGrabRow: {
     alignItems: 'center',
@@ -894,12 +1038,8 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  headerIconButtonActive: {
-    backgroundColor: 'rgba(255,255,255,0.35)',
   },
   headerInfo: {
     alignItems: 'center',
@@ -962,6 +1102,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginTop: 4,
     textAlign: 'center',
+  },
+  trackArtistLinks: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    marginTop: 4,
   },
   lyricsMainContainer: {
     flex: 1,
@@ -1026,12 +1173,8 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  circleActionBtnActive: {
-    backgroundColor: 'rgba(255,255,255,0.32)',
   },
   centerActionPill: {
     flexDirection: 'row',
@@ -1039,21 +1182,24 @@ const styles = StyleSheet.create({
     height: 44,
     paddingHorizontal: 16,
     borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   lyricsTrackPill: {
     height: 44,
     paddingHorizontal: 20,
     borderRadius: 22,
     alignItems: 'center',
+    flexDirection: 'row',
     justifyContent: 'center',
     maxWidth: SCREEN_WIDTH - 150,
-    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   lyricsTrackPillText: {
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '600',
+  },
+  lyricsArtistLinks: {
+    flexDirection: 'row',
+    flexShrink: 1,
   },
   pillSegment: {
     paddingHorizontal: 12,
@@ -1120,14 +1266,19 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
     borderRadius: 34,
-    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#FFFFFF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 8,
+  },
+  glassButtonSurface: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  glassButtonDisabled: {
+    opacity: 0.34,
   },
   modalOverlay: {
     flex: 1,

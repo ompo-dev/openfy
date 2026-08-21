@@ -1,22 +1,12 @@
 /**
  * MiniPlayer Component
  * Refactored iOS Liquid Glass / SwiftUI Dynamic Island style pill player.
- * Deep emerald/dark translucent glass with circular artwork, typography, AirPlay output,
- * tactile haptics, and sleek edge-to-edge white progress bar.
+ * Compact status dock with artwork, track metadata, tactile controls, and progress.
  */
 
 import * as React from 'react';
-import {
-  Animated,
-  Image,
-  Platform,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Animated, Image, Platform, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
 import { GlassSurface, LoggedPressable } from '../native';
@@ -60,12 +50,6 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
     togglePlayPause();
   };
 
-  const handleDevicePress = () => {
-    try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch {}
-  };
-
   return (
     <Animated.View
       style={[
@@ -97,101 +81,100 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
       >
         <GlassSurface
           glass="regular"
-          isInteractive
+          isInteractive={!!onPress}
           style={styles.glassContainer}
         >
-          {/* Subtle Emerald / Dark Translucent Liquid Glass Gradient */}
-          <LinearGradient
-            colors={['rgba(10, 48, 30, 0.88)', 'rgba(6, 32, 20, 0.94)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.gradientBacking}
-          >
-            <View style={styles.contentRow}>
-              {/* Left: Circular Album Cover */}
-              <View style={styles.coverWrapper}>
-                {currentTrack.imageURL ? (
-                  <Image
-                    source={{ uri: currentTrack.imageURL }}
-                    style={styles.coverImage}
-                  />
-                ) : (
-                  <View style={[styles.coverImage, styles.coverFallback]}>
-                    <Ionicons name="musical-note" size={18} color="#FFFFFF" />
-                  </View>
-                )}
-              </View>
-
-              {/* Center: Title & Artist Typography with Marquee */}
-              <View style={styles.infoContainer}>
-                <MarqueeText
-                  text={currentTrack.title}
-                  style={styles.titleText}
-                  align="left"
-                  fadeWidth={8}
+          <View style={styles.contentRow}>
+            <View style={styles.coverWrapper}>
+              {currentTrack.imageURL ? (
+                <Image
+                  source={{ uri: currentTrack.imageURL }}
+                  style={styles.coverImage}
                 />
-                <MarqueeText
-                  text={currentTrack.artistName}
-                  style={styles.artistText}
-                  align="left"
-                  fadeWidth={8}
-                />
-              </View>
+              ) : (
+                <View style={[styles.coverImage, styles.coverFallback]}>
+                  <Ionicons name="musical-note" size={18} color="#FFFFFF" />
+                </View>
+              )}
+            </View>
 
-              {/* Right: Audio Output Device & Play/Pause / Confirm Button */}
-              <View style={styles.controlsContainer}>
-                <LoggedPressable
-                  style={styles.playBtn}
-                  hitSlop={12}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    handlePlayPause();
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    playerState.isPlaying ? 'Pausar' : 'Tocar'
-                  }
+            <View style={styles.infoContainer}>
+              <MarqueeText
+                text={currentTrack.title}
+                style={styles.titleText}
+                align="left"
+                fadeWidth={8}
+              />
+              <MarqueeText
+                text={currentTrack.artistName}
+                style={styles.artistText}
+                align="left"
+                fadeWidth={8}
+              />
+            </View>
+
+            <View style={styles.controlsContainer}>
+              <LoggedPressable
+                style={styles.controlPressable}
+                hitSlop={12}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  handlePlayPause();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'}
+              >
+                <GlassSurface
+                  glass="clear"
+                  tintColor="rgba(255,255,255,0.16)"
+                  isInteractive
+                  style={styles.controlSurface}
                 >
                   <Ionicons
                     name={playerState.isPlaying ? 'pause' : 'play'}
-                    size={24}
+                    size={19}
                     color="#FFFFFF"
-                    style={
-                      !playerState.isPlaying ? { marginLeft: 2 } : undefined
-                    }
+                    style={!playerState.isPlaying ? { marginLeft: 2 } : undefined}
                   />
-                </LoggedPressable>
+                </GlassSurface>
+              </LoggedPressable>
 
-                {onConfirm && (
-                  <TouchableOpacity
-                    style={styles.confirmCheckBtn}
-                    activeOpacity={0.8}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      try {
-                        Haptics.notificationAsync(
-                          Haptics.NotificationFeedbackType.Success
-                        );
-                      } catch {}
-                      onConfirm();
-                    }}
+              {onConfirm && (
+                <LoggedPressable
+                  style={styles.controlPressable}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    try {
+                      Haptics.notificationAsync(
+                        Haptics.NotificationFeedbackType.Success
+                      );
+                    } catch {}
+                    onConfirm();
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Confirmar música"
+                >
+                  <GlassSurface
+                    glass="regular"
+                    tintColor="rgba(30,215,96,0.34)"
+                    isInteractive
+                    style={styles.controlSurface}
                   >
-                    <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
-                  </TouchableOpacity>
-                )}
-              </View>
+                    <Ionicons name="arrow-forward" size={17} color="#FFFFFF" />
+                  </GlassSurface>
+                </LoggedPressable>
+              )}
             </View>
+          </View>
 
-            {/* Bottom Progress Line */}
-            <View style={styles.progressBarBackground}>
-              <View
-                style={[
-                  styles.progressBarFill,
-                  { width: `${progress * 100}%` },
-                ]}
-              />
-            </View>
-          </LinearGradient>
+          <View style={styles.progressBarBackground}>
+            <View
+              style={[
+                styles.progressBarFill,
+                { width: `${progress * 100}%` },
+              ]}
+            />
+          </View>
         </GlassSurface>
       </LoggedPressable>
     </Animated.View>
@@ -217,13 +200,8 @@ const styles = StyleSheet.create({
   },
   glassContainer: {
     borderRadius: 36,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.16)',
     overflow: 'hidden',
-  },
-  gradientBacking: {
-    borderRadius: 36,
-    overflow: 'hidden',
+    minHeight: 64,
   },
   contentRow: {
     flexDirection: 'row',
@@ -278,30 +256,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingRight: 4,
+    paddingRight: 2,
   },
-  deviceBtn: {
-    padding: 4,
-  },
-  playBtn: {
-    padding: 4,
+  controlPressable: {
     width: 32,
     height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  confirmCheckBtn: {
+  controlSurface: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#5B5BD6',
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
-    shadowColor: '#5B5BD6',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 4,
   },
   progressBarBackground: {
     height: 2.5,

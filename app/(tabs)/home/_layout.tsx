@@ -1,4 +1,5 @@
 import { Stack } from 'expo-router';
+import { detailStackOptions } from '@config';
 
 export default function HomeLayout() {
   return (
@@ -15,15 +16,15 @@ export default function HomeLayout() {
       />
       <Stack.Screen
         name="playlist"
-        options={{ headerShown: false, animation: 'default' }}
+        options={detailStackOptions}
       />
       <Stack.Screen
         name="album"
-        options={{ headerShown: false, animation: 'default' }}
+        options={detailStackOptions}
       />
       <Stack.Screen
         name="artist"
-        options={{ headerShown: false, animation: 'default' }}
+        options={detailStackOptions}
       />
       <Stack.Screen
         name="episode"

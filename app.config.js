@@ -4,12 +4,15 @@ module.exports = {
     slug: 'openfy',
     version: '1.0.0',
     orientation: 'portrait',
-    icon: './assets/images/logo.png',
+    icon: './assets/images/app-icon/openfy-light.png',
     scheme: 'openfy',
     userInterfaceStyle: 'automatic',
     ios: {
       bundleIdentifier: 'com.openfy.app',
-      icon: './assets/images/logo.png',
+      icon: {
+        light: './assets/images/app-icon/openfy-light.png',
+        dark: './assets/images/app-icon/openfy-dark.png',
+      },
       ...(process.env.IOS_APPLE_TEAM_ID
         ? { appleTeamId: process.env.IOS_APPLE_TEAM_ID }
         : {}),
@@ -17,15 +20,17 @@ module.exports = {
     },
     android: {
       package: 'com.openfy.app',
+      icon: './assets/images/app-icon/openfy-dark.png',
       softwareKeyboardLayoutMode: 'pan',
       adaptiveIcon: {
-        foregroundImage: './assets/images/logo.png',
-        backgroundColor: '#121212',
+        foregroundImage: './assets/images/app-icon/openfy-android-foreground.png',
+        monochromeImage: './assets/images/app-icon/openfy-android-foreground.png',
+        backgroundColor: '#000000',
       },
     },
     web: {
       bundler: 'metro',
-      favicon: './assets/images/logo.png',
+      favicon: './assets/images/app-icon/openfy-light.png',
     },
     plugins: [
       'expo-router',
@@ -58,6 +63,8 @@ module.exports = {
       clientID: process.env.CLIENT_ID || '',
       clientSecret: process.env.CLIENT_SECRET || '',
       tokenKey: process.env.TOKEN_KEY || 'spotify_token',
+      musicServerUrl:
+        process.env.EXPO_PUBLIC_MUSIC_SERVER_URL || 'http://localhost:3001',
       refreshTokenKey: process.env.REFRESH_TOKEN_KEY || 'spotify_refresh_token',
       expirationKey: process.env.EXPIRATION_KEY || 'spotify_expiration_key',
       authorizationEndpoint:

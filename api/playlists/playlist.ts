@@ -2,9 +2,7 @@ import { PlaylistModel, TrackModel } from '@models';
 import { PlaylistItemResponseType, PlaylistResponseType } from '@config';
 import { parseFromPlaylistItemsToTracks, parseToPlaylist } from '@utils';
 
-import { BASE_URL, spotifyGet } from '../config';
-
-const MUSIC_SERVER_URL = 'http://localhost:3001';
+import { BASE_URL, MUSIC_SERVER_URL, spotifyGet } from '../config';
 
 type BackendPlaylist = {
   id: string;
@@ -56,18 +54,21 @@ export const getPlaylist = async (
   playlistId: string
 ): Promise<PlaylistModel> => {
   try {
+    return parseBackendPlaylist(await getBackendPlaylist(playlistId));
+  } catch {
+    // Server scraper is preferred because it works without browser CORS or
+    // bundled Spotify client credentials. Official API stays as fallback.
+  }
+
+  try {
     const response = await spotifyGet<PlaylistResponseType>(
       `${BASE_URL}/playlists/${playlistId}`
     );
 
     return parseToPlaylist(response.data);
   } catch (error) {
-    try {
-      return parseBackendPlaylist(await getBackendPlaylist(playlistId));
-    } catch {
-      console.error(`Error fetching playlist with an ID: ${playlistId}`, error);
-      throw error;
-    }
+    console.error(`Error fetching playlist with an ID: ${playlistId}`, error);
+    throw error;
   }
 };
 
@@ -83,6 +84,13 @@ export const getPlaylistItems = async ({
   offset: number;
 }): Promise<TrackModel[]> => {
   try {
+    const playlist = await getBackendPlaylist(playlistId);
+    return parseBackendTracks(playlist).slice(offset, offset + limit);
+  } catch {
+    // Fallback below keeps signed-in/credentialed Spotify clients working.
+  }
+
+  try {
     const response = await spotifyGet<{ items: PlaylistItemResponseType[]; total: number }>(
       `${BASE_URL}/playlists/${playlistId}/tracks`,
       {
@@ -96,12 +104,7 @@ export const getPlaylistItems = async ({
 
     return parseFromPlaylistItemsToTracks(response.data.items);
   } catch (error) {
-    try {
-      const playlist = await getBackendPlaylist(playlistId);
-      return parseBackendTracks(playlist).slice(offset, offset + limit);
-    } catch {
-      console.error(`Error fetching playlist with an ID: ${playlistId}`, error);
-      throw error;
-    }
+    console.error(`Error fetching playlist with an ID: ${playlistId}`, error);
+    throw error;
   }
 };

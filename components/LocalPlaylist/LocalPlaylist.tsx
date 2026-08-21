@@ -56,6 +56,7 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
   return (
     <CollectionDetail
       kind="playlist"
+      collectionId={playlist.id}
       title={playlist.title}
       imageURL={imageURL}
       description={`Playlist importada do ${

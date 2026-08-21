@@ -20,7 +20,7 @@ const isAndroid = Platform.OS === 'android';
  */
 export function GlassSurfaceFallback({
   glass = 'regular',
-  tintColor: _tintColor,
+  tintColor,
   isInteractive: _isInteractive,
   style,
   children,
@@ -28,11 +28,12 @@ export function GlassSurfaceFallback({
 }: GlassSurfaceProps) {
   const dark = useColorScheme() === 'dark';
 
-  const backing = isAndroid
+  const platformBacking = isAndroid
     ? dark
       ? 'rgba(28,28,30,0.85)'
       : 'rgba(255,255,255,0.85)'
     : undefined;
+  const backing = tintColor ?? platformBacking;
 
   const intensity =
     glass === 'clear' ? 20 : glass === 'thick' ? 60 : 40;

@@ -10,7 +10,7 @@ import {
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Href, useRouter } from 'expo-router';
+import { Href, useRouter, useSegments } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TrackModel } from '@models';
@@ -24,6 +24,7 @@ type CollectionTrack = TrackModel & { localAudioPath?: string };
 
 export type CollectionDetailProps = {
   kind: 'album' | 'artist' | 'playlist';
+  collectionId: string;
   title: string;
   imageURL: string;
   description?: string;
@@ -48,10 +49,12 @@ const toPlayerTrack = (track: CollectionTrack, collectionName: string) => ({
   imageURL: track.imageURL || '',
   localAudioPath: track.localAudioPath,
   duration_ms: track.durationMs || 0,
+  artists: track.artists,
 });
 
 export const CollectionDetail = ({
   kind,
+  collectionId,
   title,
   imageURL,
   description,
@@ -68,6 +71,7 @@ export const CollectionDetail = ({
   footer,
 }: CollectionDetailProps) => {
   const router = useRouter();
+  const segments = useSegments();
   const insets = useSafeAreaInsets();
   const [sortAscending, setSortAscending] = React.useState(false);
   const {
@@ -76,12 +80,15 @@ export const CollectionDetail = ({
     isShuffle,
     playerState,
     playWithQueue,
+    queueSourceId,
     togglePlayPause,
     toggleShuffle,
   } = usePlayer();
   const hasActiveTrack = Boolean(
     currentTrack && tracks.some((track) => track.id === currentTrack.spotifyId)
   );
+  const collectionPlaybackId = `${kind}:${collectionId}`;
+  const isCollectionPlayback = queueSourceId === collectionPlaybackId;
   const metadata = metadataProp || formatCollectionMeta({
     createdAt,
     trackCount: trackCount ?? tracks.length,
@@ -107,9 +114,17 @@ export const CollectionDetail = ({
       const index = shuffled
         ? Math.floor(Math.random() * playerTracks.length)
         : startIndex;
-      await playWithQueue(playerTracks, index);
+      await playWithQueue(playerTracks, index, collectionPlaybackId);
     },
-    [isShuffle, playWithQueue, resolveTracksForPlayback, title, toggleShuffle, tracks]
+    [
+      collectionPlaybackId,
+      isShuffle,
+      playWithQueue,
+      resolveTracksForPlayback,
+      title,
+      toggleShuffle,
+      tracks,
+    ]
   );
 
   const handleAddToQueue = React.useCallback(async () => {
@@ -120,18 +135,23 @@ export const CollectionDetail = ({
   }, [addToQueue, resolveTracksForPlayback, title, tracks]);
 
   const handlePrimaryPlay = React.useCallback(async () => {
-    if (hasActiveTrack) {
+    if (isCollectionPlayback) {
       await togglePlayPause();
       return;
     }
     await playCollection();
-  }, [hasActiveTrack, playCollection, togglePlayPause]);
+  }, [isCollectionPlayback, playCollection, togglePlayPause]);
 
   const handleShare = React.useCallback(async () => {
     try {
       await Share.share({ message: `${title} · Openfy Music` });
     } catch {}
   }, [title]);
+
+  const handleBack = React.useCallback(() => {
+    const section = segments.join('/').includes('library') ? 'library' : 'home';
+    router.replace(`/(tabs)/${section}` as Href);
+  }, [router, segments]);
 
   const renderTrack = React.useCallback(
     ({ item, index }: { item: CollectionTrack; index: number }) => {
@@ -209,6 +229,10 @@ export const CollectionDetail = ({
             <View style={[styles.hero, { paddingTop: insets.top + 8 }]}>
             {imageURL ? (
               <Image source={{ uri: imageURL }} style={styles.heroArtwork} contentFit="cover" />
+            ) : kind === 'artist' ? (
+              <View style={styles.artistHeroFallback}>
+                <Ionicons name="person" size={74} color="rgba(255,255,255,0.82)" />
+              </View>
             ) : null}
             <LinearGradient
               colors={[
@@ -226,7 +250,7 @@ export const CollectionDetail = ({
                 iconName="chevron-back"
                 label="Voltar"
                 size={42}
-                onPress={() => router.back()}
+                onPress={handleBack}
               />
               <GlassSurface glass="regular" isInteractive style={styles.topTools}>
                 <LoggedPressable
@@ -301,14 +325,15 @@ export const CollectionDetail = ({
                 </LoggedPressable>
               </GlassSurface>
               <NativeIconButton
-                systemImage={hasActiveTrack && playerState.isPlaying ? 'pause.fill' : 'play.fill'}
-                iconName={hasActiveTrack && playerState.isPlaying ? 'pause' : 'play'}
-                label={hasActiveTrack && playerState.isPlaying ? 'Pausar' : 'Tocar'}
+                systemImage={isCollectionPlayback && playerState.isPlaying ? 'pause.fill' : 'play.fill'}
+                iconName={isCollectionPlayback && playerState.isPlaying ? 'pause' : 'play'}
+                label={isCollectionPlayback && playerState.isPlaying ? 'Pausar' : 'Tocar'}
                 size={52}
                 onPress={() => void handlePrimaryPlay()}
               />
             </View>
             </View>
+            <View style={styles.contentTopSpacer} />
             {sectionTitle ? <Text style={styles.sectionTitle}>{sectionTitle}</Text> : null}
           </>
         }
@@ -324,6 +349,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#101010' },
   hero: { backgroundColor: '#101010', minHeight: 426, paddingHorizontal: 14, justifyContent: 'space-between', overflow: 'hidden' },
   heroArtwork: { ...(StyleSheet.absoluteFill as any), opacity: 0.9 },
+  artistHeroFallback: { ...(StyleSheet.absoluteFill as any), alignItems: 'center', backgroundColor: '#242424', justifyContent: 'center' },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   topTools: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10 },
   topToolAction: { alignItems: 'center', justifyContent: 'center' },
@@ -335,6 +361,7 @@ const styles = StyleSheet.create({
   metadata: { color: 'rgba(255,255,255,0.78)', fontFamily: 'SF-Semibold', fontSize: 12, marginTop: 8, textAlign: 'center' },
   description: { color: 'rgba(255,255,255,0.7)', fontFamily: 'SF-Regular', fontSize: 13, lineHeight: 19, marginTop: 16, textAlign: 'center' },
   actionRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 22 },
+  contentTopSpacer: { height: 18 },
   actionPill: { alignItems: 'center', borderRadius: 999, flexDirection: 'row', minHeight: 46, paddingHorizontal: 6 },
   pillAction: { alignItems: 'center', height: 42, justifyContent: 'center', width: 43 },
   pillDivider: { backgroundColor: 'rgba(255,255,255,0.2)', height: 22, width: StyleSheet.hairlineWidth },

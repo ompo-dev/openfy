@@ -6,6 +6,7 @@
  */
 
 import { Platform } from 'react-native';
+import { MUSIC_SERVER_URL } from '@config';
 import {
   evaluateCandidateMatch,
   hasUnwantedForbiddenWords,
@@ -20,10 +21,8 @@ export type ResolvedAudio = {
   imageURL?: string;
 };
 
-const MUSIC_SERVER_URL = 'http://localhost:3001';
-
 const getPlayableAudioUrl = (streamUrl: string): string =>
-  Platform.OS === 'web'
+  Platform.OS === 'web' && MUSIC_SERVER_URL
     ? `${MUSIC_SERVER_URL}/api/audio/proxy?url=${encodeURIComponent(streamUrl)}`
     : streamUrl;
 
@@ -35,6 +34,8 @@ const getYouTubeVideoIdFromTrackId = (trackId?: string): string | null => {
 const resolveExactYouTubeVideo = async (
   videoId: string
 ): Promise<ResolvedAudio | null> => {
+  if (!MUSIC_SERVER_URL) return null;
+
   try {
     const response = await fetch(`${MUSIC_SERVER_URL}/api/music/youtube`, {
       method: 'POST',
@@ -510,6 +511,7 @@ export const resolveAudioUrl = async (
   // before accepting another provider.
   let backendFallback: ResolvedAudio | null = null;
   try {
+    if (!MUSIC_SERVER_URL) throw new Error('Music server unavailable');
     const backendRes = await fetch(`${MUSIC_SERVER_URL}/api/music/resolve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

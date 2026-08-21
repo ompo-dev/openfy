@@ -7,6 +7,15 @@ export type LibrarySelectedCategoryProviderPropsType = {
   children: React.ReactNode;
 };
 
+export type LibraryView = 'songs' | 'playlists' | 'albums' | 'artists';
+
+const nextLibraryView: Record<LibraryView, LibraryView> = {
+  songs: 'playlists',
+  playlists: 'albums',
+  albums: 'artists',
+  artists: 'songs',
+};
+
 export const LibrarySelectedCategoryContext = React.createContext<{
   librarySelectedCategory: Categories;
   setLibrarySelectedCategory: React.Dispatch<React.SetStateAction<Categories>>;
@@ -16,8 +25,8 @@ export const LibrarySelectedCategoryContext = React.createContext<{
   librarySort: 'recent' | 'title';
   setLibrarySort: React.Dispatch<React.SetStateAction<'recent' | 'title'>>;
   toggleLibrarySort: () => void;
-  libraryView: 'songs' | 'playlists';
-  setLibraryView: React.Dispatch<React.SetStateAction<'songs' | 'playlists'>>;
+  libraryView: LibraryView;
+  setLibraryView: React.Dispatch<React.SetStateAction<LibraryView>>;
   toggleLibraryView: () => void;
   libraryRevision: number;
   refreshLibrary: () => void;
@@ -46,7 +55,7 @@ export const LibrarySelectedCategoryProvider = ({
   const [librarySort, setLibrarySort] = React.useState<'recent' | 'title'>(
     'recent'
   );
-  const [libraryView, setLibraryView] = React.useState<'songs' | 'playlists'>(
+  const [libraryView, setLibraryView] = React.useState<LibraryView>(
     'songs'
   );
   const [libraryRevision, setLibraryRevision] = React.useState(0);
@@ -66,8 +75,7 @@ export const LibrarySelectedCategoryProvider = ({
           setLibrarySort((sort) => (sort === 'recent' ? 'title' : 'recent')),
         libraryView,
         setLibraryView,
-        toggleLibraryView: () =>
-          setLibraryView((view) => (view === 'songs' ? 'playlists' : 'songs')),
+        toggleLibraryView: () => setLibraryView((view) => nextLibraryView[view]),
         libraryRevision,
         refreshLibrary: () => setLibraryRevision((revision) => revision + 1),
       }}
@@ -86,8 +94,8 @@ export const useLibrarySelectedCategory = (): {
   librarySort: 'recent' | 'title';
   setLibrarySort: React.Dispatch<React.SetStateAction<'recent' | 'title'>>;
   toggleLibrarySort: () => void;
-  libraryView: 'songs' | 'playlists';
-  setLibraryView: React.Dispatch<React.SetStateAction<'songs' | 'playlists'>>;
+  libraryView: LibraryView;
+  setLibraryView: React.Dispatch<React.SetStateAction<LibraryView>>;
   toggleLibraryView: () => void;
   libraryRevision: number;
   refreshLibrary: () => void;

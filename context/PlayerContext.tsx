@@ -13,6 +13,8 @@ export { PlayerTrack } from '../stores/usePlayerStore';
 export const usePlayer = () => {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const queue = usePlayerStore((s) => s.queue);
+  const queueIndex = usePlayerStore((s) => s.queueIndex);
+  const queueSourceId = usePlayerStore((s) => s.queueSourceId);
   const playerState = usePlayerStore((s) => s.playerState);
   const isPlayerVisible = usePlayerStore((s) => s.isPlayerVisible);
   const lyricsData = usePlayerStore((s) => s.lyricsData);
@@ -38,6 +40,8 @@ export const usePlayer = () => {
   return {
     currentTrack,
     queue,
+    queueIndex,
+    queueSourceId,
     playerState,
     isPlayerVisible,
     lyricsData,

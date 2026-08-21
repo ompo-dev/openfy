@@ -1,3 +1,6 @@
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+
 export enum PLATFORMS {
   IOS = 'ios',
   ANDROID = 'android',
@@ -68,3 +71,17 @@ export const TRACK_COVER_SIZE = 50;
 export const RECENTLY_PLAYED_COVER_SIZE = 55;
 export const BROWSE_CATEGORY_IMAGE_SIZE = 75;
 export const BROWSE_CATEGORY_HEIGHT = 55;
+
+const configuredMusicServerUrl =
+  Constants.expoConfig?.extra?.musicServerUrl as string | undefined;
+const isLoopbackMusicServer = /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(
+  configuredMusicServerUrl || ''
+);
+
+// A phone's localhost is the phone, never the computer running Metro.
+export const MUSIC_SERVER_URL =
+  configuredMusicServerUrl && (Platform.OS === 'web' || !isLoopbackMusicServer)
+    ? configuredMusicServerUrl
+    : Platform.OS === 'web'
+      ? 'http://localhost:3001'
+      : '';

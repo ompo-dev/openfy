@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -30,6 +31,7 @@ import {
 } from '@services';
 
 import { getPlaylist, getPlaylistItems } from '@api';
+import { MUSIC_SERVER_URL } from '@config';
 import axios from 'axios';
 
 type TrackPreview = {
@@ -57,12 +59,148 @@ type ImportedPlaylist = {
   title: string;
 };
 
+type SpotifyEmbedEntity = {
+  spotifyId?: string;
+  name?: string;
+  title?: string;
+  subtitle?: string;
+  uri?: string;
+  duration?: number;
+  duration_ms?: number;
+  artistName?: string;
+  imageURL?: string;
+  albumName?: string;
+  artists?: { name?: string }[];
+  album?: { name?: string; coverArt?: { sources?: { url?: string }[] } };
+  coverArt?: { sources?: { url?: string }[] };
+  visualIdentity?: { image?: { url?: string }[] };
+  trackList?: SpotifyEmbedEntity[];
+};
+
+const NEXT_DATA_PATTERN = /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/;
+
+const getCoverUrl = (entity: SpotifyEmbedEntity): string =>
+  entity.imageURL ||
+  entity.visualIdentity?.image?.[0]?.url ||
+  entity.album?.coverArt?.sources?.[0]?.url ||
+  entity.coverArt?.sources?.[0]?.url ||
+  '';
+
+const toTrackPreview = (
+  entity: SpotifyEmbedEntity,
+  fallback: Partial<TrackPreview> = {}
+): TrackPreview | null => {
+  const spotifyId =
+    entity.spotifyId || entity.uri?.replace(/^spotify:track:/, '') || fallback.spotifyId;
+  const title = entity.name || entity.title || fallback.title;
+  if (!spotifyId || !title) return null;
+
+  return {
+    spotifyId,
+    title,
+    artistName:
+      entity.artists?.map((artist) => artist.name).filter(Boolean).join(', ') ||
+      entity.artistName ||
+      entity.subtitle ||
+      fallback.artistName ||
+      'Artista',
+    albumName: entity.albumName || entity.album?.name || fallback.albumName || 'Spotify',
+    imageURL: getCoverUrl(entity) || fallback.imageURL || '',
+    duration_ms: entity.duration_ms || entity.duration || fallback.duration_ms || 0,
+  };
+};
+
+const withDownloadState = async (tracks: TrackPreview[]): Promise<TrackPreview[]> => {
+  const downloadedIds = new Set((await getDownloadedTracks()).map((track) => track.spotifyId));
+  return tracks.map((track) => ({ ...track, isDownloaded: downloadedIds.has(track.spotifyId) }));
+};
+
+const fetchSpotifyEmbedEntity = async (
+  type: 'track' | 'playlist' | 'album',
+  id: string
+): Promise<SpotifyEmbedEntity | null> => {
+  try {
+    const response = await fetch(`https://open.spotify.com/embed/${type}/${id}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!response.ok) return null;
+    const match = (await response.text()).match(NEXT_DATA_PATTERN);
+    return match?.[1]
+      ? (JSON.parse(match[1]).props?.pageProps?.state?.data?.entity ?? null)
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const fetchCollectionOnDevice = async (
+  id: string,
+  type: 'playlist' | 'album'
+): Promise<{ title: string; coverUrl: string; tracks: TrackPreview[] } | null> => {
+  const collection = await fetchSpotifyEmbedEntity(type, id);
+  const entries = collection?.trackList ?? [];
+  if (!collection?.name || entries.length === 0) return null;
+
+  const tracks: (TrackPreview | null)[] = [];
+  for (let index = 0; index < entries.length; index += 4) {
+    tracks.push(
+      ...(await Promise.all(
+        entries.slice(index, index + 4).map(async (entry) => {
+          const fallback = toTrackPreview(entry, { albumName: collection.name });
+          if (!fallback) return null;
+          const canonical = await fetchSpotifyEmbedEntity('track', fallback.spotifyId);
+          return toTrackPreview(canonical ?? {}, fallback);
+        })
+      ))
+    );
+  }
+
+  return {
+    title: collection.name,
+    coverUrl: getCoverUrl(collection),
+    tracks: await withDownloadState(tracks.filter((track): track is TrackPreview => track !== null)),
+  };
+};
+
+const fetchCollectionFromServer = async (
+  id: string,
+  type: 'playlist' | 'album'
+): Promise<{ title: string; coverUrl: string; tracks: TrackPreview[] } | null> => {
+  try {
+    const response = await fetch(`${MUSIC_SERVER_URL}/api/spotify/${type}/${id}`, {
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) return null;
+    const collection = (await response.json()) as {
+      title?: string;
+      coverUrl?: string;
+      tracks?: SpotifyEmbedEntity[];
+    };
+    const tracks = (collection.tracks ?? [])
+      .map((track) => toTrackPreview(track))
+      .filter((track): track is TrackPreview => track !== null);
+    return collection.title && tracks.length
+      ? { title: collection.title, coverUrl: collection.coverUrl || '', tracks: await withDownloadState(tracks) }
+      : null;
+  } catch {
+    return null;
+  }
+};
+
 const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => {
   const cleanTrackId = trackId.replace(/^spotify:track:/, '').split('?')[0];
 
+  if (Platform.OS !== 'web') {
+    return toTrackPreview(
+      (await fetchSpotifyEmbedEntity('track', cleanTrackId)) ?? {},
+      { spotifyId: cleanTrackId }
+    );
+  }
+
   // 0. PRIMARY: Dedicated Local / Cloud Node.js Resolution Backend (CORS-free, 100% accurate)
   try {
-    const backendRes = await fetch(`http://localhost:3001/api/spotify/track/${cleanTrackId}`, {
+    const backendRes = await fetch(`${MUSIC_SERVER_URL}/api/spotify/track/${cleanTrackId}`, {
       signal: AbortSignal.timeout(3000),
     });
     if (backendRes.ok) {
@@ -168,40 +306,17 @@ const fetchPlaylistOrAlbum = async (
   id: string,
   type: 'playlist' | 'album'
 ): Promise<{ title: string; coverUrl: string; tracks: TrackPreview[] }> => {
+  if (Platform.OS === 'web') {
+    return (await fetchCollectionFromServer(id, type)) ?? { title: '', coverUrl: '', tracks: [] };
+  }
+
+  return (await fetchCollectionOnDevice(id, type)) ?? { title: '', coverUrl: '', tracks: [] };
+
   const spotifyUrl = `https://open.spotify.com/${type}/${id}`;
 
   // Spotify's own playlist endpoint exposes each track's album art. This must
   // run before fallbacks, which only know the playlist container cover.
   if (type === 'playlist') {
-    try {
-      const response = await fetch(
-        `http://localhost:3001/api/spotify/playlist/${id}`,
-        { signal: AbortSignal.timeout(15000) }
-      );
-      if (response.ok) {
-        const data = (await response.json()) as {
-          title?: string;
-          coverUrl?: string;
-          tracks?: TrackPreview[];
-        };
-        if (data.title && Array.isArray(data.tracks) && data.tracks.length > 0) {
-          const downloadedIds = new Set(
-            (await getDownloadedTracks()).map((track) => track.spotifyId)
-          );
-          return {
-            title: data.title,
-            coverUrl: data.coverUrl || '',
-            tracks: data.tracks.map((track) => ({
-              ...track,
-              isDownloaded: downloadedIds.has(track.spotifyId),
-            })),
-          };
-        }
-      }
-    } catch (error) {
-      console.warn('[ImportModal] Local Spotify playlist lookup failed:', error);
-    }
-
     try {
       const playlist = await getPlaylist(id);
       const spotifyTracks = [];
@@ -295,8 +410,9 @@ const fetchPlaylistOrAlbum = async (
     });
     const html = embedRes.data as string;
     const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/);
-    if (match && match[1]) {
-      const nextData = JSON.parse(match[1]);
+    const nextDataPayload = match?.[1];
+    if (nextDataPayload) {
+      const nextData = JSON.parse(nextDataPayload!);
       const entity = nextData.props?.pageProps?.state?.data?.entity;
       if (entity && entity.trackList && entity.trackList.length > 0) {
         const albumTitle = entity.name || (type === 'album' ? 'Álbum' : 'Playlist');
@@ -369,7 +485,7 @@ const fetchYouTubeTrack = async (videoId: string): Promise<TrackPreview | null> 
 
   try {
     const response = await axios.post(
-      'http://localhost:3001/api/music/youtube',
+      `${MUSIC_SERVER_URL}/api/music/youtube`,
       { url: youtubeUrl },
       { timeout: 9000 }
     );

@@ -312,8 +312,8 @@ async function fetchSpotifyPlaylistFallbackSource(playlistId) {
   }
 }
 
-async function fetchSpotifyCanonicalPlaylist(playlistId) {
-  const cacheKey = `spotify_playlist:${playlistId}`;
+async function fetchSpotifyCanonicalCollection(collectionType, collectionId) {
+  const cacheKey = `spotify_${collectionType}:${collectionId}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
@@ -321,9 +321,12 @@ async function fetchSpotifyCanonicalPlaylist(playlistId) {
     // Spotify's embeddable track list can be windowed for long playlists.
     // The server-side fallback is CORS-free and is only selected when it has
     // more entries, so imports never silently stop at the embed window.
-    const fallbackSourcePromise = fetchSpotifyPlaylistFallbackSource(playlistId);
+    const fallbackSourcePromise =
+      collectionType === 'playlist'
+        ? fetchSpotifyPlaylistFallbackSource(collectionId)
+        : Promise.resolve(null);
     const response = await fetch(
-      `https://open.spotify.com/embed/playlist/${playlistId}`,
+      `https://open.spotify.com/embed/${collectionType}/${collectionId}`,
       {
         headers: {
           'User-Agent':
@@ -378,7 +381,7 @@ async function fetchSpotifyCanonicalPlaylist(playlistId) {
 
     if (tracks.length === 0) return null;
     const result = {
-      id: playlistId,
+      id: collectionId,
       title: playlistTitle,
       coverUrl:
         entity?.coverArt?.sources?.[0]?.url || fallbackSource?.coverUrl || '',
@@ -387,10 +390,19 @@ async function fetchSpotifyCanonicalPlaylist(playlistId) {
     setCache(cacheKey, result, 86400);
     return result;
   } catch (error) {
-    console.warn(`[Spotify Scraper] Failed to fetch playlist ${playlistId}:`, error.message);
+    console.warn(
+      `[Spotify Scraper] Failed to fetch ${collectionType} ${collectionId}:`,
+      error.message
+    );
     return null;
   }
 }
+
+const fetchSpotifyCanonicalPlaylist = (playlistId) =>
+  fetchSpotifyCanonicalCollection('playlist', playlistId);
+
+const fetchSpotifyCanonicalAlbum = (albumId) =>
+  fetchSpotifyCanonicalCollection('album', albumId);
 
 const getYouTubeVideoId = (input) => {
   if (typeof input !== 'string') return null;
@@ -493,7 +505,42 @@ async function fetchYouTubeArtistImage(artistName) {
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
+  const getChannelImage = async (channelUrl) => {
+    const response = await fetch(channelUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) return '';
+    const html = await response.text();
+    return (
+      html.match(/<meta property="og:image" content="([^"]+)"/i)?.[1]?.replace(/\\u0026/g, '&') ||
+      ''
+    );
+  };
+
   try {
+    // A YouTube channel page exposes its avatar as og:image. This is a
+    // profile image, unlike a search result thumbnail or album cover.
+    const handle = normalizedName.replace(/\s+/g, '');
+    let imageURL = await getChannelImage(
+      `https://www.youtube.com/@${encodeURIComponent(handle)}`
+    );
+
+    if (!imageURL) {
+      const search = await fetch(
+        `https://www.youtube.com/results?search_query=${encodeURIComponent(`${normalizedName} official`)}`,
+        { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(8000) }
+      );
+      const html = search.ok ? await search.text() : '';
+      const channelPath = html.match(/"channelRenderer":\{[\s\S]{0,4000}?"canonicalBaseUrl":"([^"]+)"/)?.[1];
+      if (channelPath) imageURL = await getChannelImage(`https://www.youtube.com${channelPath}`);
+    }
+
+    if (imageURL) {
+      setCache(cacheKey, imageURL, 86400);
+      return imageURL;
+    }
+
     const result = await youtubeDl(`ytsearch1:${normalizedName} official music`, {
       dumpSingleJson: true,
       noWarnings: true,
@@ -501,7 +548,7 @@ async function fetchYouTubeArtistImage(artistName) {
       noPlaylist: true,
       skipDownload: true,
     });
-    let imageURL = result?.channel_thumbnail || result?.uploader_avatar || '';
+    imageURL = result?.channel_thumbnail || result?.uploader_avatar || '';
 
     if (!imageURL && result?.channel_url) {
       const channel = await youtubeDl(result.channel_url, {
@@ -1099,6 +1146,26 @@ const server = http.createServer(async (req, res) => {
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Playlist not found' }));
+    }
+    return;
+  }
+
+  // GET /api/spotify/album/:id
+  if (pathname.startsWith('/api/spotify/album/')) {
+    const albumId = pathname.replace('/api/spotify/album/', '').split('?')[0];
+    if (!/^[A-Za-z0-9]+$/.test(albumId)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid album id' }));
+      return;
+    }
+
+    const album = await fetchSpotifyCanonicalAlbum(albumId);
+    if (album) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(album));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Album not found' }));
     }
     return;
   }

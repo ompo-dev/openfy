@@ -1,5 +1,6 @@
 jest.mock('../../config', () => ({
   BASE_URL: 'https://api.spotify.test/v1',
+  MUSIC_SERVER_URL: 'http://localhost:3001',
   spotifyGet: jest.fn(),
 }));
 
@@ -51,5 +52,20 @@ describe('playlist fallback', () => {
         durationMs: 120_000,
       }),
     ]);
+  });
+
+  it('prioriza backend canônico antes do token Spotify', async () => {
+    await expect(getPlaylist('playlist-1')).resolves.toEqual(
+      expect.objectContaining({
+        id: 'playlist-1',
+        title: 'Playlist local',
+      })
+    );
+
+    expect(mockedSpotifyGet).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:3001/api/spotify/playlist/playlist-1',
+      { signal: expect.any(AbortSignal) }
+    );
   });
 });

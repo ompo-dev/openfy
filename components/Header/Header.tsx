@@ -12,6 +12,13 @@ import { AppIcon, GlassSurface, NativeIconButton } from '../native';
 import { useLibrarySelectedCategory } from '@context';
 import { LibraryControlsPicker } from './LibraryControlsPicker';
 
+const libraryCopy = {
+  songs: { search: 'músicas', title: 'Songs' },
+  playlists: { search: 'playlists', title: 'Playlists' },
+  albums: { search: 'álbuns', title: 'Álbuns' },
+  artists: { search: 'artistas', title: 'Artistas' },
+} as const;
+
 export const Header = () => {
   const { top: statusBarOffset } = useSafeAreaInsets();
   const [importModalVisible, setImportModalVisible] = React.useState(false);
@@ -25,6 +32,7 @@ export const Header = () => {
     setLibraryView,
     refreshLibrary,
   } = useLibrarySelectedCategory();
+  const copy = libraryCopy[libraryView];
 
   return (
     <View style={[styles.container, { paddingTop: statusBarOffset + 8 }]}>
@@ -37,7 +45,7 @@ export const Header = () => {
           onPress={() => setImportModalVisible(true)}
         />
         <Text style={styles.titleText}>
-          {libraryView === 'songs' ? 'Songs' : 'Playlists'}
+          {copy.title}
         </Text>
         <LibraryControlsPicker
           sort={librarySort}
@@ -48,7 +56,7 @@ export const Header = () => {
         <GlassSurface glass="clear" isInteractive style={styles.controls}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Pesquisar ${libraryView === 'songs' ? 'músicas' : 'playlists'}`}
+            accessibilityLabel={`Pesquisar ${copy.search}`}
             onPress={() => setSearchVisible((visible) => !visible)}
             style={styles.controlButton}
           >
@@ -62,7 +70,7 @@ export const Header = () => {
           autoFocus
           value={librarySearchQuery}
           onChangeText={setLibrarySearchQuery}
-          placeholder={`Pesquisar ${libraryView === 'songs' ? 'músicas' : 'playlists'}`}
+          placeholder={`Pesquisar ${copy.search}`}
           placeholderTextColor="#777"
           style={styles.searchInput}
         />

@@ -2,10 +2,11 @@ import * as React from 'react';
 import { View } from 'react-native';
 import { Href, useRouter, useSegments } from 'expo-router';
 
-import { getArtist, getArtistAlbums, getArtistTopTracks } from '@api';
+import { getArtist, getArtistAlbums, getArtistTopTracks, getYouTubeArtistImage } from '@api';
 import { CollectionDetail } from '@components';
 import { ArtistModel, LibraryItemModel, TrackModel } from '@models';
 import { Shapes, Sizes } from '@config';
+import { getDownloadedTracks } from '@services';
 import { Slider } from '../components/Slider';
 
 export type ArtistScreenPropsType = {
@@ -18,12 +19,49 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
   const [artist, setArtist] = React.useState<ArtistModel | null>(null);
   const [topTracks, setTopTracks] = React.useState<TrackModel[]>([]);
   const [albums, setAlbums] = React.useState<LibraryItemModel[]>([]);
+  const localArtistName = artistId.startsWith('local_artist_')
+    ? decodeURIComponent(artistId.slice('local_artist_'.length))
+    : '';
 
   React.useEffect(() => {
     let active = true;
     setArtist(null);
     setTopTracks([]);
     setAlbums([]);
+
+    if (localArtistName) {
+      void Promise.all([getDownloadedTracks(), getYouTubeArtistImage(localArtistName)]).then(([
+        downloaded,
+        profileImage,
+      ]) => {
+        if (!active) return;
+        const normalize = (value: string) => value.trim().toLocaleLowerCase();
+        const tracks = downloaded
+          .filter((track) =>
+            track.artistName
+              .split(/\s*(?:,|&| feat\.?)\s*/i)
+              .some((name) => normalize(name) === normalize(localArtistName))
+          )
+          .map((track) => ({
+            id: track.spotifyId,
+            title: track.title,
+            subtitle: track.artistName,
+            imageURL: track.localImagePath || track.imageURL,
+            albumName: track.albumName,
+            durationMs: track.duration_ms,
+          }));
+        setArtist({
+          id: artistId,
+          type: 'artist',
+          name: localArtistName,
+          imageURL: profileImage,
+        });
+        setTopTracks(tracks);
+      });
+      return () => {
+        active = false;
+      };
+    }
 
     void getArtist(artistId)
       .then((artistData) => {
@@ -52,7 +90,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     return () => {
       active = false;
     };
-  }, [artistId]);
+  }, [artistId, localArtistName]);
 
   const handleArtistPress = React.useCallback(
     (targetArtistId: string) => {
@@ -77,6 +115,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
   return (
     <CollectionDetail
       kind="artist"
+      collectionId={artist.id}
       title={artist.name}
       imageURL={artist.imageURL}
       description={description}

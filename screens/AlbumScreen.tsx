@@ -65,6 +65,7 @@ export const AlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
   return (
     <CollectionDetail
       kind="album"
+      collectionId={album.id}
       title={album.name}
       imageURL={album.imageURL}
       description={album.label || album.genres.join(' · ')}

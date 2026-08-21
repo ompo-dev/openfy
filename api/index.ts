@@ -9,7 +9,9 @@ export {
 } from './albums';
 
 export {
+  findArtistIdByName,
   getArtist,
+  getYouTubeArtistImage,
   getArtistTopTracks,
   getUserTopArtists,
   getUserFollowedArtists,
