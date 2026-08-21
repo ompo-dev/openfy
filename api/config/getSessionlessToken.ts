@@ -19,16 +19,34 @@ const getSessionTokenFromAsynceStorage = async (): Promise<{
   }
 };
 
-export const getSessionlessToken = async (): Promise<{
+const TOKEN_REFRESH_BUFFER_MS = 60_000;
+
+export const clearSessionlessToken = async () => {
+  await AsyncStorage.multiRemove([
+    'sessionless_token',
+    'sessionless_token_expiration',
+  ]);
+};
+
+export const getSessionlessToken = async (
+  forceRefresh = false
+): Promise<{
   token: string | null;
   tokenExpiration: string | null;
 }> => {
   try {
     const { token, tokenExpiration } = await getSessionTokenFromAsynceStorage();
 
-    if (token && tokenExpiration && new Date(tokenExpiration) >= new Date()) {
+    if (
+      !forceRefresh &&
+      token &&
+      tokenExpiration &&
+      new Date(tokenExpiration).getTime() > Date.now() + TOKEN_REFRESH_BUFFER_MS
+    ) {
       return { token, tokenExpiration };
     }
+
+    if (forceRefresh) await clearSessionlessToken();
 
     if (!Constants.expoConfig || !Constants.expoConfig.extra) {
       throw Error("Failed to read 'Constants.expoConfig.extra' variable");
@@ -61,8 +79,10 @@ export const getSessionlessToken = async (): Promise<{
       throw new Error('Failed to authenticate with Spotify.');
     }
 
-    const date = new Date();
-    date.setHours(date.getHours() + 1);
+    const expiresInSeconds = Number(response.data.expires_in) || 3600;
+    const date = new Date(
+      Date.now() + Math.max(0, expiresInSeconds * 1000 - TOKEN_REFRESH_BUFFER_MS)
+    );
 
     await AsyncStorage.setItem('sessionless_token', newToken);
     await AsyncStorage.setItem('sessionless_token_expiration', date.toString());

@@ -27,12 +27,24 @@ export const parseToAlbum = ({
   tracks: {
     total: total,
     items: items.map(
-      ({ id: trackId, name: trackName, artists: trackArtists, explicit }) => ({
+      ({
+        id: trackId,
+        name: trackName,
+        artists: trackArtists,
+        duration_ms,
+        explicit,
+      }) => ({
         id: trackId,
         title: trackName,
         subtitle: trackArtists
           .map(({ name: artistName }) => artistName)
           .join(', '),
+        albumName: name,
+        imageURL: images?.[0]?.url || '',
+        durationMs: duration_ms,
+        artists: trackArtists
+          .filter((artist) => artist.id)
+          .map((artist) => ({ id: artist.id!, name: artist.name })),
         explicit: explicit,
       })
     ),

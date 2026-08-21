@@ -5,6 +5,7 @@ export type TrackModel = {
   imageURL?: string;
   albumName?: string;
   durationMs?: number;
+  artists?: { id: string; name: string }[];
   isSaved?: boolean;
   isDownloaded?: boolean;
   isPlaying?: boolean;

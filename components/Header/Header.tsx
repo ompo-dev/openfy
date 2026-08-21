@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ImportModal } from '../ImportModal';
 import { AppIcon, GlassSurface, NativeIconButton } from '../native';
 import { useLibrarySelectedCategory } from '@context';
+import { LibraryControlsPicker } from './LibraryControlsPicker';
 
 export const Header = () => {
   const { top: statusBarOffset } = useSafeAreaInsets();
@@ -19,9 +20,9 @@ export const Header = () => {
     librarySearchQuery,
     setLibrarySearchQuery,
     librarySort,
-    toggleLibrarySort,
+    setLibrarySort,
     libraryView,
-    toggleLibraryView,
+    setLibraryView,
     refreshLibrary,
   } = useLibrarySelectedCategory();
 
@@ -38,35 +39,13 @@ export const Header = () => {
         <Text style={styles.titleText}>
           {libraryView === 'songs' ? 'Songs' : 'Playlists'}
         </Text>
+        <LibraryControlsPicker
+          sort={librarySort}
+          view={libraryView}
+          onSortChange={setLibrarySort}
+          onViewChange={setLibraryView}
+        />
         <GlassSurface glass="clear" isInteractive style={styles.controls}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              librarySort === 'recent'
-                ? `Ordenar ${libraryView === 'songs' ? 'músicas' : 'playlists'} por título`
-                : `Ordenar ${libraryView === 'songs' ? 'músicas' : 'playlists'} recentes`
-            }
-            onPress={toggleLibrarySort}
-            style={styles.controlButton}
-          >
-            <AppIcon name="sort" size={18} color="#B8B8B8" />
-          </Pressable>
-          <View style={styles.controlDivider} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              libraryView === 'songs' ? 'Mostrar playlists' : 'Mostrar músicas'
-            }
-            onPress={toggleLibraryView}
-            style={styles.controlButton}
-          >
-            <AppIcon
-              name={libraryView === 'songs' ? 'grid' : 'list'}
-              size={18}
-              color="#B8B8B8"
-            />
-          </Pressable>
-          <View style={styles.controlDivider} />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Pesquisar ${libraryView === 'songs' ? 'músicas' : 'playlists'}`}
@@ -117,7 +96,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   controls: {
-    marginLeft: 'auto',
     height: 36,
     borderRadius: 18,
     flexDirection: 'row',
@@ -129,11 +107,6 @@ const styles = StyleSheet.create({
     height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  controlDivider: {
-    width: StyleSheet.hairlineWidth,
-    height: 16,
-    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   searchInput: {
     height: 40,

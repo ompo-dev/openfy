@@ -119,7 +119,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
       ]}
     >
       {/* Hidden full text measurement layer without width restrictions */}
-      <View style={styles.measureContainer} pointerEvents="none">
+      <View style={[styles.measureContainer, { pointerEvents: 'none' }]}>
         <Text
           onLayout={onMeasureLayout}
           numberOfLines={1}
@@ -158,15 +158,13 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
             colors={[fadeColor, 'transparent']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
-            style={[styles.nativeFade, { left: 0, width: fadeWidth }]}
-            pointerEvents="none"
+            style={[styles.nativeFade, { left: 0, width: fadeWidth, pointerEvents: 'none' }]}
           />
           <LinearGradient
             colors={['transparent', fadeColor]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
-            style={[styles.nativeFade, { right: 0, width: fadeWidth }]}
-            pointerEvents="none"
+            style={[styles.nativeFade, { right: 0, width: fadeWidth, pointerEvents: 'none' }]}
           />
         </>
       )}

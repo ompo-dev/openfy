@@ -32,7 +32,7 @@ export type AlbumResponseType = {
       name: string;
       duration_ms: number;
       explicit: boolean;
-      artists: { name: string }[];
+      artists: { id?: string; name: string }[];
     }[];
   };
   copyrights: { text: string; type: string }[];
@@ -168,10 +168,10 @@ export type PlaylistItemResponseType = {
     };
     id: string;
     name: string;
-    artists: { name: string }[];
+    artists: { id?: string; name: string }[];
     explicit: boolean;
     duration_ms: number;
-  };
+  } | null;
 };
 
 export type PlaylistResponseType = {

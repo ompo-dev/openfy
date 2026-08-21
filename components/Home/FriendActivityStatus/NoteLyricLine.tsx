@@ -1,6 +1,6 @@
 import * as React from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Platform, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 export interface NoteLyricSegment {
@@ -89,7 +89,7 @@ export const NoteLyricBlocks = ({
         toValue: 0,
         duration: 260,
         easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }).start();
     },
     [blockTransition]

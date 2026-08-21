@@ -9,6 +9,7 @@ import * as React from 'react';
 import {
   Animated,
   Image,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -35,7 +36,7 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
   React.useEffect(() => {
     Animated.spring(fadeAnim, {
       toValue: isPlayerVisible ? 1 : 0,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
       damping: 18,
       stiffness: 200,
       mass: 0.8,

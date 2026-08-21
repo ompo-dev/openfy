@@ -113,9 +113,8 @@ export function SheetFrame({
           accessibilityLabel="Fechar"
         />
         <SafeAreaView
-          style={styles.safe}
           edges={['left', 'right', 'bottom']}
-          pointerEvents="box-none"
+          style={[styles.safe, { pointerEvents: 'box-none' }]}
         >
           <GlassSurface glass="regular" style={styles.sheet}>
             {handle}

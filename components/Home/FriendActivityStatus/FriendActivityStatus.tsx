@@ -13,6 +13,7 @@ import * as React from 'react';
 import {
   Animated,
   Image,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -226,7 +227,7 @@ export const FriendActivityStatus = ({
 
       Animated.spring(tiltAnim, {
         toValue: targetDeg,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
         tension: 500,
         friction: 22,
         overshootClamping: true,
@@ -240,7 +241,7 @@ export const FriendActivityStatus = ({
       decayTimer.current = setTimeout(() => {
         Animated.spring(tiltAnim, {
           toValue: 0,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
           tension: 180,
           friction: 18,
           overshootClamping: false,

@@ -289,7 +289,7 @@ export const MusicSnippetEditorModal: React.FC<
               blurRadius={22}
               resizeMode="cover"
             />
-            <View pointerEvents="none" style={S.backgroundScrim} />
+            <View style={[S.backgroundScrim, { pointerEvents: 'none' }]} />
 
             <View style={S.content}>
               <View style={S.handle} />
@@ -381,7 +381,7 @@ export const MusicSnippetEditorModal: React.FC<
                   ))}
                 </Animated.View>
 
-                <View style={S.fixedCenterFrame} pointerEvents="none">
+                <View style={[S.fixedCenterFrame, { pointerEvents: 'none' }]}>
                   <View style={S.selectionWaveformClip}>
                     <Animated.View
                       style={[

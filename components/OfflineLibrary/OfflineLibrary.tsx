@@ -24,6 +24,7 @@ import { useLibrarySelectedCategory, usePlayer } from '@context';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { LoggedPressable } from '../native';
 import { PlaylistMosaic } from '../PlaylistMosaic';
+import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
 
 export const OfflineLibrary = () => {
   const router = useRouter();
@@ -135,37 +136,23 @@ export const OfflineLibrary = () => {
             )}
 
             <View style={styles.info}>
-              <Text
-                style={[styles.title, isCurrentTrack && styles.titleActive]}
-                numberOfLines={1}
-              >
-                {isCurrentTrack && (
-                  <Ionicons
-                    name={isPlaying ? 'volume-high' : 'pause'}
-                    size={14}
-                    color="#1DB954"
-                  />
-                )}{' '}
-                {item.title}
-              </Text>
+              <View style={styles.titleRow}>
+                {isPlaying ? <SoundWaveIcon color="#1DB954" size={15} /> : null}
+                <Text
+                  style={[styles.title, isCurrentTrack && styles.titleActive]}
+                  numberOfLines={1}
+                >
+                  {item.title}
+                </Text>
+              </View>
               <Text style={styles.artist} numberOfLines={1}>
                 {item.artistName}
               </Text>
             </View>
 
-            <LoggedPressable
-              accessibilityRole="button"
-              accessibilityLabel={`Tocar ${item.title}`}
-              onPress={() => handlePlay(item)}
-              hitSlop={8}
-              style={styles.actionButton}
-            >
-              <Ionicons
-                name={isPlaying ? 'pause' : 'play'}
-                size={19}
-                color="#1DB954"
-              />
-            </LoggedPressable>
+            <View style={styles.actionButton}>
+              <Ionicons name="ellipsis-horizontal" size={21} color="#B8B8B8" />
+            </View>
           </View>
         </LoggedPressable>
       </Swipeable>
@@ -292,11 +279,17 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 3,
   },
+  titleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7,
+  },
   title: {
     color: '#FFFFFF',
     fontSize: 15,
     fontFamily: 'SF-Semibold',
     fontWeight: '600',
+    flexShrink: 1,
   },
   titleActive: {
     color: '#1DB954',

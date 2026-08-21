@@ -10,6 +10,7 @@ export {
 
 export {
   getArtist,
+  getArtistTopTracks,
   getUserTopArtists,
   getUserFollowedArtists,
 } from './artists';

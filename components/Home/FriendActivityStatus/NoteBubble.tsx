@@ -176,44 +176,50 @@ const getTailGradientProgress = ({
   ] as const;
 };
 
-const SoundWaveIcon = ({ color }: { color: string }) => {
-  const first = React.useRef(new Animated.Value(6)).current;
-  const second = React.useRef(new Animated.Value(12)).current;
-  const third = React.useRef(new Animated.Value(7)).current;
+export const SoundWaveIcon = ({
+  color,
+  size = 15,
+}: {
+  color: string;
+  size?: number;
+}) => {
+  const first = React.useRef(new Animated.Value(size * 0.4)).current;
+  const second = React.useRef(new Animated.Value(size * 0.8)).current;
+  const third = React.useRef(new Animated.Value(size * 0.47)).current;
 
   React.useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
         Animated.parallel([
           Animated.timing(first, {
-            toValue: 13,
+            toValue: size * 0.87,
             duration: 280,
             useNativeDriver: false,
           }),
           Animated.timing(second, {
-            toValue: 6,
+            toValue: size * 0.4,
             duration: 260,
             useNativeDriver: false,
           }),
           Animated.timing(third, {
-            toValue: 15,
+            toValue: size,
             duration: 300,
             useNativeDriver: false,
           }),
         ]),
         Animated.parallel([
           Animated.timing(first, {
-            toValue: 6,
+            toValue: size * 0.4,
             duration: 280,
             useNativeDriver: false,
           }),
           Animated.timing(second, {
-            toValue: 14,
+            toValue: size * 0.93,
             duration: 300,
             useNativeDriver: false,
           }),
           Animated.timing(third, {
-            toValue: 7,
+            toValue: size * 0.47,
             duration: 260,
             useNativeDriver: false,
           }),
@@ -222,18 +228,18 @@ const SoundWaveIcon = ({ color }: { color: string }) => {
     );
     loop.start();
     return () => loop.stop();
-  }, [first, second, third]);
+  }, [first, second, size, third]);
 
   return (
-    <View style={styles.waveContainer}>
+    <View style={[styles.waveContainer, { gap: size * 0.13, height: size, width: size * 0.73 }]}>
       <Animated.View
-        style={[styles.waveBar, { height: first, backgroundColor: color }]}
+        style={[styles.waveBar, { width: size * 0.147, height: first, backgroundColor: color }]}
       />
       <Animated.View
-        style={[styles.waveBar, { height: second, backgroundColor: color }]}
+        style={[styles.waveBar, { width: size * 0.147, height: second, backgroundColor: color }]}
       />
       <Animated.View
-        style={[styles.waveBar, { height: third, backgroundColor: color }]}
+        style={[styles.waveBar, { width: size * 0.147, height: third, backgroundColor: color }]}
       />
     </View>
   );
@@ -321,35 +327,31 @@ export const NoteBubble = ({
       onLayout={handleLayout}
     >
       <LinearGradient
-        pointerEvents="none"
         colors={mainColors}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={[styles.tailMain, mainTailStyle]}
+        style={[styles.tailMain, mainTailStyle, { pointerEvents: 'none' }]}
       />
       <LinearGradient
-        pointerEvents="none"
         colors={smallColors}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={[styles.tailSmall, tails.small]}
+        style={[styles.tailSmall, tails.small, { pointerEvents: 'none' }]}
       />
       <View
         style={[styles.bubble, { width: bubbleWidth, backgroundColor: color }]}
       >
         <LinearGradient
-          pointerEvents="none"
           colors={['rgba(255,255,255,0.60)', 'rgba(255,255,255,0.04)']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={styles.borderGradient}
+          style={[styles.borderGradient, { pointerEvents: 'none' }]}
         >
           <LinearGradient
-            pointerEvents="none"
             colors={[getGradientTone(color, 0), getGradientTone(color, 1)]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={styles.bubbleGradient}
+            style={[styles.bubbleGradient, { pointerEvents: 'none' }]}
           />
         </LinearGradient>
         <View style={styles.titleRow}>

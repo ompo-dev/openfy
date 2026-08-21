@@ -14,8 +14,10 @@ export const LibrarySelectedCategoryContext = React.createContext<{
   librarySearchQuery: string;
   setLibrarySearchQuery: React.Dispatch<React.SetStateAction<string>>;
   librarySort: 'recent' | 'title';
+  setLibrarySort: React.Dispatch<React.SetStateAction<'recent' | 'title'>>;
   toggleLibrarySort: () => void;
   libraryView: 'songs' | 'playlists';
+  setLibraryView: React.Dispatch<React.SetStateAction<'songs' | 'playlists'>>;
   toggleLibraryView: () => void;
   libraryRevision: number;
   refreshLibrary: () => void;
@@ -26,8 +28,10 @@ export const LibrarySelectedCategoryContext = React.createContext<{
   librarySearchQuery: '',
   setLibrarySearchQuery: () => {},
   librarySort: 'recent',
+  setLibrarySort: () => {},
   toggleLibrarySort: () => {},
   libraryView: 'songs',
+  setLibraryView: () => {},
   toggleLibraryView: () => {},
   libraryRevision: 0,
   refreshLibrary: () => {},
@@ -57,9 +61,11 @@ export const LibrarySelectedCategoryProvider = ({
         librarySearchQuery,
         setLibrarySearchQuery,
         librarySort,
+        setLibrarySort,
         toggleLibrarySort: () =>
           setLibrarySort((sort) => (sort === 'recent' ? 'title' : 'recent')),
         libraryView,
+        setLibraryView,
         toggleLibraryView: () =>
           setLibraryView((view) => (view === 'songs' ? 'playlists' : 'songs')),
         libraryRevision,
@@ -78,8 +84,10 @@ export const useLibrarySelectedCategory = (): {
   librarySearchQuery: string;
   setLibrarySearchQuery: React.Dispatch<React.SetStateAction<string>>;
   librarySort: 'recent' | 'title';
+  setLibrarySort: React.Dispatch<React.SetStateAction<'recent' | 'title'>>;
   toggleLibrarySort: () => void;
   libraryView: 'songs' | 'playlists';
+  setLibraryView: React.Dispatch<React.SetStateAction<'songs' | 'playlists'>>;
   toggleLibraryView: () => void;
   libraryRevision: number;
   refreshLibrary: () => void;

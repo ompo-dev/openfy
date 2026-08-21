@@ -1,134 +1,79 @@
 import * as React from 'react';
+import { View } from 'react-native';
+import { Href, useRouter, useSegments } from 'expo-router';
 
-import { Preview } from '@components';
-
-import { checkSavedTracks, getAlbum, getArtist } from '@api';
-import { AlbumModel, ArtistModel, TrackModel } from '@models';
-import { AlbumFallback, ArtistFallback, SEPARATOR } from '@config';
-import {
-  getDisplayCopyrightText,
-  getDisplayDate,
-  getDisplayTime,
-} from '@utils';
-import { translations } from '@data';
+import { CollectionDetail } from '@components';
+import { getAlbum, getArtist } from '@api';
+import { AlbumModel, ArtistModel } from '@models';
+import { getDisplayTime } from '@utils';
 
 export type AlbumScreenPropsType = {
   albumId: string;
 };
 
 export const AlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
-  const [album, setAlbum] = React.useState<AlbumModel | null>(AlbumFallback);
-  const [artists, setArtists] = React.useState<ArtistModel[] | null>(
-    ArtistFallback
-  );
+  const router = useRouter();
+  const segments = useSegments();
+  const [album, setAlbum] = React.useState<AlbumModel | null>(null);
+  const [artists, setArtists] = React.useState<ArtistModel[]>([]);
 
   React.useEffect(() => {
-    (async () => {
+    let active = true;
+
+    void (async () => {
       try {
         const albumData = await getAlbum(albumId);
-        const savedAlbumTracksArr = await checkSavedTracks(
-          albumData.tracks.items.map((track) => track.id)
+        const artistData = await Promise.all(
+          albumData.artists.map(({ id }) => getArtist(id))
         );
-        setAlbum({
-          ...albumData,
-          tracks: {
-            ...albumData.tracks,
-            items: albumData.tracks.items.map((item, i) => ({
-              ...item,
-              isSaved: savedAlbumTracksArr[i],
-            })),
-          },
-        });
-
-        const artistsData = await Promise.all(
-          albumData.artists.map(async ({ id }) => await getArtist(id))
-        );
-        setArtists(artistsData);
+        if (!active) return;
+        setAlbum(albumData);
+        setArtists(artistData);
       } catch (error) {
-        setAlbum(null);
-        setArtists(null);
+        if (active) {
+          setAlbum(null);
+          setArtists([]);
+        }
         console.error('Failed to get album data:', error);
       }
     })();
+
+    return () => {
+      active = false;
+    };
   }, [albumId]);
 
-  // @API_RATE
-  // const artistSeed = React.useMemo(
-  //   () =>
-  //     artists.length
-  //       ? artists
-  //           .map((a) => a.id)
-  //           .slice(0, 5)
-  //           .join(`,`)
-  //       : '',
-  //   [artists]
-  // );
-  const id = React.useMemo(() => (album ? album.id : ''), [album]);
-  const title = React.useMemo(() => (album ? album.name : ''), [album]);
-  const subtitle = React.useMemo(
-    () =>
-      artists && artists.length
-        ? artists.map((a) => a.name).join(` ${SEPARATOR} `)
-        : '',
-    [artists]
+  const handleArtistPress = React.useCallback(
+    (artistId: string) => {
+      const section = segments.join('/').includes('library') ? 'library' : 'home';
+      router.push(`/(tabs)/${section}/artist/${artistId}` as Href);
+    },
+    [router, segments]
   );
-  const imageURL = React.useMemo(() => (album ? album.imageURL : ''), [album]);
 
-  const copyrightTexts = React.useMemo(
-    () =>
-      album
-        ? album.copyrights.map((copyright) =>
-            getDisplayCopyrightText(copyright.text, copyright.type)
-          )
-        : ['', ''],
-    [album]
-  );
-  const info = React.useMemo(
-    () =>
-      album
-        ? `${translations.type[album.albumType]} ${SEPARATOR} ${album.releaseDate.split('-')[0]}`
-        : '',
-    [album]
-  );
-  const tracks = React.useMemo(
-    () =>
-      album
-        ? album.tracks.items
-        : [
-            ...Array(1).fill({
-              id: '',
-              title: '',
-              subtitle: '',
-              imageURL: '',
-              isSaved: false,
-              isPlaying: false,
-              isDownloaded: false,
-              explicit: false,
-            }),
-          ],
-    [album]
-  ) as TrackModel[];
-  const infoTexts = React.useMemo(
-    () => [
-      getDisplayDate(album?.releaseDate),
-      `${album?.tracks.total || ''} ${translations.tracks} ${SEPARATOR} ${getDisplayTime(album?.duration || '')}`,
-    ],
-    [album]
-  );
+  if (!album) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
+
+  const metadata = [
+    album.genres[0],
+    album.releaseDate.split('-')[0],
+    `${album.tracks.total} ${album.tracks.total === 1 ? 'música' : 'músicas'}`,
+    getDisplayTime(album.duration),
+  ]
+    .filter(Boolean)
+    .join(' • ');
 
   return (
-    <Preview
-      type="album"
-      id={id}
-      imageURL={imageURL}
-      headerTitle={title}
-      summaryTitle={title}
-      summarySubtitle={subtitle}
-      summaryInfo={info}
-      infoTexts={infoTexts}
-      copyrightTexts={copyrightTexts}
-      tracks={tracks}
-      artists={artists}
+    <CollectionDetail
+      kind="album"
+      title={album.name}
+      imageURL={album.imageURL}
+      description={album.label || album.genres.join(' · ')}
+      metadata={metadata}
+      trackCount={album.tracks.total}
+      totalDurationMs={album.duration}
+      tracks={album.tracks.items}
+      artists={artists.map(({ id, name }) => ({ id, name }))}
+      onArtistPress={handleArtistPress}
     />
   );
 };

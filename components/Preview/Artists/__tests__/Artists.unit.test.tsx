@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useRouter } from 'expo-router';
+import { useRouter, useSegments } from 'expo-router';
 import {
   render,
   fireEvent,
@@ -9,6 +9,7 @@ import { Artists, ArtistsPropsType } from '../Artists';
 
 jest.mock('expo-router', () => ({
   useRouter: jest.fn(),
+  useSegments: jest.fn(),
 }));
 
 jest.mock('expo-image', () => ({ Image: 'Image' }));
@@ -42,6 +43,7 @@ describe('AlbumArtists', () => {
 
   beforeEach(async () => {
     (useRouter as jest.Mock).mockReturnValue({ push: mockRouter });
+    (useSegments as jest.Mock).mockReturnValue(['(tabs)', 'home']);
     container = await render(<Artists {...defaultProps} />);
   });
 
@@ -59,14 +61,14 @@ describe('AlbumArtists', () => {
       const artist1 = container.getByTestId(TEST_IDS.ARTIST_LINK_ID_1);
 
       fireEvent.press(artist1);
-      expect(mockRouter).toHaveBeenCalledWith('/artists/id_1');
+      expect(mockRouter).toHaveBeenCalledWith('/(tabs)/home/artist/id_1');
     });
 
     it('navigates to the first artist page with given ID', () => {
       const artist2 = container.getByTestId(TEST_IDS.ARTIST_LINK_ID_2);
 
       fireEvent.press(artist2);
-      expect(mockRouter).toHaveBeenCalledWith('/artists/id_2');
+      expect(mockRouter).toHaveBeenCalledWith('/(tabs)/home/artist/id_2');
     });
   });
 

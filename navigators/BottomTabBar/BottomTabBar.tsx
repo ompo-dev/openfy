@@ -79,8 +79,7 @@ export const BottomTabBar = ({ state, descriptors, navigation }: BottomTabBarPro
 
   return (
     <View
-      style={[styles.wrap, { paddingBottom: insets.bottom + 8 }]}
-      pointerEvents="box-none"
+      style={[styles.wrap, { paddingBottom: insets.bottom + 8, pointerEvents: 'box-none' }]}
     >
       <GlassSurface glass="regular" isInteractive style={styles.bar}>
         {leftRoutes.map(renderTab)}

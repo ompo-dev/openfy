@@ -1,5 +1,3 @@
-import axios from 'axios';
-
 import { AlbumModel, ArtistModel, LibraryItemModel } from '@models';
 import {
   AlbumResponseType,
@@ -12,13 +10,7 @@ import {
   parseToArtist,
 } from '@utils';
 
-import { BASE_URL, getSessionlessToken } from '../config';
-
-type ResponseType = {
-  album: AlbumResponseType;
-  playlist: SearchPlaylistResponseType;
-  artist: ArtistResponseType;
-};
+import { BASE_URL, spotifyGet } from '../config';
 
 export const search = async ({
   type,
@@ -40,27 +32,24 @@ export const search = async ({
   nameIncludes: string;
 }): Promise<LibraryItemModel[] | AlbumModel | ArtistModel | null> => {
   try {
-    const { token } = await getSessionlessToken();
-
-    const response = await axios.get(`${BASE_URL}/search`, {
+    const response = await spotifyGet<unknown>(`${BASE_URL}/search`, {
       params: { q, type, limit, offset },
-      headers: { Authorization: `Bearer ${token}` },
     });
 
     if (type === 'playlist') {
       return parseFromSearchPlaylistToCard(
-        (response as { data: ResponseType['playlist'] }).data,
+        response.data as SearchPlaylistResponseType,
         playlistOwnerURI,
         nameIncludes
       );
     }
 
     if (type === 'artist') {
-      return parseToArtist((response as { data: ResponseType['artist'] }).data);
+      return parseToArtist(response.data as ArtistResponseType);
     }
 
     if (type === 'album') {
-      return parseToAlbum((response as { data: ResponseType['album'] }).data);
+      return parseToAlbum(response.data as AlbumResponseType);
     }
 
     return null;

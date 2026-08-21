@@ -485,6 +485,43 @@ async function fetchYouTubeTrack(videoId) {
   return null;
 }
 
+async function fetchYouTubeArtistImage(artistName) {
+  const normalizedName = String(artistName || '').trim();
+  if (!normalizedName) return '';
+
+  const cacheKey = `youtube_artist_image:${normalizeText(normalizedName)}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const result = await youtubeDl(`ytsearch1:${normalizedName} official music`, {
+      dumpSingleJson: true,
+      noWarnings: true,
+      noCallHome: true,
+      noPlaylist: true,
+      skipDownload: true,
+    });
+    let imageURL = result?.channel_thumbnail || result?.uploader_avatar || '';
+
+    if (!imageURL && result?.channel_url) {
+      const channel = await youtubeDl(result.channel_url, {
+        dumpSingleJson: true,
+        noWarnings: true,
+        noCallHome: true,
+        noPlaylist: true,
+        playlistEnd: 1,
+        skipDownload: true,
+      });
+      imageURL = channel?.channel_thumbnail || channel?.uploader_avatar || '';
+    }
+
+    if (imageURL) setCache(cacheKey, imageURL, 86400);
+    return imageURL;
+  } catch {
+    return '';
+  }
+}
+
 /**
  * 1. YouTube Official Channel & Timing Ranker
  */
@@ -1077,6 +1114,27 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Track not found' }));
     }
+    return;
+  }
+
+  // GET /api/youtube/artist-image?artist=...
+  if (pathname === '/api/youtube/artist-image') {
+    const artistName = String(parsedUrl.query.artist || '').trim();
+    if (!artistName || artistName.length > 160) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid artist name' }));
+      return;
+    }
+
+    const imageURL = await fetchYouTubeArtistImage(artistName);
+    if (!imageURL) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Artist image not found' }));
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ imageURL }));
     return;
   }
 

@@ -1,123 +1,140 @@
 import * as React from 'react';
-import { LocalPlaylist, Preview } from '@components';
+import { View } from 'react-native';
+import { Href, useRouter, useSegments } from 'expo-router';
 
+import { CollectionDetail, LocalPlaylist } from '@components';
 import { PlaylistModel, TrackModel } from '@models';
 import { checkSavedTracks, getPlaylist, getPlaylistItems } from '@api';
+import { formatCollectionMeta } from '@utils';
 
-export type AlbumScreenPropsType = {
+export type PlaylistScreenPropsType = {
   playlistId: string;
 };
 
-export const PlaylistScreen = ({ playlistId }: AlbumScreenPropsType) =>
+export const PlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) =>
   playlistId.startsWith('local_') ? (
     <LocalPlaylist playlistId={playlistId} />
   ) : (
     <RemotePlaylistScreen playlistId={playlistId} />
   );
 
-const RemotePlaylistScreen = ({ playlistId }: AlbumScreenPropsType) => {
+const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
+  const router = useRouter();
+  const segments = useSegments();
   const [playlist, setPlaylist] = React.useState<PlaylistModel | null>(null);
   const [tracks, setTracks] = React.useState<TrackModel[]>([]);
-  const [offset, setOffset] = React.useState(0);
-  const [limit] = React.useState(50);
+  const offsetRef = React.useRef(0);
+  const tracksRef = React.useRef<TrackModel[]>([]);
+  const loadingPromiseRef = React.useRef<Promise<void> | null>(null);
 
-  const fetchTracks = async () => {
-    if (!playlistId || !playlist) {
+  const loadTrackPage = React.useCallback(async (targetPlaylist: PlaylistModel) => {
+    if (offsetRef.current >= targetPlaylist.tracks.total) return;
+    if (loadingPromiseRef.current) {
+      await loadingPromiseRef.current;
       return;
     }
 
-    const { total } = playlist.tracks;
-
-    if (total - offset <= 0) {
-      return;
-    }
-
+    const request = (async () => {
     try {
-      const newTracks = await getPlaylistItems({
-        playlistId,
-        limit,
-        offset,
+      const page = await getPlaylistItems({
+        playlistId: targetPlaylist.id,
+        limit: 50,
+        offset: offsetRef.current,
       });
-      const savedPlaylistTracksArr = await checkSavedTracks(
-        newTracks.map((track) => track.id)
+      const saved = await checkSavedTracks(page.map((track) => track.id)).catch(
+        () => []
       );
-
-      setTracks((prevTracks) => [
-        ...prevTracks,
-        ...newTracks.map((item, i) => ({
-          ...item,
-          isSaved: savedPlaylistTracksArr[i],
+      offsetRef.current += 50;
+      tracksRef.current = [
+        ...tracksRef.current,
+        ...page.map((track, index) => ({
+          ...track,
+          isSaved: saved[index] ?? false,
         })),
-      ]);
-      setOffset((prevOffset) => prevOffset + limit);
+      ];
+      setTracks(tracksRef.current);
     } catch (error) {
-      console.error(error);
+      offsetRef.current = targetPlaylist.tracks.total;
+      console.error('Failed to get playlist tracks:', error);
     }
-  };
-
-  React.useEffect(() => {
-    if (!playlistId) {
-      return;
-    }
-
-    (async () => {
-      try {
-        const playlistData = await getPlaylist(playlistId);
-
-        setPlaylist(playlistData);
-      } catch (error) {
-        setPlaylist(null);
-        console.error('Failed to get playlist data:', error);
-      }
     })();
-  }, [playlistId]);
+
+    loadingPromiseRef.current = request;
+    try {
+      await request;
+    } finally {
+      if (loadingPromiseRef.current === request) {
+        loadingPromiseRef.current = null;
+      }
+    }
+  }, []);
+
+  const loadAllTrackPages = React.useCallback(
+    async (targetPlaylist: PlaylistModel) => {
+      while (offsetRef.current < targetPlaylist.tracks.total) {
+        await loadTrackPage(targetPlaylist);
+      }
+      return tracksRef.current;
+    },
+    [loadTrackPage]
+  );
 
   React.useEffect(() => {
-    fetchTracks();
+    let active = true;
+    offsetRef.current = 0;
+    tracksRef.current = [];
+    setPlaylist(null);
+    setTracks([]);
 
-    //eslint-disable-next-line
-  }, [playlistId]);
+    void getPlaylist(playlistId)
+      .then((data) => {
+        if (!active) return;
+        setPlaylist(data);
+        void loadTrackPage(data);
+      })
+      .catch((error) => {
+        if (active) setPlaylist(null);
+        console.error('Failed to get playlist data:', error);
+      });
 
-  const id = React.useMemo(() => (playlist ? playlist.id : ''), [playlist]);
-  const ownerId = React.useMemo(
-    () => (playlist ? playlist.ownerId : ''),
-    [playlist]
+    return () => {
+      active = false;
+    };
+  }, [loadTrackPage, playlistId]);
+
+  const handleArtistPress = React.useCallback(
+    (artistId: string) => {
+      const section = segments.join('/').includes('library') ? 'library' : 'home';
+      router.push(`/(tabs)/${section}/artist/${artistId}` as Href);
+    },
+    [router, segments]
   );
-  const title = React.useMemo(
-    () => (playlist ? playlist.title : ''),
-    [playlist]
-  );
-  const subtitle = React.useMemo(
-    () => (playlist ? playlist.subtitle : ''),
-    [playlist]
-  );
-  const info = React.useMemo(() => (playlist ? playlist.info : ''), [playlist]);
-  const imageURL = React.useMemo(
-    () => (playlist ? playlist.imageURL : ''),
-    [playlist]
-  );
-  // @API_RATE
-  // const recommendationSeed = React.useMemo(
-  //   () =>
-  //     tracks
-  //       .slice(0, 5)
-  //       .map(({ id }) => id)
-  //       .join(','),
-  //   [tracks]
-  // );
+
+  if (!playlist) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
 
   return (
-    <Preview
-      type="playlist"
-      id={id}
-      ownerId={ownerId}
-      imageURL={imageURL}
-      headerTitle={title}
-      summaryTitle={title}
-      summarySubtitle={subtitle}
-      summaryInfo={info}
+    <CollectionDetail
+      kind="playlist"
+      title={playlist.title}
+      imageURL={playlist.imageURL}
+      description={playlist.description}
+      metadata={`${playlist.subtitle} • ${formatCollectionMeta({
+        trackCount: playlist.tracks.total,
+        totalDurationMs:
+          offsetRef.current >= playlist.tracks.total
+            ? tracks.reduce((total, track) => total + (track.durationMs || 0), 0)
+            : 0,
+      })}`}
+      trackCount={playlist.tracks.total}
+      totalDurationMs={
+        offsetRef.current >= playlist.tracks.total
+          ? tracks.reduce((total, track) => total + (track.durationMs || 0), 0)
+          : 0
+      }
       tracks={tracks}
-      fetchTracks={fetchTracks}
+      onArtistPress={handleArtistPress}
+      onEndReached={() => void loadTrackPage(playlist)}
+      resolveTracksForPlayback={() => loadAllTrackPages(playlist)}
     />
   );
 };

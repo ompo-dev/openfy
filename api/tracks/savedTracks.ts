@@ -10,6 +10,7 @@ export const checkSavedTracks = async (
     if (trackIds.length > 50) {
       throw new Error('Cannot check more than 50 track IDs at once.');
     }
+    if (!token) return trackIds.map(() => false);
 
     const encodedIds = encodeURIComponent(trackIds.join(','));
 

@@ -1,10 +1,8 @@
-import axios from 'axios';
-
 import { LibraryItemModel } from '@models';
 import { AlbumsResponseType } from '@config';
 import { parseToRecommendedAlbums } from '@utils';
 
-import { BASE_URL, getSessionlessToken } from '../config';
+import { BASE_URL, spotifyGet } from '../config';
 
 export const getArtistAlbums = async (
   artistId: string,
@@ -13,9 +11,7 @@ export const getArtistAlbums = async (
   offset: number = 0
 ): Promise<LibraryItemModel[]> => {
   try {
-    const { token } = await getSessionlessToken();
-
-    const response = (await axios.get(
+    const response = await spotifyGet<AlbumsResponseType>(
       `${BASE_URL}/artists/${artistId}/albums`,
       {
         params: {
@@ -23,11 +19,8 @@ export const getArtistAlbums = async (
           limit: limit,
           offset: offset,
         },
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       }
-    )) as { data: AlbumsResponseType };
+    );
 
     return parseToRecommendedAlbums(response.data);
   } catch (error) {

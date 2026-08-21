@@ -4,12 +4,19 @@ import { TrackModel } from '@models';
 export const parseFromPlaylistItemsToTracks = (
   items: PlaylistItemResponseType[]
 ): TrackModel[] =>
-  items.map(({ track: { id, name, artists, album, duration_ms, explicit } }) => ({
-    id: id,
-    title: name,
-    subtitle: artists.map((a) => a.name).join(', '),
-    imageURL: album.images[0]?.url || '',
-    albumName: album.name,
-    durationMs: duration_ms,
-    explicit: explicit,
-  }));
+  items.flatMap(({ track }) => {
+    if (!track?.id || !track.album) return [];
+
+    return [{
+      id: track.id,
+      title: track.name,
+      subtitle: track.artists.map((artist) => artist.name).join(', '),
+      imageURL: track.album.images[0]?.url || '',
+      albumName: track.album.name,
+      durationMs: track.duration_ms,
+      artists: track.artists
+        .filter((artist) => artist.id)
+        .map((artist) => ({ id: artist.id!, name: artist.name })),
+      explicit: track.explicit,
+    }];
+  });

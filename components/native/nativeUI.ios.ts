@@ -1,13 +1,14 @@
-// iOS: real SwiftUI, imported straight from @expo/ui/swift-ui.
+// iOS: SwiftUI controls plus Host from universal Expo UI entrypoint.
 // Metro only bundles this file on iOS where the ExpoUI native module exists.
 // Android/web resolve `nativeUI.ts` which stubs every export.
+export { Host as SwiftHost } from '@expo/ui';
+
 export {
   BottomSheet as SwiftBottomSheet,
   Button as SwiftButton,
   Divider as SwiftDivider,
   Form as SwiftForm,
   Group as SwiftGroup,
-  Host as SwiftHost,
   HStack as SwiftHStack,
   Image as SwiftImage,
   Menu as SwiftMenu,
