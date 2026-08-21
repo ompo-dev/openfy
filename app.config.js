@@ -60,11 +60,14 @@ module.exports = {
         'expo-splash-screen',
         {
           backgroundColor: '#121212',
-          image: './icon.svg',
+          // iOS renders its native splash from a PNG. This is the transparent
+          // raster export of icon.svg, so the white Openfy mark has no square
+          // background against the dark splash color.
+          image: './assets/images/app-icon/openfy-android-foreground.png',
           imageWidth: 120,
           dark: {
             backgroundColor: '#121212',
-            image: './icon.svg',
+            image: './assets/images/app-icon/openfy-android-foreground.png',
             imageWidth: 120,
           },
         },
