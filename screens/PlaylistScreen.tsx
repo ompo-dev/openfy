@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Preview } from '@components';
+import { LocalPlaylist, Preview } from '@components';
 
 import { PlaylistModel, TrackModel } from '@models';
 import { checkSavedTracks, getPlaylist, getPlaylistItems } from '@api';
@@ -8,7 +8,14 @@ export type AlbumScreenPropsType = {
   playlistId: string;
 };
 
-export const PlaylistScreen = ({ playlistId }: AlbumScreenPropsType) => {
+export const PlaylistScreen = ({ playlistId }: AlbumScreenPropsType) =>
+  playlistId.startsWith('local_') ? (
+    <LocalPlaylist playlistId={playlistId} />
+  ) : (
+    <RemotePlaylistScreen playlistId={playlistId} />
+  );
+
+const RemotePlaylistScreen = ({ playlistId }: AlbumScreenPropsType) => {
   const [playlist, setPlaylist] = React.useState<PlaylistModel | null>(null);
   const [tracks, setTracks] = React.useState<TrackModel[]>([]);
   const [offset, setOffset] = React.useState(0);

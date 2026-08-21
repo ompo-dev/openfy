@@ -30,8 +30,8 @@ describe('BottomTabBar', () => {
     },
   };
 
-  beforeEach(() => {
-    container = render(<BottomTabBar {...mockProps} />);
+  beforeEach(async () => {
+    container = await render(<BottomTabBar {...mockProps} />);
   });
 
   afterEach(() => {

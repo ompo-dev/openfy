@@ -131,7 +131,7 @@ export const Track = ({
           title,
           artistName: artistName || subtitle,
           albumName: albumName || '',
-          imageURL: imageURL || '',
+          imageURL: imageURL || resolved.imageURL || '',
           duration_ms: duration_ms || 0,
         },
         resolved.url,

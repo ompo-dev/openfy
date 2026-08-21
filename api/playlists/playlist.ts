@@ -27,7 +27,7 @@ export const getPlaylist = async (
 
 export const getPlaylistItems = async ({
   playlistId,
-  fields = 'items.track(id, name, artists(name), album.images(url), explicit)',
+  fields = 'items.track(id,name,artists(name),album(name,images(url)),duration_ms,explicit)',
   limit,
   offset,
 }: {

@@ -9,7 +9,7 @@ export type CopyrightsPropsType = {
 
 export const Copyrights = ({ copyrightTexts }: CopyrightsPropsType) => {
   return (
-    <View style={styles.view}>
+    <View style={styles.view} testID="copyright-view">
       {copyrightTexts.map((text, index) => (
         <Text
           key={index}

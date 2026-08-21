@@ -162,7 +162,10 @@ export type SavedEpisodesResponseType = {
 
 export type PlaylistItemResponseType = {
   track: {
-    album: { images: { url: string | null }[] };
+    album: {
+      name: string;
+      images: { url: string | null }[];
+    };
     id: string;
     name: string;
     artists: { name: string }[];

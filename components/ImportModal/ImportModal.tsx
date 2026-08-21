@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,14 +20,16 @@ import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { parseSpotifyLink } from '@services';
-import { resolveAudioUrl } from '@services';
-import { downloadTrack, isTrackDownloaded } from '@services';
-import { COLORS } from '@config';
+import {
+  downloadTrack,
+  getDownloadedTracks,
+  isTrackDownloaded,
+  parseSpotifyLink,
+  resolveAudioUrl,
+  upsertLocalPlaylist,
+} from '@services';
 
 import { getPlaylist, getPlaylistItems } from '@api';
-import { getAlbum } from '@api';
-import { getSessionlessToken } from '@api';
 import axios from 'axios';
 
 type TrackPreview = {
@@ -38,6 +39,7 @@ type TrackPreview = {
   albumName: string;
   imageURL: string;
   duration_ms: number;
+  youtubeUrl?: string;
   isDownloaded?: boolean;
   downloadStatus?: 'idle' | 'resolving' | 'downloading' | 'done' | 'error';
   downloadProgress?: number;
@@ -46,9 +48,14 @@ type TrackPreview = {
 type ImportModalProps = {
   visible: boolean;
   onClose: () => void;
+  onLibraryChanged?: () => void;
 };
 
-const BASE_URL = 'https://api.spotify.com/v1';
+type ImportedPlaylist = {
+  sourcePlatform: 'spotify' | 'youtube';
+  sourceId: string;
+  title: string;
+};
 
 const fetchTrackById = async (trackId: string): Promise<TrackPreview | null> => {
   const cleanTrackId = trackId.replace(/^spotify:track:/, '').split('?')[0];
@@ -163,6 +170,74 @@ const fetchPlaylistOrAlbum = async (
 ): Promise<{ title: string; coverUrl: string; tracks: TrackPreview[] }> => {
   const spotifyUrl = `https://open.spotify.com/${type}/${id}`;
 
+  // Spotify's own playlist endpoint exposes each track's album art. This must
+  // run before fallbacks, which only know the playlist container cover.
+  if (type === 'playlist') {
+    try {
+      const response = await fetch(
+        `http://localhost:3001/api/spotify/playlist/${id}`,
+        { signal: AbortSignal.timeout(15000) }
+      );
+      if (response.ok) {
+        const data = (await response.json()) as {
+          title?: string;
+          coverUrl?: string;
+          tracks?: TrackPreview[];
+        };
+        if (data.title && Array.isArray(data.tracks) && data.tracks.length > 0) {
+          const downloadedIds = new Set(
+            (await getDownloadedTracks()).map((track) => track.spotifyId)
+          );
+          return {
+            title: data.title,
+            coverUrl: data.coverUrl || '',
+            tracks: data.tracks.map((track) => ({
+              ...track,
+              isDownloaded: downloadedIds.has(track.spotifyId),
+            })),
+          };
+        }
+      }
+    } catch (error) {
+      console.warn('[ImportModal] Local Spotify playlist lookup failed:', error);
+    }
+
+    try {
+      const playlist = await getPlaylist(id);
+      const spotifyTracks = [];
+      const limit = 100;
+
+      for (let offset = 0; ; offset += limit) {
+        const page = await getPlaylistItems({ playlistId: id, limit, offset });
+        spotifyTracks.push(...page);
+        if (page.length < limit) break;
+      }
+
+      if (spotifyTracks.length > 0) {
+        const downloadedIds = new Set(
+          (await getDownloadedTracks()).map((track) => track.spotifyId)
+        );
+        const tracks = spotifyTracks.map((track) => ({
+            spotifyId: track.id,
+            title: track.title,
+            artistName: track.subtitle,
+            albumName: track.albumName || playlist.title,
+            imageURL: track.imageURL || '',
+            duration_ms: track.durationMs || 0,
+            isDownloaded: downloadedIds.has(track.id),
+          }));
+
+        return {
+          title: playlist.title,
+          coverUrl: playlist.imageURL,
+          tracks,
+        };
+      }
+    } catch (error) {
+      console.warn('[ImportModal] Spotify playlist metadata lookup failed:', error);
+    }
+  }
+
   // 1. Try Spotyloader info API with required headers
   try {
     const res = await axios.get(
@@ -191,7 +266,12 @@ const fetchPlaylistOrAlbum = async (
           title: t.name || t.title || 'Música',
           artistName: artist,
           albumName: albumTitle,
-          imageURL: t.image || coverUrl,
+          imageURL:
+            type === 'playlist'
+              ? t.image && t.image !== coverUrl
+                ? t.image
+                : ''
+              : t.image || coverUrl,
           duration_ms: t.duration_ms || 0,
           isDownloaded: already,
         });
@@ -231,7 +311,7 @@ const fetchPlaylistOrAlbum = async (
             title: t.title || 'Música',
             artistName: t.subtitle || 'Unknown Artist',
             albumName: albumTitle,
-            imageURL: coverUrl,
+            imageURL: type === 'album' ? coverUrl : '',
             duration_ms: t.duration || 0,
             isDownloaded: already,
           });
@@ -285,32 +365,41 @@ const fetchPlaylistOrAlbum = async (
 };
 
 const fetchYouTubeTrack = async (videoId: string): Promise<TrackPreview | null> => {
+  const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
   try {
-    const res = await axios.get(
-      `https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`,
-      { timeout: 6000 }
+    const response = await axios.post(
+      'http://localhost:3001/api/music/youtube',
+      { url: youtubeUrl },
+      { timeout: 9000 }
     );
-    const data = res.data;
-    if (data && data.title) {
+    const track = response.data?.track;
+    if (track?.videoId === videoId && track.title && track.streamUrl) {
       const trackId = `yt_${videoId}`;
       const already = await isTrackDownloaded(trackId);
       return {
         spotifyId: trackId,
-        title: data.title,
-        artistName: data.author_name || 'YouTube Music',
-        albumName: 'YouTube Track',
-        imageURL: data.thumbnail_url || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-        duration_ms: 0,
+        title: track.title,
+        artistName: track.artistName || 'YouTube Music',
+        albumName: track.albumName || 'YouTube Track',
+        imageURL: track.imageURL || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        duration_ms: track.duration_ms || 0,
+        youtubeUrl: track.youtubeUrl || youtubeUrl,
         isDownloaded: already,
       };
     }
   } catch (err) {
-    console.warn('[ImportModal] YouTube track fetch failed:', err);
+    console.warn('[ImportModal] Exact YouTube track fetch failed:', err);
   }
+
+  // Never show metadata that cannot be downloaded from this exact video.
+  // A retry is preferable to quietly resolving a similarly named track.
   return null;
 };
 
-const fetchYouTubePlaylist = async (playlistId: string): Promise<TrackPreview[]> => {
+const fetchYouTubePlaylist = async (
+  playlistId: string
+): Promise<{ title: string; tracks: TrackPreview[] }> => {
   const gateways = [
     `https://inv.nadeko.net/api/v1/playlists/${playlistId}`,
     `https://invidious.f5.si/api/v1/playlists/${playlistId}`,
@@ -337,22 +426,31 @@ const fetchYouTubePlaylist = async (playlistId: string): Promise<TrackPreview[]>
             isDownloaded: already,
           });
         }
-        if (list.length > 0) return list;
+        if (list.length > 0) {
+          return { title: data.title || 'YouTube Playlist', tracks: list };
+        }
       }
     } catch {}
   }
-  return [];
+  return { title: '', tracks: [] };
 };
 
-export const ImportModal = ({ visible, onClose }: ImportModalProps) => {
+export const ImportModal = ({
+  visible,
+  onClose,
+  onLibraryChanged,
+}: ImportModalProps) => {
   const [inputText, setInputText] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
   const [tracks, setTracks] = React.useState<TrackPreview[]>([]);
+  const [importedPlaylist, setImportedPlaylist] =
+    React.useState<ImportedPlaylist | null>(null);
   const [error, setError] = React.useState('');
 
   const reset = () => {
     setInputText('');
     setTracks([]);
+    setImportedPlaylist(null);
     setError('');
     setIsLoading(false);
   };
@@ -388,16 +486,24 @@ export const ImportModal = ({ visible, onClose }: ImportModalProps) => {
     setIsLoading(true);
     setError('');
     setTracks([]);
+    setImportedPlaylist(null);
 
     try {
       let tracksToShow: TrackPreview[] = [];
+      let playlistToSave: ImportedPlaylist | null = null;
 
       if (parsed.platform === 'youtube') {
         if (parsed.type === 'track') {
           const ytTrack = await fetchYouTubeTrack(parsed.id);
           if (ytTrack) tracksToShow = [ytTrack];
         } else if (parsed.type === 'playlist') {
-          tracksToShow = await fetchYouTubePlaylist(parsed.id);
+          const result = await fetchYouTubePlaylist(parsed.id);
+          tracksToShow = result.tracks;
+          playlistToSave = {
+            sourcePlatform: 'youtube',
+            sourceId: parsed.id,
+            title: result.title,
+          };
         }
       } else {
         // Spotify
@@ -410,6 +516,13 @@ export const ImportModal = ({ visible, onClose }: ImportModalProps) => {
         } else if (parsed.type === 'playlist' || parsed.type === 'album') {
           const result = await fetchPlaylistOrAlbum(parsed.id, parsed.type);
           tracksToShow = result.tracks;
+          if (parsed.type === 'playlist') {
+            playlistToSave = {
+              sourcePlatform: 'spotify',
+              sourceId: parsed.id,
+              title: result.title,
+            };
+          }
         }
       }
 
@@ -417,6 +530,17 @@ export const ImportModal = ({ visible, onClose }: ImportModalProps) => {
         setError('Nenhuma música encontrada. Verifique o link e tente novamente.');
       } else {
         setTracks(tracksToShow);
+        if (playlistToSave) {
+          await upsertLocalPlaylist({
+            ...playlistToSave,
+            trackIds: tracksToShow.map((track) => track.spotifyId),
+            coverImageURLs: tracksToShow
+              .map((track) => track.imageURL)
+              .filter(Boolean),
+          });
+          setImportedPlaylist(playlistToSave);
+          onLibraryChanged?.();
+        }
       }
     } catch (err) {
       setError('Erro ao buscar dados. Verifique o link e tente novamente.');
@@ -463,7 +587,7 @@ export const ImportModal = ({ visible, onClose }: ImportModalProps) => {
           title: track.title,
           artistName: track.artistName,
           albumName: track.albumName,
-          imageURL: track.imageURL,
+          imageURL: track.imageURL || resolved.imageURL || '',
           duration_ms: track.duration_ms,
         },
         resolved.url,
@@ -480,9 +604,31 @@ export const ImportModal = ({ visible, onClose }: ImportModalProps) => {
       if (result) {
         setTracks((prev) =>
           prev.map((t, i) =>
-            i === index ? { ...t, downloadStatus: 'done', isDownloaded: true, downloadProgress: 1 } : t
+            i === index
+              ? {
+                  ...t,
+                  imageURL: result.imageURL || t.imageURL,
+                  downloadStatus: 'done',
+                  isDownloaded: true,
+                  downloadProgress: 1,
+                }
+              : t
           )
         );
+        if (importedPlaylist) {
+          await upsertLocalPlaylist({
+            ...importedPlaylist,
+            trackIds: tracks.map((item) => item.spotifyId),
+            coverImageURLs: tracks
+              .map((item, itemIndex) =>
+                itemIndex === index
+                  ? result.imageURL || item.imageURL
+                  : item.imageURL
+              )
+              .filter(Boolean),
+          });
+        }
+        onLibraryChanged?.();
       } else {
         throw new Error('Download falhou.');
       }
@@ -525,13 +671,13 @@ export const ImportModal = ({ visible, onClose }: ImportModalProps) => {
           <Pressable onPress={handleClose} style={styles.closeButton}>
             <Ionicons name="close" size={24} color="#FFFFFF" />
           </Pressable>
-          <Text style={styles.title}>Importar do Spotify</Text>
+          <Text style={styles.title}>Adicionar músicas</Text>
           <View style={styles.headerRight} />
         </View>
 
         {/* Input Section */}
         <View style={styles.inputSection}>
-          <Text style={styles.label}>Cole o link do Spotify:</Text>
+          <Text style={styles.label}>Cole um link do Spotify ou YouTube:</Text>
           <View style={styles.inputRow}>
             <TextInput
               style={styles.textInput}
@@ -540,7 +686,7 @@ export const ImportModal = ({ visible, onClose }: ImportModalProps) => {
                 setInputText(t);
                 setError('');
               }}
-              placeholder="https://open.spotify.com/track/..."
+              placeholder="https://open.spotify.com/track/... ou youtube.com/watch?v=..."
               placeholderTextColor="#666"
               multiline={false}
               autoCapitalize="none"

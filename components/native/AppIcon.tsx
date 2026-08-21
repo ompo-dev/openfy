@@ -10,6 +10,7 @@ export type AppIconName =
   | 'library-outline'
   | 'search'
   | 'search-outline'
+  | 'sort'
   | 'add'
   | 'heart'
   | 'heart-outline'
@@ -33,6 +34,7 @@ export type AppIconName =
   | 'checkmark-circle'
   | 'close'
   | 'close-circle'
+  | 'trash'
   | 'musical-note'
   | 'musical-notes'
   | 'person'
@@ -63,6 +65,7 @@ interface AppIconProps {
 }
 
 export function AppIcon({ name, color = '#FFFFFF', size = 24, style }: AppIconProps) {
-  const iconName = name === 'cast' ? 'radio-outline' : name;
+  const iconName =
+    name === 'cast' ? 'radio-outline' : name === 'sort' ? 'swap-vertical' : name;
   return <Ionicons name={iconName as any} size={size} color={color} style={style as any} />;
 }

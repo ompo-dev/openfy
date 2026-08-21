@@ -51,7 +51,6 @@ export const normalizeString = (str: string): string => {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // remove accents
-    .replace(/[\(\[\{].*?[\)\]\}]/g, '') // remove parenthesized content
     .replace(/[^a-z0-9\s]/g, ' ') // alphanumeric only
     .replace(/\s+/g, ' ')
     .trim();
@@ -79,6 +78,75 @@ export const hasHardForbiddenWords = (
  * Alias for backward compatibility
  */
 export const hasUnwantedForbiddenWords = hasHardForbiddenWords;
+
+const isKnownArtist = (artist: string): boolean => {
+  const normalized = normalizeString(artist);
+  return (
+    normalized.length > 0 &&
+    normalized !== 'artista' &&
+    normalized !== 'unknown artist' &&
+    normalized !== 'unknown'
+  );
+};
+
+export const hasCanonicalTitleMatch = (
+  candidateTitle: string,
+  canonicalTitle: string
+): boolean => {
+  const candidate = normalizeString(candidateTitle);
+  const canonical = normalizeString(canonicalTitle);
+  const escapedCanonical = canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const hasUnexpectedContinuation =
+    !!canonical &&
+    new RegExp(`(?:^|\\s)${escapedCanonical}\\s+\\d+\\b`).test(candidate);
+
+  if (!canonical || hasUnexpectedContinuation) return false;
+
+  const candidateWords = candidate.split(' ');
+  let candidateIndex = 0;
+  return canonical.split(' ').every((word) => {
+    const nextIndex = candidateWords.indexOf(word, candidateIndex);
+    if (nextIndex < 0) return false;
+    candidateIndex = nextIndex + 1;
+    return true;
+  });
+};
+
+/**
+ * Detects a lyric provider returning a different numbered track under the
+ * requested title. LRC timestamps are removed first, so timestamps never
+ * masquerade as a title suffix.
+ */
+export const hasConflictingNumberedTitleInLyrics = (
+  lyrics: string | undefined,
+  canonicalTitle: string
+): boolean => {
+  const title = normalizeString(canonicalTitle);
+  if (!title || !lyrics) return false;
+
+  const text = normalizeString(
+    lyrics.replace(/\[\d{1,2}:\d{2}(?:\.\d+)?\]/g, ' ')
+  );
+  const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|\\s)${escapedTitle}\\s+\\d+\\b`).test(text);
+};
+
+export const hasCanonicalArtistMatch = (
+  candidateTitle: string,
+  candidateArtist: string,
+  canonicalArtist: string
+): boolean => {
+  if (!isKnownArtist(canonicalArtist)) return true;
+
+  const candidateContext = normalizeString(
+    `${candidateTitle} ${candidateArtist}`
+  );
+  const artist = normalizeString(canonicalArtist);
+  return (
+    candidateContext.includes(artist) ||
+    candidateContext.replace(/\s/g, '').includes(artist.replace(/\s/g, ''))
+  );
+};
 
 /**
  * Score how well candidate duration matches canonical duration
@@ -135,7 +203,7 @@ export const evaluateCandidateMatch = (
   const reasons: string[] = [];
   const lowerCandTitle = (candidate.title || '').toLowerCase();
   const lowerCanonTitle = (canonical.title || '').toLowerCase();
-  const candAuthor = (candidate.artist || '').toLowerCase();
+  const candAuthor = normalizeString(candidate.artist || '');
 
   // 1. Hard Rejection (slowed, loops, compilations, snippets)
   if (hasHardForbiddenWords(candidate.title, canonical.title)) {
@@ -149,6 +217,42 @@ export const evaluateCandidateMatch = (
       isVerified: false,
       status: 'unavailable',
       reasons: ['Candidate title contains hard-rejected word (slowed/loop/compilation)'],
+    };
+  }
+
+  const normPrimaryArtist = normalizeString(canonical.artists[0] || '');
+
+  if (!hasCanonicalTitleMatch(candidate.title, canonical.title)) {
+    return {
+      spotifyId: canonical.spotifyId,
+      canonicalTitle: canonical.title,
+      canonicalArtists: canonical.artists,
+      expectedDurationMs: canonical.durationMs,
+      sourceConfidence: 0,
+      durationDifferenceMs: 0,
+      isVerified: false,
+      status: 'unavailable',
+      reasons: ['Candidate title does not match the canonical track'],
+    };
+  }
+
+  if (
+    !hasCanonicalArtistMatch(
+      candidate.title,
+      candidate.artist || '',
+      canonical.artists[0] || ''
+    )
+  ) {
+    return {
+      spotifyId: canonical.spotifyId,
+      canonicalTitle: canonical.title,
+      canonicalArtists: canonical.artists,
+      expectedDurationMs: canonical.durationMs,
+      sourceConfidence: 0,
+      durationDifferenceMs: 0,
+      isVerified: false,
+      status: 'unavailable',
+      reasons: ['Candidate artist does not match the canonical artist'],
     };
   }
 
@@ -172,10 +276,6 @@ export const evaluateCandidateMatch = (
   reasons.push(`Duration matched: ${(durationEval.diffMs / 1000).toFixed(1)}s difference`);
 
   // 3. Official Artist Channel / Uploader Matching (+30 points)
-  const normCanonicalTitle = normalizeString(canonical.title);
-  const normCandidateTitle = normalizeString(candidate.title);
-  const normPrimaryArtist = normalizeString(canonical.artists[0] || '');
-
   const isOfficialChannel =
     normPrimaryArtist &&
     (candAuthor.includes(normPrimaryArtist) ||
@@ -189,14 +289,12 @@ export const evaluateCandidateMatch = (
     reasons.push('Official channel/uploader verified');
   }
 
-  // 4. Title & Artist Lexical Matching (+20 points)
-  const hasTitleMatch =
-    normCandidateTitle.includes(normCanonicalTitle) ||
-    normCanonicalTitle.includes(normCandidateTitle);
-
-  if (hasTitleMatch) {
+  // 4. Title & artist are hard-verified above; both also raise confidence.
+  confidence += 20;
+  reasons.push('Title verified');
+  if (isKnownArtist(canonical.artists[0] || '')) {
     confidence += 20;
-    reasons.push('Title verified');
+    reasons.push('Artist verified');
   }
 
   // 5. Popularity / View Count Bonus (+10 points)

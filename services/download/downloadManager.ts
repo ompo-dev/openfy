@@ -64,6 +64,27 @@ const BACKGROUND_RETRY_BASE_MS = 15 * 60 * 1000;
 const BACKGROUND_RETRY_MAX_MS = 6 * 60 * 60 * 1000;
 const MAX_BACKGROUND_ATTEMPTS = 8;
 
+const createStorageMutationQueue = () => {
+  let previous = Promise.resolve();
+
+  return async <T>(operation: () => Promise<T>): Promise<T> => {
+    const before = previous;
+    let release = () => {};
+    previous = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await before;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  };
+};
+
+const mutateDownloadedStorage = createStorageMutationQueue();
+const mutatePendingStorage = createStorageMutationQueue();
+
 /**
  * Ensure download directories exist
  */
@@ -104,6 +125,14 @@ const saveDownloadedTracks = async (tracks: DownloadedTrack[]): Promise<void> =>
   await AsyncStorage.setItem(DOWNLOADS_STORAGE_KEY, JSON.stringify(tracks));
 };
 
+const updateDownloadedTracks = async (
+  update: (tracks: DownloadedTrack[]) => DownloadedTrack[]
+): Promise<void> => {
+  await mutateDownloadedStorage(async () => {
+    await saveDownloadedTracks(update(await getDownloadedTracks()));
+  });
+};
+
 export const getPendingDownloads = async (): Promise<PendingDownload[]> => {
   try {
     const stored = await AsyncStorage.getItem(PENDING_DOWNLOADS_STORAGE_KEY);
@@ -124,41 +153,48 @@ const savePendingDownloads = async (
   );
 };
 
+const updatePendingDownloads = async (
+  update: (downloads: PendingDownload[]) => PendingDownload[]
+): Promise<void> => {
+  await mutatePendingStorage(async () => {
+    await savePendingDownloads(update(await getPendingDownloads()));
+  });
+};
+
 const upsertPendingDownload = async (
   track: DownloadTrackInput,
   audioUrl?: string,
   audioFormat = 'mp3'
 ): Promise<void> => {
-  const downloads = await getPendingDownloads();
-  const existing = downloads.find(
-    (candidate) => candidate.track.spotifyId === track.spotifyId
-  );
-  const next: PendingDownload = {
-    track,
-    audioUrl,
-    audioFormat,
-    queuedAt: existing?.queuedAt || new Date().toISOString(),
-    attempts: existing?.attempts || 0,
-    lastAttemptAt: new Date().toISOString(),
-  };
-  await savePendingDownloads([
-    ...downloads.filter(
-      (candidate) => candidate.track.spotifyId !== track.spotifyId
-    ),
-    next,
-  ]);
+  await updatePendingDownloads((downloads) => {
+    const existing = downloads.find(
+      (candidate) => candidate.track.spotifyId === track.spotifyId
+    );
+    const next: PendingDownload = {
+      track,
+      audioUrl,
+      audioFormat,
+      queuedAt: existing?.queuedAt || new Date().toISOString(),
+      attempts: existing?.attempts || 0,
+      lastAttemptAt: new Date().toISOString(),
+    };
+    return [
+      ...downloads.filter(
+        (candidate) => candidate.track.spotifyId !== track.spotifyId
+      ),
+      next,
+    ];
+  });
 };
 
 const removePendingDownload = async (spotifyId: string): Promise<void> => {
-  const downloads = await getPendingDownloads();
-  await savePendingDownloads(
+  await updatePendingDownloads((downloads) =>
     downloads.filter((candidate) => candidate.track.spotifyId !== spotifyId)
   );
 };
 
 const recordPendingDownloadFailure = async (spotifyId: string): Promise<void> => {
-  const downloads = await getPendingDownloads();
-  await savePendingDownloads(
+  await updatePendingDownloads((downloads) =>
     downloads.map((candidate) =>
       candidate.track.spotifyId === spotifyId
         ? {
@@ -438,6 +474,7 @@ const downloadTrackInternal = async (
   try {
     await upsertPendingDownload(track, audioUrl, audioFormat);
     const trackId = `track_${track.spotifyId}`;
+    let effectiveTrack = track;
 
     let resolvedUrl = audioUrl;
     let format = audioFormat;
@@ -454,6 +491,10 @@ const downloadTrackInternal = async (
       if (mainResult?.url) {
         resolvedUrl = mainResult.url;
         format = mainResult.format || 'mp3';
+        if (!effectiveTrack.imageURL && mainResult.imageURL) {
+          effectiveTrack = { ...effectiveTrack, imageURL: mainResult.imageURL };
+          await upsertPendingDownload(effectiveTrack, resolvedUrl, format);
+        }
       }
     }
 
@@ -498,9 +539,9 @@ const downloadTrackInternal = async (
     onProgress?.(0.75);
 
     // Download cover art
-    let localImagePath = track.imageURL;
-    if (track.imageURL && track.imageURL.startsWith('http')) {
-      const downloadedCoverUri = await downloadCover(track.imageURL, trackId);
+    let localImagePath = effectiveTrack.imageURL;
+    if (effectiveTrack.imageURL && effectiveTrack.imageURL.startsWith('http')) {
+      const downloadedCoverUri = await downloadCover(effectiveTrack.imageURL, trackId);
       if (downloadedCoverUri) {
         localImagePath = downloadedCoverUri;
       }
@@ -510,15 +551,15 @@ const downloadTrackInternal = async (
 
     const downloadedTrack: DownloadedTrack = {
       id: trackId,
-      spotifyId: track.spotifyId,
-      title: track.title,
-      artistName: track.artistName,
-      albumName: track.albumName,
-      imageURL: localImagePath || track.imageURL,
+      spotifyId: effectiveTrack.spotifyId,
+      title: effectiveTrack.title,
+      artistName: effectiveTrack.artistName,
+      albumName: effectiveTrack.albumName,
+      imageURL: localImagePath || effectiveTrack.imageURL,
       localAudioPath,
       localImagePath: localImagePath || track.imageURL,
       downloadedAt: new Date().toISOString(),
-      duration_ms: track.duration_ms,
+      duration_ms: effectiveTrack.duration_ms,
       audioUrl: resolvedUrl,
     };
 
@@ -536,11 +577,12 @@ const downloadTrackInternal = async (
       .catch(() => {});
 
     // Save to AsyncStorage
-    const existingTracks = await getDownloadedTracks();
-    const filtered = existingTracks.filter(
-      (t) => t.spotifyId !== track.spotifyId
-    );
-    await saveDownloadedTracks([...filtered, downloadedTrack]);
+    await updateDownloadedTracks((existingTracks) => [
+      ...existingTracks.filter(
+        (candidate) => candidate.spotifyId !== track.spotifyId
+      ),
+      downloadedTrack,
+    ]);
     await removePendingDownload(track.spotifyId);
 
     onProgress?.(1.0);
@@ -641,8 +683,9 @@ export const deleteDownloadedTrack = async (
       }
     }
 
-    const filtered = tracks.filter((t) => t.spotifyId !== spotifyId);
-    await saveDownloadedTracks(filtered);
+    await updateDownloadedTracks((currentTracks) =>
+      currentTracks.filter((candidate) => candidate.spotifyId !== spotifyId)
+    );
     return true;
   } catch (error) {
     console.error('[DownloadManager] Failed to delete downloaded track:', error);

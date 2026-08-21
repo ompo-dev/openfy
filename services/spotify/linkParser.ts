@@ -57,39 +57,26 @@ export const parseSpotifyLink = (
     };
   }
 
-  // 3. YouTube / YouTube Music Playlists
-  const ytPlaylistMatch = trimmed.match(/[?&]list=([a-zA-Z0-9_-]+)/);
-  if (
-    ytPlaylistMatch &&
-    (trimmed.includes('youtube.com') || trimmed.includes('music.youtube.com'))
-  ) {
-    return {
-      platform: 'youtube',
-      type: 'playlist',
-      id: ytPlaylistMatch[1],
-    };
+  // 3. YouTube / YouTube Music. Read query parameters in either order, since
+  // share links often put tracking parameters before the video ID.
+  const youtubeHost = /^(?:https?:\/\/)?(?:www\.)?(?:music\.)?youtube\.com\//i;
+  if (youtubeHost.test(trimmed)) {
+    const videoId = trimmed.match(/[?&]v=([A-Za-z0-9_-]{11})(?:[&#]|$)/)?.[1];
+    if (videoId) {
+      return { platform: 'youtube', type: 'track', id: videoId };
+    }
+
+    const playlistId = trimmed.match(/[?&]list=([A-Za-z0-9_-]+)(?:[&#]|$)/)?.[1];
+    if (playlistId) {
+      return { platform: 'youtube', type: 'playlist', id: playlistId };
+    }
   }
 
-  // 4. YouTube / YouTube Music Watch
-  const ytWatchMatch = trimmed.match(
-    /(?:music\.youtube\.com|youtube\.com)\/watch\?v=([a-zA-Z0-9_-]{11})/
+  const youtuBeMatch = trimmed.match(
+    /^(?:https?:\/\/)?(?:www\.)?youtu\.be\/([A-Za-z0-9_-]{11})(?:[?&#/]|$)/i
   );
-  if (ytWatchMatch) {
-    return {
-      platform: 'youtube',
-      type: 'track',
-      id: ytWatchMatch[1],
-    };
-  }
-
-  // 5. youtu.be short link
-  const youtuBeMatch = trimmed.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
   if (youtuBeMatch) {
-    return {
-      platform: 'youtube',
-      type: 'track',
-      id: youtuBeMatch[1],
-    };
+    return { platform: 'youtube', type: 'track', id: youtuBeMatch[1] };
   }
 
   return null;

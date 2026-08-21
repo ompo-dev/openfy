@@ -1,16 +1,17 @@
 import * as React from 'react';
-import { useRouter, useSegments } from 'expo-router';
+import { useRouter } from 'expo-router';
 import {
   render,
   fireEvent,
   RenderResult,
-  within,
 } from '@testing-library/react-native';
 import { Artists, ArtistsPropsType } from '../Artists';
 
 jest.mock('expo-router', () => ({
   useRouter: jest.fn(),
 }));
+
+jest.mock('expo-image', () => ({ Image: 'Image' }));
 
 enum TEST_IDS {
   ARTIST_IMAGE = 'artist-image',
@@ -39,10 +40,9 @@ describe('AlbumArtists', () => {
     ],
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     (useRouter as jest.Mock).mockReturnValue({ push: mockRouter });
-    (useSegments as jest.Mock).mockReturnValue(['(tabs)', 'home']);
-    container = render(<Artists {...defaultProps} />);
+    container = await render(<Artists {...defaultProps} />);
   });
 
   afterEach(() => {
@@ -74,8 +74,8 @@ describe('AlbumArtists', () => {
     it('passes properly props to Image component for first artist', () => {
       const Images = container.getAllByTestId(TEST_IDS.ARTIST_IMAGE);
 
-      Images.forEach((Image, i) => {
-        expect(Image.props.source.uri).toEqual(
+      Images.forEach((image, i) => {
+        expect(image.props.source.uri).toEqual(
           defaultProps.artists![i].imageURL
         );
       });
@@ -84,10 +84,8 @@ describe('AlbumArtists', () => {
     it('displays artist name(s) inside Text components', () => {
       const Texts = container.getAllByTestId(TEST_IDS.ARTIST_NAME);
 
-      Texts.forEach((Text, i) => {
-        expect(
-          within(Text).queryByText(defaultProps.artists![i].name)
-        ).toBeTruthy();
+      Texts.forEach((text, i) => {
+        expect(text.props.children).toEqual(defaultProps.artists![i].name);
       });
     });
   });

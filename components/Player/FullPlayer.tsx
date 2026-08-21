@@ -67,6 +67,25 @@ const getTrackKey = (
       )
     : '';
 
+const getExactYouTubeUrl = (input?: string): string => {
+  const parsed = parseSpotifyLink(input || '');
+  return parsed?.platform === 'youtube' && parsed.type === 'track'
+    ? `https://www.youtube.com/watch?v=${parsed.id}`
+    : '';
+};
+
+const getTrackYouTubeUrl = (
+  track: { spotifyId: string; youtubeUrl?: string } | null
+): string => {
+  const explicitUrl = getExactYouTubeUrl(track?.youtubeUrl);
+  if (explicitUrl) return explicitUrl;
+
+  const directVideoId = track?.spotifyId?.match(/^yt_([A-Za-z0-9_-]{11})$/)?.[1];
+  return directVideoId
+    ? `https://www.youtube.com/watch?v=${directVideoId}`
+    : '';
+};
+
 export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const {
     currentTrack,
@@ -125,8 +144,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     }
 
     youtubeTrackKeyRef.current = currentTrackKey;
-    setYoutubeUrl(currentTrack.youtubeUrl || '');
-    if (currentTrack.youtubeUrl) return;
+    const exactTrackUrl = getTrackYouTubeUrl(currentTrack);
+    setYoutubeUrl(exactTrackUrl);
+    if (exactTrackUrl) return;
 
     let isMounted = true;
     fetch('http://localhost:3001/api/music/resolve', {
@@ -142,13 +162,11 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       .then((r) => r.json())
       .then((data) => {
         if (isMounted) {
-          if (data.source?.id) {
+          if (/^[A-Za-z0-9_-]{11}$/.test(data.source?.id || '')) {
             setYoutubeUrl(`https://www.youtube.com/watch?v=${data.source.id}`);
-          } else if (
-            data.playback?.url &&
-            data.playback.url.includes('youtube.com')
-          ) {
-            setYoutubeUrl(data.playback.url);
+          } else {
+            const resolvedUrl = getExactYouTubeUrl(data.playback?.url);
+            if (resolvedUrl) setYoutubeUrl(resolvedUrl);
           }
         }
       })
@@ -249,28 +267,25 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     Haptics.selectionAsync().catch(() => {});
     setIsActionModalVisible(false);
     const activeYoutubeUrl =
-      currentTrack?.youtubeUrl ||
+      getTrackYouTubeUrl(currentTrack) ||
       (youtubeTrackKeyRef.current === currentTrackKey ? youtubeUrl : '');
-    const urlToOpen =
-      activeYoutubeUrl ||
-      `https://www.youtube.com/results?search_query=${encodeURIComponent(
-        `${currentTrack?.artistName || ''} - ${currentTrack?.title || ''}`
-      )}`;
-    Linking.openURL(urlToOpen).catch(() => {});
+    if (!getExactYouTubeUrl(activeYoutubeUrl)) {
+      Alert.alert(
+        'Vídeo indisponível',
+        'Ainda não foi possível confirmar o vídeo oficial desta música.'
+      );
+      return;
+    }
+    Linking.openURL(activeYoutubeUrl).catch(() => {});
   };
 
   const handleOpenEditLinkModal = () => {
     Haptics.selectionAsync().catch(() => {});
     setIsActionModalVisible(false);
     const activeYoutubeUrl =
-      currentTrack?.youtubeUrl ||
+      getTrackYouTubeUrl(currentTrack) ||
       (youtubeTrackKeyRef.current === currentTrackKey ? youtubeUrl : '');
-    setCustomLinkInput(
-      activeYoutubeUrl ||
-        `https://www.youtube.com/results?search_query=${encodeURIComponent(
-          `${currentTrack?.artistName || ''} - ${currentTrack?.title || ''}`
-        )}`
-    );
+    setCustomLinkInput(getExactYouTubeUrl(activeYoutubeUrl));
     setIsEditModalVisible(true);
   };
 

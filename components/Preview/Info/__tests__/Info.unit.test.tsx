@@ -8,8 +8,8 @@ describe('Info', () => {
     infoTexts: ['August 12, 2022', '28 tracks \u2022 1 hr 36 min'],
   };
 
-  beforeEach(() => {
-    container = render(<Info {...defaultProps} />);
+  beforeEach(async () => {
+    container = await render(<Info {...defaultProps} />);
   });
 
   afterEach(() => {

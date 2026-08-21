@@ -29,6 +29,17 @@ export type {
 } from './download/downloadManager';
 
 export {
+  getLocalPlaylist,
+  getLocalPlaylists,
+  removeTrackFromLocalPlaylists,
+  upsertLocalPlaylist,
+} from './library/localPlaylistManager';
+export type {
+  LocalPlaylist,
+  LocalPlaylistInput,
+} from './library/localPlaylistManager';
+
+export {
   BACKGROUND_DOWNLOAD_TASK,
   registerBackgroundDownloadTask,
 } from './background/backgroundDownloads';

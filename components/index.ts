@@ -7,4 +7,6 @@ export { Search } from './Search';
 export { MiniPlayer, FullPlayer } from './Player';
 export { ImportModal } from './ImportModal';
 export { OfflineLibrary } from './OfflineLibrary';
+export { PlaylistMosaic } from './PlaylistMosaic';
+export { LocalPlaylist } from './LocalPlaylist';
 export * from './native';

@@ -17,6 +17,56 @@ export type ResolvedAudio = {
   format: string;
   source: 'spotyloader' | 'soundcloud' | 'youtube';
   confidence?: number;
+  imageURL?: string;
+};
+
+const MUSIC_SERVER_URL = 'http://localhost:3001';
+
+const getPlayableAudioUrl = (streamUrl: string): string =>
+  Platform.OS === 'web'
+    ? `${MUSIC_SERVER_URL}/api/audio/proxy?url=${encodeURIComponent(streamUrl)}`
+    : streamUrl;
+
+const getYouTubeVideoIdFromTrackId = (trackId?: string): string | null => {
+  const match = trackId?.match(/^yt_([A-Za-z0-9_-]{11})$/);
+  return match?.[1] || null;
+};
+
+const resolveExactYouTubeVideo = async (
+  videoId: string
+): Promise<ResolvedAudio | null> => {
+  try {
+    const response = await fetch(`${MUSIC_SERVER_URL}/api/music/youtube`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as {
+      track?: {
+        videoId?: string;
+        streamUrl?: string;
+        imageURL?: string;
+        format?: string;
+      };
+    };
+    if (data.track?.videoId !== videoId || !data.track.streamUrl) return null;
+
+    return {
+      url: getPlayableAudioUrl(data.track.streamUrl),
+      quality: 'high',
+      format: data.track.format || 'm4a',
+      source: 'youtube',
+      confidence: 100,
+      imageURL: data.track.imageURL,
+    };
+  } catch {
+    return null;
+  }
 };
 
 /**
@@ -175,6 +225,24 @@ export const resolveViaYouTubeTopic = async (
         const author = (video.author || '').toLowerCase();
         const title = (video.title || '').toLowerCase();
 
+        const matchReport = evaluateCandidateMatch(
+          {
+            title: video.title || '',
+            artist: video.author || '',
+            durationMs: durSec * 1000,
+            provider: 'youtube',
+            url: `https://www.youtube.com/watch?v=${video.videoId}`,
+            viewCount,
+          },
+          {
+            title: trackName,
+            artists: primaryArtist ? [primaryArtist] : [],
+            durationMs: expectedDurationMs || 0,
+            spotifyId: '',
+          }
+        );
+        if (!matchReport.isVerified) continue;
+
         // Duration proximity filter
         const diffSec = expectedSec > 0 ? Math.abs(durSec - expectedSec) : 0;
         if (diffSec > 45 && expectedSec > 0) continue;
@@ -211,7 +279,11 @@ export const resolveViaYouTubeTopic = async (
         // 4. Timing proximity penalty
         score -= diffSec * 20;
 
-        scoredCandidates.push({ ...video, score, diffSec });
+        scoredCandidates.push({
+          ...video,
+          score: score + matchReport.sourceConfidence,
+          diffSec,
+        });
       }
 
       if (scoredCandidates.length === 0) continue;
@@ -249,6 +321,7 @@ export const resolveViaYouTubeTopic = async (
               format: 'm4a',
               source: 'youtube',
               confidence: 98,
+              imageURL: video.videoThumbnails?.at(-1)?.url,
             };
           }
         }
@@ -331,7 +404,7 @@ export const resolveViaSoundCloud = async (
         );
 
         if (
-          matchReport.status !== 'unavailable' &&
+          matchReport.isVerified &&
           !hasUnwantedForbiddenWords(item.title, trackName)
         ) {
           candidates.push({ ...item, matchReport });
@@ -340,7 +413,8 @@ export const resolveViaSoundCloud = async (
 
       if (candidates.length > 0) {
         candidates.sort(
-          (a, b) => b.matchReport.overallScore - a.matchReport.overallScore
+          (a, b) =>
+            b.matchReport.sourceConfidence - a.matchReport.sourceConfidence
         );
         const track = candidates[0];
 
@@ -377,14 +451,14 @@ export const resolveViaSoundCloud = async (
                   transcoding.format.protocol === 'progressive';
                 const isM3u8 = streamData.url.includes('.m3u8');
                 console.log(
-                  `[AudioResolver] Verified SoundCloud Track: "${track.title}" by "${track.user?.username}" (Confidence: ${track.matchReport.overallScore}%)`
+                  `[AudioResolver] Verified SoundCloud Track: "${track.title}" by "${track.user?.username}" (Confidence: ${track.matchReport.sourceConfidence}%)`
                 );
                 return {
                   url: streamData.url,
                   quality: 'high',
                   format: isProgressive ? 'mp3' : isM3u8 ? 'm3u8' : 'mp3',
                   source: 'soundcloud',
-                  confidence: track.matchReport.overallScore,
+                  confidence: track.matchReport.sourceConfidence,
                 };
               }
             }
@@ -410,6 +484,13 @@ export const resolveAudioUrl = async (
   spotifyId?: string,
   durationMs?: number
 ): Promise<ResolvedAudio | null> => {
+  const youtubeVideoId = getYouTubeVideoIdFromTrackId(spotifyId);
+  if (youtubeVideoId) {
+    // A pasted YouTube URL is an exact source. Never replace it with a text
+    // search result, even when a similar track is more popular.
+    return resolveExactYouTubeVideo(youtubeVideoId);
+  }
+
   const isUnknownArtist =
     !artistName ||
     artistName.toLowerCase().includes('unknown') ||
@@ -423,8 +504,13 @@ export const resolveAudioUrl = async (
   );
 
   // 0. PRIMARY: Dedicated Node.js Resolution Backend API (Structured Entity & Strict Matching)
+  // Keep a server-side SoundCloud answer only as a fallback.  The server may
+  // have identified the exact official YouTube video but be unable to extract
+  // its stream; in that case the device must still try its YouTube resolver
+  // before accepting another provider.
+  let backendFallback: ResolvedAudio | null = null;
   try {
-    const backendRes = await fetch('http://localhost:3001/api/music/resolve', {
+    const backendRes = await fetch(`${MUSIC_SERVER_URL}/api/music/resolve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -433,38 +519,36 @@ export const resolveAudioUrl = async (
         durationMs,
         spotifyId,
       }),
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(15000),
     });
 
     if (backendRes.ok) {
       const data = await backendRes.json();
-      const streamUrl = data.source?.streamUrl || (data.source?.url && !data.source.url.includes('youtube.com/watch') && !data.source.url.includes('youtu.be') ? data.source.url : null);
+      const streamUrl = data.source?.streamUrl;
       if (streamUrl) {
         console.log(
           `[AudioResolver] Resolved Playable Stream via Backend Server: "${data.track?.title}"`
         );
-        return {
-          url: streamUrl,
-          quality: data.source.quality || '128kbps',
-          format: data.source.format || 'mp3',
-          source: 'soundcloud',
+        const backendResult: ResolvedAudio = {
+          url: getPlayableAudioUrl(streamUrl),
+          quality: data.source.quality || 'high',
+          format: data.source.format || 'm4a',
+          source: data.source.provider === 'youtube' ? 'youtube' : 'soundcloud',
           confidence: Math.round((data.source.score || 0.9) * 100),
+          imageURL: data.track?.imageURL || data.artwork?.url,
         };
+
+        if (backendResult.source === 'youtube') {
+          return backendResult;
+        }
+
+        backendFallback = backendResult;
       }
     }
   } catch {}
 
-  // 1. SECONDARY: SoundCloud Match Engine (Strict Duration & Anti-Remix verification)
-  const soundcloudResult = await resolveViaSoundCloud(
-    trackName,
-    primaryArtist,
-    durationMs
-  );
-  if (soundcloudResult?.url && !isPreviewUrl(soundcloudResult.url)) {
-    return soundcloudResult;
-  }
-
-  // 2. TERTIARY: YouTube Official Channel & Master Topic Ranker
+  // 1. SECONDARY: Official YouTube channel/topic match. Keep original source
+  // priority even when the local backend is unavailable.
   const ytResult = await resolveViaYouTubeTopic(
     trackName,
     primaryArtist,
@@ -472,6 +556,21 @@ export const resolveAudioUrl = async (
   );
   if (ytResult?.url && !isPreviewUrl(ytResult.url)) {
     return ytResult;
+  }
+
+  if (backendFallback?.url && !isPreviewUrl(backendFallback.url)) {
+    return backendFallback;
+  }
+
+  // 2. Last fallback: SoundCloud still must pass canonical title, artist and
+  // duration checks before it can be used.
+  const soundcloudResult = await resolveViaSoundCloud(
+    trackName,
+    primaryArtist,
+    durationMs
+  );
+  if (soundcloudResult?.url && !isPreviewUrl(soundcloudResult.url)) {
+    return soundcloudResult;
   }
 
   return null;

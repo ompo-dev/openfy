@@ -11,10 +11,26 @@ export const LibrarySelectedCategoryContext = React.createContext<{
   librarySelectedCategory: Categories;
   setLibrarySelectedCategory: React.Dispatch<React.SetStateAction<Categories>>;
   animatedValue: SharedValue<number> | null;
+  librarySearchQuery: string;
+  setLibrarySearchQuery: React.Dispatch<React.SetStateAction<string>>;
+  librarySort: 'recent' | 'title';
+  toggleLibrarySort: () => void;
+  libraryView: 'songs' | 'playlists';
+  toggleLibraryView: () => void;
+  libraryRevision: number;
+  refreshLibrary: () => void;
 }>({
   librarySelectedCategory: Categories.DOWNLOADED,
   setLibrarySelectedCategory: () => {},
   animatedValue: null,
+  librarySearchQuery: '',
+  setLibrarySearchQuery: () => {},
+  librarySort: 'recent',
+  toggleLibrarySort: () => {},
+  libraryView: 'songs',
+  toggleLibraryView: () => {},
+  libraryRevision: 0,
+  refreshLibrary: () => {},
 });
 
 export const LibrarySelectedCategoryProvider = ({
@@ -22,6 +38,14 @@ export const LibrarySelectedCategoryProvider = ({
 }: LibrarySelectedCategoryProviderPropsType) => {
   const [librarySelectedCategory, setLibrarySelectedCategory] =
     React.useState<Categories>(Categories.DOWNLOADED);
+  const [librarySearchQuery, setLibrarySearchQuery] = React.useState('');
+  const [librarySort, setLibrarySort] = React.useState<'recent' | 'title'>(
+    'recent'
+  );
+  const [libraryView, setLibraryView] = React.useState<'songs' | 'playlists'>(
+    'songs'
+  );
+  const [libraryRevision, setLibraryRevision] = React.useState(0);
   const animatedValue = useSharedValue(1);
 
   return (
@@ -30,6 +54,16 @@ export const LibrarySelectedCategoryProvider = ({
         librarySelectedCategory,
         setLibrarySelectedCategory,
         animatedValue: animatedValue as SharedValue<number>,
+        librarySearchQuery,
+        setLibrarySearchQuery,
+        librarySort,
+        toggleLibrarySort: () =>
+          setLibrarySort((sort) => (sort === 'recent' ? 'title' : 'recent')),
+        libraryView,
+        toggleLibraryView: () =>
+          setLibraryView((view) => (view === 'songs' ? 'playlists' : 'songs')),
+        libraryRevision,
+        refreshLibrary: () => setLibraryRevision((revision) => revision + 1),
       }}
     >
       {children}
@@ -41,6 +75,14 @@ export const useLibrarySelectedCategory = (): {
   librarySelectedCategory: Categories;
   setLibrarySelectedCategory: React.Dispatch<React.SetStateAction<Categories>>;
   animatedValue: SharedValue<number>;
+  librarySearchQuery: string;
+  setLibrarySearchQuery: React.Dispatch<React.SetStateAction<string>>;
+  librarySort: 'recent' | 'title';
+  toggleLibrarySort: () => void;
+  libraryView: 'songs' | 'playlists';
+  toggleLibraryView: () => void;
+  libraryRevision: number;
+  refreshLibrary: () => void;
 } => {
   const context = React.useContext(LibrarySelectedCategoryContext);
 

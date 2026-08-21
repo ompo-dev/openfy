@@ -4,49 +4,95 @@
  */
 
 import * as React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AntDesign, FontAwesome5 } from '@expo/vector-icons';
 
-import { LibraryRelated } from './LibraryRelated';
-import { HomeCategories } from './HomeCategories/HomeCategories';
 import { ImportModal } from '../ImportModal';
-import { Pages } from '@config';
-import { translations } from '@data';
+import { AppIcon, GlassSurface, NativeIconButton } from '../native';
+import { useLibrarySelectedCategory } from '@context';
 
-export type HeaderPropsType = {
-  tab: Pages;
-};
-
-export const Header = ({ tab }: HeaderPropsType) => {
+export const Header = () => {
   const { top: statusBarOffset } = useSafeAreaInsets();
   const [importModalVisible, setImportModalVisible] = React.useState(false);
-
-  const isHome = tab === Pages.HOME;
-  const isLibrary = tab === Pages.LIBRARY;
+  const [searchVisible, setSearchVisible] = React.useState(false);
+  const {
+    librarySearchQuery,
+    setLibrarySearchQuery,
+    librarySort,
+    toggleLibrarySort,
+    libraryView,
+    toggleLibraryView,
+    refreshLibrary,
+  } = useLibrarySelectedCategory();
 
   return (
-    <View style={[styles.container, { paddingTop: statusBarOffset }]}>
-      {/* Top Bar */}
+    <View style={[styles.container, { paddingTop: statusBarOffset + 8 }]}>
       <View style={styles.topRow}>
-        {isLibrary && (
-          <View style={styles.rightActions}>
-            <Pressable
-              style={styles.iconButton}
-              hitSlop={8}
-              onPress={() => setImportModalVisible(true)}
-            >
-              <AntDesign name="plus" size={24} color="#FFFFFF" />
-            </Pressable>
-          </View>
-        )}
+        <NativeIconButton
+          systemImage="plus"
+          iconName="add"
+          label="Adicionar música"
+          size={38}
+          onPress={() => setImportModalVisible(true)}
+        />
+        <Text style={styles.titleText}>
+          {libraryView === 'songs' ? 'Songs' : 'Playlists'}
+        </Text>
+        <GlassSurface glass="clear" isInteractive style={styles.controls}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              librarySort === 'recent'
+                ? `Ordenar ${libraryView === 'songs' ? 'músicas' : 'playlists'} por título`
+                : `Ordenar ${libraryView === 'songs' ? 'músicas' : 'playlists'} recentes`
+            }
+            onPress={toggleLibrarySort}
+            style={styles.controlButton}
+          >
+            <AppIcon name="sort" size={18} color="#B8B8B8" />
+          </Pressable>
+          <View style={styles.controlDivider} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              libraryView === 'songs' ? 'Mostrar playlists' : 'Mostrar músicas'
+            }
+            onPress={toggleLibraryView}
+            style={styles.controlButton}
+          >
+            <AppIcon
+              name={libraryView === 'songs' ? 'grid' : 'list'}
+              size={18}
+              color="#B8B8B8"
+            />
+          </Pressable>
+          <View style={styles.controlDivider} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Pesquisar ${libraryView === 'songs' ? 'músicas' : 'playlists'}`}
+            onPress={() => setSearchVisible((visible) => !visible)}
+            style={styles.controlButton}
+          >
+            <AppIcon name="search" size={18} color="#B8B8B8" />
+          </Pressable>
+        </GlassSurface>
       </View>
 
-      {isLibrary && <LibraryRelated />}
+      {searchVisible ? (
+        <TextInput
+          autoFocus
+          value={librarySearchQuery}
+          onChangeText={setLibrarySearchQuery}
+          placeholder={`Pesquisar ${libraryView === 'songs' ? 'músicas' : 'playlists'}`}
+          placeholderTextColor="#777"
+          style={styles.searchInput}
+        />
+      ) : null}
 
       <ImportModal
         visible={importModalVisible}
         onClose={() => setImportModalVisible(false)}
+        onLibraryChanged={refreshLibrary}
       />
     </View>
   );
@@ -55,42 +101,48 @@ export const Header = ({ tab }: HeaderPropsType) => {
 const styles = StyleSheet.create({
   container: {
     backgroundColor: '#121212',
-    paddingBottom: 4,
+    paddingBottom: 12,
   },
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    height: 56,
-  },
-  homeTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    paddingHorizontal: 12,
+    height: 52,
     gap: 10,
-  },
-  spotifyLogo: {
-    marginRight: 2,
-  },
-  homeTitleText: {
-    color: '#FFFFFF',
-    fontSize: 26,
-    fontFamily: 'SF-Bold',
-    fontWeight: '800',
-    letterSpacing: -0.5,
   },
   titleText: {
     color: '#FFFFFF',
-    fontSize: 22,
-    fontFamily: 'SF-Bold',
-    fontWeight: '700',
+    fontSize: 17,
+    fontFamily: 'SF-Semibold',
+    fontWeight: '600',
   },
-  rightActions: {
+  controls: {
+    marginLeft: 'auto',
+    height: 36,
+    borderRadius: 18,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    overflow: 'hidden',
   },
-  iconButton: {
-    padding: 2,
+  controlButton: {
+    width: 35,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  controlDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 16,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  searchInput: {
+    height: 40,
+    marginHorizontal: 12,
+    marginTop: 6,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#1E1E1E',
+    color: '#FFFFFF',
+    fontSize: 15,
   },
 });

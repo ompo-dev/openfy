@@ -10,6 +10,11 @@
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  hasCanonicalArtistMatch,
+  hasConflictingNumberedTitleInLyrics,
+  hasCanonicalTitleMatch,
+} from '../canonical/canonicalMatcher';
 
 export type LyricSegment = {
   index: number;
@@ -30,7 +35,75 @@ export type LyricsData = {
   timeOffsetMs?: number;
 };
 
+export const createEstimatedLyricSegments = (
+  plainLyrics: string | undefined,
+  durationMs: number
+): LyricSegment[] => {
+  if (!plainLyrics || durationMs <= 0) return [];
+
+  const lines = plainLyrics
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return [];
+
+  const startOffsetMs = Math.min(2500, Math.round(durationMs * 0.04));
+  const availableMs = Math.max(0, durationMs - startOffsetMs);
+  const weights = lines.map((line) => Math.max(1, line.split(/\s+/).length));
+  const totalWeight = weights.reduce((total, weight) => total + weight, 0);
+  let startTimeMs = startOffsetMs;
+
+  return lines.map((text, index) => {
+    const nextStartMs =
+      index === lines.length - 1
+        ? durationMs
+        : startTimeMs + (availableMs * weights[index]) / totalWeight;
+    const segment = {
+      index,
+      startTimeMs: Math.round(startTimeMs),
+      endTimeMs: Math.round(nextStartMs),
+      text,
+    };
+    startTimeMs = nextStartMs;
+    return segment;
+  });
+};
+
 const LYRICS_DIR = `${FileSystem.documentDirectory || ''}openfy_lyrics/`;
+
+type LyricsCandidateIdentity = {
+  trackName?: string;
+  artistName?: string;
+  duration?: number;
+  durationMs?: number;
+};
+
+const isCanonicalLyricsCandidate = (
+  candidate: LyricsCandidateIdentity,
+  trackName: string,
+  artistName: string,
+  durationMs: number
+): boolean => {
+  if (!hasCanonicalTitleMatch(candidate.trackName || '', trackName)) {
+    return false;
+  }
+
+  if (
+    artistName &&
+    !hasCanonicalArtistMatch(
+      candidate.trackName || '',
+      candidate.artistName || '',
+      artistName
+    )
+  ) {
+    return false;
+  }
+
+  const candidateDurationMs = candidate.durationMs || (candidate.duration || 0) * 1000;
+  if (!durationMs || !candidateDurationMs) return true;
+
+  return Math.abs(candidateDurationMs - durationMs) <= Math.max(10000, durationMs * 0.1);
+};
 
 export const ensureLyricsDirectory = async (): Promise<void> => {
   if (Platform.OS === 'web') return;
@@ -101,7 +174,8 @@ export const parseLrcToSegments = (
  */
 export const fetchLyricsFromLetras = async (
   trackName: string,
-  artistName: string
+  artistName: string,
+  durationSeconds?: number
 ): Promise<LyricsData | null> => {
   try {
     const cleanT = (trackName || '').replace(/\(.*\)/g, '').replace(/-.*/g, '').trim();
@@ -131,12 +205,19 @@ export const fetchLyricsFromLetras = async (
       for (const doc of docs.slice(0, 3)) {
         if (!doc.dns || !doc.url) continue;
 
-        // Verify doc title matches requested track name
-        const docTitleNorm = (doc.txt || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        const targetTitleNorm = (trackName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        const targetWords = targetTitleNorm.split('_').filter(w => w.length > 2);
-        const titleMatches = targetWords.some(w => docTitleNorm.includes(w)) || docTitleNorm.includes(targetTitleNorm) || targetTitleNorm.includes(docTitleNorm);
-        if (!titleMatches) continue;
+        if (
+          !isCanonicalLyricsCandidate(
+            {
+              trackName: `${doc.txt || ''} ${doc.url || ''}`,
+              artistName: doc.art,
+            },
+            trackName,
+            artistName,
+            0
+          )
+        ) {
+          continue;
+        }
 
         const pageUrl = `https://www.letras.mus.br/${doc.dns}/${doc.url}/`;
         const pageRes = await fetch(pageUrl, {
@@ -157,13 +238,17 @@ export const fetchLyricsFromLetras = async (
             .trim();
 
           if (plain.length > 20) {
+            const segments = createEstimatedLyricSegments(
+              plain,
+              Math.round((durationSeconds || 0) * 1000)
+            );
             return {
               id: doc.id || `letras_${doc.dns}`,
               trackName: doc.txt || trackName,
               artistName: doc.art || artistName,
               plainLyrics: plain,
-              segments: [],
-              isSynced: false,
+              segments,
+              isSynced: segments.length > 0,
               source: 'letras',
             };
           }
@@ -205,7 +290,23 @@ export const fetchLyrics = async (
     const bRes = await fetch(backendUrl, { signal: AbortSignal.timeout(4000) });
     if (bRes.ok) {
       const bData = await bRes.json();
-      if (bData && bData.valid) {
+      if (
+        bData?.valid &&
+        isCanonicalLyricsCandidate(
+          {
+            trackName: bData.trackName,
+            artistName: bData.artistName,
+            durationMs: bData.durationMs,
+          },
+          cleanTrack,
+          primaryArtist || artistName,
+          durationMs
+        ) &&
+        !hasConflictingNumberedTitleInLyrics(
+          bData.syncedLyrics || bData.plainLyrics,
+          cleanTrack
+        )
+      ) {
         let segments: LyricSegment[] = [];
         if (bData.syncedLyrics) {
           segments = parseLrcToSegments(bData.syncedLyrics, durationMs);
@@ -232,7 +333,10 @@ export const fetchLyrics = async (
     }
   } catch {}
 
-  // 2. SECONDARY: Try exact synchronized match on LRCLIB directly
+  let exactLyrics: LyricsData | null = null;
+
+  // Keep direct exact result as a fallback. Search has better disambiguation
+  // for separate tracks with similar titles.
   try {
     const params = new URLSearchParams({
       track_name: cleanTrack,
@@ -254,14 +358,25 @@ export const fetchLyrics = async (
         id?: number;
         trackName: string;
         artistName: string;
+        duration?: number;
         plainLyrics?: string;
         syncedLyrics?: string;
       };
 
-      if (data.syncedLyrics && data.syncedLyrics.trim().length > 0) {
+      if (
+        isCanonicalLyricsCandidate(
+          data,
+          cleanTrack,
+          primaryArtist || artistName,
+          durationMs
+        ) &&
+        data.syncedLyrics &&
+        !hasConflictingNumberedTitleInLyrics(data.syncedLyrics, cleanTrack) &&
+        data.syncedLyrics.trim().length > 0
+      ) {
         const segments = parseLrcToSegments(data.syncedLyrics, durationMs);
         if (segments.length > 0) {
-          return {
+          exactLyrics = {
             id: data.id,
             trackName: data.trackName || trackName,
             artistName: data.artistName || artistName,
@@ -274,14 +389,29 @@ export const fetchLyrics = async (
         }
       }
 
-      if (data.plainLyrics && data.plainLyrics.trim().length > 0) {
-        return {
+      if (
+        isCanonicalLyricsCandidate(
+          data,
+          cleanTrack,
+          primaryArtist || artistName,
+          durationMs
+        ) &&
+        !exactLyrics &&
+        data.plainLyrics &&
+        !hasConflictingNumberedTitleInLyrics(data.plainLyrics, cleanTrack) &&
+        data.plainLyrics.trim().length > 0
+      ) {
+        const segments = createEstimatedLyricSegments(
+          data.plainLyrics,
+          durationMs
+        );
+        exactLyrics = {
           id: data.id,
           trackName: data.trackName || trackName,
           artistName: data.artistName || artistName,
           plainLyrics: data.plainLyrics,
-          segments: [],
-          isSynced: false,
+          segments,
+          isSynced: segments.length > 0,
           source: 'lrclib',
         };
       }
@@ -304,12 +434,25 @@ export const fetchLyrics = async (
         id?: number;
         trackName: string;
         artistName: string;
+        duration?: number;
         plainLyrics?: string;
         syncedLyrics?: string;
       }[];
 
       if (Array.isArray(sData) && sData.length > 0) {
-        const matchedSynced = sData.find(
+        const matchedCandidates = sData.filter((item) =>
+          isCanonicalLyricsCandidate(
+            item,
+            cleanTrack,
+            primaryArtist || artistName,
+            durationMs
+          ) &&
+          !hasConflictingNumberedTitleInLyrics(
+            item.syncedLyrics || item.plainLyrics,
+            cleanTrack
+          )
+        );
+        const matchedSynced = matchedCandidates.find(
           (item) => item.syncedLyrics && item.syncedLyrics.trim().length > 0
         );
         if (matchedSynced?.syncedLyrics) {
@@ -328,17 +471,21 @@ export const fetchLyrics = async (
           }
         }
 
-        const matchedPlain = sData.find(
+        const matchedPlain = matchedCandidates.find(
           (item) => item.plainLyrics && item.plainLyrics.trim().length > 0
         );
         if (matchedPlain?.plainLyrics) {
+          const segments = createEstimatedLyricSegments(
+            matchedPlain.plainLyrics,
+            durationMs
+          );
           return {
             id: matchedPlain.id,
             trackName: matchedPlain.trackName || trackName,
             artistName: matchedPlain.artistName || artistName,
             plainLyrics: matchedPlain.plainLyrics,
-            segments: [],
-            isSynced: false,
+            segments,
+            isSynced: segments.length > 0,
             source: 'lrclib',
           };
         }
@@ -348,8 +495,14 @@ export const fetchLyrics = async (
     console.warn('[LyricsService] Search fallback error:', error);
   }
 
+  if (exactLyrics) return exactLyrics;
+
   // 4. QUATERNARY: Direct Letras.mus.br Scraper
-  const letrasData = await fetchLyricsFromLetras(cleanTrack, primaryArtist || artistName);
+  const letrasData = await fetchLyricsFromLetras(
+    cleanTrack,
+    primaryArtist || artistName,
+    durationSeconds
+  );
   if (letrasData) {
     return letrasData;
   }

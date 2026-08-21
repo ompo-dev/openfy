@@ -89,7 +89,10 @@ const streamCache = new Map<string, string>();
 const lyricsCache = new Map<string, LyricsData>();
 
 const STORAGE_STREAM_PREFIX = 'openfy_stream_cache_';
-const STORAGE_LYRICS_PREFIX = 'openfy_lyrics_cache_';
+// Version cache when lyric source selection changes so prior false negatives
+// are replaced by validated synchronized data.
+const LYRICS_CACHE_VERSION = 'v6';
+const STORAGE_LYRICS_PREFIX = `openfy_lyrics_cache_${LYRICS_CACHE_VERSION}_`;
 
 const IS_SPOTIFY_ID = /^[a-zA-Z0-9]{22}$/;
 
@@ -106,6 +109,9 @@ const getCacheKey = (track: PlayerTrack) => {
     .replace(/[^a-z0-9]/g, '_');
   return `${cleanArtist}_${cleanTitle}`;
 };
+
+const getLyricsCacheKey = (track: PlayerTrack) =>
+  `${getCacheKey(track)}:${LYRICS_CACHE_VERSION}`;
 
 export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   currentTrack: null,
@@ -131,13 +137,14 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     // 1. ATOMIC GENERATION LOCK 🔒: Increments request counter to cancel any stale in-flight fetches
     const requestId = get().activeRequestId + 1;
     const cacheKey = getCacheKey(track);
+    const lyricsCacheKey = getLyricsCacheKey(track);
 
     console.log(
       `[PlayerStore #${requestId}] Requested: "${track.artistName} - ${track.title}"`
     );
 
     // Check if we have cached lyrics in memory
-    const cachedLyrics = lyricsCache.get(cacheKey) || null;
+    const cachedLyrics = lyricsCache.get(lyricsCacheKey) || null;
 
     // Immediate UI state update with synchronized target track
     set({
@@ -220,7 +227,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         );
         if (stored) {
           const parsed = JSON.parse(stored) as LyricsData;
-          lyricsCache.set(cacheKey, parsed);
+          lyricsCache.set(lyricsCacheKey, parsed);
           return parsed;
         }
       } catch {}
@@ -232,7 +239,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       );
 
       if (fetched) {
-        lyricsCache.set(cacheKey, fetched);
+        lyricsCache.set(lyricsCacheKey, fetched);
         AsyncStorage.setItem(
           `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
           JSON.stringify(fetched)
@@ -511,7 +518,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     if (get().activeRequestId === activeRequestId) {
       const cacheKey = getCacheKey(currentTrack);
       if (lyrics) {
-        lyricsCache.set(cacheKey, lyrics);
+        lyricsCache.set(getLyricsCacheKey(currentTrack), lyrics);
         AsyncStorage.setItem(
           `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
           JSON.stringify(lyrics)

@@ -5,6 +5,7 @@
 
 import * as React from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FriendActivityStatus } from './FriendActivityStatus';
 import { ListeningFeed } from './ListeningFeed';
@@ -16,11 +17,13 @@ export { FriendActivityStatus } from './FriendActivityStatus';
 export { CompactMusicCarousel } from './CompactMusicCarousel';
 
 export const Home = () => {
+  const { top } = useSafeAreaInsets();
+
   return (
     <View style={styles.container}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: top + 8 }]}
       >
         {/* 1. Friend Activity Listening Status (Stories / Speech Bubbles) */}
         <FriendActivityStatus />
