@@ -1,5 +1,6 @@
 import { MUSIC_SERVER_URL } from '@config';
 import { fetchWithTimeout } from '@utils';
+import { Platform } from 'react-native';
 
 import { getPlayableAudioUrl } from '../audio/audioResolver';
 import { preloadAudio } from '../audio/playerService';
@@ -69,7 +70,12 @@ const resolveHomeTrack = (track: HomeTrackSeed) => {
   if (active) return active;
 
   const request = runQueuedResolve(async (): Promise<RefreshedHomeTrack | null> => {
-    if (!MUSIC_SERVER_URL) return null;
+    if (!MUSIC_SERVER_URL) {
+      console.warn(
+        `[HomeRefresh] ${Platform.OS} cannot preload "${track.artistName} - ${track.title}": music backend URL is empty.`
+      );
+      return null;
+    }
 
     try {
       const response = await fetchWithTimeout(
@@ -86,10 +92,20 @@ const resolveHomeTrack = (track: HomeTrackSeed) => {
         },
         15_000
       );
-      if (!response.ok) return null;
+      if (!response.ok) {
+        console.warn(
+          `[HomeRefresh] Backend returned HTTP ${response.status ?? 'unknown'} for "${track.artistName} - ${track.title}".`
+        );
+        return null;
+      }
 
       const data = (await response.json()) as ResolveResponse;
-      if (!data.source?.streamUrl) return null;
+      if (!data.source?.streamUrl) {
+        console.warn(
+          `[HomeRefresh] Backend returned no stream for "${track.artistName} - ${track.title}".`
+        );
+        return null;
+      }
 
       const streamExpiresAt = Date.now() + HOME_STREAM_TTL_MS;
       const streamUrl = getPlayableAudioUrl(data.source.streamUrl);
@@ -104,7 +120,11 @@ const resolveHomeTrack = (track: HomeTrackSeed) => {
         streamUrl,
         streamExpiresAt,
       };
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[HomeRefresh] Backend failed at ${MUSIC_SERVER_URL} for "${track.artistName} - ${track.title}": ${message}`
+      );
       return null;
     }
   });

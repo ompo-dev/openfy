@@ -7,6 +7,7 @@
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { MUSIC_SERVER_URL } from '@config';
 import { fetchLyrics, saveLyricsOffline } from '../lyrics/lyricsService';
 import {
   getPlayableAudioUrl,
@@ -71,6 +72,17 @@ const cancelledDownloads = new Set<string>();
 const BACKGROUND_RETRY_BASE_MS = 15 * 60 * 1000;
 const BACKGROUND_RETRY_MAX_MS = 6 * 60 * 60 * 1000;
 const MAX_BACKGROUND_ATTEMPTS = 8;
+
+const errorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
+const audioUrlOrigin = (url: string) => {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return 'invalid URL';
+  }
+};
 
 const createStorageMutationQueue = () => {
   let previous = Promise.resolve();
@@ -444,8 +456,10 @@ export const downloadAudio = async (
           return result.uri;
         }
       }
-    } catch {
-      // Fallback
+    } catch (error) {
+      console.warn(
+        `[DownloadManager] Resumable download failed from ${audioUrlOrigin(audioUrl)}: ${errorMessage(error)}. Trying direct download.`
+      );
     }
 
     // 3. Fallback to FileSystem.downloadAsync
@@ -459,7 +473,11 @@ export const downloadAudio = async (
           return directResult.uri;
         }
       }
-    } catch {}
+    } catch (error) {
+      console.warn(
+        `[DownloadManager] Direct download failed from ${audioUrlOrigin(audioUrl)}: ${errorMessage(error)}`
+      );
+    }
 
     return null;
   } catch (error) {
@@ -511,9 +529,9 @@ const downloadTrackInternal = async (
     const trackId = `track_${track.spotifyId}`;
     let effectiveTrack = track;
 
-    // iOS can begin a background download after provider signatures expire.
-    // Resolve a fresh proxied stream at execution time on that platform.
-    let resolvedUrl = Platform.OS === 'ios' ? undefined : audioUrl || track.audioUrl;
+    // A freshly preloaded source is still the canonical result. Use it first
+    // on iOS too; if it expired, the refresh below resolves a new source.
+    let resolvedUrl = audioUrl || track.audioUrl;
     let format = audioFormat || track.audioFormat || 'mp3';
     if (resolvedUrl) {
       resolvedUrl = getPlayableAudioUrl(resolvedUrl);
@@ -521,7 +539,9 @@ const downloadTrackInternal = async (
 
     // If no URL provided, resolve audio source
     if (!resolvedUrl) {
-      console.log(`[DownloadManager] Resolving audio for: "${track.artistName} - ${track.title}"`);
+      console.log(
+        `[DownloadManager] ${Platform.OS} resolving "${track.artistName} - ${track.title}", backend: ${MUSIC_SERVER_URL || 'unavailable'}`
+      );
       const mainResult = await resolveAudioUrl(
         track.title,
         track.artistName,
@@ -557,6 +577,9 @@ const downloadTrackInternal = async (
     if (cancelledDownloads.has(track.spotifyId)) return null;
 
     if (!resolvedUrl) {
+      console.warn(
+        `[DownloadManager] No verified stream for "${track.artistName} - ${track.title}". Check backend logs at ${MUSIC_SERVER_URL || 'unavailable'}.`
+      );
       throw new Error('Could not resolve audio stream URL');
     }
 
@@ -654,7 +677,9 @@ const downloadTrackInternal = async (
     try {
       await recordPendingDownloadFailure(track.spotifyId);
     } catch {}
-    console.error('[DownloadManager] Track download failed:', error);
+    console.error(
+      `[DownloadManager] ${Platform.OS} download failed for "${track.artistName} - ${track.title}": ${errorMessage(error)}`
+    );
     return null;
   }
 };

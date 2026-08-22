@@ -48,6 +48,7 @@ import {
 } from '@services';
 import { GlassSurface, LoggedPressable } from '../native';
 import { LyricSyncEditor } from './LyricSyncEditor';
+import { PlayerActionPill } from './PlayerActionPill';
 import { MarqueeText } from '../common/MarqueeText';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -1092,50 +1093,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   />
                 </GlassSurface>
               ) : (
-                <GlassSurface
-                  glass="regular"
-                  isInteractive
-                  style={styles.centerActionPill}
-                >
-                  <LoggedPressable
-                    onPress={() => setIsLiked(!isLiked)}
-                    style={styles.pillSegment}
-                  >
-                    <Ionicons
-                      name={isLiked ? 'heart' : 'heart-outline'}
-                      size={19}
-                      color={isLiked ? '#FF3B30' : 'rgba(255,255,255,0.8)'}
-                    />
-                  </LoggedPressable>
-
-                  <View style={styles.pillDivider} />
-
-                  <LoggedPressable
-                    onPress={openLyricsView}
-                    style={styles.pillSegment}
-                  >
-                    <Ionicons
-                      name="musical-note"
-                      size={19}
-                      color="rgba(255,255,255,0.8)"
-                    />
-                  </LoggedPressable>
-
-                  <View style={styles.pillDivider} />
-
-                  <LoggedPressable
-                    style={styles.pillSegment}
-                    onPress={handleOpenYoutubeMenu}
-                    accessibilityRole="button"
-                    accessibilityLabel="Opções do YouTube"
-                  >
-                    <Ionicons
-                      name="ellipsis-horizontal"
-                      size={19}
-                      color="rgba(255,255,255,0.8)"
-                    />
-                  </LoggedPressable>
-                </GlassSurface>
+                <PlayerActionPill
+                  isLiked={isLiked}
+                  onToggleLike={() => setIsLiked(!isLiked)}
+                  onOpenLyrics={openLyricsView}
+                  onOpenOptions={handleOpenYoutubeMenu}
+                />
               )}
 
               {/* Right Pill: YouTube Button with Clean Glass Theme */}
@@ -1638,13 +1601,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  centerActionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 44,
-    paddingHorizontal: 16,
-    borderRadius: 22,
-  },
   lyricsTrackPill: {
     height: 44,
     paddingHorizontal: 20,
@@ -1660,17 +1616,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   lyricsTrackPillMarquee: { flex: 1 },
-  pillSegment: {
-    paddingHorizontal: 12,
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pillDivider: {
-    width: 1,
-    height: 16,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-  },
   progressContainer: {
     width: '100%',
     marginVertical: 8,

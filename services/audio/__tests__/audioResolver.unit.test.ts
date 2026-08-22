@@ -56,4 +56,40 @@ describe('resolveAudioUrl', () => {
       expect.objectContaining({ method: 'POST' })
     );
   });
+
+  it('keeps iPhone on strict direct fallback when backend resolve fails', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            videoId: 'abc123DEF45',
+            title: 'Faixa canônica (Official Audio)',
+            author: 'Artista canônico - Topic',
+            lengthSeconds: 180,
+            viewCount: 1_000_000,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          adaptiveFormats: [
+            {
+              url: 'https://media.test/direct-canonical.m4a',
+              type: 'audio/mp4',
+              bitrate: 128000,
+            },
+          ],
+        }),
+      });
+
+    await expect(
+      resolveAudioUrl('Faixa canônica', 'Artista canônico', 'spotify_id', 180000)
+    ).resolves.toMatchObject({
+      source: 'youtube',
+      url: 'https://media.test/direct-canonical.m4a',
+    });
+  });
 });

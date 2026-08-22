@@ -22,6 +22,7 @@ import {
   swiftButtonStyle,
   swiftFont,
   swiftForegroundStyle,
+  glassCircleModifiers,
 } from '../native';
 
 type LibrarySort = 'recent' | 'title';
@@ -104,8 +105,14 @@ export const LibraryControlsPicker = ({
         matchContents={{ horizontal: !isSort, vertical: false }}
       >
         <SwiftMenu
-          modifiers={[swiftButtonStyle?.('plain')].filter(Boolean)}
-          label={<NativeMenuLabel iconOnly={isSort} label={label} />}
+          {...(isSort
+            ? { label: 'Ordenar', systemImage: 'line.3.horizontal.decrease' }
+            : { label: <NativeMenuLabel label={label} /> })}
+          modifiers={
+            isSort
+              ? glassCircleModifiers(38, '#B8B8B8')
+              : [swiftButtonStyle?.('plain')].filter(Boolean)
+          }
         >
           {options.map((option) => (
             <SwiftButton
@@ -190,20 +197,10 @@ export const LibraryControlsPicker = ({
 
 const NativeMenuLabel = ({
   label,
-  iconOnly,
 }: {
   label: string;
-  iconOnly: boolean;
 }) =>
-  iconOnly ? (
-    <SwiftImage
-      systemName="line.3.horizontal.decrease"
-      modifiers={[
-        swiftForegroundStyle?.('#B8B8B8'),
-        swiftFont?.({ size: 15, weight: 'semibold' }),
-      ].filter(Boolean)}
-    />
-  ) : (
+  (
     <SwiftHStack spacing={4}>
       <SwiftText
         modifiers={[swiftForegroundStyle?.('#B8B8B8')].filter(Boolean)}

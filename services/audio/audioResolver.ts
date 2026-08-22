@@ -22,13 +22,15 @@ export type ResolvedAudio = {
   imageURL?: string;
 };
 
-const requiresCanonicalBackend = Platform.OS === 'ios';
 const AUDIO_RESOLVE_TTL_MS = 8 * 60_000;
 const resolvedAudioCache = new Map<
   string,
   { value: ResolvedAudio; expiresAt: number }
 >();
 const activeAudioResolves = new Map<string, Promise<ResolvedAudio | null>>();
+
+const errorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
 
 const getAudioResolveKey = (
   trackName: string,
@@ -78,7 +80,12 @@ const getYouTubeVideoIdFromTrackId = (trackId?: string): string | null => {
 const resolveExactYouTubeVideo = async (
   videoId: string
 ): Promise<ResolvedAudio | null> => {
-  if (!MUSIC_SERVER_URL) return null;
+  if (!MUSIC_SERVER_URL) {
+    console.warn(
+      `[AudioResolver] Exact YouTube unavailable on ${Platform.OS}: music backend URL is empty.`
+    );
+    return null;
+  }
 
   try {
     const response = await fetchWithHermesTimeout(
@@ -92,7 +99,12 @@ const resolveExactYouTubeVideo = async (
       },
       8000
     );
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.warn(
+        `[AudioResolver] Exact YouTube backend returned HTTP ${response.status ?? 'unknown'}.`
+      );
+      return null;
+    }
 
     const data = (await response.json()) as {
       track?: {
@@ -112,7 +124,10 @@ const resolveExactYouTubeVideo = async (
       confidence: 100,
       imageURL: data.track.imageURL,
     };
-  } catch {
+  } catch (error) {
+    console.warn(
+      `[AudioResolver] Exact YouTube backend failed at ${MUSIC_SERVER_URL}: ${errorMessage(error)}`
+    );
     return null;
   }
 };
@@ -603,7 +618,7 @@ const resolveAudioUrlInternal = async (
   const primaryArtist = isUnknownArtist ? '' : artistName;
 
   console.log(
-    `[AudioResolver] Resolving Audio for Canonical: "${artistName} - ${trackName}" (${durationMs || 0}ms)`
+    `[AudioResolver] ${Platform.OS} resolving "${artistName} - ${trackName}" (${durationMs || 0}ms), backend: ${MUSIC_SERVER_URL || 'unavailable'}`
   );
 
   // 0. PRIMARY: Dedicated Node.js Resolution Backend API (Structured Entity & Strict Matching)
@@ -651,17 +666,25 @@ const resolveAudioUrlInternal = async (
         }
 
         backendFallback = backendResult;
+      } else {
+        console.warn(
+          `[AudioResolver] Backend returned no playable stream for "${artistName} - ${trackName}".`
+        );
       }
+    } else {
+      console.warn(
+        `[AudioResolver] Backend resolve returned HTTP ${backendRes.status ?? 'unknown'} for "${artistName} - ${trackName}".`
+      );
     }
-  } catch {}
+  } catch (error) {
+    console.warn(
+      `[AudioResolver] Backend resolve failed at ${MUSIC_SERVER_URL || 'unavailable'} for "${artistName} - ${trackName}": ${errorMessage(error)}`
+    );
+  }
 
-  // Native direct providers cannot preserve the canonical backend's matching
-  // and proxy guarantees. A miss must stay a miss instead of becoming another
-  // song with the requested track's cache key.
-  if (requiresCanonicalBackend) return backendFallback;
-
-  // 1. SECONDARY: Official YouTube channel/topic match. Keep original source
-  // priority even when the local backend is unavailable.
+  // Keep the same strict title, artist and duration matching on every
+  // platform. This lets iPhone recover when a local development backend is
+  // unavailable instead of failing every track at once.
   const ytResult = await resolveViaYouTubeTopic(
     trackName,
     primaryArtist,
@@ -686,5 +709,8 @@ const resolveAudioUrlInternal = async (
     return soundcloudResult;
   }
 
+  console.warn(
+    `[AudioResolver] No verified source found for "${artistName} - ${trackName}" on ${Platform.OS}.`
+  );
   return null;
 };
