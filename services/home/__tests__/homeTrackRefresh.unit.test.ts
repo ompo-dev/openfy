@@ -31,17 +31,21 @@ describe('refreshHomeTracks', () => {
       }),
     });
 
-    const refreshed = await refreshHomeTracks([
-      {
-        key: 'home-card',
-        spotifyId: 'source-id',
-        title: 'Título original',
-        artistName: 'Artista original',
-        albumName: 'Single',
-        imageURL: '',
-        duration_ms: 180000,
-      },
-    ]);
+    const onTrackResolved = jest.fn();
+    const refreshed = await refreshHomeTracks(
+      [
+        {
+          key: 'home-card',
+          spotifyId: 'source-id',
+          title: 'Título original',
+          artistName: 'Artista original',
+          albumName: 'Single',
+          imageURL: '',
+          duration_ms: 180000,
+        },
+      ],
+      onTrackResolved
+    );
 
     expect(fetchMock).toHaveBeenCalledWith(
       'http://music.test/api/music/resolve',
@@ -51,7 +55,7 @@ describe('refreshHomeTracks', () => {
       })
     );
     expect(refreshed).toEqual({
-      'home-card': {
+      'home-card': expect.objectContaining({
         spotifyId: 'source-id',
         title: 'Título canônico',
         artistName: 'Artista canônico',
@@ -59,8 +63,15 @@ describe('refreshHomeTracks', () => {
         imageURL: 'https://images.test/cover.jpg',
         duration_ms: 181000,
         streamUrl: 'proxy:https://media.test/track.m4a',
-      },
+        streamExpiresAt: expect.any(Number),
+      }),
     });
+    expect(onTrackResolved).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'home-card' }),
+      expect.objectContaining({
+        streamUrl: 'proxy:https://media.test/track.m4a',
+      })
+    );
   });
 
   it('does not replace the visible card when its audio source cannot be verified', async () => {

@@ -51,6 +51,7 @@ export interface FriendNoteItem {
     imageUrl?: string;
     duration_ms?: number;
     streamUrl?: string;
+    streamExpiresAt?: number;
   };
 }
 
@@ -242,6 +243,7 @@ export const FriendActivityStatus = ({
             imageUrl: refreshed.imageURL,
             duration_ms: refreshed.duration_ms,
             streamUrl: refreshed.streamUrl,
+            streamExpiresAt: refreshed.streamExpiresAt,
           },
         };
       }),
@@ -394,6 +396,7 @@ export const FriendActivityStatus = ({
           'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27341ea22e92c68e146eb4a7812',
         duration_ms: item.note.duration_ms || 200000,
         streamUrl: item.note.streamUrl,
+        streamExpiresAt: item.note.streamExpiresAt,
       });
     }
     setFriendSheetNote(item);

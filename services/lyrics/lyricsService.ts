@@ -78,15 +78,74 @@ type LyricsCandidateIdentity = {
   artistName?: string;
   duration?: number;
   durationMs?: number;
+  albumName?: string;
+  releaseDate?: string;
 };
 
-const isCanonicalLyricsCandidate = (
+type LyricTitleMatch = {
+  matches: boolean;
+  isRelaxed: boolean;
+};
+
+// Provider catalogues often omit production credits, but stripping every
+// hyphenated suffix turns different songs into the same lookup ("ESCANOR" was
+// previously enough to return another 7 Minutoz release). Keep the complete
+// title as the identity and only use the base title as a guarded fallback.
+const getLyricTitleVariants = (trackName: string): string[] => {
+  const fullTitle = (trackName || '').trim();
+  const withoutProductionCredit = fullTitle
+    .replace(
+      /\s*[\[(]\s*(?:prod(?:\.|ução)?|produced by)(?=\s|$)[^\])]*[\])]/gi,
+      ''
+    )
+    .trim();
+  return [...new Set([fullTitle, withoutProductionCredit].filter(Boolean))];
+};
+
+const getTitleWithoutProductionCredit = (trackName: string): string =>
+  (trackName || '')
+    .trim()
+    .replace(
+      /\s*[\[(]\s*(?:prod(?:\.|ução)?|produced by)(?=\s|$)[^\])]*[\])]/gi,
+      ''
+    )
+    .trim();
+
+const getLyricTitleMatch = (
+  candidateTitle: string,
+  trackName: string
+): LyricTitleMatch => {
+  const fullTitle = (trackName || '').trim();
+  const titleWithoutProductionCredit =
+    getTitleWithoutProductionCredit(trackName);
+
+  if (
+    (fullTitle && hasCanonicalTitleMatch(candidateTitle, fullTitle)) ||
+    (titleWithoutProductionCredit &&
+      hasCanonicalTitleMatch(candidateTitle, titleWithoutProductionCredit))
+  ) {
+    return { matches: true, isRelaxed: false };
+  }
+
+  return { matches: false, isRelaxed: false };
+};
+
+const hasConflictingLyricsTitle = (
+  lyrics: string | undefined,
+  trackName: string
+): boolean =>
+  getLyricTitleVariants(trackName).some((title) =>
+    hasConflictingNumberedTitleInLyrics(lyrics, title)
+  );
+
+export const isCanonicalLyricsCandidate = (
   candidate: LyricsCandidateIdentity,
   trackName: string,
   artistName: string,
   durationMs: number
 ): boolean => {
-  if (!hasCanonicalTitleMatch(candidate.trackName || '', trackName)) {
+  const titleMatch = getLyricTitleMatch(candidate.trackName || '', trackName);
+  if (!titleMatch.matches) {
     return false;
   }
 
@@ -103,11 +162,17 @@ const isCanonicalLyricsCandidate = (
 
   const candidateDurationMs =
     candidate.durationMs || (candidate.duration || 0) * 1000;
-  if (!durationMs || !candidateDurationMs) return true;
+  // A base-title match such as "Escanor" is ambiguous. Without an accurate
+  // duration we cannot prove that it is the credited release, so omit lyrics
+  // rather than attach a different song's text.
+  if (!durationMs || !candidateDurationMs) return !titleMatch.isRelaxed;
+
+  const durationToleranceMs = titleMatch.isRelaxed
+    ? Math.max(3000, durationMs * 0.02)
+    : Math.max(10000, durationMs * 0.1);
 
   return (
-    Math.abs(candidateDurationMs - durationMs) <=
-    Math.max(10000, durationMs * 0.1)
+    Math.abs(candidateDurationMs - durationMs) <= durationToleranceMs
   );
 };
 
@@ -184,15 +249,15 @@ export const fetchLyricsFromLetras = async (
   durationSeconds?: number
 ): Promise<LyricsData | null> => {
   try {
-    const cleanT = (trackName || '')
-      .replace(/\(.*\)/g, '')
-      .replace(/-.*/g, '')
-      .trim();
     const cleanA = (artistName || '')
       .replace(/\(.*\)/g, '')
       .replace(/,.*/g, '')
       .trim();
-    const queries = [`${cleanA} ${cleanT}`, cleanT, `${cleanT} ${cleanA}`];
+    const queries = getLyricTitleVariants(trackName).flatMap((title) => [
+      `${cleanA} ${title}`,
+      title,
+      `${title} ${cleanA}`,
+    ]);
 
     for (const query of queries) {
       const searchUrl = `https://solr.sscdn.co/letras/m1/?q=${encodeURIComponent(query)}`;
@@ -221,7 +286,7 @@ export const fetchLyricsFromLetras = async (
             },
             trackName,
             artistName,
-            0
+            Math.round((durationSeconds || 0) * 1000)
           )
         ) {
           continue;
@@ -275,14 +340,15 @@ export const fetchLyricsFromLetras = async (
 export const fetchLyrics = async (
   trackName: string,
   artistName: string,
-  durationSeconds?: number
+  durationSeconds?: number,
+  albumName?: string,
+  releaseDate?: string
 ): Promise<LyricsData | null> => {
   const isUnknown =
     !artistName ||
     artistName.toLowerCase() === 'artista' ||
     artistName.toLowerCase().includes('unknown');
 
-  const cleanTrack = trackName.split('(')[0].split('-')[0].trim();
   const primaryArtist = isUnknown
     ? ''
     : artistName.split(',')[0].split('&')[0].trim();
@@ -291,9 +357,11 @@ export const fetchLyrics = async (
   // 1. PRIMARY: Query dedicated Openfy Backend (/api/lyrics)
   try {
     const backendParams = new URLSearchParams({
-      title: cleanTrack,
+      title: trackName,
       artist: primaryArtist || artistName,
       ...(durationMs > 0 ? { durationMs: String(durationMs) } : {}),
+      ...(albumName ? { album: albumName } : {}),
+      ...(releaseDate ? { releaseDate } : {}),
     });
 
     if (!MUSIC_SERVER_URL) throw new Error('Music server unavailable');
@@ -309,13 +377,13 @@ export const fetchLyrics = async (
             artistName: bData.artistName,
             durationMs: bData.durationMs,
           },
-          cleanTrack,
+          trackName,
           primaryArtist || artistName,
           durationMs
         ) &&
-        !hasConflictingNumberedTitleInLyrics(
+        !hasConflictingLyricsTitle(
           bData.syncedLyrics || bData.plainLyrics,
-          cleanTrack
+          trackName
         )
       ) {
         let segments: LyricSegment[] = [];
@@ -331,7 +399,7 @@ export const fetchLyrics = async (
         }
 
         return {
-          id: `lyrics_${cleanTrack}`,
+          id: `lyrics_${trackName}`,
           trackName: bData.trackName || trackName,
           artistName: bData.artistName || artistName,
           plainLyrics: bData.plainLyrics,
@@ -344,13 +412,17 @@ export const fetchLyrics = async (
     }
   } catch {}
 
+  // iOS must use the same canonical verifier as the backend. Direct provider
+  // fallback can return a different track with a similar title.
+  if (Platform.OS === 'ios') return null;
+
   let exactLyrics: LyricsData | null = null;
 
   // Keep direct exact result as a fallback. Search has better disambiguation
   // for separate tracks with similar titles.
   try {
     const params = new URLSearchParams({
-      track_name: cleanTrack,
+      track_name: trackName,
     });
     if (primaryArtist) {
       params.append('artist_name', primaryArtist);
@@ -377,12 +449,12 @@ export const fetchLyrics = async (
       if (
         isCanonicalLyricsCandidate(
           data,
-          cleanTrack,
+          trackName,
           primaryArtist || artistName,
           durationMs
         ) &&
         data.syncedLyrics &&
-        !hasConflictingNumberedTitleInLyrics(data.syncedLyrics, cleanTrack) &&
+        !hasConflictingLyricsTitle(data.syncedLyrics, trackName) &&
         data.syncedLyrics.trim().length > 0
       ) {
         const segments = parseLrcToSegments(data.syncedLyrics, durationMs);
@@ -403,13 +475,13 @@ export const fetchLyrics = async (
       if (
         isCanonicalLyricsCandidate(
           data,
-          cleanTrack,
+          trackName,
           primaryArtist || artistName,
           durationMs
         ) &&
         !exactLyrics &&
         data.plainLyrics &&
-        !hasConflictingNumberedTitleInLyrics(data.plainLyrics, cleanTrack) &&
+        !hasConflictingLyricsTitle(data.plainLyrics, trackName) &&
         data.plainLyrics.trim().length > 0
       ) {
         const segments = createEstimatedLyricSegments(
@@ -433,14 +505,16 @@ export const fetchLyrics = async (
 
   // 3. TERTIARY: Search query fallback on LRCLIB
   try {
-    const query = primaryArtist ? `${primaryArtist} ${cleanTrack}` : cleanTrack;
-    const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(query)}`;
+    for (const lookupTitle of getLyricTitleVariants(trackName)) {
+      const query = primaryArtist
+        ? `${primaryArtist} ${lookupTitle}`
+        : lookupTitle;
+      const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(query)}`;
+      const sRes = await fetch(searchUrl, {
+        headers: { 'User-Agent': 'Openfy-App/1.0 (https://github.com/openfy)' },
+      });
 
-    const sRes = await fetch(searchUrl, {
-      headers: { 'User-Agent': 'Openfy-App/1.0 (https://github.com/openfy)' },
-    });
-
-    if (sRes.ok) {
+      if (!sRes.ok) continue;
       const sData = (await sRes.json()) as {
         id?: number;
         trackName: string;
@@ -455,13 +529,13 @@ export const fetchLyrics = async (
           (item) =>
             isCanonicalLyricsCandidate(
               item,
-              cleanTrack,
+              trackName,
               primaryArtist || artistName,
               durationMs
             ) &&
-            !hasConflictingNumberedTitleInLyrics(
+            !hasConflictingLyricsTitle(
               item.syncedLyrics || item.plainLyrics,
-              cleanTrack
+              trackName
             )
         );
         const matchedSynced = matchedCandidates.find(
@@ -514,7 +588,7 @@ export const fetchLyrics = async (
 
   // 4. QUATERNARY: Direct Letras.mus.br Scraper
   const letrasData = await fetchLyricsFromLetras(
-    cleanTrack,
+    trackName,
     primaryArtist || artistName,
     durationSeconds
   );

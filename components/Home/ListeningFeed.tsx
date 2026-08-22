@@ -464,6 +464,7 @@ export const ListeningFeed = () => {
               imageUrl: refreshed.imageURL,
               duration_ms: refreshed.duration_ms,
               streamUrl: refreshed.streamUrl,
+              streamExpiresAt: refreshed.streamExpiresAt,
             }
           : track;
       }),
@@ -482,6 +483,7 @@ export const ListeningFeed = () => {
               imageURL: refreshed.imageURL,
               duration_ms: refreshed.duration_ms,
               streamUrl: refreshed.streamUrl,
+              streamExpiresAt: refreshed.streamExpiresAt,
             }
           : track;
       }),
@@ -498,6 +500,7 @@ export const ListeningFeed = () => {
           imageURL: refreshed.imageURL,
           duration_ms: refreshed.duration_ms,
           streamUrl: refreshed.streamUrl,
+          streamExpiresAt: refreshed.streamExpiresAt,
         }
       : LYRIC_TRACK;
   }, [refreshedTracks]);

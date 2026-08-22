@@ -51,6 +51,7 @@ export const normalizeString = (str: string): string => {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // remove accents
+    .replace(/(?<=\w)\.(?=\w)/g, '') // preserve initialisms such as A.R.T.
     .replace(/[^a-z0-9\s]/g, ' ') // alphanumeric only
     .replace(/\s+/g, ' ')
     .trim();
@@ -138,10 +139,21 @@ export const hasCanonicalArtistMatch = (
 ): boolean => {
   if (!isKnownArtist(canonicalArtist)) return true;
 
-  const candidateContext = normalizeString(
-    `${candidateTitle} ${candidateArtist}`
-  );
   const artist = normalizeString(canonicalArtist);
+  const sourceArtist = normalizeString(candidateArtist);
+  const hasSourceArtist = isKnownArtist(candidateArtist);
+
+  // A user upload can put the target artist in its title while belonging to a
+  // different creator. When provider exposes a creator, that creator is the
+  // identity signal; title-only matching is reserved for sources without one.
+  if (hasSourceArtist) {
+    return (
+      sourceArtist.includes(artist) ||
+      sourceArtist.replace(/\s/g, '').includes(artist.replace(/\s/g, ''))
+    );
+  }
+
+  const candidateContext = normalizeString(candidateTitle);
   return (
     candidateContext.includes(artist) ||
     candidateContext.replace(/\s/g, '').includes(artist.replace(/\s/g, ''))

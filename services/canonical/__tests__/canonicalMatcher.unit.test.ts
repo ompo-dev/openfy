@@ -29,6 +29,28 @@ describe('evaluateCandidateMatch', () => {
     expect(result.status).toBe('unavailable');
   });
 
+  it('rejects a user upload that only puts target artist in its title', () => {
+    const result = evaluateCandidateMatch(
+      {
+        title: 'Drake - Headlines',
+        artist: 'Sophie-Victoria',
+        durationMs: 236000,
+        provider: 'soundcloud',
+        url: 'https://soundcloud.com/sophie-victoria/drake-headlines',
+        playbackCount: 500000,
+      },
+      {
+        title: 'Headlines',
+        artists: ['Drake'],
+        durationMs: 236000,
+        spotifyId: 'headlines',
+      }
+    );
+
+    expect(result.isVerified).toBe(false);
+    expect(result.reasons).toContain('Candidate artist does not match the canonical artist');
+  });
+
   it('verifies the canonical song when title, artist, and duration agree', () => {
     const result = evaluateCandidateMatch(
       {

@@ -32,6 +32,7 @@ export interface CompactTrackItem {
   duration_ms: number;
   explicit?: boolean;
   streamUrl?: string;
+  streamExpiresAt?: number;
 }
 
 const COMPACT_TRACKS: CompactTrackItem[] = [
@@ -114,6 +115,7 @@ export const CompactMusicCarousel = () => {
               imageUrl: refreshed.imageURL,
               duration_ms: refreshed.duration_ms,
               streamUrl: refreshed.streamUrl,
+              streamExpiresAt: refreshed.streamExpiresAt,
             }
           : track;
       }),
@@ -152,6 +154,7 @@ export const CompactMusicCards = ({
       imageURL: item.imageUrl,
       duration_ms: item.duration_ms,
       streamUrl: item.streamUrl,
+      streamExpiresAt: item.streamExpiresAt,
     });
   };
 

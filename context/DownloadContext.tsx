@@ -30,6 +30,7 @@ type DownloadContextValue = {
   activeDownloadsCount: number;
   enqueueDownloads: (tracks: DownloadTrackInput[]) => void;
   cancelDownload: (spotifyId: string) => Promise<void>;
+  retryDownload: (spotifyId: string) => Promise<void>;
   refreshDownloads: () => Promise<void>;
 };
 
@@ -178,6 +179,16 @@ export function DownloadProvider({ children }: { children: React.ReactNode }) {
     await cancelPersistentDownload(spotifyId);
   }, []);
 
+  const retryDownload = React.useCallback(
+    async (spotifyId: string) => {
+      const job = downloads.find((candidate) => candidate.spotifyId === spotifyId);
+      if (!job) return;
+      await queueDownloads([job]);
+      await runDownload(job, job.audioUrl, job.audioFormat || 'mp3');
+    },
+    [downloads, runDownload]
+  );
+
   const enqueueDownloads = React.useCallback(
     (tracks: DownloadTrackInput[]) => {
       const activeOrCompleted = new Set(
@@ -240,9 +251,17 @@ export function DownloadProvider({ children }: { children: React.ReactNode }) {
       activeDownloadsCount,
       enqueueDownloads,
       cancelDownload,
+      retryDownload,
       refreshDownloads,
     }),
-    [activeDownloadsCount, cancelDownload, downloads, enqueueDownloads, refreshDownloads]
+    [
+      activeDownloadsCount,
+      cancelDownload,
+      downloads,
+      enqueueDownloads,
+      refreshDownloads,
+      retryDownload,
+    ]
   );
 
   return (

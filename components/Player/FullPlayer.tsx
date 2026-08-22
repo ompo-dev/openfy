@@ -24,6 +24,7 @@ import {
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
+import MaskedView from '@react-native-masked-view/masked-view';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -47,6 +48,7 @@ import {
 } from '@services';
 import { GlassSurface, LoggedPressable } from '../native';
 import { LyricSyncEditor } from './LyricSyncEditor';
+import { MarqueeText } from '../common/MarqueeText';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const COVER_SIZE = Math.min(SCREEN_WIDTH - 64, 340);
@@ -54,6 +56,43 @@ const COVER_SIZE = Math.min(SCREEN_WIDTH - 64, 340);
 type FullPlayerProps = {
   visible: boolean;
   onClose: () => void;
+};
+
+const LyricsViewport = ({ children }: React.PropsWithChildren) => {
+  if (Platform.OS === 'web') {
+    return (
+      <View
+        style={[
+          styles.lyricsMainContainer,
+          {
+            maskImage:
+              'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 14%, rgba(0,0,0,1) 86%, transparent 100%)',
+            WebkitMaskImage:
+              'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 14%, rgba(0,0,0,1) 86%, transparent 100%)',
+          } as any,
+        ]}
+      >
+        {children}
+      </View>
+    );
+  }
+
+  return (
+    <MaskedView
+      style={styles.lyricsMainContainer}
+      maskElement={
+        <View style={styles.lyricsMask}>
+          <LinearGradient
+            colors={['transparent', '#000000', '#000000', 'transparent']}
+            locations={[0, 0.14, 0.86, 1]}
+            style={StyleSheet.absoluteFill}
+          />
+        </View>
+      }
+    >
+      <View style={styles.lyricsMaskContent}>{children}</View>
+    </MaskedView>
+  );
 };
 
 const formatTime = (ms: number): string => {
@@ -839,19 +878,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           /* =========================================================
            * FULL SCREEN APPLE MUSIC SYNCED LYRICS VIEW
            * ========================================================= */
-          <View
-            style={[
-              styles.lyricsMainContainer,
-              Platform.OS === 'web'
-                ? ({
-                    maskImage:
-                      'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 14%, rgba(0,0,0,1) 86%, transparent 100%)',
-                    WebkitMaskImage:
-                      'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 14%, rgba(0,0,0,1) 86%, transparent 100%)',
-                  } as any)
-                : undefined,
-            ]}
-          >
+          <LyricsViewport>
             {lyricTimeline.length > 0 ? (
               <FlatList
                 ref={lyricsListRef}
@@ -957,21 +984,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 </Text>
               </View>
             )}
-            {Platform.OS !== 'web' ? (
-              <>
-                <LinearGradient
-                  colors={['rgba(8,10,16,0.82)', 'rgba(8,10,16,0)']}
-                  pointerEvents="none"
-                  style={styles.lyricsFadeTop}
-                />
-                <LinearGradient
-                  colors={['rgba(8,10,16,0)', 'rgba(8,10,16,0.82)']}
-                  pointerEvents="none"
-                  style={styles.lyricsFadeBottom}
-                />
-              </>
-            ) : null}
-          </View>
+          </LyricsViewport>
         ) : (
           /* =========================================================
            * STANDARD ALBUM ART & TRACK INFO VIEW
@@ -993,9 +1006,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
             {/* Track Info (Title & Artist) */}
             <View style={styles.trackInfoSection}>
-              <Text style={styles.trackTitle} numberOfLines={1}>
-                {currentTrack.title}
-              </Text>
+              <MarqueeText
+                text={currentTrack.title}
+                style={styles.trackTitle}
+                containerStyle={styles.trackTitleMarquee}
+                align="center"
+                fadeWidth={16}
+              />
               <View style={styles.trackArtistLinks}>
                 {artistLinks.map((artist, index) => (
                   <LoggedPressable
@@ -1005,10 +1022,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                       void handleArtistPress(artist.id, artist.name)
                     }
                   >
-                    <Text style={styles.trackArtist} numberOfLines={1}>
-                      {artist.name}
-                      {index < artistLinks.length - 1 ? ' · ' : ''}
-                    </Text>
+                    <MarqueeText
+                      text={`${artist.name}${index < artistLinks.length - 1 ? ' · ' : ''}`}
+                      style={styles.trackArtist}
+                      containerStyle={styles.trackArtistMarquee}
+                      align="center"
+                      fadeWidth={14}
+                    />
                   </LoggedPressable>
                 ))}
               </View>
@@ -1063,28 +1083,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   isInteractive
                   style={styles.lyricsTrackPill}
                 >
-                  <Text style={styles.lyricsTrackPillText} numberOfLines={1}>
-                    {currentTrack.title} •
-                  </Text>
-                  <View style={styles.lyricsArtistLinks}>
-                    {artistLinks.map((artist, index) => (
-                      <LoggedPressable
-                        key={`${artist.id}-${artist.name}`}
-                        accessibilityLabel={`Abrir artista ${artist.name}`}
-                        onPress={() =>
-                          void handleArtistPress(artist.id, artist.name)
-                        }
-                      >
-                        <Text
-                          style={styles.lyricsTrackPillText}
-                          numberOfLines={1}
-                        >
-                          {artist.name}
-                          {index < artistLinks.length - 1 ? ' · ' : ''}
-                        </Text>
-                      </LoggedPressable>
-                    ))}
-                  </View>
+                  <MarqueeText
+                    text={`${currentTrack.title} • ${artistLinks.map((artist) => artist.name).join(' · ')}`}
+                    style={styles.lyricsTrackPillText}
+                    containerStyle={styles.lyricsTrackPillMarquee}
+                    align="center"
+                    fadeWidth={14}
+                  />
                 </GlassSurface>
               ) : (
                 <GlassSurface
@@ -1516,6 +1521,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     letterSpacing: -0.3,
   },
+  trackTitleMarquee: { maxWidth: '100%' },
   trackArtist: {
     color: 'rgba(255,255,255,0.65)',
     fontSize: 17,
@@ -1530,25 +1536,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 4,
   },
+  trackArtistMarquee: { maxWidth: SCREEN_WIDTH - 64 },
   lyricsMainContainer: {
     flex: 1,
     marginVertical: 4,
     position: 'relative',
   },
-  lyricsFadeTop: {
-    height: 72,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-  },
-  lyricsFadeBottom: {
-    bottom: 0,
-    height: 72,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-  },
+  lyricsMask: { flex: 1 },
+  lyricsMaskContent: { flex: 1 },
   lyricsScrollContent: {
     paddingTop: 48,
     paddingBottom: 72,
@@ -1664,10 +1659,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  lyricsArtistLinks: {
-    flexDirection: 'row',
-    flexShrink: 1,
-  },
+  lyricsTrackPillMarquee: { flex: 1 },
   pillSegment: {
     paddingHorizontal: 12,
     height: '100%',

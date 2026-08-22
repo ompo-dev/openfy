@@ -4,12 +4,12 @@
  */
 
 import * as React from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ImportModal } from '../ImportModal';
 import { DownloadsModal } from '../DownloadsModal';
-import { AppIcon, GlassSurface, NativeIconButton } from '../native';
+import { NativeIconButton } from '../native';
 import { useDownloads, useLibrarySelectedCategory } from '@context';
 import { LibraryControlsPicker } from './LibraryControlsPicker';
 
@@ -58,16 +58,14 @@ export const Header = () => {
         </View>
         <View style={styles.trailingControls}>
           <View style={styles.downloadControl}>
-            <GlassSurface glass="clear" isInteractive style={styles.controls}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Ver downloads"
-                onPress={() => setDownloadsModalVisible(true)}
-                style={styles.controlButton}
-              >
-                <AppIcon name="download" size={18} color="#B8B8B8" />
-              </Pressable>
-            </GlassSurface>
+            <NativeIconButton
+              systemImage="arrow.down.circle"
+              iconName="download"
+              label="Ver downloads"
+              size={38}
+              tint="#B8B8B8"
+              onPress={() => setDownloadsModalVisible(true)}
+            />
             {activeDownloadsCount > 0 ? (
               <View style={styles.downloadBadge}>
                 <Text style={styles.downloadBadgeText}>{activeDownloadsCount}</Text>
@@ -81,16 +79,14 @@ export const Header = () => {
             onSortChange={setLibrarySort}
             onViewChange={setLibraryView}
           />
-          <GlassSurface glass="clear" isInteractive style={styles.controls}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Pesquisar ${searchCopy}`}
-              onPress={() => setSearchVisible((visible) => !visible)}
-              style={styles.controlButton}
-            >
-              <AppIcon name="search" size={18} color="#B8B8B8" />
-            </Pressable>
-          </GlassSurface>
+          <NativeIconButton
+            systemImage="magnifyingglass"
+            iconName="search"
+            label={`Pesquisar ${searchCopy}`}
+            size={38}
+            tint="#B8B8B8"
+            onPress={() => setSearchVisible((visible) => !visible)}
+          />
         </View>
       </View>
 
@@ -139,24 +135,10 @@ const styles = StyleSheet.create({
     pointerEvents: 'box-none',
   },
   trailingControls: { flexDirection: 'row', gap: 8, marginLeft: 'auto' },
-  controls: {
-    height: 36,
-    borderRadius: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
   downloadControl: {
-    height: 36,
+    height: 38,
     position: 'relative',
-    width: 35,
-  },
-  controlButton: {
-    width: 35,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
+    width: 38,
   },
   downloadBadge: {
     alignItems: 'center',
@@ -170,8 +152,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 3,
     position: 'absolute',
     pointerEvents: 'none',
-    right: -5,
-    top: -5,
+    right: -3,
+    top: -3,
   },
   downloadBadgeText: {
     color: '#07120A',

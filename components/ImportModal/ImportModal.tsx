@@ -359,13 +359,12 @@ const fetchPlaylistOrAlbum = async (
     : null;
   if (fromServer) return fromServer;
 
-  return (
-    (await fetchCollectionOnDevice(id, type)) ?? {
-      title: '',
-      coverUrl: '',
-      tracks: [],
-    }
-  );
+  // Spotify embed works natively without browser CORS. Do not make the
+  // following metadata fallbacks dead when it is unavailable.
+  if (Platform.OS !== 'web') {
+    const onDevice = await fetchCollectionOnDevice(id, type);
+    if (onDevice) return onDevice;
+  }
 
   const spotifyUrl = `https://open.spotify.com/${type}/${id}`;
 
@@ -567,7 +566,13 @@ const fetchPlaylistOrAlbum = async (
     } catch {}
   }
 
-  return { title: '', coverUrl: '', tracks: [] };
+  return (
+    (await fetchCollectionOnDevice(id, type)) ?? {
+      title: '',
+      coverUrl: '',
+      tracks: [],
+    }
+  );
 };
 
 const fetchYouTubeTrack = async (

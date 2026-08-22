@@ -127,10 +127,21 @@ export const resolveMusicServerUrl = ({
 
 const configuredMusicServerUrl = Constants.expoConfig?.extra?.musicServerUrl as
   string | undefined;
-const developmentHost =
-  Constants.expoConfig?.hostUri ||
-  (Constants.expoGoConfig as { debuggerHost?: string } | null)?.debuggerHost ||
-  Constants.experienceUrl;
+const runtimeManifest = Constants.manifest2 as
+  | { hostUri?: string; extra?: { expoGo?: { debuggerHost?: string } } }
+  | null;
+const legacyManifest = Constants.manifest as
+  | { hostUri?: string; debuggerHost?: string }
+  | null;
+const developmentHost = [
+  Constants.expoConfig?.hostUri,
+  (Constants.expoGoConfig as { debuggerHost?: string } | null)?.debuggerHost,
+  runtimeManifest?.hostUri,
+  runtimeManifest?.extra?.expoGo?.debuggerHost,
+  legacyManifest?.hostUri,
+  legacyManifest?.debuggerHost,
+  Constants.experienceUrl,
+].find((host): host is string => typeof host === 'string' && host.length > 0);
 
 // A phone's localhost is the phone. Expo Go provides Metro's LAN host, so
 // iPhone reaches the same local Node backend that web uses.

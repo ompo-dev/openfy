@@ -40,6 +40,7 @@ type FeaturedItem = {
   titleColor: string;
   duration_ms: number;
   streamUrl?: string;
+  streamExpiresAt?: number;
 };
 
 const FEATURED_ITEMS: FeaturedItem[] = [
@@ -99,6 +100,7 @@ export const HeroBanner = () => {
               imageUrl: refreshed.imageURL,
               duration_ms: refreshed.duration_ms,
               streamUrl: refreshed.streamUrl,
+              streamExpiresAt: refreshed.streamExpiresAt,
             }
           : item;
       }),
@@ -126,6 +128,7 @@ export const HeroBanner = () => {
       imageURL: item.imageUrl,
       duration_ms: item.duration_ms,
       streamUrl: item.streamUrl,
+      streamExpiresAt: item.streamExpiresAt,
     });
   };
 

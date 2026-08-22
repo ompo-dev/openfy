@@ -99,9 +99,9 @@ export const LibraryControlsPicker = ({
   if (IOS_NATIVE_ENABLED) {
     return (
       <SwiftHost
-        style={styles.nativeHost}
+        style={isSort ? styles.nativeIconHost : styles.nativeHost}
         colorScheme={scheme}
-        matchContents={{ horizontal: false, vertical: true }}
+        matchContents={{ horizontal: !isSort, vertical: false }}
       >
         <SwiftMenu
           modifiers={[swiftButtonStyle?.('plain')].filter(Boolean)}
@@ -253,7 +253,8 @@ const FallbackTrigger = ({
 );
 
 const styles = StyleSheet.create({
-  nativeHost: { height: 36 },
+  nativeHost: { height: 38, justifyContent: 'center' },
+  nativeIconHost: { height: 38, justifyContent: 'center', width: 38 },
   fallbackControl: {
     alignItems: 'center',
     borderRadius: 18,

@@ -183,6 +183,7 @@ export const FriendNoteSheet = ({
         imageURL: note.note.imageUrl || note.user.avatarUrl,
         duration_ms: note.note.duration_ms || 200000,
         streamUrl: note.note.streamUrl,
+        streamExpiresAt: note.note.streamExpiresAt,
       });
     }
   };

@@ -22,6 +22,8 @@ export type ResolvedAudio = {
   imageURL?: string;
 };
 
+const requiresCanonicalBackend = Platform.OS === 'ios';
+
 /**
  * The backend proxy refreshes compatibility with provider streams for every
  * client. Native must use it too: signed provider URLs behave differently in
@@ -586,6 +588,11 @@ export const resolveAudioUrl = async (
       }
     }
   } catch {}
+
+  // Native direct providers cannot preserve the canonical backend's matching
+  // and proxy guarantees. A miss must stay a miss instead of becoming another
+  // song with the requested track's cache key.
+  if (requiresCanonicalBackend) return backendFallback;
 
   // 1. SECONDARY: Official YouTube channel/topic match. Keep original source
   // priority even when the local backend is unavailable.

@@ -511,7 +511,9 @@ const downloadTrackInternal = async (
     const trackId = `track_${track.spotifyId}`;
     let effectiveTrack = track;
 
-    let resolvedUrl = audioUrl || track.audioUrl;
+    // iOS can begin a background download after provider signatures expire.
+    // Resolve a fresh proxied stream at execution time on that platform.
+    let resolvedUrl = Platform.OS === 'ios' ? undefined : audioUrl || track.audioUrl;
     let format = audioFormat || track.audioFormat || 'mp3';
     if (resolvedUrl) {
       resolvedUrl = getPlayableAudioUrl(resolvedUrl);
@@ -548,6 +550,7 @@ const downloadTrackInternal = async (
           };
           await upsertPendingDownload(effectiveTrack, resolvedUrl, format);
         }
+        await upsertPendingDownload(effectiveTrack, resolvedUrl, format);
       }
     }
 
@@ -624,7 +627,8 @@ const downloadTrackInternal = async (
     fetchLyrics(
       track.title,
       track.artistName,
-      track.duration_ms ? track.duration_ms / 1000 : undefined
+      track.duration_ms ? track.duration_ms / 1000 : undefined,
+      track.albumName
     )
       .then((lyrics) => {
         if (lyrics) {

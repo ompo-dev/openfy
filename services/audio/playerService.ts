@@ -5,6 +5,7 @@
  */
 import {
   createAudioPlayer,
+  preload,
   setAudioModeAsync,
   type AudioStatus,
 } from 'expo-audio';
@@ -37,6 +38,49 @@ export const DEFAULT_STATE: PlayerState = {
 let playerInstance: AudioPlayer | null = null;
 let statusCallback: ((state: PlayerState) => void) | null = null;
 let isSeeking = false;
+let volumeRamp: {
+  timer: ReturnType<typeof setInterval>;
+  resolve: () => void;
+} | null = null;
+const preloadedSources = new Set<string>();
+
+const stopVolumeRamp = () => {
+  if (!volumeRamp) return;
+  clearInterval(volumeRamp.timer);
+  volumeRamp.resolve();
+  volumeRamp = null;
+};
+
+const rampPlayerVolume = (
+  player: AudioPlayer,
+  target: number,
+  durationMs: number
+): Promise<void> => {
+  stopVolumeRamp();
+  const start = Math.max(0, Math.min(1, player.volume ?? 1));
+  const end = Math.max(0, Math.min(1, target));
+  if (start === end || durationMs <= 0) {
+    player.volume = end;
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const complete = () => {
+      if (volumeRamp?.resolve === complete) volumeRamp = null;
+      resolve();
+    };
+    const timer = setInterval(() => {
+      const progress = Math.min(1, (Date.now() - startedAt) / durationMs);
+      player.volume = start + (end - start) * progress;
+      if (progress === 1) {
+        clearInterval(timer);
+        complete();
+      }
+    }, 50);
+    volumeRamp = { timer, resolve: complete };
+  });
+};
 
 const toState = (status: AudioStatus): PlayerState => ({
   isPlaying: status.playing ?? false,
@@ -62,15 +106,40 @@ export const configureAudioSession = async (): Promise<void> => {
   }
 };
 
+/** Fade the active song without blocking its replacement source lookup. */
+export const fadeOutCurrent = (durationMs = 2000): Promise<void> => {
+  const player = playerInstance;
+  return player ? rampPlayerVolume(player, 0, durationMs) : Promise.resolve();
+};
+
+/** Keep current song audible when a requested replacement cannot be loaded. */
+export const restoreCurrentVolume = (): Promise<void> => {
+  const player = playerInstance;
+  return player ? rampPlayerVolume(player, 1, 180) : Promise.resolve();
+};
+
+/** Buffer a short lead-in; Expo reuses it when this URI starts playing. */
+export const preloadAudio = async (uri: string): Promise<void> => {
+  if (!uri || preloadedSources.has(uri)) return;
+  preloadedSources.add(uri);
+  try {
+    await Promise.resolve(preload(uri, { preferredForwardBufferDuration: 5 }));
+  } catch {
+    preloadedSources.delete(uri);
+  }
+};
+
 /**
  * Load and play an audio URI (local file or remote stream).
  */
 export const loadAndPlay = async (
   uri: string,
   onStatusUpdate?: (state: PlayerState) => void,
-  lockScreenMetadata?: LockScreenMetadata
+  lockScreenMetadata?: LockScreenMetadata,
+  fadeInDurationMs = 0
 ): Promise<boolean> => {
   try {
+    stopVolumeRamp();
     // Unload existing player
     if (playerInstance) {
       try {
@@ -89,6 +158,7 @@ export const loadAndPlay = async (
 
     const player = createAudioPlayer(uri, { updateInterval: 100 });
     playerInstance = player;
+    player.volume = fadeInDurationMs > 0 ? 0 : 1;
 
     if (lockScreenMetadata) {
       try {
@@ -107,6 +177,9 @@ export const loadAndPlay = async (
     });
 
     player.play();
+    if (fadeInDurationMs > 0) {
+      void rampPlayerVolume(player, 1, fadeInDurationMs);
+    }
     return true;
   } catch (error) {
     console.error('[PlayerService] Failed to load audio:', error, 'URI:', uri);
@@ -166,6 +239,7 @@ export const seekTo = async (positionMs: number): Promise<void> => {
 export const unload = async (): Promise<void> => {
   if (!playerInstance) return;
   try {
+    stopVolumeRamp();
     playerInstance.pause();
     try {
       playerInstance.clearLockScreenControls();

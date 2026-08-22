@@ -15,7 +15,7 @@ const statusCopy: Record<DownloadJobStatus, string> = {
   resolving: 'Buscando áudio',
   downloading: 'Baixando',
   completed: 'Concluído',
-  error: 'Será retomado em segundo plano',
+  error: 'Falhou. Toque para tentar novamente.',
 };
 
 const statusColor: Record<DownloadJobStatus, string> = {
@@ -27,7 +27,7 @@ const statusColor: Record<DownloadJobStatus, string> = {
 };
 
 export function DownloadsModal({ visible, onClose }: DownloadsModalProps) {
-  const { downloads, activeDownloadsCount, cancelDownload } = useDownloads();
+  const { downloads, activeDownloadsCount, cancelDownload, retryDownload } = useDownloads();
 
   return (
     <SheetFrame
@@ -77,7 +77,15 @@ export function DownloadsModal({ visible, onClose }: DownloadsModalProps) {
             {download.status === 'completed' ? (
               <Ionicons name="checkmark-circle" color="#1ED760" size={22} />
             ) : download.status === 'error' ? (
-              <Ionicons name="time-outline" color="#F6B26B" size={21} />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Tentar baixar ${download.title} novamente`}
+                hitSlop={10}
+                onPress={() => void retryDownload(download.spotifyId)}
+                style={styles.cancelButton}
+              >
+                <Ionicons name="refresh" color="#F6B26B" size={19} />
+              </Pressable>
             ) : (
               <Pressable
                 accessibilityRole="button"

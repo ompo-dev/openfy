@@ -64,6 +64,9 @@ export {
   seekTo,
   unload,
   getStatus,
+  fadeOutCurrent,
+  restoreCurrentVolume,
+  preloadAudio,
   configureAudioSession,
   DEFAULT_STATE,
 } from './audio/playerService';

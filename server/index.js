@@ -37,6 +37,7 @@ function normalizeText(str) {
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
+    .replace(/(?<=\w)\.(?=\w)/g, '')
     .replace(/[()[\]{}]/g, ' ')
     .replace(/['"`]/g, '')
     .replace(/[^a-z0-9\s]/g, ' ')
@@ -132,15 +133,62 @@ function isCanonicalTitleMatch(candidateTitle, targetTitle) {
   });
 }
 
+function getLyricTitleVariants(title) {
+  const fullTitle = (title || '').trim();
+  const withoutProductionCredit = fullTitle
+    .replace(
+      /\s*[\[(]\s*(?:prod(?:\.|ução)?|produced by)(?=\s|$)[^\])]*[\])]/gi,
+      ''
+    )
+    .trim();
+  const baseTitle = withoutProductionCredit.split(/\s+-\s+/)[0]?.trim();
+  return [...new Set([fullTitle, withoutProductionCredit, baseTitle].filter(Boolean))];
+}
+
+function getTitleWithoutProductionCredit(title) {
+  return (title || '')
+    .trim()
+    .replace(
+      /\s*[\[(]\s*(?:prod(?:\.|ução)?|produced by)(?=\s|$)[^\])]*[\])]/gi,
+      ''
+    )
+    .trim();
+}
+
+function getLyricTitleMatch(candidateTitle, title) {
+  const fullTitle = (title || '').trim();
+  const titleWithoutProductionCredit = getTitleWithoutProductionCredit(title);
+  const baseTitle = titleWithoutProductionCredit.split(/\s+-\s+/)[0]?.trim();
+  if (
+    (fullTitle && isCanonicalTitleMatch(candidateTitle, fullTitle)) ||
+    (titleWithoutProductionCredit &&
+      isCanonicalTitleMatch(candidateTitle, titleWithoutProductionCredit))
+  ) {
+    return { matches: true, isRelaxed: false };
+  }
+  return {
+    matches: Boolean(baseTitle) && isCanonicalTitleMatch(candidateTitle, baseTitle),
+    isRelaxed: true,
+  };
+}
+
 function isCanonicalArtistMatch(candidateTitle, candidateArtist, targetArtist) {
   if (!isKnownArtist(targetArtist)) return true;
 
-  const candidateContext = normalizeText(
-    `${candidateTitle || ''} ${candidateArtist || ''}`
-  );
   const artistAliases = [targetArtist, getArtistSearchName(targetArtist)]
     .map(normalizeText)
     .filter((artist) => artist.length >= 3);
+
+  const sourceArtist = normalizeText(candidateArtist);
+  if (isKnownArtist(candidateArtist)) {
+    return artistAliases.some(
+      (artist) =>
+        sourceArtist.includes(artist) ||
+        sourceArtist.replace(/\s/g, '').includes(artist.replace(/\s/g, ''))
+    );
+  }
+
+  const candidateContext = normalizeText(candidateTitle);
 
   return artistAliases.some(
     (artist) =>
@@ -157,34 +205,40 @@ function isCanonicalLyricMatch(
   artist,
   durationMs
 ) {
-  if (!isCanonicalTitleMatch(candidateTitle, title)) return false;
+  const titleMatch = getLyricTitleMatch(candidateTitle, title);
+  if (!titleMatch.matches) return false;
   if (
     isKnownArtist(artist) &&
     !isCanonicalArtistMatch(candidateTitle, candidateArtist, artist)
   ) {
     return false;
   }
-  if (!durationMs || !candidateDurationMs) return true;
+  if (!durationMs || !candidateDurationMs) return !titleMatch.isRelaxed;
 
   return (
     Math.abs(candidateDurationMs - durationMs) <=
-    Math.max(10000, durationMs * 0.1)
+    (titleMatch.isRelaxed
+      ? Math.max(3000, durationMs * 0.02)
+      : Math.max(10000, durationMs * 0.1))
   );
 }
 
 function hasConflictingNumberedTitleInLyrics(lyrics, title) {
-  const canonicalTitle = normalizeText(title);
-  if (!canonicalTitle || !lyrics) return false;
+  if (!lyrics) return false;
 
   const lyricsWithoutTimestamps = lyrics.replace(
     /\[\d{1,2}:\d{2}(?:\.\d+)?\]/g,
     ' '
   );
   const normalizedLyrics = normalizeText(lyricsWithoutTimestamps);
-  const escapedTitle = canonicalTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?:^|\\s)${escapedTitle}\\s+\\d+\\b`).test(
-    normalizedLyrics
-  );
+  return getLyricTitleVariants(title).some((titleVariant) => {
+    const canonicalTitle = normalizeText(titleVariant);
+    if (!canonicalTitle) return false;
+    const escapedTitle = canonicalTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?:^|\\s)${escapedTitle}\\s+\\d+\\b`).test(
+      normalizedLyrics
+    );
+  });
 }
 
 function createEstimatedLyricLines(plainLyrics, durationMs) {
@@ -798,7 +852,7 @@ async function fetchSoundCloudPlayableStream(title, artist, durationMs) {
 // 3. Multi-Engine Lyrics Resolver (LRCLIB Exact -> LRCLIB Search -> Letras.mus.br Scraper -> Vagalume)
 async function fetchComprehensiveLyrics(title, artist, durationMs, albumName) {
   const durationSec = durationMs > 0 ? Math.round(durationMs / 1000) : 0;
-  const cacheKey = `lyrics_multi_v2:${artist}:${title}:${durationSec}`;
+  const cacheKey = `lyrics_multi_v3:${artist}:${title}:${albumName || ''}:${durationSec}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
   let exactLrclibResult = null;
@@ -873,15 +927,14 @@ async function fetchComprehensiveLyrics(title, artist, durationMs, albumName) {
 
   // 2. LRCLIB Search
   try {
-    const cleanTitle = (title || '')
-      .replace(/\(.*\)/g, '')
-      .replace(/-.*/g, '')
-      .trim();
     const cleanArtist = (artist || '')
       .replace(/\(.*\)/g, '')
       .replace(/,.*/g, '')
       .trim();
-    const searchQueries = [`${cleanArtist} ${cleanTitle}`, cleanTitle, title];
+    const searchQueries = getLyricTitleVariants(title).flatMap((lookupTitle) => [
+      `${cleanArtist} ${lookupTitle}`,
+      lookupTitle,
+    ]);
 
     for (const sq of searchQueries) {
       const sRes = await fetch(
@@ -958,15 +1011,15 @@ async function fetchComprehensiveLyrics(title, artist, durationMs, albumName) {
 
   // 3. Letras.mus.br Scraper (100% complete Brazilian & International Lyrics)
   try {
-    const cleanT = (title || '')
-      .replace(/\(.*\)/g, '')
-      .replace(/-.*/g, '')
-      .trim();
     const cleanA = (artist || '')
       .replace(/\(.*\)/g, '')
       .replace(/,.*/g, '')
       .trim();
-    const queries = [`${cleanA} ${cleanT}`, cleanT, `${cleanT} ${cleanA}`];
+    const queries = getLyricTitleVariants(title).flatMap((lookupTitle) => [
+      `${cleanA} ${lookupTitle}`,
+      lookupTitle,
+      `${lookupTitle} ${cleanA}`,
+    ]);
 
     for (const q of queries) {
       const url = `https://solr.sscdn.co/letras/m1/?q=${encodeURIComponent(q)}`;
@@ -1339,7 +1392,10 @@ const server = http.createServer(async (req, res) => {
         const parsedArtists =
           Array.isArray(artists) && artists.length > 0
             ? artists.map((a) => (typeof a === 'string' ? { name: a } : a))
-            : [{ name: artist || 'Artista' }];
+            : String(artist || 'Artista')
+                .split(/\s*(?:,|&)\s*/)
+                .filter(Boolean)
+                .map((name) => ({ name }));
 
         const lockedTarget = {
           title: title.trim(),
@@ -1494,6 +1550,6 @@ const server = http.createServer(async (req, res) => {
   res.end(JSON.stringify({ error: 'Not found' }));
 });
 
-server.listen(PORT, () => {
-  console.log(`🚀 [Openfy Backend Server] Running on http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 [Openfy Backend Server] Listening on port ${PORT}`);
 });

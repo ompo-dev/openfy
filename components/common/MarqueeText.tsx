@@ -21,6 +21,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import MaskedView from '@react-native-masked-view/masked-view';
 
 interface MarqueeTextProps {
   text: string;
@@ -29,7 +30,7 @@ interface MarqueeTextProps {
   speed?: number; // pixels per second
   delay?: number; // ms delay before starting
   fadeWidth?: number;
-  fadeColor?: string; // Optional background color for native fade gradient overlays
+  fadeColor?: string; // Kept for callers; native fade is now an alpha mask.
   align?: 'left' | 'center';
 }
 
@@ -40,9 +41,10 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
   speed = 22,
   delay = 1400,
   fadeWidth = 10,
-  fadeColor,
+  fadeColor: _fadeColor,
   align = 'left',
 }) => {
+  void _fadeColor;
   const [containerWidth, setContainerWidth] = React.useState(0);
   const [measuredTextWidth, setMeasuredTextWidth] = React.useState(0);
   const scrollAnim = React.useRef(new Animated.Value(0)).current;
@@ -100,6 +102,29 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
 
   const isCenter = align === 'center';
 
+  const animatedText = (
+    <Animated.View
+      style={{
+        transform: [{ translateX: scrollAnim }],
+        flexDirection: 'row',
+        justifyContent: isOverflowing ? 'flex-start' : isCenter ? 'center' : 'flex-start',
+        alignItems: 'center',
+        width: isOverflowing ? undefined : '100%',
+      }}
+    >
+      <Text
+        numberOfLines={1}
+        style={[
+          styles.text,
+          style,
+          !isOverflowing && { textAlign: isCenter ? 'center' : 'left' },
+        ]}
+      >
+        {text}
+      </Text>
+    </Animated.View>
+  );
+
   return (
     <View
       onLayout={onContainerLayout}
@@ -129,44 +154,25 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
         </Text>
       </View>
 
-      {/* Visible animated marquee text */}
-      <Animated.View
-        style={{
-          transform: [{ translateX: scrollAnim }],
-          flexDirection: 'row',
-          justifyContent: isOverflowing ? 'flex-start' : isCenter ? 'center' : 'flex-start',
-          alignItems: 'center',
-          width: isOverflowing ? undefined : '100%',
-        }}
-      >
-        <Text
-          numberOfLines={1}
-          style={[
-            styles.text,
-            style,
-            !isOverflowing && { textAlign: isCenter ? 'center' : 'left' },
-          ]}
+      {isOverflowing && Platform.OS !== 'web' ? (
+        <MaskedView
+          style={styles.nativeMask}
+          maskElement={
+            <View style={styles.nativeMask}>
+              <LinearGradient
+                colors={['transparent', '#000000', '#000000', 'transparent']}
+                locations={[0, 0.08, 0.92, 1]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={StyleSheet.absoluteFill}
+              />
+            </View>
+          }
         >
-          {text}
-        </Text>
-      </Animated.View>
-
-      {/* Optional native left/right fade gradients */}
-      {isOverflowing && fadeColor && Platform.OS !== 'web' && (
-        <>
-          <LinearGradient
-            colors={[fadeColor, 'transparent']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={[styles.nativeFade, { left: 0, width: fadeWidth, pointerEvents: 'none' }]}
-          />
-          <LinearGradient
-            colors={['transparent', fadeColor]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={[styles.nativeFade, { right: 0, width: fadeWidth, pointerEvents: 'none' }]}
-          />
-        </>
+          {animatedText}
+        </MaskedView>
+      ) : (
+        animatedText
       )}
     </View>
   );
@@ -192,10 +198,5 @@ const styles = StyleSheet.create({
   text: {
     flexShrink: 0,
   },
-  nativeFade: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    zIndex: 10,
-  },
+  nativeMask: { alignSelf: 'stretch' },
 });
