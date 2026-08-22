@@ -41,6 +41,8 @@ import {
   moveLyricGap,
   moveLyricSegment,
   parseSpotifyLink,
+  resolveDirectYouTubeAudio,
+  resolveDirectYouTubeTrack,
   resizeLyricGapEnd,
   resizeLyricGapStart,
   resizeLyricSegmentEnd,
@@ -304,29 +306,46 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     if (exactTrackUrl) return;
 
     let isMounted = true;
-    if (!MUSIC_SERVER_URL) return;
-    fetch(`${MUSIC_SERVER_URL}/api/music/resolve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: currentTrack.title,
-        artist: currentTrack.artistName,
-        durationMs: currentTrack.duration_ms,
-        spotifyId: currentTrack.spotifyId,
-      }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (isMounted) {
+    const resolveYoutubeUrl = async () => {
+      if (MUSIC_SERVER_URL) {
+        try {
+          const response = await fetch(`${MUSIC_SERVER_URL}/api/music/resolve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: currentTrack.title,
+              artist: currentTrack.artistName,
+              durationMs: currentTrack.duration_ms,
+              spotifyId: currentTrack.spotifyId,
+            }),
+          });
+          const data = await response.json();
           if (/^[A-Za-z0-9_-]{11}$/.test(data.source?.id || '')) {
-            setYoutubeUrl(`https://www.youtube.com/watch?v=${data.source.id}`);
-          } else {
-            const resolvedUrl = getExactYouTubeUrl(data.playback?.url);
-            if (resolvedUrl) setYoutubeUrl(resolvedUrl);
+            if (isMounted) {
+              setYoutubeUrl(`https://www.youtube.com/watch?v=${data.source.id}`);
+            }
+            return;
           }
+          const resolvedUrl = getExactYouTubeUrl(data.playback?.url);
+          if (resolvedUrl && isMounted) {
+            setYoutubeUrl(resolvedUrl);
+            return;
+          }
+        } catch {}
+      }
+
+      if (Platform.OS !== 'web') {
+        const direct = await resolveDirectYouTubeAudio({
+          title: currentTrack.title,
+          artist: currentTrack.artistName,
+          durationMs: currentTrack.duration_ms,
+        });
+        if (direct && isMounted) {
+          setYoutubeUrl(`https://www.youtube.com/watch?v=${direct.videoId}`);
         }
-      })
-      .catch(() => {});
+      }
+    };
+    void resolveYoutubeUrl();
 
     return () => {
       isMounted = false;
@@ -527,15 +546,34 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     setIsUpdatingAudio(true);
 
     try {
-      if (!MUSIC_SERVER_URL) throw new Error('Music server unavailable');
-      const response = await fetch(`${MUSIC_SERVER_URL}/api/music/youtube`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: newUrl }),
-      });
-      if (!response.ok) throw new Error('Could not resolve YouTube track');
-
-      const data = (await response.json()) as {
+      const directTrack =
+        Platform.OS !== 'web'
+          ? await resolveDirectYouTubeTrack(parsedLink.id)
+          : null;
+      const data = directTrack
+        ? {
+            track: {
+              videoId: directTrack.videoId,
+              youtubeUrl: `https://www.youtube.com/watch?v=${directTrack.videoId}`,
+              streamUrl: directTrack.url,
+              title: directTrack.title,
+              artistName: directTrack.artistName,
+              albumName: 'YouTube Track',
+              imageURL: directTrack.imageURL || '',
+              duration_ms: directTrack.durationMs,
+              format: directTrack.format,
+            },
+          }
+        : await (async () => {
+            if (!MUSIC_SERVER_URL) throw new Error('Music server unavailable');
+            const response = await fetch(`${MUSIC_SERVER_URL}/api/music/youtube`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: newUrl }),
+            });
+            if (!response.ok) throw new Error('Could not resolve YouTube track');
+            return response.json();
+          })() as {
         track?: {
           videoId: string;
           youtubeUrl: string;
@@ -545,6 +583,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           albumName: string;
           imageURL: string;
           duration_ms: number;
+          format?: string;
         };
       };
       const track = data.track;

@@ -22,6 +22,7 @@ import {
   getDownloadedTracks,
   isTrackDownloaded,
   parseSpotifyLink,
+  resolveDirectYouTubeTrack,
   upsertLocalPlaylist,
 } from '@services';
 import { useDownloads } from '@context';
@@ -580,7 +581,31 @@ const fetchYouTubeTrack = async (
 ): Promise<TrackPreview | null> => {
   const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
+  // A standalone iPhone has no Metro API route. Resolve the pasted video
+  // itself so this path does not silently depend on a development server.
+  if (Platform.OS !== 'web') {
+    const directTrack = await resolveDirectYouTubeTrack(videoId);
+    if (directTrack) {
+      const trackId = `yt_${videoId}`;
+      const already = await isTrackDownloaded(trackId);
+      return {
+        spotifyId: trackId,
+        title: directTrack.title,
+        artistName: directTrack.artistName,
+        albumName: 'YouTube Track',
+        imageURL:
+          directTrack.imageURL || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        duration_ms: directTrack.durationMs,
+        youtubeUrl,
+        audioUrl: directTrack.url,
+        audioFormat: directTrack.format,
+        isDownloaded: already,
+      };
+    }
+  }
+
   try {
+    if (!MUSIC_SERVER_URL) return null;
     const response = await axios.post(
       `${MUSIC_SERVER_URL}/api/music/youtube`,
       { url: youtubeUrl },

@@ -5,8 +5,19 @@
 
 const http = require('http');
 const url = require('url');
+const path = require('path');
+const { handleNodeServerRequest } = require('./expoRequestAdapter');
 const ytdl = require('@distube/ytdl-core');
-const youtubeDl = require('youtube-dl-exec');
+const youtubeDl = require('youtube-dl-exec').create(
+  process.env.YOUTUBE_DL_PATH ||
+    path.join(
+      process.cwd(),
+      'node_modules',
+      'youtube-dl-exec',
+      'bin',
+      process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
+    )
+);
 
 const PORT = process.env.PORT || 3001;
 
@@ -1555,6 +1566,17 @@ const server = http.createServer(async (req, res) => {
   res.end(JSON.stringify({ error: 'Not found' }));
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 [Openfy Backend Server] Listening on port ${PORT}`);
-});
+/**
+ * Expo Router gives API routes standard Request/Response objects. Reuse the
+ * resolver below so `npx expo start` is the only development process.
+ */
+const handleFetchRequest = (request) =>
+  handleNodeServerRequest(server, request);
+
+if (require.main === module) {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 [Openfy Backend Server] Listening on port ${PORT}`);
+  });
+}
+
+module.exports = { handleFetchRequest };

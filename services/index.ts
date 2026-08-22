@@ -11,6 +11,14 @@ export {
   resolveViaYouTubeTopic,
 } from './audio/audioResolver';
 export type { ResolvedAudio } from './audio/audioResolver';
+export {
+  resolveDirectYouTubeAudio,
+  resolveDirectYouTubeTrack,
+} from './audio/directYouTubeResolver';
+export type {
+  DirectYouTubeAudio,
+  DirectYouTubeTrack,
+} from './audio/directYouTubeResolver';
 
 export { refreshHomeTracks } from './home/homeTrackRefresh';
 export type { HomeTrackSeed, RefreshedHomeTrack } from './home/homeTrackRefresh';

@@ -21,9 +21,9 @@
     "@distube/ytdl-core": "^4.16.12",
     "@expo/ui": "~57.0.12",
     "@expo/vector-icons": "^15.1.1",
-    "@react-native-masked-view/masked-view": "0.3.2",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/slider": "5.2.0",
+    "@react-native-masked-view/masked-view": "0.3.2",
     "axios": "^1.19.0",
     "expo": "~57.0.15",
     "expo-asset": "~57.0.13",
@@ -60,6 +60,7 @@
     "react-native-web": "~0.21.0",
     "react-native-worklets": "^0.10.1",
     "youtube-dl-exec": "^3.1.12",
+    "youtubei.js": "^17.2.0",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

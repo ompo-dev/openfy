@@ -12,6 +12,7 @@ import {
   evaluateCandidateMatch,
   hasUnwantedForbiddenWords,
 } from '../canonical/canonicalMatcher';
+import { resolveDirectYouTubeAudio } from './directYouTubeResolver';
 
 export type ResolvedAudio = {
   url: string;
@@ -80,6 +81,20 @@ const getYouTubeVideoIdFromTrackId = (trackId?: string): string | null => {
 const resolveExactYouTubeVideo = async (
   videoId: string
 ): Promise<ResolvedAudio | null> => {
+  if (Platform.OS !== 'web') {
+    const direct = await resolveDirectYouTubeAudio({ videoId });
+    if (direct) {
+      return {
+        url: direct.url,
+        quality: 'high',
+        format: direct.format,
+        source: 'youtube',
+        confidence: 100,
+        imageURL: direct.imageURL,
+      };
+    }
+  }
+
   if (!MUSIC_SERVER_URL) {
     console.warn(
       `[AudioResolver] Exact YouTube unavailable on ${Platform.OS}: music backend URL is empty.`
@@ -627,59 +642,88 @@ const resolveAudioUrlInternal = async (
   // its stream; in that case the device must still try its YouTube resolver
   // before accepting another provider.
   let backendFallback: ResolvedAudio | null = null;
-  try {
-    if (!MUSIC_SERVER_URL) throw new Error('Music server unavailable');
-    const backendRes = await fetchWithHermesTimeout(
-      `${MUSIC_SERVER_URL}/api/music/resolve`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: trackName,
-          artist: primaryArtist,
-          durationMs,
-          spotifyId,
-          releaseDate,
-        }),
-      },
-      15000
+  if (!MUSIC_SERVER_URL) {
+    console.log(
+      `[AudioResolver] No server origin on ${Platform.OS}; using direct native resolution.`
     );
+  } else {
+    try {
+      const backendRes = await fetchWithHermesTimeout(
+        `${MUSIC_SERVER_URL}/api/music/resolve`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: trackName,
+            artist: primaryArtist,
+            durationMs,
+            spotifyId,
+            releaseDate,
+          }),
+        },
+        15000
+      );
 
-    if (backendRes.ok) {
-      const data = await backendRes.json();
-      const streamUrl = data.source?.streamUrl;
-      if (streamUrl) {
-        console.log(
-          `[AudioResolver] Resolved Playable Stream via Backend Server: "${data.track?.title}"`
-        );
-        const backendResult: ResolvedAudio = {
-          url: getPlayableAudioUrl(streamUrl),
-          quality: data.source.quality || 'high',
-          format: data.source.format || 'm4a',
-          source: data.source.provider === 'youtube' ? 'youtube' : 'soundcloud',
-          confidence: Math.round((data.source.score || 0.9) * 100),
-          imageURL: data.track?.imageURL || data.artwork?.url,
-        };
+      if (backendRes.ok) {
+        const data = await backendRes.json();
+        const streamUrl = data.source?.streamUrl;
+        if (streamUrl) {
+          console.log(
+            `[AudioResolver] Resolved Playable Stream via Backend Server: "${data.track?.title}"`
+          );
+          const backendResult: ResolvedAudio = {
+            url: getPlayableAudioUrl(streamUrl),
+            quality: data.source.quality || 'high',
+            format: data.source.format || 'm4a',
+            source: data.source.provider === 'youtube' ? 'youtube' : 'soundcloud',
+            confidence: Math.round((data.source.score || 0.9) * 100),
+            imageURL: data.track?.imageURL || data.artwork?.url,
+          };
 
-        if (backendResult.source === 'youtube') {
-          return backendResult;
+          if (backendResult.source === 'youtube') {
+            return backendResult;
+          }
+
+          backendFallback = backendResult;
+        } else {
+          console.warn(
+            `[AudioResolver] Backend returned no playable stream for "${artistName} - ${trackName}".`
+          );
         }
-
-        backendFallback = backendResult;
       } else {
         console.warn(
-          `[AudioResolver] Backend returned no playable stream for "${artistName} - ${trackName}".`
+          `[AudioResolver] Backend resolve returned HTTP ${backendRes.status ?? 'unknown'} for "${artistName} - ${trackName}".`
         );
       }
-    } else {
+    } catch (error) {
       console.warn(
-        `[AudioResolver] Backend resolve returned HTTP ${backendRes.status ?? 'unknown'} for "${artistName} - ${trackName}".`
+        `[AudioResolver] Backend resolve failed at ${MUSIC_SERVER_URL} for "${artistName} - ${trackName}": ${errorMessage(error)}`
       );
     }
-  } catch (error) {
-    console.warn(
-      `[AudioResolver] Backend resolve failed at ${MUSIC_SERVER_URL || 'unavailable'} for "${artistName} - ${trackName}": ${errorMessage(error)}`
-    );
+  }
+
+  // A standalone native build has no Metro API route. Resolve the selected
+  // official video on the device with YouTube's iOS client and keep the URL
+  // direct: the signed stream is bound to the phone's network identity.
+  if (Platform.OS !== 'web') {
+    const directResult = await resolveDirectYouTubeAudio({
+      title: trackName,
+      artist: primaryArtist,
+      durationMs,
+    });
+    if (directResult?.url) {
+      console.log(
+        `[AudioResolver] Resolved direct iOS stream: "${artistName} - ${trackName}"`
+      );
+      return {
+        url: directResult.url,
+        quality: 'high',
+        format: directResult.format,
+        source: 'youtube',
+        confidence: 100,
+        imageURL: directResult.imageURL,
+      };
+    }
   }
 
   // Keep the same strict title, artist and duration matching on every
