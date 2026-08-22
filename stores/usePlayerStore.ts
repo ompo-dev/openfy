@@ -10,6 +10,7 @@
 
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   loadAndPlay,
@@ -131,7 +132,14 @@ const getLyricsCacheKey = (track: PlayerTrack) =>
   `${getCacheKey(track)}:${LYRICS_CACHE_VERSION}`;
 
 const getExistingLocalAudioPath = async (path?: string): Promise<string | null> => {
-  if (!path || path.endsWith('.m3u8') || !path.startsWith('file:')) return null;
+  if (!path || path.endsWith('.m3u8')) return null;
+
+  // The browser download implementation persists the already-resolved proxy URL
+  // rather than a file URI. It is still the downloaded track's playback source,
+  // so resolving it again causes an unnecessary (and sometimes failing) lookup.
+  if (Platform.OS === 'web' && /^https?:\/\//i.test(path)) return path;
+
+  if (!path.startsWith('file:')) return null;
 
   try {
     const info = await FileSystem.getInfoAsync(path);

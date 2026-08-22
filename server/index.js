@@ -164,6 +164,10 @@ function getLyricTitleMatch(candidateTitle, title) {
   ) {
     return { matches: true, isRelaxed: false };
   }
+  const baseTitle = titleWithoutProductionCredit.split(/\s+-\s+/)[0]?.trim();
+  if (baseTitle && isCanonicalTitleMatch(candidateTitle, baseTitle)) {
+    return { matches: true, isRelaxed: true };
+  }
   return { matches: false, isRelaxed: false };
 }
 

@@ -127,6 +127,13 @@ const getLyricTitleMatch = (
     return { matches: true, isRelaxed: false };
   }
 
+  // Some catalogues shorten a credited release to its base title. Accept that
+  // only as a relaxed match; the caller then requires a near-exact duration.
+  const baseTitle = titleWithoutProductionCredit.split(/\s+-\s+/)[0]?.trim();
+  if (baseTitle && hasCanonicalTitleMatch(candidateTitle, baseTitle)) {
+    return { matches: true, isRelaxed: true };
+  }
+
   return { matches: false, isRelaxed: false };
 };
 
