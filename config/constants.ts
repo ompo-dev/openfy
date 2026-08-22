@@ -140,6 +140,7 @@ const developmentHost = [
   runtimeManifest?.extra?.expoGo?.debuggerHost,
   legacyManifest?.hostUri,
   legacyManifest?.debuggerHost,
+  Constants.linkingUri,
   Constants.experienceUrl,
 ].find((host): host is string => typeof host === 'string' && host.length > 0);
 

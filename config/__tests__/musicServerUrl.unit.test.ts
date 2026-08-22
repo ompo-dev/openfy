@@ -20,6 +20,15 @@ describe('resolveMusicServerUrl', () => {
     ).toBe('http://192.168.100.27:3001');
   });
 
+  it('derives the LAN backend from Expo linking URI on an iPhone', () => {
+    expect(
+      resolveMusicServerUrl({
+        developmentHost: 'exp://192.168.100.27:8081',
+        platform: 'ios',
+      })
+    ).toBe('http://192.168.100.27:3001');
+  });
+
   it('uses an explicitly configured non-loopback server on native', () => {
     expect(
       resolveMusicServerUrl({

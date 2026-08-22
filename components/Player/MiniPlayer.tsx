@@ -11,7 +11,6 @@ import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
 import { GlassSurface, LoggedPressable } from '../native';
 import { MarqueeText } from '../common/MarqueeText';
-import { PlayerActionPill } from './PlayerActionPill';
 
 export type MiniPlayerProps = {
   onPress?: () => void;
@@ -23,7 +22,6 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
   const { currentTrack, playerState, togglePlayPause, isPlayerVisible } =
     usePlayer();
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
-  const [isLiked, setIsLiked] = React.useState(false);
 
   React.useEffect(() => {
     Animated.spring(fadeAnim, {
@@ -51,39 +49,6 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
     } catch {}
     togglePlayPause();
   };
-
-  // The global mini player is the same action pill from the full player.
-  // The note composer keeps its expanded preview so its confirm action stays
-  // available without opening the full player.
-  if (!onConfirm) {
-    return (
-      <Animated.View
-        style={[
-          styles.actionDock,
-          style,
-          {
-            opacity: fadeAnim,
-            transform: [
-              {
-                translateY: fadeAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [24, 0],
-                }),
-              },
-            ],
-          },
-        ]}
-      >
-        <PlayerActionPill
-          size="mini"
-          isLiked={isLiked}
-          onToggleLike={() => setIsLiked((liked) => !liked)}
-          onOpenLyrics={() => onPress?.()}
-          onOpenOptions={() => onPress?.()}
-        />
-      </Animated.View>
-    );
-  }
 
   return (
     <Animated.View
@@ -117,7 +82,6 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
         <GlassSurface
           glass="regular"
           isInteractive={!!onPress}
-          tintColor="rgba(20, 22, 26, 0.64)"
           style={styles.glassContainer}
         >
           <View style={styles.contentRow}>
@@ -217,19 +181,6 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
 };
 
 const styles = StyleSheet.create({
-  actionDock: {
-    alignItems: 'center',
-    bottom: Platform.OS === 'ios' ? 94 : 89,
-    elevation: 24,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
-    zIndex: 9999,
-  },
   container: {
     position: 'absolute',
     bottom: Platform.OS === 'ios' ? 89 : 84,
@@ -243,12 +194,11 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
   },
   pressableWrapper: {
-    borderRadius: 36,
-    overflow: 'hidden',
+    // Keep the native GlassView as the clipping surface. An outer clipped
+    // Pressable prevents iOS from composing the real Liquid Glass material.
+    alignSelf: 'stretch',
   },
   glassContainer: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.22)',
     borderRadius: 36,
     overflow: 'hidden',
     minHeight: 64,

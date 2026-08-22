@@ -16,12 +16,15 @@ import {
   SwiftHStack,
   SwiftImage,
   SwiftMenu,
+  SwiftPicker,
   SwiftText,
   GlassSurface,
   LoggedPressable,
   swiftButtonStyle,
   swiftFont,
   swiftForegroundStyle,
+  swiftPickerStyle,
+  swiftTag,
   glassCircleModifiers,
 } from '../native';
 
@@ -98,6 +101,35 @@ export const LibraryControlsPicker = ({
   );
 
   if (IOS_NATIVE_ENABLED) {
+    if (!isSort) {
+      return (
+        <SwiftHost
+          style={styles.nativePickerHost}
+          colorScheme={scheme}
+          matchContents={{ horizontal: true, vertical: false }}
+        >
+          <SwiftPicker<LibraryView>
+            label={<NativeMenuLabel label={label} />}
+            selection={view}
+            onSelectionChange={(selection: LibraryView) => onViewChange(selection)}
+            modifiers={[swiftPickerStyle?.('menu')].filter(Boolean)}
+          >
+            {VIEW_OPTIONS.map((option) => (
+              <SwiftText
+                key={option.value}
+                modifiers={[
+                  swiftTag?.(option.value),
+                  swiftForegroundStyle?.('#B8B8B8'),
+                ].filter(Boolean)}
+              >
+                {option.label}
+              </SwiftText>
+            ))}
+          </SwiftPicker>
+        </SwiftHost>
+      );
+    }
+
     return (
       <SwiftHost
         style={isSort ? styles.nativeIconHost : styles.nativeHost}
@@ -251,6 +283,7 @@ const FallbackTrigger = ({
 
 const styles = StyleSheet.create({
   nativeHost: { height: 38, justifyContent: 'center' },
+  nativePickerHost: { height: 38, justifyContent: 'center', minWidth: 108 },
   nativeIconHost: { height: 38, justifyContent: 'center', width: 38 },
   fallbackControl: {
     alignItems: 'center',
