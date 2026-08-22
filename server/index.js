@@ -141,8 +141,7 @@ function getLyricTitleVariants(title) {
       ''
     )
     .trim();
-  const baseTitle = withoutProductionCredit.split(/\s+-\s+/)[0]?.trim();
-  return [...new Set([fullTitle, withoutProductionCredit, baseTitle].filter(Boolean))];
+  return [...new Set([fullTitle, withoutProductionCredit].filter(Boolean))];
 }
 
 function getTitleWithoutProductionCredit(title) {
@@ -158,7 +157,6 @@ function getTitleWithoutProductionCredit(title) {
 function getLyricTitleMatch(candidateTitle, title) {
   const fullTitle = (title || '').trim();
   const titleWithoutProductionCredit = getTitleWithoutProductionCredit(title);
-  const baseTitle = titleWithoutProductionCredit.split(/\s+-\s+/)[0]?.trim();
   if (
     (fullTitle && isCanonicalTitleMatch(candidateTitle, fullTitle)) ||
     (titleWithoutProductionCredit &&
@@ -166,10 +164,7 @@ function getLyricTitleMatch(candidateTitle, title) {
   ) {
     return { matches: true, isRelaxed: false };
   }
-  return {
-    matches: Boolean(baseTitle) && isCanonicalTitleMatch(candidateTitle, baseTitle),
-    isRelaxed: true,
-  };
+  return { matches: false, isRelaxed: false };
 }
 
 function isCanonicalArtistMatch(candidateTitle, candidateArtist, targetArtist) {
@@ -850,9 +845,9 @@ async function fetchSoundCloudPlayableStream(title, artist, durationMs) {
 }
 
 // 3. Multi-Engine Lyrics Resolver (LRCLIB Exact -> LRCLIB Search -> Letras.mus.br Scraper -> Vagalume)
-async function fetchComprehensiveLyrics(title, artist, durationMs, albumName) {
+async function fetchComprehensiveLyrics(title, artist, durationMs, albumName, releaseDate) {
   const durationSec = durationMs > 0 ? Math.round(durationMs / 1000) : 0;
-  const cacheKey = `lyrics_multi_v3:${artist}:${title}:${albumName || ''}:${durationSec}`;
+  const cacheKey = `lyrics_multi_v4:${artist}:${title}:${albumName || ''}:${releaseDate || ''}:${durationSec}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
   let exactLrclibResult = null;
@@ -1163,6 +1158,7 @@ const server = http.createServer(async (req, res) => {
       10
     );
     const qAlbum = parsedUrl.query.album || '';
+    const qReleaseDate = parsedUrl.query.releaseDate || '';
 
     if (!qTitle) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1174,7 +1170,8 @@ const server = http.createServer(async (req, res) => {
       qTitle,
       qArtist,
       qDurationMs,
-      qAlbum
+      qAlbum,
+      qReleaseDate
     );
     if (lyricsResult && lyricsResult.valid) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1359,6 +1356,7 @@ const server = http.createServer(async (req, res) => {
           artist,
           artists,
           albumName,
+          releaseDate,
           durationMs,
           spotifyId,
           isrc,
@@ -1402,6 +1400,7 @@ const server = http.createServer(async (req, res) => {
           artists: parsedArtists,
           artistName: parsedArtists[0]?.name || artist || 'Artista',
           albumName: albumName || 'Single',
+          releaseDate: releaseDate || '',
           durationMs: durationMs || 0,
           isrc: isrc || '',
           imageURL: imageURL || '',
@@ -1473,7 +1472,8 @@ const server = http.createServer(async (req, res) => {
               lockedTarget.title,
               lockedTarget.artistName,
               lockedTarget.durationMs,
-              lockedTarget.albumName
+              lockedTarget.albumName,
+              lockedTarget.releaseDate
             )
           : null;
 
@@ -1517,6 +1517,7 @@ const server = http.createServer(async (req, res) => {
             artistName: lockedTarget.artistName,
             artists: lockedTarget.artists,
             albumName: lockedTarget.albumName,
+            releaseDate: lockedTarget.releaseDate,
             imageURL: artworkUrl,
             duration_ms: lockedTarget.durationMs,
             spotifyId: lockedTarget.spotifyId,

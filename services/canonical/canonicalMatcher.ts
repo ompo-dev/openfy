@@ -204,12 +204,14 @@ export const evaluateCandidateMatch = (
     url: string;
     viewCount?: number;
     playbackCount?: number;
+    releaseDate?: string;
   },
   canonical: {
     title: string;
     artists: string[];
     durationMs: number;
     spotifyId: string;
+    releaseDate?: string;
   }
 ): MatchReport => {
   const reasons: string[] = [];
@@ -284,8 +286,24 @@ export const evaluateCandidateMatch = (
     };
   }
 
-  let confidence = durationEval.score * 0.4; // 40% baseline from exact duration proximity
+  let confidence = 45; // Title verified above. This is the strongest identity signal.
+  reasons.push('Title verified');
+
+  if (isKnownArtist(canonical.artists[0] || '')) {
+    confidence += 25;
+    reasons.push('Artist verified');
+  }
+
+  confidence += durationEval.score * 0.25;
   reasons.push(`Duration matched: ${(durationEval.diffMs / 1000).toFixed(1)}s difference`);
+
+  const candidateYear = String(candidate.releaseDate || '').match(/\d{4}/)?.[0];
+  const canonicalYear = String(canonical.releaseDate || '').match(/\d{4}/)?.[0];
+  if (candidateYear && canonicalYear) {
+    const yearDiff = Math.abs(Number(candidateYear) - Number(canonicalYear));
+    confidence += Math.max(0, 5 - yearDiff * 2);
+    reasons.push(`Release date matched: ${yearDiff} year difference`);
+  }
 
   // 3. Official Artist Channel / Uploader Matching (+30 points)
   const isOfficialChannel =
@@ -301,18 +319,10 @@ export const evaluateCandidateMatch = (
     reasons.push('Official channel/uploader verified');
   }
 
-  // 4. Title & artist are hard-verified above; both also raise confidence.
-  confidence += 20;
-  reasons.push('Title verified');
-  if (isKnownArtist(canonical.artists[0] || '')) {
-    confidence += 20;
-    reasons.push('Artist verified');
-  }
-
-  // 5. Popularity / View Count Bonus (+10 points)
+  // 5. Popularity / View Count Bonus (+5 points)
   const popularity = candidate.viewCount || candidate.playbackCount || 0;
   if (popularity > 50000) {
-    confidence += 10;
+    confidence += 5;
     reasons.push(`High playcount verified (${popularity.toLocaleString()})`);
   }
 

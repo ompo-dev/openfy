@@ -42,6 +42,7 @@ export type PlayerTrack = {
   artistName: string;
   albumName: string;
   imageURL: string;
+  releaseDate?: string;
   localAudioPath?: string;
   streamUrl?: string;
   streamExpiresAt?: number;
@@ -183,7 +184,8 @@ const warmTrackAudio = (track?: PlayerTrack) => {
       track.title,
       track.artistName,
       track.spotifyId,
-      track.duration_ms
+      track.duration_ms,
+      track.releaseDate
     );
     if (resolved?.url) {
       cacheAudioSource(track, resolved.url);

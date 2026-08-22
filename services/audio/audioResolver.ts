@@ -23,6 +23,29 @@ export type ResolvedAudio = {
 };
 
 const requiresCanonicalBackend = Platform.OS === 'ios';
+const AUDIO_RESOLVE_TTL_MS = 8 * 60_000;
+const resolvedAudioCache = new Map<
+  string,
+  { value: ResolvedAudio; expiresAt: number }
+>();
+const activeAudioResolves = new Map<string, Promise<ResolvedAudio | null>>();
+
+const getAudioResolveKey = (
+  trackName: string,
+  artistName: string,
+  spotifyId?: string,
+  durationMs?: number,
+  releaseDate?: string
+) =>
+  [
+    spotifyId || '',
+    trackName,
+    artistName,
+    durationMs || 0,
+    releaseDate || '',
+  ]
+    .join('\u0000')
+    .toLowerCase();
 
 /**
  * The backend proxy refreshes compatibility with provider streams for every
@@ -517,7 +540,49 @@ export const resolveAudioUrl = async (
   trackName: string,
   artistName: string,
   spotifyId?: string,
-  durationMs?: number
+  durationMs?: number,
+  releaseDate?: string
+): Promise<ResolvedAudio | null> => {
+  const resolveKey = getAudioResolveKey(
+    trackName,
+    artistName,
+    spotifyId,
+    durationMs,
+    releaseDate
+  );
+  const cached = resolvedAudioCache.get(resolveKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const active = activeAudioResolves.get(resolveKey);
+  if (active) return active;
+
+  const request = resolveAudioUrlInternal(
+    trackName,
+    artistName,
+    spotifyId,
+    durationMs,
+    releaseDate
+  )
+    .then((result) => {
+      if (result?.url) {
+        resolvedAudioCache.set(resolveKey, {
+          value: result,
+          expiresAt: Date.now() + AUDIO_RESOLVE_TTL_MS,
+        });
+      }
+      return result;
+    })
+    .finally(() => activeAudioResolves.delete(resolveKey));
+
+  activeAudioResolves.set(resolveKey, request);
+  return request;
+};
+
+const resolveAudioUrlInternal = async (
+  trackName: string,
+  artistName: string,
+  spotifyId?: string,
+  durationMs?: number,
+  releaseDate?: string
 ): Promise<ResolvedAudio | null> => {
   const youtubeVideoId = getYouTubeVideoIdFromTrackId(spotifyId);
   if (youtubeVideoId) {
@@ -559,6 +624,7 @@ export const resolveAudioUrl = async (
           artist: primaryArtist,
           durationMs,
           spotifyId,
+          releaseDate,
         }),
       },
       15000

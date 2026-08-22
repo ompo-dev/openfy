@@ -56,6 +56,7 @@ export type CanonicalTrack = {
   artists: string[];
   primaryArtist: string;
   albumName: string;
+  releaseDate?: string;
   durationMs: number;
   imageURL: string;
   localAudioPath?: string;
