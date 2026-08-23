@@ -38,6 +38,10 @@ export function DownloadsModal({ visible, onClose }: DownloadsModalProps) {
   const { downloads, activeDownloadsCount, cancelDownload, retryDownload } = useDownloads();
   const [diagnostic, setDiagnostic] = React.useState<DiagnosticView | null>(null);
 
+  React.useEffect(() => {
+    if (!visible) setDiagnostic(null);
+  }, [visible]);
+
   const openDiagnostic = React.useCallback((spotifyId: string, title: string) => {
     setDiagnostic({ spotifyId, title, content: 'Carregando logs…' });
     void formatDownloadDiagnostics(spotifyId)
@@ -60,13 +64,48 @@ export function DownloadsModal({ visible, onClose }: DownloadsModalProps) {
   }, [diagnostic]);
 
   return (
-    <>
-      <SheetFrame
-        visible={visible}
-        title={activeDownloadsCount ? `Downloads (${activeDownloadsCount})` : 'Downloads'}
-        onClose={onClose}
-      >
-        {downloads.length === 0 ? (
+    <SheetFrame
+      visible={visible}
+      title={
+        diagnostic
+          ? `Logs: ${diagnostic.title}`
+          : activeDownloadsCount
+            ? `Downloads (${activeDownloadsCount})`
+            : 'Downloads'
+      }
+      onClose={onClose}
+      headerLeading={
+        diagnostic ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Voltar para downloads"
+            hitSlop={10}
+            onPress={() => setDiagnostic(null)}
+            style={styles.copyButton}
+          >
+            <Ionicons name="chevron-back" color="#FFFFFF" size={18} />
+          </Pressable>
+        ) : null
+      }
+      headerTrailing={
+        diagnostic ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Copiar logs"
+            hitSlop={10}
+            onPress={copyDiagnostic}
+            style={styles.copyButton}
+          >
+            <Ionicons name="copy-outline" color="#FFFFFF" size={17} />
+          </Pressable>
+        ) : null
+      }
+    >
+      {diagnostic ? (
+        <Text selectable style={styles.logContent}>
+          {diagnostic.content}
+        </Text>
+      ) : downloads.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="download-outline" color="#8D8D8D" size={30} />
             <Text style={styles.emptyTitle}>Nenhum download em andamento</Text>
@@ -143,28 +182,7 @@ export function DownloadsModal({ visible, onClose }: DownloadsModalProps) {
             </View>
           ))
         )}
-      </SheetFrame>
-      <SheetFrame
-        visible={Boolean(diagnostic)}
-        title={diagnostic ? `Logs: ${diagnostic.title}` : 'Logs'}
-        onClose={() => setDiagnostic(null)}
-        headerTrailing={
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Copiar logs"
-            hitSlop={10}
-            onPress={copyDiagnostic}
-            style={styles.copyButton}
-          >
-            <Ionicons name="copy-outline" color="#FFFFFF" size={17} />
-          </Pressable>
-        }
-      >
-        <Text selectable style={styles.logContent}>
-          {diagnostic?.content || ''}
-        </Text>
-      </SheetFrame>
-    </>
+    </SheetFrame>
   );
 }
 

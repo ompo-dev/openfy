@@ -407,6 +407,101 @@ const bufferToBase64 = (buffer: ArrayBuffer): string => {
   return base64;
 };
 
+const FETCH_AUDIO_FALLBACK_MAX_BYTES = 32 * 1024 * 1024;
+
+const downloadAudioWithFetch = async (
+  audioUrl: string,
+  localPath: string,
+  trackId: string,
+  format: string
+): Promise<string | null> => {
+  const spotifyId = diagnosticsIdFromTrackId(trackId);
+  const transport = 'fetch';
+  const session = 'foreground';
+
+  try {
+    recordDownloadDiagnostic(spotifyId, 'audio.request', {
+      method: 'GET',
+      transport,
+      session,
+      url: audioUrl,
+      format,
+    });
+    const response = await fetch(audioUrl);
+    const headers = Object.fromEntries(
+      ['content-type', 'content-length', 'accept-ranges', 'date', 'server'].flatMap(
+        (name) => {
+          const value = response.headers.get(name);
+          return value ? [[name, value]] : [];
+        }
+      )
+    );
+    const mimeType = response.headers.get('content-type');
+    const contentLength = Number(response.headers.get('content-length') || 0);
+
+    if (!response.ok || !isAudioMimeType(mimeType)) {
+      recordDownloadDiagnostic(spotifyId, 'audio.invalid_response', {
+        transport,
+        session,
+        status: response.status,
+        mimeType,
+        headers,
+        reason: !response.ok ? 'http_status' : 'unexpected_mime_type',
+      });
+      return null;
+    }
+    if (contentLength > FETCH_AUDIO_FALLBACK_MAX_BYTES) {
+      recordDownloadDiagnostic(spotifyId, 'audio.failed', {
+        transport,
+        session,
+        bytes: contentLength,
+        reason: 'fetch_body_too_large',
+      });
+      return null;
+    }
+
+    const buffer = await response.arrayBuffer();
+    if (
+      buffer.byteLength < 50000 ||
+      buffer.byteLength > FETCH_AUDIO_FALLBACK_MAX_BYTES
+    ) {
+      recordDownloadDiagnostic(spotifyId, 'audio.invalid_response', {
+        transport,
+        session,
+        bytes: buffer.byteLength,
+        reason:
+          buffer.byteLength < 50000 ? 'file_too_small' : 'fetch_body_too_large',
+      });
+      return null;
+    }
+
+    await FileSystem.writeAsStringAsync(localPath, bufferToBase64(buffer), {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return validateDownloadedAudio(
+      {
+        uri: localPath,
+        status: response.status,
+        mimeType,
+        headers,
+      },
+      trackId,
+      transport,
+      session
+    );
+  } catch (error) {
+    recordDownloadDiagnostic(spotifyId, 'audio.failed', {
+      transport,
+      session,
+      error: errorMessage(error),
+    });
+    console.warn(
+      `[DownloadManager] Fetch download failed from ${audioUrlOrigin(audioUrl)}: ${errorMessage(error)}`
+    );
+    return null;
+  }
+};
+
 /**
  * Download HLS .m3u8 stream by fetching audio segments in parallel batches
  * and concatenating them cleanly to local storage.
@@ -619,6 +714,14 @@ export const downloadAudio = async (
         );
       }
     }
+
+    const fetchResult = await downloadAudioWithFetch(
+      audioUrl,
+      localPath,
+      trackId,
+      cleanFormat
+    );
+    if (fetchResult) return fetchResult;
 
     recordDownloadDiagnostic(spotifyId, 'audio.exhausted', { url: audioUrl });
     return null;

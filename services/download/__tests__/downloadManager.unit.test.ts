@@ -17,6 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { resolveAudioUrl } from '../../audio/audioResolver';
 import {
+  downloadAudio,
   downloadTrack,
   getPendingDownloads,
   queueDownloads,
@@ -36,6 +37,7 @@ jest.mock('../../lyrics/lyricsService', () => ({
 
 const resolveAudioUrlMock = resolveAudioUrl as jest.Mock;
 const fileSystemMock = FileSystem as jest.Mocked<typeof FileSystem>;
+const fetchMock = jest.fn();
 
 describe('queueDownloads', () => {
   beforeEach(async () => {
@@ -49,6 +51,8 @@ describe('queueDownloads', () => {
     } as ReturnType<typeof FileSystem.createDownloadResumable>);
     fileSystemMock.downloadAsync.mockReset();
     fileSystemMock.downloadAsync.mockResolvedValue({ uri: 'file:///mock_dir/cover.jpg' });
+    fetchMock.mockReset();
+    global.fetch = fetchMock;
   });
 
   it('persists hydrated audio URL and format for background resume', async () => {
@@ -164,6 +168,37 @@ describe('queueDownloads', () => {
       'https://rr1.googlevideo.test/fresh-on-device.m4a',
       expect.any(String),
       expect.objectContaining({ sessionType: 'foreground' })
+    );
+  });
+
+  it('BUG-R3: iPhone saves audio through fetch when URLSession rejects a signed stream', async () => {
+    fileSystemMock.createDownloadResumable.mockReturnValueOnce({
+      downloadAsync: jest.fn().mockRejectedValue(new Error('URLSession failed')),
+    } as ReturnType<typeof FileSystem.createDownloadResumable>);
+    fileSystemMock.downloadAsync.mockRejectedValue(new Error('URLSession failed'));
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name: string) =>
+          name === 'content-type'
+            ? 'audio/mp4'
+            : name === 'content-length'
+              ? '60000'
+              : null,
+      },
+      arrayBuffer: async () => new Uint8Array(60000).buffer,
+    });
+
+    await expect(
+      downloadAudio('https://rr1.googlevideo.test/audio.m4a', 'track_3', 'm4a')
+    ).resolves.toBe('file:///mock_dir/openfy_downloads/track_3.m4a');
+
+    expect(fetchMock).toHaveBeenCalledWith('https://rr1.googlevideo.test/audio.m4a');
+    expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledWith(
+      'file:///mock_dir/openfy_downloads/track_3.m4a',
+      expect.any(String),
+      expect.objectContaining({ encoding: 'base64' })
     );
   });
 });
