@@ -101,6 +101,11 @@ const resolveExactYouTubeVideo = async (
         imageURL: direct.imageURL,
       };
     }
+
+    // A native build has no guaranteed Metro/API route. Continue with the
+    // on-device canonical resolver instead of making this exact track depend
+    // on a development server.
+    return null;
   }
 
   if (!MUSIC_SERVER_URL) {
@@ -674,9 +679,9 @@ const resolveAudioUrlInternal = async (
   // its stream; in that case the device must still try its YouTube resolver
   // before accepting another provider.
   let backendFallback: ResolvedAudio | null = null;
-  if (!MUSIC_SERVER_URL) {
+  if (Platform.OS !== 'web' || !MUSIC_SERVER_URL) {
     console.log(
-      `[AudioResolver] No server origin on ${Platform.OS}; using direct native resolution.`
+      `[AudioResolver] No server dependency on ${Platform.OS}; using direct resolution.`
     );
   } else {
     try {

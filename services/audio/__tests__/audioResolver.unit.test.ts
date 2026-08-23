@@ -60,36 +60,19 @@ describe('resolveAudioUrl', () => {
     });
   });
 
-  it('falls back to the strict canonical lookup when an exact YouTube stream expires', async () => {
-    fetchMock
-      .mockResolvedValueOnce({ ok: false })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          source: {
-            streamUrl: 'https://media.test/canonical.m4a',
-            provider: 'youtube',
-          },
-          track: { title: 'Faixa canônica' },
-        }),
-      });
-
+  it('does not call the configured backend when an exact iPhone stream expires', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 503 });
     await expect(
       resolveAudioUrl('Faixa canônica', 'Artista canônico', 'yt_12345678901', 180000)
-    ).resolves.toMatchObject({
-      source: 'youtube',
-      url: 'https://media.test/canonical.m4a',
-    });
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      'http://192.168.100.27:3001/api/music/resolve',
-      expect.objectContaining({ method: 'POST' })
+    ).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('192.168.100.27:3001'),
+      expect.anything()
     );
   });
 
-  it('keeps iPhone on strict direct fallback when backend resolve fails', async () => {
+  it('keeps iPhone on strict direct canonical fallback without a backend', async () => {
     fetchMock
-      .mockResolvedValueOnce({ ok: false, status: 503 })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => [
