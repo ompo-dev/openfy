@@ -1,13 +1,21 @@
 import * as React from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Clipboard from 'expo-clipboard';
 
 import { useDownloads, type DownloadJobStatus } from '@context';
+import { formatDownloadDiagnostics } from '@services';
 import { SheetFrame } from '../native';
 
 type DownloadsModalProps = {
   visible: boolean;
   onClose: () => void;
+};
+
+type DiagnosticView = {
+  spotifyId: string;
+  title: string;
+  content: string;
 };
 
 const statusCopy: Record<DownloadJobStatus, string> = {
@@ -28,79 +36,135 @@ const statusColor: Record<DownloadJobStatus, string> = {
 
 export function DownloadsModal({ visible, onClose }: DownloadsModalProps) {
   const { downloads, activeDownloadsCount, cancelDownload, retryDownload } = useDownloads();
+  const [diagnostic, setDiagnostic] = React.useState<DiagnosticView | null>(null);
+
+  const openDiagnostic = React.useCallback((spotifyId: string, title: string) => {
+    setDiagnostic({ spotifyId, title, content: 'Carregando logs…' });
+    void formatDownloadDiagnostics(spotifyId)
+      .then((content) => {
+        setDiagnostic((current) =>
+          current?.spotifyId === spotifyId ? { ...current, content } : current
+        );
+      })
+      .catch((error) => {
+        setDiagnostic((current) =>
+          current?.spotifyId === spotifyId
+            ? { ...current, content: `Não foi possível carregar logs: ${String(error)}` }
+            : current
+        );
+      });
+  }, []);
+
+  const copyDiagnostic = React.useCallback(() => {
+    if (diagnostic) void Clipboard.setStringAsync(diagnostic.content);
+  }, [diagnostic]);
 
   return (
-    <SheetFrame
-      visible={visible}
-      title={activeDownloadsCount ? `Downloads (${activeDownloadsCount})` : 'Downloads'}
-      onClose={onClose}
-    >
-      {downloads.length === 0 ? (
-        <View style={styles.empty}>
-          <Ionicons name="download-outline" color="#8D8D8D" size={30} />
-          <Text style={styles.emptyTitle}>Nenhum download em andamento</Text>
-          <Text style={styles.emptyCopy}>
-            Adicione uma música, álbum ou playlist para acompanhar por aqui.
-          </Text>
-        </View>
-      ) : (
-        downloads.map((download) => (
-          <View key={download.spotifyId} style={styles.item}>
-            {download.imageURL ? (
-              <Image source={{ uri: download.imageURL }} style={styles.cover} />
-            ) : (
-              <View style={[styles.cover, styles.coverFallback]}>
-                <Ionicons name="musical-note" color="#909090" size={20} />
-              </View>
-            )}
-            <View style={styles.info}>
-              <Text style={styles.title} numberOfLines={1}>
-                {download.title}
-              </Text>
-              <Text style={styles.artist} numberOfLines={1}>
-                {download.artistName}
-              </Text>
-              <Text style={[styles.status, { color: statusColor[download.status] }]}>
-                {statusCopy[download.status]}
-              </Text>
-              {download.status === 'downloading' || download.status === 'resolving' ? (
-                <View style={styles.progressTrack}>
-                  <View
-                    style={[
-                      styles.progress,
-                      { width: `${Math.max(2, Math.round(download.progress * 100))}%` },
-                    ]}
-                  />
-                </View>
-              ) : null}
-            </View>
-            {download.status === 'completed' ? (
-              <Ionicons name="checkmark-circle" color="#1ED760" size={22} />
-            ) : download.status === 'error' ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Tentar baixar ${download.title} novamente`}
-                hitSlop={10}
-                onPress={() => void retryDownload(download.spotifyId)}
-                style={styles.cancelButton}
-              >
-                <Ionicons name="refresh" color="#F6B26B" size={19} />
-              </Pressable>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Cancelar download de ${download.title}`}
-                hitSlop={10}
-                onPress={() => void cancelDownload(download.spotifyId)}
-                style={styles.cancelButton}
-              >
-                <Ionicons name="close" color="#FFFFFF" size={17} />
-              </Pressable>
-            )}
+    <>
+      <SheetFrame
+        visible={visible}
+        title={activeDownloadsCount ? `Downloads (${activeDownloadsCount})` : 'Downloads'}
+        onClose={onClose}
+      >
+        {downloads.length === 0 ? (
+          <View style={styles.empty}>
+            <Ionicons name="download-outline" color="#8D8D8D" size={30} />
+            <Text style={styles.emptyTitle}>Nenhum download em andamento</Text>
+            <Text style={styles.emptyCopy}>
+              Adicione uma música, álbum ou playlist para acompanhar por aqui.
+            </Text>
           </View>
-        ))
-      )}
-    </SheetFrame>
+        ) : (
+          downloads.map((download) => (
+            <View key={download.spotifyId} style={styles.item}>
+              {download.imageURL ? (
+                <Image source={{ uri: download.imageURL }} style={styles.cover} />
+              ) : (
+                <View style={[styles.cover, styles.coverFallback]}>
+                  <Ionicons name="musical-note" color="#909090" size={20} />
+                </View>
+              )}
+              <View style={styles.info}>
+                <Text style={styles.title} numberOfLines={1}>
+                  {download.title}
+                </Text>
+                <Text style={styles.artist} numberOfLines={1}>
+                  {download.artistName}
+                </Text>
+                <Text style={[styles.status, { color: statusColor[download.status] }]}>
+                  {statusCopy[download.status]}
+                </Text>
+                {download.status === 'downloading' || download.status === 'resolving' ? (
+                  <View style={styles.progressTrack}>
+                    <View
+                      style={[
+                        styles.progress,
+                        { width: `${Math.max(2, Math.round(download.progress * 100))}%` },
+                      ]}
+                    />
+                  </View>
+                ) : null}
+              </View>
+              <View style={styles.actions}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Ver logs de ${download.title}`}
+                  hitSlop={10}
+                  onPress={() => openDiagnostic(download.spotifyId, download.title)}
+                  style={styles.logButton}
+                >
+                  <Ionicons name="document-text-outline" color="#FFFFFF" size={15} />
+                  <Text style={styles.logButtonText}>Logs</Text>
+                </Pressable>
+                {download.status === 'completed' ? (
+                  <Ionicons name="checkmark-circle" color="#1ED760" size={22} />
+                ) : download.status === 'error' ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Tentar baixar ${download.title} novamente`}
+                    hitSlop={10}
+                    onPress={() => void retryDownload(download.spotifyId)}
+                    style={styles.cancelButton}
+                  >
+                    <Ionicons name="refresh" color="#F6B26B" size={19} />
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Cancelar download de ${download.title}`}
+                    hitSlop={10}
+                    onPress={() => void cancelDownload(download.spotifyId)}
+                    style={styles.cancelButton}
+                  >
+                    <Ionicons name="close" color="#FFFFFF" size={17} />
+                  </Pressable>
+                )}
+              </View>
+            </View>
+          ))
+        )}
+      </SheetFrame>
+      <SheetFrame
+        visible={Boolean(diagnostic)}
+        title={diagnostic ? `Logs: ${diagnostic.title}` : 'Logs'}
+        onClose={() => setDiagnostic(null)}
+        headerTrailing={
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Copiar logs"
+            hitSlop={10}
+            onPress={copyDiagnostic}
+            style={styles.copyButton}
+          >
+            <Ionicons name="copy-outline" color="#FFFFFF" size={17} />
+          </Pressable>
+        }
+      >
+        <Text selectable style={styles.logContent}>
+          {diagnostic?.content || ''}
+        </Text>
+      </SheetFrame>
+    </>
   );
 }
 
@@ -182,5 +246,41 @@ const styles = StyleSheet.create({
     height: 32,
     justifyContent: 'center',
     width: 32,
+  },
+  actions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  logButton: {
+    alignItems: 'center',
+    borderColor: 'rgba(255, 255, 255, 0.24)',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 4,
+    height: 32,
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  logButtonText: {
+    color: '#FFFFFF',
+    fontFamily: 'SF-Semibold',
+    fontSize: 11,
+  },
+  copyButton: {
+    alignItems: 'center',
+    borderColor: 'rgba(255, 255, 255, 0.24)',
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  logContent: {
+    color: '#D8D8D8',
+    fontFamily: 'SF-Mono',
+    fontSize: 11,
+    lineHeight: 16,
   },
 });

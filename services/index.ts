@@ -37,6 +37,14 @@ export {
   processPendingDownloads,
   queueDownloads,
 } from './download/downloadManager';
+export {
+  formatDownloadDiagnostics,
+  getDownloadDiagnostics,
+} from './download/downloadDiagnostics';
+export type {
+  DownloadDiagnostic,
+  DownloadDiagnosticEvent,
+} from './download/downloadDiagnostics';
 export type {
   DownloadedTrack,
   DownloadStatus,

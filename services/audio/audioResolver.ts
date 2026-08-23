@@ -57,14 +57,22 @@ const getAudioResolveKey = (
  */
 export const getPlayableAudioUrl = (streamUrl: string): string =>
   (() => {
-    if (!MUSIC_SERVER_URL) return streamUrl;
-
     try {
       const input = new URL(streamUrl);
       const proxiedSource =
         input.pathname === '/api/audio/proxy'
           ? input.searchParams.get('url') || ''
           : streamUrl;
+
+      // Native URLSession downloads signed provider URLs itself. Sending them
+      // back through Metro makes an iPhone depend on a dev server and breaks
+      // sideloaded builds. Unwrap stale proxy URLs before every native play or
+      // download attempt.
+      if (Platform.OS !== 'web') {
+        return /^https:\/\//i.test(proxiedSource) ? proxiedSource : streamUrl;
+      }
+
+      if (!MUSIC_SERVER_URL) return streamUrl;
       return /^https:\/\//i.test(proxiedSource)
         ? `${MUSIC_SERVER_URL}/api/audio/proxy?url=${encodeURIComponent(proxiedSource)}`
         : streamUrl;
@@ -636,6 +644,30 @@ const resolveAudioUrlInternal = async (
     `[AudioResolver] ${Platform.OS} resolving "${artistName} - ${trackName}" (${durationMs || 0}ms), backend: ${MUSIC_SERVER_URL || 'unavailable'}`
   );
 
+  // A native app must resolve on-device first. A Metro/API route can exist in
+  // development, but it is not part of an IPA and must never become required
+  // for playback or offline downloads.
+  if (Platform.OS !== 'web') {
+    const directResult = await resolveDirectYouTubeAudio({
+      title: trackName,
+      artist: primaryArtist,
+      durationMs,
+    });
+    if (directResult?.url) {
+      console.log(
+        `[AudioResolver] Resolved direct native stream: "${artistName} - ${trackName}"`
+      );
+      return {
+        url: directResult.url,
+        quality: 'high',
+        format: directResult.format,
+        source: 'youtube',
+        confidence: 100,
+        imageURL: directResult.imageURL,
+      };
+    }
+  }
+
   // 0. PRIMARY: Dedicated Node.js Resolution Backend API (Structured Entity & Strict Matching)
   // Keep a server-side SoundCloud answer only as a fallback.  The server may
   // have identified the exact official YouTube video but be unable to extract
@@ -699,30 +731,6 @@ const resolveAudioUrlInternal = async (
       console.warn(
         `[AudioResolver] Backend resolve failed at ${MUSIC_SERVER_URL} for "${artistName} - ${trackName}": ${errorMessage(error)}`
       );
-    }
-  }
-
-  // A standalone native build has no Metro API route. Resolve the selected
-  // official video on the device with YouTube's iOS client and keep the URL
-  // direct: the signed stream is bound to the phone's network identity.
-  if (Platform.OS !== 'web') {
-    const directResult = await resolveDirectYouTubeAudio({
-      title: trackName,
-      artist: primaryArtist,
-      durationMs,
-    });
-    if (directResult?.url) {
-      console.log(
-        `[AudioResolver] Resolved direct iOS stream: "${artistName} - ${trackName}"`
-      );
-      return {
-        url: directResult.url,
-        quality: 'high',
-        format: directResult.format,
-        source: 'youtube',
-        confidence: 100,
-        imageURL: directResult.imageURL,
-      };
     }
   }
 

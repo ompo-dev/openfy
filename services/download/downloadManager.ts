@@ -15,6 +15,10 @@ import {
   resolveViaSoundCloud,
   resolveViaYouTubeTopic,
 } from '../audio/audioResolver';
+import {
+  recordDownloadDiagnostic,
+  startDownloadDiagnostics,
+} from './downloadDiagnostics';
 
 export type DownloadStatus = 'idle' | 'downloading' | 'completed' | 'error';
 
@@ -82,6 +86,82 @@ const audioUrlOrigin = (url: string) => {
   } catch {
     return 'invalid URL';
   }
+};
+
+const diagnosticsIdFromTrackId = (trackId: string) =>
+  trackId.startsWith('track_') ? trackId.slice('track_'.length) : trackId;
+
+const selectResponseHeaders = (headers?: Record<string, string>) => {
+  if (!headers) return undefined;
+  const wanted = ['content-type', 'content-length', 'accept-ranges', 'date', 'server'];
+  const selected = Object.fromEntries(
+    Object.entries(headers).filter(([name]) => wanted.includes(name.toLowerCase()))
+  );
+  return Object.keys(selected).length ? selected : undefined;
+};
+
+type NativeDownloadResult = {
+  uri?: string;
+  status?: number;
+  mimeType?: string | null;
+  headers?: Record<string, string>;
+};
+
+const isAudioMimeType = (mimeType?: string | null) =>
+  !mimeType || /^(audio\/|video\/|application\/octet-stream$)/i.test(mimeType);
+
+const validateDownloadedAudio = async (
+  result: NativeDownloadResult | null | undefined,
+  trackId: string,
+  transport: string,
+  session: 'background' | 'foreground'
+): Promise<string | null> => {
+  const spotifyId = diagnosticsIdFromTrackId(trackId);
+  const details = {
+    transport,
+    session,
+    status: result?.status,
+    mimeType: result?.mimeType,
+    headers: selectResponseHeaders(result?.headers),
+  };
+  recordDownloadDiagnostic(spotifyId, 'audio.response', details);
+
+  if (!result?.uri) {
+    recordDownloadDiagnostic(spotifyId, 'audio.invalid_response', {
+      ...details,
+      reason: 'missing_file_uri',
+    });
+    return null;
+  }
+
+  const fileInfo = await FileSystem.getInfoAsync(result.uri);
+  const bytes = fileInfo.exists ? fileInfo.size : undefined;
+  const successfulStatus =
+    result.status === undefined || (result.status >= 200 && result.status < 300);
+  const valid =
+    successfulStatus &&
+    isAudioMimeType(result.mimeType) &&
+    fileInfo.exists &&
+    Boolean(bytes && bytes > 50000);
+  if (valid) {
+    recordDownloadDiagnostic(spotifyId, 'audio.saved', {
+      ...details,
+      bytes,
+    });
+    return result.uri;
+  }
+
+  recordDownloadDiagnostic(spotifyId, 'audio.invalid_response', {
+    ...details,
+    bytes,
+    reason: !successfulStatus
+      ? 'http_status'
+      : !isAudioMimeType(result.mimeType)
+        ? 'unexpected_mime_type'
+        : 'file_too_small',
+  });
+  await FileSystem.deleteAsync(result.uri, { idempotent: true }).catch(() => {});
+  return null;
 };
 
 const createStorageMutationQueue = () => {
@@ -227,6 +307,7 @@ const removePendingDownload = async (spotifyId: string): Promise<void> => {
 /** Stops an active native transfer and removes its persisted retry entry. */
 export const cancelDownload = async (spotifyId: string): Promise<void> => {
   cancelledDownloads.add(spotifyId);
+  recordDownloadDiagnostic(spotifyId, 'download.cancelled');
   const resumable = activeResumables.get(`track_${spotifyId}`);
   if (resumable) {
     await resumable.cancelAsync().catch(() => {});
@@ -426,6 +507,7 @@ export const downloadAudio = async (
     await ensureDirectories();
     const cleanFormat = format === 'm3u8' ? 'mp3' : format || 'mp3';
     const localPath = `${DOWNLOADS_DIR}${trackId}.${cleanFormat}`;
+    const spotifyId = diagnosticsIdFromTrackId(trackId);
 
     // 1. If HLS .m3u8 playlist
     if (audioUrl.includes('.m3u8')) {
@@ -436,6 +518,13 @@ export const downloadAudio = async (
 
     // 2. Direct progressive download via createDownloadResumable
     try {
+      recordDownloadDiagnostic(spotifyId, 'audio.request', {
+        method: 'GET',
+        transport: 'resumable',
+        session: 'background',
+        url: audioUrl,
+        format: cleanFormat,
+      });
       const downloadResumable = FileSystem.createDownloadResumable(
         audioUrl,
         localPath,
@@ -450,13 +539,19 @@ export const downloadAudio = async (
       activeResumables.set(trackId, downloadResumable);
 
       const result = await downloadResumable.downloadAsync();
-      if (result?.uri) {
-        const fileInfo = await FileSystem.getInfoAsync(result.uri);
-        if (fileInfo.exists && fileInfo.size && fileInfo.size > 50000) {
-          return result.uri;
-        }
-      }
+      const validResult = await validateDownloadedAudio(
+        result,
+        trackId,
+        'resumable',
+        'background'
+      );
+      if (validResult) return validResult;
     } catch (error) {
+      recordDownloadDiagnostic(spotifyId, 'audio.failed', {
+        transport: 'resumable',
+        session: 'background',
+        error: errorMessage(error),
+      });
       console.warn(
         `[DownloadManager] Resumable download failed from ${audioUrlOrigin(audioUrl)}: ${errorMessage(error)}. Trying direct download.`
       );
@@ -464,23 +559,73 @@ export const downloadAudio = async (
 
     // 3. Fallback to FileSystem.downloadAsync
     try {
+      recordDownloadDiagnostic(spotifyId, 'audio.request', {
+        method: 'GET',
+        transport: 'direct',
+        session: 'background',
+        url: audioUrl,
+        format: cleanFormat,
+      });
       const directResult = await FileSystem.downloadAsync(audioUrl, localPath, {
         sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
       });
-      if (directResult?.uri) {
-        const fileInfo = await FileSystem.getInfoAsync(directResult.uri);
-        if (fileInfo.exists && fileInfo.size && fileInfo.size > 50000) {
-          return directResult.uri;
-        }
-      }
+      const validResult = await validateDownloadedAudio(
+        directResult,
+        trackId,
+        'direct',
+        'background'
+      );
+      if (validResult) return validResult;
     } catch (error) {
+      recordDownloadDiagnostic(spotifyId, 'audio.failed', {
+        transport: 'direct',
+        session: 'background',
+        error: errorMessage(error),
+      });
       console.warn(
         `[DownloadManager] Direct download failed from ${audioUrlOrigin(audioUrl)}: ${errorMessage(error)}`
       );
     }
 
+    // iOS background URLSession may defer a short-lived signed stream until it
+    // expires. A foreground retry starts while the user still has the sheet open.
+    if (Platform.OS === 'ios') {
+      try {
+        recordDownloadDiagnostic(spotifyId, 'audio.request', {
+          method: 'GET',
+          transport: 'direct',
+          session: 'foreground',
+          url: audioUrl,
+          format: cleanFormat,
+        });
+        const directResult = await FileSystem.downloadAsync(audioUrl, localPath, {
+          sessionType: FileSystem.FileSystemSessionType.FOREGROUND,
+        });
+        const validResult = await validateDownloadedAudio(
+          directResult,
+          trackId,
+          'direct',
+          'foreground'
+        );
+        if (validResult) return validResult;
+      } catch (error) {
+        recordDownloadDiagnostic(spotifyId, 'audio.failed', {
+          transport: 'direct',
+          session: 'foreground',
+          error: errorMessage(error),
+        });
+        console.warn(
+          `[DownloadManager] Foreground download failed from ${audioUrlOrigin(audioUrl)}: ${errorMessage(error)}`
+        );
+      }
+    }
+
+    recordDownloadDiagnostic(spotifyId, 'audio.exhausted', { url: audioUrl });
     return null;
   } catch (error) {
+    recordDownloadDiagnostic(diagnosticsIdFromTrackId(trackId), 'audio.failed', {
+      error: errorMessage(error),
+    });
     console.error('[DownloadManager] Audio download failed:', error);
     return null;
   }
@@ -521,6 +666,11 @@ const downloadTrackInternal = async (
 ): Promise<DownloadedTrack | null> => {
   try {
     if (cancelledDownloads.has(track.spotifyId)) return null;
+    await startDownloadDiagnostics(track);
+    recordDownloadDiagnostic(track.spotifyId, 'download.queued', {
+      hasSuppliedAudioUrl: Boolean(audioUrl || track.audioUrl),
+      format: audioFormat || track.audioFormat || 'mp3',
+    });
     await upsertPendingDownload(
       track,
       audioUrl || track.audioUrl,
@@ -529,16 +679,27 @@ const downloadTrackInternal = async (
     const trackId = `track_${track.spotifyId}`;
     let effectiveTrack = track;
 
-    // A freshly preloaded source is still the canonical result. Use it first
-    // on iOS too; if it expired, the refresh below resolves a new source.
-    let resolvedUrl = audioUrl || track.audioUrl;
-    let format = audioFormat || track.audioFormat || 'mp3';
+    const suppliedAudioUrl = audioUrl || track.audioUrl;
+    // Server-created signed URLs can be tied to the server network. Native
+    // must resolve its own fresh stream first; web keeps the preloaded source.
+    let resolvedUrl = Platform.OS === 'web' ? suppliedAudioUrl : undefined;
+    let format = Platform.OS === 'web'
+      ? audioFormat || track.audioFormat || 'mp3'
+      : 'mp3';
     if (resolvedUrl) {
       resolvedUrl = getPlayableAudioUrl(resolvedUrl);
+      recordDownloadDiagnostic(track.spotifyId, 'audio.source.preloaded', {
+        url: resolvedUrl,
+        format,
+      });
     }
 
-    // If no URL provided, resolve audio source
+    // Native always resolves locally first. Web resolves only when its
+    // preloaded source is unavailable.
     if (!resolvedUrl) {
+      recordDownloadDiagnostic(track.spotifyId, 'audio.resolve.request', {
+        platform: Platform.OS,
+      });
       console.log(
         `[DownloadManager] ${Platform.OS} resolving "${track.artistName} - ${track.title}", backend: ${MUSIC_SERVER_URL || 'unavailable'}`
       );
@@ -563,6 +724,11 @@ const downloadTrackInternal = async (
       if (fallbackResult?.url) {
         resolvedUrl = fallbackResult.url;
         format = fallbackResult.format || 'mp3';
+        recordDownloadDiagnostic(track.spotifyId, 'audio.source.resolved', {
+          url: resolvedUrl,
+          format,
+          source: fallbackResult.source,
+        });
         if (!effectiveTrack.imageURL && fallbackResult.imageURL) {
           effectiveTrack = {
             ...effectiveTrack,
@@ -572,6 +738,15 @@ const downloadTrackInternal = async (
         }
         await upsertPendingDownload(effectiveTrack, resolvedUrl, format);
       }
+    }
+
+    if (!resolvedUrl && suppliedAudioUrl) {
+      resolvedUrl = getPlayableAudioUrl(suppliedAudioUrl);
+      format = audioFormat || track.audioFormat || 'mp3';
+      recordDownloadDiagnostic(track.spotifyId, 'audio.source.fallback', {
+        url: resolvedUrl,
+        format,
+      });
     }
 
     if (cancelledDownloads.has(track.spotifyId)) return null;
@@ -595,7 +770,8 @@ const downloadTrackInternal = async (
 
     // Stream URLs can expire while the OS waits to run a background task.
     // Resolve once more before marking the queued item as failed.
-    if (!localAudioPath && (audioUrl || track.audioUrl)) {
+    if (!localAudioPath) {
+      recordDownloadDiagnostic(track.spotifyId, 'audio.resolve.refresh');
       const refreshed = await resolveAudioUrl(
         track.title,
         track.artistName,
@@ -605,6 +781,11 @@ const downloadTrackInternal = async (
       if (refreshed?.url && refreshed.url !== resolvedUrl) {
         resolvedUrl = refreshed.url;
         format = refreshed.format || format;
+        recordDownloadDiagnostic(track.spotifyId, 'audio.source.refreshed', {
+          url: resolvedUrl,
+          format,
+          source: refreshed.source,
+        });
         await upsertPendingDownload(track, resolvedUrl, format);
         localAudioPath = await downloadAudio(
           resolvedUrl,
@@ -670,10 +851,14 @@ const downloadTrackInternal = async (
     await removePendingDownload(track.spotifyId);
 
     onProgress?.(1.0);
+    recordDownloadDiagnostic(track.spotifyId, 'download.completed');
     console.log(`[DownloadManager] Successfully downloaded track "${track.title}" to ${localAudioPath}`);
     return downloadedTrack;
   } catch (error) {
     if (cancelledDownloads.has(track.spotifyId)) return null;
+    recordDownloadDiagnostic(track.spotifyId, 'download.failed', {
+      error: errorMessage(error),
+    });
     try {
       await recordPendingDownloadFailure(track.spotifyId);
     } catch {}

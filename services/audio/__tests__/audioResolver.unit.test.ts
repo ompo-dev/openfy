@@ -12,19 +12,19 @@ import { resolveDirectYouTubeAudio } from '../directYouTubeResolver';
 const directYouTubeMock = resolveDirectYouTubeAudio as jest.Mock;
 
 describe('getPlayableAudioUrl', () => {
-  it('routes provider streams through the configured backend proxy', () => {
+  it('keeps provider streams direct on native builds', () => {
     expect(getPlayableAudioUrl('https://r1.googlevideo.com/audio.m4a')).toBe(
-      'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fr1.googlevideo.com%2Faudio.m4a'
+      'https://r1.googlevideo.com/audio.m4a'
     );
   });
 
-  it('rewrites an old proxy URL instead of proxying it twice', () => {
+  it('unwraps old proxy URLs on native builds', () => {
     expect(
       getPlayableAudioUrl(
         'http://localhost:3001/api/audio/proxy?url=https%3A%2F%2Fcf-media.sndcdn.com%2Ftrack.mp3'
       )
     ).toBe(
-      'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fcf-media.sndcdn.com%2Ftrack.mp3'
+      'https://cf-media.sndcdn.com/track.mp3'
     );
   });
 });
@@ -78,7 +78,7 @@ describe('resolveAudioUrl', () => {
       resolveAudioUrl('Faixa canônica', 'Artista canônico', 'yt_12345678901', 180000)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fmedia.test%2Fcanonical.m4a',
+      url: 'https://media.test/canonical.m4a',
     });
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
