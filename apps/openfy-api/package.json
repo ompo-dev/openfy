@@ -23,7 +23,8 @@
     "next": "^16.3.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "youtube-dl-exec": "^3.1.12"
+    "youtube-dl-exec": "^3.1.12",
+    "youtubei.js": "^17.2.0"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",

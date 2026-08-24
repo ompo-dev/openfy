@@ -9,8 +9,10 @@ const ytdl = require('@distube/ytdl-core');
 const youtubeDl = require('youtube-dl-exec');
 const { fetchAllowedAudioStream } = require('./audioStreamProxy');
 const { resolveYoutubeCookiesPath } = require('./youtubeCredentials');
+const { createInnertubeTrackResolver } = require('./youtubeInnertube');
 
 const PORT = process.env.PORT || 3001;
+const resolveYouTubeInnertubeTrack = createInnertubeTrackResolver();
 
 // In-memory LRU-like TTL cache
 const cache = new Map();
@@ -484,6 +486,14 @@ async function fetchYouTubeTrack(videoId) {
   if (cached) return cached;
 
   const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+  // Prefer InnerTube's iOS client. It yields an AAC URL without spawning
+  // yt-dlp, which is the path YouTube currently rejects with its bot check.
+  const innertubeTrack = await resolveYouTubeInnertubeTrack(videoId);
+  if (innertubeTrack) {
+    setCache(cacheKey, innertubeTrack, 1800);
+    return innertubeTrack;
+  }
 
   // yt-dlp is bundled through the existing youtube-dl-exec dependency and is
   // kept current by its postinstall.  It is resilient to YouTube player-script
