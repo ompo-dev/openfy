@@ -24,6 +24,7 @@ export type ResolvedAudio = {
 };
 
 const AUDIO_RESOLVE_TTL_MS = 8 * 60_000;
+const WEB_BACKEND_TIMEOUT_MS = 30_000;
 const resolvedAudioCache = new Map<
   string,
   { value: ResolvedAudio; expiresAt: number }
@@ -125,7 +126,7 @@ const resolveExactYouTubeVideo = async (
           url: `https://www.youtube.com/watch?v=${videoId}`,
         }),
       },
-      8000
+      WEB_BACKEND_TIMEOUT_MS
     );
     if (!response.ok) {
       console.warn(
@@ -698,7 +699,7 @@ const resolveAudioUrlInternal = async (
             releaseDate,
           }),
         },
-        15000
+        WEB_BACKEND_TIMEOUT_MS
       );
 
       if (backendRes.ok) {
@@ -739,9 +740,23 @@ const resolveAudioUrlInternal = async (
     }
   }
 
+  // Browser provider requests are blocked by CORS. The music backend/proxy
+  // is the only supported web resolver, so never turn one backend timeout
+  // into a long sequence of public proxy requests.
+  if (Platform.OS === 'web') {
+    if (backendFallback?.url && !isPreviewUrl(backendFallback.url)) {
+      return backendFallback;
+    }
+
+    console.warn(
+      `[AudioResolver] Web backend returned no playable stream for "${artistName} - ${trackName}".`
+    );
+    return null;
+  }
+
   // Keep the same strict title, artist and duration matching on every
-  // platform. This lets iPhone recover when a local development backend is
-  // unavailable instead of failing every track at once.
+  // native platform. This lets iPhone recover when a local development
+  // backend is unavailable instead of failing every track at once.
   const ytResult = await resolveViaYouTubeTopic(
     trackName,
     primaryArtist,

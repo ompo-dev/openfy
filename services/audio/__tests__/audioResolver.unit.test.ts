@@ -8,6 +8,7 @@ jest.mock('../directYouTubeResolver', () => ({
 
 import { getPlayableAudioUrl, resolveAudioUrl } from '../audioResolver';
 import { resolveDirectYouTubeAudio } from '../directYouTubeResolver';
+import { Platform } from 'react-native';
 
 const directYouTubeMock = resolveDirectYouTubeAudio as jest.Mock;
 
@@ -31,12 +32,20 @@ describe('getPlayableAudioUrl', () => {
 
 describe('resolveAudioUrl', () => {
   const fetchMock = jest.fn();
+  const originalPlatform = Platform.OS;
 
   beforeEach(() => {
     fetchMock.mockReset();
     directYouTubeMock.mockReset();
     directYouTubeMock.mockResolvedValue(null);
     global.fetch = fetchMock;
+  });
+
+  afterEach(() => {
+    Object.defineProperty(Platform, 'OS', {
+      configurable: true,
+      value: originalPlatform,
+    });
   });
 
   it('keeps a client-resolved iOS stream direct instead of sending it back through a proxy', async () => {
@@ -104,5 +113,23 @@ describe('resolveAudioUrl', () => {
       source: 'youtube',
       url: 'https://media.test/direct-canonical.m4a',
     });
+  });
+
+  it('does not call browser-only CORS fallbacks after the web backend fails', async () => {
+    Object.defineProperty(Platform, 'OS', {
+      configurable: true,
+      value: 'web',
+    });
+    fetchMock.mockRejectedValueOnce(new Error('backend timeout'));
+
+    await expect(
+      resolveAudioUrl('Faixa web', 'Artista web', 'web-regression', 180000)
+    ).resolves.toBeNull();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://192.168.100.27:3001/api/music/resolve',
+      expect.objectContaining({ method: 'POST' })
+    );
   });
 });
