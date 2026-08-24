@@ -655,10 +655,10 @@ const resolveAudioUrlInternal = async (
     }
   } catch {}
 
-  // Native direct providers cannot preserve the canonical backend's matching
-  // and proxy guarantees. A miss must stay a miss instead of becoming another
-  // song with the requested track's cache key.
-  if (requiresCanonicalBackend) return backendFallback;
+  // Browser fallbacks call public provider instances directly and therefore
+  // fail under CORS. iOS also requires the backend proxy for compatible
+  // background downloads. In both cases, a server miss must stay a miss.
+  if (requiresCanonicalBackend || Platform.OS === 'web') return backendFallback;
 
   // 1. SECONDARY: Official YouTube channel/topic match. Keep original source
   // priority even when the local backend is unavailable.

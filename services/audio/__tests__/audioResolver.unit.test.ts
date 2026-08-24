@@ -2,6 +2,10 @@ jest.mock('@config', () => ({
   MUSIC_SERVER_URL: 'http://192.168.100.27:3001',
 }));
 
+jest.mock('react-native', () => ({
+  Platform: { OS: 'web' },
+}));
+
 import { getPlayableAudioUrl, resolveAudioUrl } from '../audioResolver';
 
 describe('getPlayableAudioUrl', () => {
@@ -52,6 +56,20 @@ describe('resolveAudioUrl', () => {
     });
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
+      'http://192.168.100.27:3001/api/music/resolve',
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it('does not call CORS-prone browser providers after a backend miss on web', async () => {
+    fetchMock.mockResolvedValue({ ok: false });
+
+    await expect(
+      resolveAudioUrl('Pique Narutão', 'Sidney Scaccio', '5b8WiNjA6ihEvaeB9J3eyQ', 181834)
+    ).resolves.toBeNull();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
       'http://192.168.100.27:3001/api/music/resolve',
       expect.objectContaining({ method: 'POST' })
     );
