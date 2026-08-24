@@ -7,6 +7,7 @@ const http = require('http');
 const url = require('url');
 const path = require('path');
 const { handleNodeServerRequest } = require('./expoRequestAdapter');
+const { createInnertubeTrackResolver } = require('./youtubeInnertube');
 const ytdl = require('@distube/ytdl-core');
 const youtubeDl = require('youtube-dl-exec').create(
   process.env.YOUTUBE_DL_PATH ||
@@ -20,6 +21,7 @@ const youtubeDl = require('youtube-dl-exec').create(
 );
 
 const PORT = process.env.PORT || 3001;
+const resolveYouTubeInnertubeTrack = createInnertubeTrackResolver();
 
 // In-memory LRU-like TTL cache
 const cache = new Map();
@@ -494,6 +496,15 @@ async function fetchYouTubeTrack(videoId) {
 
   const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
+  // Prefer the same iOS InnerTube client used by the standalone native app.
+  // It returns a playable AAC URL without spawning yt-dlp, which can be
+  // rejected by YouTube's bot check even when the video is public.
+  const innertubeTrack = await resolveYouTubeInnertubeTrack(videoId);
+  if (innertubeTrack) {
+    setCache(cacheKey, innertubeTrack, 1800);
+    return innertubeTrack;
+  }
+
   // yt-dlp is bundled through the existing youtube-dl-exec dependency and is
   // kept current by its postinstall.  It is resilient to YouTube player-script
   // changes that can leave ytdl-core with no playable formats.
@@ -501,7 +512,6 @@ async function fetchYouTubeTrack(videoId) {
     const details = await youtubeDl(youtubeUrl, {
       dumpSingleJson: true,
       noWarnings: true,
-      noCallHome: true,
       noPlaylist: true,
       format: 'bestaudio[ext=m4a]/bestaudio',
     });
@@ -608,7 +618,6 @@ async function fetchYouTubeArtistImage(artistName) {
     const result = await youtubeDl(`ytsearch1:${normalizedName} official music`, {
       dumpSingleJson: true,
       noWarnings: true,
-      noCallHome: true,
       noPlaylist: true,
       skipDownload: true,
     });
@@ -618,7 +627,6 @@ async function fetchYouTubeArtistImage(artistName) {
       const channel = await youtubeDl(result.channel_url, {
         dumpSingleJson: true,
         noWarnings: true,
-        noCallHome: true,
         noPlaylist: true,
         playlistEnd: 1,
         skipDownload: true,
