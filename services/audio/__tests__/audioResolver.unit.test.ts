@@ -131,5 +131,12 @@ describe('resolveAudioUrl', () => {
       'http://192.168.100.27:3001/api/music/resolve',
       expect.objectContaining({ method: 'POST' })
     );
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://192.168.100.27:3001/api/music/resolve',
+      expect.objectContaining({ signal: expect.anything() })
+    );
+    expect(
+      JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    ).toMatchObject({ includeLyrics: false });
   });
 });

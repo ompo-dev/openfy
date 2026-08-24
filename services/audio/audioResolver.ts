@@ -24,7 +24,7 @@ export type ResolvedAudio = {
 };
 
 const AUDIO_RESOLVE_TTL_MS = 8 * 60_000;
-const WEB_BACKEND_TIMEOUT_MS = 30_000;
+const WEB_BACKEND_TIMEOUT_MS = 120_000;
 const resolvedAudioCache = new Map<
   string,
   { value: ResolvedAudio; expiresAt: number }
@@ -697,6 +697,7 @@ const resolveAudioUrlInternal = async (
             durationMs,
             spotifyId,
             releaseDate,
+            includeLyrics: false,
           }),
         },
         WEB_BACKEND_TIMEOUT_MS
@@ -741,7 +742,7 @@ const resolveAudioUrlInternal = async (
   }
 
   // Browser provider requests are blocked by CORS. The music backend/proxy
-  // is the only supported web resolver, so never turn one backend timeout
+  // is the only supported web resolver, so never turn a backend failure
   // into a long sequence of public proxy requests.
   if (Platform.OS === 'web') {
     if (backendFallback?.url && !isPreviewUrl(backendFallback.url)) {

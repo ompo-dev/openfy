@@ -609,7 +609,7 @@ const fetchYouTubeTrack = async (
     const response = await axios.post(
       `${MUSIC_SERVER_URL}/api/music/youtube`,
       { url: youtubeUrl },
-      { timeout: 30000 }
+      { timeout: 120000 }
     );
     const track = response.data?.track;
     if (track?.videoId === videoId && track.title && track.streamUrl) {
