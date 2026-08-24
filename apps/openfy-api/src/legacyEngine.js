@@ -8,6 +8,7 @@ const url = require('url');
 const ytdl = require('@distube/ytdl-core');
 const youtubeDl = require('youtube-dl-exec');
 const { fetchAllowedAudioStream } = require('./audioStreamProxy');
+const { resolveYoutubeCookiesPath } = require('./youtubeCredentials');
 
 const PORT = process.env.PORT || 3001;
 
@@ -488,12 +489,13 @@ async function fetchYouTubeTrack(videoId) {
   // kept current by its postinstall.  It is resilient to YouTube player-script
   // changes that can leave ytdl-core with no playable formats.
   try {
+    const cookies = await resolveYoutubeCookiesPath();
     const details = await youtubeDl(youtubeUrl, {
       dumpSingleJson: true,
       noWarnings: true,
-      noCallHome: true,
       noPlaylist: true,
       format: 'bestaudio[ext=m4a]/bestaudio',
+      ...(cookies ? { cookies } : {}),
     });
     if (details?.id !== videoId || !details.url) return null;
 
@@ -513,7 +515,10 @@ async function fetchYouTubeTrack(videoId) {
     setCache(cacheKey, result, 1800);
     return result;
   } catch (error) {
-    console.warn(`[YouTube Extractor] yt-dlp failed for ${videoId}:`, error.message);
+    const details = String(error?.stderr || error?.message || error || '')
+      .replace(/\s+/g, ' ')
+      .slice(0, 1000);
+    console.warn(`[YouTube Extractor] yt-dlp failed for ${videoId}:`, details);
   }
 
   // Retain the previous extractor as a lightweight fallback for environments

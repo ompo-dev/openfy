@@ -15,6 +15,8 @@ com Elysia, Swagger, Bun e Axios.
 | 8 | A ponte encaminha corpos POST | `nodeRequestAdapter.test.ts` | Integração de contrato | PASS |
 | 9 | O Next não é forçado a executar dentro do runtime Bun | `runtimeScript.test.ts` | Unitário | PASS |
 | 10 | Corpos JSON validados são recriados antes de chegar à engine | `app.test.ts` | Integração de contrato | PASS |
+| 11 | Cookies do YouTube são aceitos somente do ambiente e em formato Netscape | `youtubeCredentials.test.ts` | Unitário | PASS |
+| 12 | O binário `yt-dlp` é autorizado explicitamente pelo Bun | `runtimeScript.test.ts` | Unitário | PASS |
 
 ## Evidência RED
 
@@ -31,7 +33,7 @@ com Elysia, Swagger, Bun e Axios.
 
 ## Evidência GREEN
 
-- `bun test --coverage`: 11 testes passaram; 86,63% de funções e 96,13% de
+- `bun test --coverage`: 15 testes passaram; 90,45% de funções e 95,71% de
   linhas cobertas.
 - `bun run typecheck`: passou.
 - `bun run build`: passou.

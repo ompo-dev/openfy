@@ -2,6 +2,7 @@
  * Media Link Parser (Spotify & YouTube / YouTube Music)
  * Supports:
  * - https://open.spotify.com/track/ID
+ * - https://open.spotify.com/intl-pt/track/ID
  * - https://open.spotify.com/playlist/ID
  * - https://open.spotify.com/album/ID
  * - spotify:track:ID
@@ -26,7 +27,7 @@ export type SpotifyResourceType = MediaType;
 export type ParsedSpotifyLink = ParsedMediaLink;
 
 const SPOTIFY_URL_REGEX =
-  /open\.spotify\.com\/(track|playlist|album)\/([A-Za-z0-9]+)/;
+  /^(?:https?:\/\/)?(?:www\.)?open\.spotify\.com\/(?:intl-[A-Za-z]{2,3}(?:-[A-Za-z]{2})?\/)?(track|playlist|album)\/([A-Za-z0-9]+)(?:[/?#]|$)/i;
 
 const SPOTIFY_URI_REGEX = /spotify:(track|playlist|album):([A-Za-z0-9]+)/;
 

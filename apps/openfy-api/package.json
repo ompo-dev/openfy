@@ -2,6 +2,9 @@
   "name": "@openfy/api",
   "version": "0.1.0",
   "private": true,
+  "trustedDependencies": [
+    "youtube-dl-exec"
+  ],
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 3001",
     "build": "next build",
