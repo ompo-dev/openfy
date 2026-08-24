@@ -6,6 +6,7 @@ describe('handleNodeServerRequest', () => {
   it('preserves a streamed partial-audio response and its range headers', async () => {
     const server = new EventEmitter();
     server.on('request', (_request, response) => {
+      response.setHeader('X-Openfy-Source', 'legacy');
       response.writeHead(206, {
         'Content-Type': 'audio/mp4',
         'Content-Range': 'bytes 0-5/6',
@@ -25,6 +26,7 @@ describe('handleNodeServerRequest', () => {
     expect(response.status).toBe(206);
     expect(response.headers.get('content-type')).toBe('audio/mp4');
     expect(response.headers.get('content-range')).toBe('bytes 0-5/6');
+    expect(response.headers.get('x-openfy-source')).toBe('legacy');
     await expect(response.text()).resolves.toBe('openfy');
   });
 
