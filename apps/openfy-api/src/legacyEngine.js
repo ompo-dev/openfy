@@ -480,10 +480,10 @@ const getYouTubeVideoId = (input) => {
   }
 };
 
-async function fetchYouTubeTrack(videoId) {
+async function fetchYouTubeTrack(videoId, forceRefresh = false) {
   const cacheKey = `youtube_track:${videoId}`;
   const cached = getCached(cacheKey);
-  if (cached) return cached;
+  if (cached && !forceRefresh) return cached;
 
   const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
@@ -565,6 +565,42 @@ async function fetchYouTubeTrack(videoId) {
   // result. The caller can retry, but it must never receive another song.
   return null;
 }
+
+const streamAudioResponse = async (res, audioRes) => {
+  const contentLength = audioRes.headers.get('content-length');
+  const contentRange = audioRes.headers.get('content-range');
+  res.writeHead(audioRes.status, {
+    'Content-Type': audioRes.headers.get('content-type') || 'audio/mpeg',
+    ...(contentLength ? { 'Content-Length': contentLength } : {}),
+    ...(contentRange ? { 'Content-Range': contentRange } : {}),
+    'Accept-Ranges': audioRes.headers.get('accept-ranges') || 'bytes',
+    'Cache-Control': 'no-store',
+  });
+
+  const reader = audioRes.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!res.destroyed) res.write(Buffer.from(value));
+  }
+  if (!res.writableEnded && !res.destroyed) res.end();
+};
+
+const fetchYouTubeAudioStream = async (videoId, range) => {
+  const track = await fetchYouTubeTrack(videoId);
+  if (!track?.streamUrl) throw new Error('YouTube audio stream unavailable');
+
+  try {
+    return await fetchAllowedAudioStream(track.streamUrl, range);
+  } catch (firstError) {
+    // The signed provider URL can expire before an iPhone starts its queued
+    // transfer. Refresh once inside this request so the client keeps one
+    // stable audio URL instead of persisting a short-lived Google URL.
+    const refreshedTrack = await fetchYouTubeTrack(videoId, true);
+    if (!refreshedTrack?.streamUrl) throw firstError;
+    return fetchAllowedAudioStream(refreshedTrack.streamUrl, range);
+  }
+};
 
 async function fetchYouTubeArtistImage(artistName) {
   const normalizedName = String(artistName || '').trim();
@@ -1264,29 +1300,38 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Renewable YouTube audio stream. The client only persists this stable
+  // endpoint; signed Google URLs stay private to the server request.
+  if (pathname === '/api/audio/youtube') {
+    const videoId = String(parsedUrl.query.videoId || '');
+    if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid YouTube video ID' }));
+      return;
+    }
+
+    try {
+      await streamAudioResponse(
+        res,
+        await fetchYouTubeAudioStream(videoId, req.headers.range)
+      );
+    } catch (error) {
+      if (!res.headersSent && !res.destroyed) {
+        console.warn(`[YouTube Audio] Stream failed for ${videoId}:`, error.message);
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to stream YouTube audio' }));
+      }
+    }
+    return;
+  }
+
   // Audio Stream Proxy
   if (pathname === '/api/audio/proxy') {
     try {
-      const range = req.headers.range;
-      const audioRes = await fetchAllowedAudioStream(parsedUrl.query.url, range);
-
-      const contentLength = audioRes.headers.get('content-length');
-      const contentRange = audioRes.headers.get('content-range');
-      res.writeHead(audioRes.status, {
-        'Content-Type': audioRes.headers.get('content-type') || 'audio/mpeg',
-        ...(contentLength ? { 'Content-Length': contentLength } : {}),
-        ...(contentRange ? { 'Content-Range': contentRange } : {}),
-        'Accept-Ranges': audioRes.headers.get('accept-ranges') || 'bytes',
-        'Cache-Control': 'no-store',
-      });
-
-      const reader = audioRes.body.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!res.destroyed) res.write(Buffer.from(value));
-      }
-      if (!res.writableEnded && !res.destroyed) res.end();
+      await streamAudioResponse(
+        res,
+        await fetchAllowedAudioStream(parsedUrl.query.url, req.headers.range)
+      );
       return;
     } catch (error) {
       if (!res.headersSent && !res.destroyed) {

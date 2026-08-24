@@ -22,6 +22,42 @@ export type ResolvedAudio = {
   imageURL?: string;
 };
 
+type BackendResolveSource = {
+  id?: string;
+  streamUrl?: string;
+  provider?: string;
+  quality?: string;
+  format?: string;
+  score?: number;
+};
+
+type BackendResolvePayload = {
+  source?: BackendResolveSource;
+  playback?: BackendResolveSource & {
+    directUrl?: string;
+    url?: string;
+  };
+  track?: {
+    title?: string;
+    imageURL?: string;
+  };
+  artwork?: {
+    url?: string;
+  };
+};
+
+type BackendResolveResponse = BackendResolvePayload & {
+  data?: BackendResolvePayload;
+  error?: {
+    code?: string;
+    message?: string;
+  };
+};
+
+const unwrapBackendResolvePayload = (
+  data: BackendResolveResponse
+): BackendResolvePayload => data.data || data;
+
 const requiresCanonicalBackend = Platform.OS === 'ios';
 const AUDIO_RESOLVE_TTL_MS = 8 * 60_000;
 const resolvedAudioCache = new Map<
@@ -49,15 +85,36 @@ const getAudioResolveKey = (
 
 /**
  * The backend proxy refreshes compatibility with provider streams for every
- * client. Native must use it too: signed provider URLs behave differently in
- * AVFoundation and may expire while a background download waits.
+ * client. A known YouTube video uses a renewable endpoint so neither the
+ * browser nor AVFoundation stores a signed Google URL as its audio source.
  */
-export const getPlayableAudioUrl = (streamUrl: string): string =>
+const getYouTubeVideoId = (sourceId?: string): string | null => {
+  const match = sourceId?.match(/^(?:yt_)?([A-Za-z0-9_-]{11})$/);
+  return match?.[1] || null;
+};
+
+export const getPlayableAudioUrl = (
+  streamUrl: string,
+  sourceId?: string
+): string =>
   (() => {
     if (!MUSIC_SERVER_URL) return streamUrl;
 
+    const youtubeVideoId = getYouTubeVideoId(sourceId);
+    if (youtubeVideoId) {
+      return `${MUSIC_SERVER_URL}/api/audio/youtube?videoId=${youtubeVideoId}`;
+    }
+
     try {
       const input = new URL(streamUrl);
+      if (input.pathname === '/api/audio/youtube') {
+        const videoId = getYouTubeVideoId(
+          input.searchParams.get('videoId') || undefined
+        );
+        return videoId
+          ? `${MUSIC_SERVER_URL}/api/audio/youtube?videoId=${videoId}`
+          : streamUrl;
+      }
       const proxiedSource =
         input.pathname === '/api/audio/proxy'
           ? input.searchParams.get('url') || ''
@@ -70,10 +127,8 @@ export const getPlayableAudioUrl = (streamUrl: string): string =>
     }
   })();
 
-const getYouTubeVideoIdFromTrackId = (trackId?: string): string | null => {
-  const match = trackId?.match(/^yt_([A-Za-z0-9_-]{11})$/);
-  return match?.[1] || null;
-};
+const getYouTubeVideoIdFromTrackId = (trackId?: string): string | null =>
+  getYouTubeVideoId(trackId);
 
 const resolveExactYouTubeVideo = async (
   videoId: string
@@ -105,7 +160,7 @@ const resolveExactYouTubeVideo = async (
     if (data.track?.videoId !== videoId || !data.track.streamUrl) return null;
 
     return {
-      url: getPlayableAudioUrl(data.track.streamUrl),
+      url: getPlayableAudioUrl(data.track.streamUrl, data.track.videoId),
       quality: 'high',
       format: data.track.format || 'm4a',
       source: 'youtube',
@@ -630,20 +685,27 @@ const resolveAudioUrlInternal = async (
       15000
     );
 
+    const data = (await backendRes
+      .json()
+      .catch(() => ({}))) as BackendResolveResponse;
     if (backendRes.ok) {
-      const data = await backendRes.json();
-      const streamUrl = data.source?.streamUrl;
+      const payload = unwrapBackendResolvePayload(data);
+      const source = payload.source || payload.playback;
+      const streamUrl =
+        payload.source?.streamUrl ||
+        payload.playback?.directUrl ||
+        payload.playback?.streamUrl;
       if (streamUrl) {
         console.log(
-          `[AudioResolver] Resolved Playable Stream via Backend Server: "${data.track?.title}"`
+          `[AudioResolver] Resolved Playable Stream via Backend Server: "${payload.track?.title}"`
         );
         const backendResult: ResolvedAudio = {
-          url: getPlayableAudioUrl(streamUrl),
-          quality: data.source.quality || 'high',
-          format: data.source.format || 'm4a',
-          source: data.source.provider === 'youtube' ? 'youtube' : 'soundcloud',
-          confidence: Math.round((data.source.score || 0.9) * 100),
-          imageURL: data.track?.imageURL || data.artwork?.url,
+          url: getPlayableAudioUrl(streamUrl, source?.id),
+          quality: source?.quality || 'high',
+          format: source?.format || 'm4a',
+          source: source?.provider === 'youtube' ? 'youtube' : 'soundcloud',
+          confidence: Math.round((source?.score || 0.9) * 100),
+          imageURL: payload.track?.imageURL || payload.artwork?.url,
         };
 
         if (backendResult.source === 'youtube') {
@@ -652,6 +714,10 @@ const resolveAudioUrlInternal = async (
 
         backendFallback = backendResult;
       }
+    } else if (data.error?.code) {
+      console.warn(
+        `[AudioResolver] Backend resolve failed with ${data.error.code}: ${data.error.message || 'no details'}`
+      );
     }
   } catch {}
 

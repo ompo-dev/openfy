@@ -516,7 +516,7 @@ const downloadTrackInternal = async (
     let resolvedUrl = Platform.OS === 'ios' ? undefined : audioUrl || track.audioUrl;
     let format = audioFormat || track.audioFormat || 'mp3';
     if (resolvedUrl) {
-      resolvedUrl = getPlayableAudioUrl(resolvedUrl);
+      resolvedUrl = getPlayableAudioUrl(resolvedUrl, track.spotifyId);
     }
 
     // If no URL provided, resolve audio source

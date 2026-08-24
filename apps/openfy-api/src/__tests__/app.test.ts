@@ -78,6 +78,36 @@ describe('Openfy API', () => {
     expect(forwardedBody).toEqual({ title: 'Gods Plan', artist: 'Drake' });
   });
 
+  it('forwards validated YouTube audio requests with the requested byte range', async () => {
+    let forwardedPath = '';
+    let forwardedRange = '';
+    const forwardingApp = createApiApp({
+      forwardLegacyRequest: async (request) => {
+        forwardedPath = new URL(request.url).pathname;
+        forwardedRange = request.headers.get('range') || '';
+        return new Response('audio', { status: 206 });
+      },
+    });
+
+    const response = await forwardingApp.handle(
+      new Request('http://localhost:3001/api/audio/youtube?videoId=m1a_GqJf02M', {
+        headers: { range: 'bytes=0-1023' },
+      })
+    );
+
+    expect(response.status).toBe(206);
+    expect(forwardedPath).toBe('/api/audio/youtube');
+    expect(forwardedRange).toBe('bytes=0-1023');
+  });
+
+  it('rejects malformed stable YouTube audio requests', async () => {
+    const response = await app.handle(
+      new Request('http://localhost:3001/api/audio/youtube?videoId=not-a-video-id')
+    );
+
+    expect(response.status).toBe(422);
+  });
+
   it('forwards a valid YouTube URL after Elysia validates its body', async () => {
     let forwardedBody: unknown;
     const forwardingApp = createApiApp({

@@ -24,6 +24,12 @@ describe('getPlayableAudioUrl', () => {
       'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fcf-media.sndcdn.com%2Ftrack.mp3'
     );
   });
+
+  it('routes known YouTube videos through the stable backend audio endpoint', () => {
+    expect(
+      getPlayableAudioUrl('https://r1.googlevideo.com/audio.m4a', 'm1a_GqJf02M')
+    ).toBe('http://192.168.100.27:3001/api/audio/youtube?videoId=m1a_GqJf02M');
+  });
 });
 
 describe('resolveAudioUrl', () => {
@@ -43,6 +49,7 @@ describe('resolveAudioUrl', () => {
           source: {
             streamUrl: 'https://media.test/canonical.m4a',
             provider: 'youtube',
+            id: 'm1a_GqJf02M',
           },
           track: { title: 'Faixa canônica' },
         }),
@@ -52,13 +59,37 @@ describe('resolveAudioUrl', () => {
       resolveAudioUrl('Faixa canônica', 'Artista canônico', 'yt_12345678901', 180000)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fmedia.test%2Fcanonical.m4a',
+      url: 'http://192.168.100.27:3001/api/audio/youtube?videoId=m1a_GqJf02M',
     });
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       'http://192.168.100.27:3001/api/music/resolve',
       expect.objectContaining({ method: 'POST' })
     );
+  });
+
+  it('accepts the Next API response envelope for backend streams', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          source: {
+            id: 'm1a_GqJf02M',
+            streamUrl: 'https://media.test/canonical.m4a',
+            provider: 'youtube',
+          },
+          track: { title: 'Gods Plan' },
+        },
+      }),
+    });
+
+    await expect(
+      resolveAudioUrl("God's Plan", 'Drake', '5b8WiNjA6ihEvaeB9J3eyQ', 198973)
+    ).resolves.toMatchObject({
+      source: 'youtube',
+      url: 'http://192.168.100.27:3001/api/audio/youtube?videoId=m1a_GqJf02M',
+    });
   });
 
   it('does not call CORS-prone browser providers after a backend miss on web', async () => {
