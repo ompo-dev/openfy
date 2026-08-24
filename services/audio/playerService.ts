@@ -10,6 +10,7 @@ import {
   type AudioStatus,
 } from 'expo-audio';
 import type { AudioPlayer } from 'expo-audio/build/AudioModule.types';
+import { Platform } from 'react-native';
 
 export type LockScreenMetadata = {
   title: string;
@@ -121,6 +122,9 @@ export const restoreCurrentVolume = (): Promise<void> => {
 /** Buffer a short lead-in; Expo reuses it when this URI starts playing. */
 export const preloadAudio = async (uri: string): Promise<void> => {
   if (!uri || preloadedSources.has(uri)) return;
+  // expo-audio preloads web URLs through fetch() and then plays the blob.
+  // That bypasses the browser media element's Range handling for proxied audio.
+  if (Platform.OS === 'web' && /^https?:\/\//i.test(uri)) return;
   preloadedSources.add(uri);
   try {
     await Promise.resolve(preload(uri, { preferredForwardBufferDuration: 5 }));

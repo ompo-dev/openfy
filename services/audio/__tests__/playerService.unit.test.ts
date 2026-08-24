@@ -4,10 +4,15 @@ jest.mock('expo-audio', () => ({
   setAudioModeAsync: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { createAudioPlayer } from 'expo-audio';
+jest.mock('react-native', () => ({
+  Platform: { OS: 'web' },
+}));
+
+import { createAudioPlayer, preload } from 'expo-audio';
 import {
   fadeOutCurrent,
   loadAndPlay,
+  preloadAudio,
   unload,
 } from '../playerService';
 
@@ -51,5 +56,11 @@ describe('playerService fades', () => {
     expect(replacement.volume).toBe(0);
     jest.advanceTimersByTime(2000);
     expect(replacement.volume).toBe(1);
+  });
+
+  it('does not fetch remote audio into a blob on web', async () => {
+    await preloadAudio('http://localhost:3001/api/audio/youtube?videoId=iciIG5tw-hk');
+
+    expect(preload).not.toHaveBeenCalled();
   });
 });
