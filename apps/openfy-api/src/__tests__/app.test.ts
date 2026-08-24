@@ -99,6 +99,36 @@ describe('Openfy API', () => {
     expect(forwardedBody).toEqual({ url: 'https://www.youtube.com/watch?v=iciIG5tw-hk' });
   });
 
+  it('keeps structured YouTube stream failures from the engine', async () => {
+    const forwardingApp = createApiApp({
+      forwardLegacyRequest: async () =>
+        Response.json(
+          {
+            success: false,
+            error: {
+              code: 'YOUTUBE_STREAM_UNAVAILABLE',
+              message: 'YouTube did not return a playable audio stream for this video',
+            },
+          },
+          { status: 502 }
+        ),
+    });
+
+    const response = await forwardingApp.handle(
+      new Request('http://localhost:3001/api/music/youtube', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'https://www.youtube.com/watch?v=iciIG5tw-hk' }),
+      })
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      error: { code: 'YOUTUBE_STREAM_UNAVAILABLE' },
+    });
+  });
+
   it('returns a generic error when the engine fails', async () => {
     const failingApp = createApiApp({
       forwardLegacyRequest: async () => {

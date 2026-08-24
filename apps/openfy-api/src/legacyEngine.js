@@ -1307,7 +1307,15 @@ const server = http.createServer(async (req, res) => {
         const track = await fetchYouTubeTrack(videoId);
         if (!track) {
           res.writeHead(502, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Could not resolve YouTube track' }));
+          res.end(
+            JSON.stringify({
+              success: false,
+              error: {
+                code: 'YOUTUBE_STREAM_UNAVAILABLE',
+                message: 'YouTube did not return a playable audio stream for this video',
+              },
+            })
+          );
           return;
         }
 
@@ -1515,6 +1523,30 @@ const server = http.createServer(async (req, res) => {
             score: resolvedSource?.score || 0,
           },
         };
+
+        if (!resolvedSource?.streamUrl) {
+          const isYouTubeBlocked = Boolean(ytOfficial);
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              success: false,
+              error: {
+                code: isYouTubeBlocked
+                  ? 'YOUTUBE_STREAM_UNAVAILABLE'
+                  : 'AUDIO_STREAM_UNAVAILABLE',
+                message: isYouTubeBlocked
+                  ? 'YouTube did not return a playable audio stream for this track'
+                  : 'No playable audio stream was found for this track',
+              },
+              data: {
+                identity: responseData.identity,
+                track: responseData.track,
+                lyrics: responseData.lyrics,
+              },
+            })
+          );
+          return;
+        }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(responseData));

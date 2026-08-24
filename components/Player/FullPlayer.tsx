@@ -170,6 +170,10 @@ const getTrackYouTubeUrl = (
     : '';
 };
 
+const YOUTUBE_STREAM_UNAVAILABLE_ERROR = 'YOUTUBE_STREAM_UNAVAILABLE';
+const YOUTUBE_STREAM_UNAVAILABLE_MESSAGE =
+  'YouTube bloqueou o stream de áudio desse vídeo no servidor. Tente outro link.';
+
 type PlayerGlassButtonProps = {
   accessibilityLabel: string;
   children: React.ReactNode;
@@ -532,7 +536,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: newUrl }),
       });
-      if (!response.ok) throw new Error('Could not resolve YouTube track');
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        throw new Error(
+          errorBody?.error?.code || 'Could not resolve YouTube track'
+        );
+      }
 
       const data = (await response.json()) as {
         track?: {
@@ -567,10 +576,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => {}
       );
-    } catch {
+    } catch (error) {
       Alert.alert(
         'Não foi possível atualizar',
-        'Verifique o link e tente novamente.'
+        error instanceof Error &&
+          error.message === YOUTUBE_STREAM_UNAVAILABLE_ERROR
+          ? YOUTUBE_STREAM_UNAVAILABLE_MESSAGE
+          : 'Verifique o link e tente novamente.'
       );
     } finally {
       setIsUpdatingAudio(false);

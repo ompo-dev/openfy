@@ -57,6 +57,10 @@ type ImportedPlaylist = {
   title: string;
 };
 
+const YOUTUBE_STREAM_UNAVAILABLE_ERROR = 'YOUTUBE_STREAM_UNAVAILABLE';
+const YOUTUBE_STREAM_UNAVAILABLE_MESSAGE =
+  'YouTube bloqueou o stream de áudio desse vídeo no servidor. Metadados foram encontrados, mas o download não pode começar sem áudio.';
+
 type SpotifyEmbedEntity = {
   spotifyId?: string;
   name?: string;
@@ -606,6 +610,12 @@ const fetchYouTubeTrack = async (
     }
   } catch (err) {
     console.warn('[ImportModal] Exact YouTube track fetch failed:', err);
+    const errorCode = axios.isAxiosError(err)
+      ? err.response?.data?.error?.code
+      : null;
+    if (errorCode === YOUTUBE_STREAM_UNAVAILABLE_ERROR) {
+      throw new Error(YOUTUBE_STREAM_UNAVAILABLE_ERROR);
+    }
   }
 
   // Never show metadata that cannot be downloaded from this exact video.
@@ -745,7 +755,9 @@ export const ImportModal = ({
 
       if (tracksToShow.length === 0) {
         setError(
-          'Nenhuma música encontrada. Verifique o link e tente novamente.'
+          parsed.platform === 'youtube'
+            ? YOUTUBE_STREAM_UNAVAILABLE_MESSAGE
+            : 'Nenhuma música encontrada. Verifique o link e tente novamente.'
         );
       } else {
         setTracks(tracksToShow);
@@ -761,7 +773,12 @@ export const ImportModal = ({
         }
       }
     } catch (err) {
-      setError('Erro ao buscar dados. Verifique o link e tente novamente.');
+      setError(
+        err instanceof Error &&
+          err.message === YOUTUBE_STREAM_UNAVAILABLE_ERROR
+          ? YOUTUBE_STREAM_UNAVAILABLE_MESSAGE
+          : 'Erro ao buscar dados. Verifique o link e tente novamente.'
+      );
       console.error('[ImportModal] handleImport error:', err);
     } finally {
       setIsLoading(false);
