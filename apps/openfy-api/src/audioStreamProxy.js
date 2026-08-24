@@ -1,5 +1,9 @@
 const MAX_AUDIO_REDIRECTS = 4;
 const AUDIO_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const DEFAULT_GOOGLE_VIDEO_RANGE = 'bytes=0-1048575';
+
+const isGoogleVideoUrl = (url) =>
+  url.hostname === 'googlevideo.com' || url.hostname.endsWith('.googlevideo.com');
 
 const isAllowedAudioStreamUrl = (input) => {
   try {
@@ -27,8 +31,9 @@ const fetchAllowedAudioStream = async (initialUrl, range, fetchImpl = fetch) => 
       : undefined;
 
   for (let redirects = 0; redirects <= MAX_AUDIO_REDIRECTS; redirects += 1) {
+    const upstreamRange = range || (isGoogleVideoUrl(targetUrl) ? DEFAULT_GOOGLE_VIDEO_RANGE : undefined);
     const audioRes = await fetchImpl(targetUrl, {
-      headers: range ? { Range: range } : undefined,
+      headers: upstreamRange ? { Range: upstreamRange } : undefined,
       redirect: 'manual',
       signal,
     });
@@ -57,4 +62,8 @@ const fetchAllowedAudioStream = async (initialUrl, range, fetchImpl = fetch) => 
   throw new Error('Too many audio stream redirects');
 };
 
-module.exports = { fetchAllowedAudioStream, isAllowedAudioStreamUrl };
+module.exports = {
+  fetchAllowedAudioStream,
+  isAllowedAudioStreamUrl,
+  isGoogleVideoUrl,
+};

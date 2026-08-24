@@ -131,13 +131,20 @@ const getCacheKey = (track: PlayerTrack) => {
 const getLyricsCacheKey = (track: PlayerTrack) =>
   `${getCacheKey(track)}:${LYRICS_CACHE_VERSION}`;
 
-const getExistingLocalAudioPath = async (path?: string): Promise<string | null> => {
+export const getExistingLocalAudioPath = async (path?: string): Promise<string | null> => {
   if (!path || path.endsWith('.m3u8')) return null;
 
-  // The browser download implementation persists the already-resolved proxy URL
-  // rather than a file URI. It is still the downloaded track's playback source,
-  // so resolving it again causes an unnecessary (and sometimes failing) lookup.
-  if (Platform.OS === 'web' && /^https?:\/\//i.test(path)) return path;
+  if (Platform.OS === 'web') {
+    try {
+      const url = new URL(path);
+      const videoId = url.searchParams.get('videoId') || '';
+      return url.pathname === '/api/audio/youtube' && /^[A-Za-z0-9_-]{11}$/.test(videoId)
+        ? path
+        : null;
+    } catch {
+      return null;
+    }
+  }
 
   if (!path.startsWith('file:')) return null;
 

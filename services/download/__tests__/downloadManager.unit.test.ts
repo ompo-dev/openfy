@@ -14,7 +14,18 @@ jest.mock('expo-file-system/legacy', () => ({
 }));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getPendingDownloads, queueDownloads } from '../downloadManager';
+import {
+  getPendingDownloads,
+  isCompleteAudioDownload,
+  queueDownloads,
+} from '../downloadManager';
+
+describe('isCompleteAudioDownload', () => {
+  it('rejects an incomplete HTTP range response', () => {
+    expect(isCompleteAudioDownload(206)).toBe(false);
+    expect(isCompleteAudioDownload(200)).toBe(true);
+  });
+});
 
 describe('queueDownloads', () => {
   beforeEach(async () => {

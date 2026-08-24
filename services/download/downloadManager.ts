@@ -69,6 +69,8 @@ const activeResumables = new Map<
 >();
 const cancelledDownloads = new Set<string>();
 const BACKGROUND_RETRY_BASE_MS = 15 * 60 * 1000;
+
+export const isCompleteAudioDownload = (status?: number) => status !== 206;
 const BACKGROUND_RETRY_MAX_MS = 6 * 60 * 60 * 1000;
 const MAX_BACKGROUND_ATTEMPTS = 8;
 
@@ -438,7 +440,7 @@ export const downloadAudio = async (
       activeResumables.set(trackId, downloadResumable);
 
       const result = await downloadResumable.downloadAsync();
-      if (result?.uri) {
+      if (result?.uri && isCompleteAudioDownload(result.status)) {
         const fileInfo = await FileSystem.getInfoAsync(result.uri);
         if (fileInfo.exists && fileInfo.size && fileInfo.size > 50000) {
           return result.uri;
@@ -453,7 +455,7 @@ export const downloadAudio = async (
       const directResult = await FileSystem.downloadAsync(audioUrl, localPath, {
         sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
       });
-      if (directResult?.uri) {
+      if (directResult?.uri && isCompleteAudioDownload(directResult.status)) {
         const fileInfo = await FileSystem.getInfoAsync(directResult.uri);
         if (fileInfo.exists && fileInfo.size && fileInfo.size > 50000) {
           return directResult.uri;
