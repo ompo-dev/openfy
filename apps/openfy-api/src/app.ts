@@ -29,6 +29,29 @@ const proxyQuerySchema = t.Object({
 const isKnownResolveRequest = (body: { title?: string; spotifyId?: string }) =>
   Boolean(body.title?.trim() || body.spotifyId?.trim());
 
+const forwardValidatedJsonRequest = (
+  request: Request,
+  body: unknown,
+  forwardLegacyRequest: LegacyRequestForwarder
+) => {
+  const serializedBody = JSON.stringify(body);
+  if (!serializedBody) {
+    throw new TypeError('Validated request body cannot be serialized');
+  }
+
+  const headers = new Headers(request.headers);
+  headers.set('content-type', 'application/json');
+  headers.set('content-length', String(new TextEncoder().encode(serializedBody).byteLength));
+
+  return forwardLegacyRequest(
+    new Request(request.url, {
+      method: request.method,
+      headers,
+      body: serializedBody,
+    })
+  );
+};
+
 const configuredOrigins = new Set(
   (process.env.OPENFY_ALLOWED_ORIGINS || '')
     .split(',')
@@ -134,12 +157,16 @@ export const createApiApp = ({ forwardLegacyRequest }: ApiAppOptions) =>
       query: proxyQuerySchema,
       detail: { tags: ['Audio'], summary: 'Transmite um stream de áudio permitido' },
     })
-    .post('/api/music/youtube', ({ request }) => forwardLegacyRequest(request), {
-      body: t.Object({
-        url: t.String({ pattern: youtubeUrlPattern, maxLength: 2_048 }),
-      }),
-      detail: { tags: ['Music'], summary: 'Importa uma faixa por URL do YouTube' },
-    })
+    .post(
+      '/api/music/youtube',
+      ({ body, request }) => forwardValidatedJsonRequest(request, body, forwardLegacyRequest),
+      {
+        body: t.Object({
+          url: t.String({ pattern: youtubeUrlPattern, maxLength: 2_048 }),
+        }),
+        detail: { tags: ['Music'], summary: 'Importa uma faixa por URL do YouTube' },
+      }
+    )
     .post(
       '/api/music/resolve',
       ({ body, request, set }) => {
@@ -153,7 +180,7 @@ export const createApiApp = ({ forwardLegacyRequest }: ApiAppOptions) =>
             },
           };
         }
-        return forwardLegacyRequest(request);
+        return forwardValidatedJsonRequest(request, body, forwardLegacyRequest);
       },
       {
         body: resolveRequestSchema,

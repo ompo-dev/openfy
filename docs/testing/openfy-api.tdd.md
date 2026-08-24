@@ -13,6 +13,8 @@ com Elysia, Swagger, Bun e Axios.
 | 6 | Swagger é exposto pelo serviço | `app.test.ts` | Integração de contrato | PASS |
 | 7 | A ponte preserva resposta parcial de áudio e cabeçalhos `Range` | `nodeRequestAdapter.test.ts` | Integração de contrato | PASS |
 | 8 | A ponte encaminha corpos POST | `nodeRequestAdapter.test.ts` | Integração de contrato | PASS |
+| 9 | O Next não é forçado a executar dentro do runtime Bun | `runtimeScript.test.ts` | Unitário | PASS |
+| 10 | Corpos JSON validados são recriados antes de chegar à engine | `app.test.ts` | Integração de contrato | PASS |
 
 ## Evidência RED
 
@@ -22,10 +24,14 @@ com Elysia, Swagger, Bun e Axios.
   porque `handleNodeServerRequest` ainda não existia.
 - O teste CORS falhou antes da configuração do plugin, pois o cabeçalho
   `Access-Control-Allow-Origin` estava ausente.
+- Os testes de encaminhamento POST falharam com `Body already used` antes de
+  a ponte recriar o corpo que o Elysia já havia validado.
+- `runtimeScript.test.ts` falhou antes de remover `bun --bun next`, que faz o
+  runtime do Next/Turbopack falhar ao carregar módulos CommonJS.
 
 ## Evidência GREEN
 
-- `bun test --coverage`: 8 testes passaram; 82,19% de funções e 95,14% de
+- `bun test --coverage`: 11 testes passaram; 86,63% de funções e 96,13% de
   linhas cobertas.
 - `bun run typecheck`: passou.
 - `bun run build`: passou.

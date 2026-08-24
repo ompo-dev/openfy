@@ -56,9 +56,11 @@ describe('Openfy API', () => {
 
   it('forwards a valid resolve request to the engine', async () => {
     let forwardedPath = '';
+    let forwardedBody: unknown;
     const forwardingApp = createApiApp({
       forwardLegacyRequest: async (request) => {
         forwardedPath = new URL(request.url).pathname;
+        forwardedBody = await request.json();
         return Response.json({ source: { streamUrl: 'https://media.test/track.m4a' } });
       },
     });
@@ -73,6 +75,28 @@ describe('Openfy API', () => {
 
     expect(response.status).toBe(200);
     expect(forwardedPath).toBe('/api/music/resolve');
+    expect(forwardedBody).toEqual({ title: 'Gods Plan', artist: 'Drake' });
+  });
+
+  it('forwards a valid YouTube URL after Elysia validates its body', async () => {
+    let forwardedBody: unknown;
+    const forwardingApp = createApiApp({
+      forwardLegacyRequest: async (request) => {
+        forwardedBody = await request.json();
+        return Response.json({ ok: true });
+      },
+    });
+
+    const response = await forwardingApp.handle(
+      new Request('http://localhost:3001/api/music/youtube', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'https://www.youtube.com/watch?v=iciIG5tw-hk' }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(forwardedBody).toEqual({ url: 'https://www.youtube.com/watch?v=iciIG5tw-hk' });
   });
 
   it('returns a generic error when the engine fails', async () => {
