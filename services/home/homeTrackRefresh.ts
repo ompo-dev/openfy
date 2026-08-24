@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 import { resolveAudioUrl } from '../audio/audioResolver';
 import { preloadAudio } from '../audio/playerService';
 
@@ -113,6 +115,11 @@ export const refreshHomeTracks = async (
     refreshed: RefreshedHomeTrack
   ) => void
 ): Promise<Record<string, RefreshedHomeTrack>> => {
+  // Resolving every visible card starts several yt-dlp processes. On web that
+  // starves the actual play/download request, so resolve only after a user
+  // chooses a track.
+  if (Platform.OS === 'web') return {};
+
   const unique = tracks.filter(
     (track, index) =>
       tracks.findIndex(

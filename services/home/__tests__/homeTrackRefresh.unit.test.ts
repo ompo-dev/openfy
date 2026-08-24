@@ -4,12 +4,22 @@ jest.mock('../../audio/audioResolver', () => ({
 
 import { refreshHomeTracks } from '../homeTrackRefresh';
 import { resolveAudioUrl } from '../../audio/audioResolver';
+import { Platform } from 'react-native';
 
 const resolveAudioUrlMock = resolveAudioUrl as jest.Mock;
 
 describe('refreshHomeTracks', () => {
+  const originalPlatform = Platform.OS;
+
   beforeEach(() => {
     resolveAudioUrlMock.mockReset();
+  });
+
+  afterEach(() => {
+    Object.defineProperty(Platform, 'OS', {
+      configurable: true,
+      value: originalPlatform,
+    });
   });
 
   it('uses canonical metadata and a playable stream for every matching Home card', async () => {
@@ -76,5 +86,28 @@ describe('refreshHomeTracks', () => {
         },
       ])
     ).resolves.toEqual({});
+  });
+
+  it('does not resolve every Home card before a web user requests playback', async () => {
+    Object.defineProperty(Platform, 'OS', {
+      configurable: true,
+      value: 'web',
+    });
+
+    await expect(
+      refreshHomeTracks([
+        {
+          key: 'web-card',
+          spotifyId: 'source-id',
+          title: 'Título',
+          artistName: 'Artista',
+          albumName: 'Single',
+          imageURL: '',
+          duration_ms: 180000,
+        },
+      ])
+    ).resolves.toEqual({});
+
+    expect(resolveAudioUrlMock).not.toHaveBeenCalled();
   });
 });
