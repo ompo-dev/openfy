@@ -32,10 +32,19 @@ de iniciar ou gerar o bundle Expo.
 
 ## Deploy na Vercel
 
-Crie um projeto Vercel com **Root Directory** em `apps/openfy-api`. Configure:
+O deploy não exige alterações de código no Expo: a URL do projeto Vercel é a
+única configuração necessária para Web, iOS e Android.
+
+1. Importe este repositório na Vercel e defina **Root Directory** como
+   `apps/openfy-api`.
+2. Mantenha os comandos definidos em `vercel.json`: `bun install
+   --frozen-lockfile` e `bun run build`.
+3. Em **Settings → Environment Variables**, copie as variáveis de
+   `.env.example` que forem necessárias. Para produção, configure:
 
 - `OPENFY_ALLOWED_ORIGINS`: lista separada por vírgulas com as origens web
-  permitidas, por exemplo `https://openfy.exemplo.com`.
+  permitidas, por exemplo `https://openfy.exemplo.com`. Inclua também cada
+  domínio de preview que deve abrir o app web. Não use `*`.
 - `OPENFY_LEGACY_ENGINE_URL` (opcional): URL HTTPS de uma engine dedicada para
   tarefas pesadas. Quando ausente, a API usa a engine compatível no mesmo
   processo durante a migração.
@@ -50,6 +59,30 @@ arquivo de cookies. O serviço valida o formato, mas não registra nem retorna o
 conteúdo. Crie/renove essa credencial em uma conta dedicada e configure-a como
 segredo no provedor de deploy.
 
-Depois do deploy, use a URL HTTPS obtida como `EXPO_PUBLIC_MUSIC_SERVER_URL` no
-Expo. Não inclua chaves, cookies de navegador ou credenciais de terceiros no
-repositório ou nas variáveis públicas.
+4. Faça o deploy e confirme `https://<seu-projeto>.vercel.app/health`. A
+   interface da API fica em `https://<seu-projeto>.vercel.app/swagger`.
+
+## Conectar o Expo (Web, iPhone e Android)
+
+Na raiz do repositório, crie um arquivo local `.env.local` a partir do arquivo
+`.env.example` da raiz e substitua a URL pelo domínio HTTPS obtido no passo
+anterior:
+
+```dotenv
+EXPO_PUBLIC_MUSIC_SERVER_URL=https://<seu-projeto>.vercel.app
+```
+
+Reinicie o Expo com cache limpo após trocar a URL:
+
+```powershell
+bunx expo start --clear
+```
+
+`EXPO_PUBLIC_MUSIC_SERVER_URL` é embutida no bundle. Por isso, para builds
+instalados de iOS/Android, gere uma nova build ou publique uma atualização Expo
+depois de alterar a variável. Em Expo Go, basta reiniciar o bundler. O iPhone e
+o Android usam a mesma URL HTTPS e não dependem de `localhost`, IP LAN ou de
+um servidor no computador.
+
+Não inclua chaves, cookies de navegador ou credenciais de terceiros no
+repositório nem em variáveis `EXPO_PUBLIC_*`.

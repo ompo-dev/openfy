@@ -30,6 +30,16 @@ describe('resolveMusicServerUrl', () => {
     ).toBe('https://music.openfy.example');
   });
 
+  it('uses the Vercel URL on Android without falling back to Metro', () => {
+    expect(
+      resolveMusicServerUrl({
+        configuredUrl: 'https://openfy-api.vercel.app/',
+        developmentHost: '192.168.100.27:8081',
+        platform: 'android',
+      })
+    ).toBe('https://openfy-api.vercel.app');
+  });
+
   it('never returns phone localhost when no LAN host is available', () => {
     expect(
       resolveMusicServerUrl({
