@@ -1,9 +1,22 @@
 const MAX_AUDIO_REDIRECTS = 4;
 const AUDIO_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
-const DEFAULT_GOOGLE_VIDEO_RANGE = 'bytes=0-1048575';
+const GOOGLE_VIDEO_CHUNK_SIZE = 1024 * 1024;
+const DEFAULT_GOOGLE_VIDEO_RANGE = `bytes=0-${GOOGLE_VIDEO_CHUNK_SIZE - 1}`;
 
 const isGoogleVideoUrl = (url) =>
   url.hostname === 'googlevideo.com' || url.hostname.endsWith('.googlevideo.com');
+
+const getGoogleVideoRange = (range) => {
+  if (!range) return DEFAULT_GOOGLE_VIDEO_RANGE;
+
+  const openRange = range.match(/^bytes=(\d+)-$/);
+  if (!openRange) return range;
+
+  const start = Number(openRange[1]);
+  return Number.isSafeInteger(start) && start >= 0
+    ? `bytes=${start}-${start + GOOGLE_VIDEO_CHUNK_SIZE - 1}`
+    : range;
+};
 
 const isAllowedAudioStreamUrl = (input) => {
   try {
@@ -31,7 +44,9 @@ const fetchAllowedAudioStream = async (initialUrl, range, fetchImpl = fetch) => 
       : undefined;
 
   for (let redirects = 0; redirects <= MAX_AUDIO_REDIRECTS; redirects += 1) {
-    const upstreamRange = range || (isGoogleVideoUrl(targetUrl) ? DEFAULT_GOOGLE_VIDEO_RANGE : undefined);
+    const upstreamRange = isGoogleVideoUrl(targetUrl)
+      ? getGoogleVideoRange(range)
+      : range;
     const audioRes = await fetchImpl(targetUrl, {
       headers: upstreamRange ? { Range: upstreamRange } : undefined,
       redirect: 'manual',

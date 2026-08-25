@@ -32,4 +32,15 @@ describe('fetchAllowedAudioStream', () => {
       fetchAllowedAudioStream('https://r1.googlevideo.com/audio.m4a', undefined, fetchImpl)
     ).resolves.toBeInstanceOf(Response);
   });
+
+  it('limits an open browser range to a Googlevideo-compatible block', async () => {
+    const fetchImpl = async (_url, options) => {
+      expect(options.headers).toEqual({ Range: 'bytes=0-1048575' });
+      return audioResponse();
+    };
+
+    await expect(
+      fetchAllowedAudioStream('https://r1.googlevideo.com/audio.m4a', 'bytes=0-', fetchImpl)
+    ).resolves.toBeInstanceOf(Response);
+  });
 });
