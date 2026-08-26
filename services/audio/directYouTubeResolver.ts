@@ -2,12 +2,14 @@ import {
   evaluateCandidateMatch,
   hasUnwantedForbiddenWords,
 } from '../canonical/canonicalMatcher';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type DirectYouTubeRequest = {
   title?: string;
   artist?: string;
   durationMs?: number;
   videoId?: string;
+  fresh?: boolean;
 };
 
 export type DirectYouTubeAudio = {
@@ -23,6 +25,20 @@ export type DirectYouTubeTrack = DirectYouTubeAudio & {
   durationMs: number;
 };
 
+type DirectPlayerClient = 'IOS' | 'YTMUSIC_ANDROID' | 'ANDROID_VR' | 'TV';
+
+type PlayerClientHealth = {
+  successes: number;
+  consecutiveFailures: number;
+  averageLatencyMs: number;
+  cooldownUntil: number;
+};
+
+type PersistedPlayerClientHealth = {
+  savedAt: number;
+  clients: Record<string, PlayerClientHealth>;
+};
+
 type SearchVideo = {
   video_id: string;
   title: { toString(): string };
@@ -34,7 +50,7 @@ type SearchVideo = {
 type DirectInnertubeClient = {
   getStreamingData(
     videoId: string,
-    options: { client: 'IOS'; quality: 'best'; type: 'audio' }
+    options: { client: DirectPlayerClient; quality: 'best'; type: 'audio' }
   ): Promise<{ url?: string; mime_type?: string }>;
   getBasicInfo(videoId: string): Promise<{
     basic_info: {
@@ -52,7 +68,174 @@ type DirectInnertubeClient = {
 
 const SEARCH_LIMIT = 8;
 const REQUEST_TIMEOUT_MS = 8_000;
+const STREAM_PROBE_BYTES = 16_384;
+const STREAM_CACHE_TTL_MS = 10 * 60_000;
+const CLIENT_FAILURE_COOLDOWN_MS = 30_000;
+const CLIENT_MAX_COOLDOWN_MS = 5 * 60_000;
+const CLIENT_HEALTH_STORAGE_KEY = '@openfy/youtube-player-client-health-v1';
+const CLIENT_HEALTH_MAX_AGE_MS = 24 * 60 * 60_000;
+const CLIENT_HEALTH_MAX_SUCCESSES = 10_000;
+const CLIENT_HEALTH_MAX_FAILURES = 20;
+const CLIENT_HEALTH_MAX_LATENCY_MS = 60_000;
+const PLAYER_CLIENTS: readonly DirectPlayerClient[] = [
+  'IOS',
+  'YTMUSIC_ANDROID',
+  'ANDROID_VR',
+  'TV',
+];
 let innertubeClient: Promise<DirectInnertubeClient> | null = null;
+const streamCache = new Map<
+  string,
+  { value: DirectYouTubeAudio; expiresAt: number }
+>();
+const pendingStreams = new Map<string, Promise<DirectYouTubeAudio | null>>();
+const playerClientHealth = new Map<DirectPlayerClient, PlayerClientHealth>();
+let playerClientHealthHydration: Promise<void> | null = null;
+let playerClientHealthWrite: Promise<void> = Promise.resolve();
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object';
+
+const isPlayerClient = (value: string): value is DirectPlayerClient =>
+  PLAYER_CLIENTS.includes(value as DirectPlayerClient);
+
+const isNonNegativeFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+const isValidPlayerClientHealth = (
+  value: unknown
+): value is PlayerClientHealth => {
+  if (!isRecord(value)) return false;
+  const {
+    successes,
+    consecutiveFailures,
+    averageLatencyMs,
+    cooldownUntil,
+  } = value;
+  if (
+    !isNonNegativeFiniteNumber(successes) ||
+    !isNonNegativeFiniteNumber(consecutiveFailures) ||
+    !isNonNegativeFiniteNumber(averageLatencyMs) ||
+    !isNonNegativeFiniteNumber(cooldownUntil)
+  ) {
+    return false;
+  }
+  return (
+    Number.isInteger(successes) &&
+    Number.isInteger(consecutiveFailures) &&
+    successes <= CLIENT_HEALTH_MAX_SUCCESSES &&
+    consecutiveFailures <= CLIENT_HEALTH_MAX_FAILURES &&
+    averageLatencyMs <= CLIENT_HEALTH_MAX_LATENCY_MS &&
+    cooldownUntil <= Date.now() + CLIENT_MAX_COOLDOWN_MS
+  );
+};
+
+const persistPlayerClientHealth = (): Promise<void> => {
+  const value: PersistedPlayerClientHealth = {
+    savedAt: Date.now(),
+    clients: Object.fromEntries(playerClientHealth),
+  };
+  const serialized = JSON.stringify(value);
+  playerClientHealthWrite = playerClientHealthWrite
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        await AsyncStorage.setItem(CLIENT_HEALTH_STORAGE_KEY, serialized);
+      } catch {
+        // Local resolution must continue if the device storage is unavailable.
+      }
+    });
+  return playerClientHealthWrite;
+};
+
+const hydratePlayerClientHealth = (): Promise<void> => {
+  if (!playerClientHealthHydration) {
+    playerClientHealthHydration = (async () => {
+      try {
+        const serialized = await AsyncStorage.getItem(CLIENT_HEALTH_STORAGE_KEY);
+        if (!serialized) return;
+        const value: unknown = JSON.parse(serialized);
+        if (
+          !isRecord(value) ||
+          typeof value.savedAt !== 'number' ||
+          !Number.isFinite(value.savedAt) ||
+          Date.now() - value.savedAt > CLIENT_HEALTH_MAX_AGE_MS ||
+          !isRecord(value.clients)
+        ) {
+          return;
+        }
+        for (const [playerClient, health] of Object.entries(value.clients)) {
+          if (isPlayerClient(playerClient) && isValidPlayerClientHealth(health)) {
+            playerClientHealth.set(playerClient, { ...health });
+          }
+        }
+      } catch {
+        // Ignore malformed or unavailable device storage.
+      }
+    })();
+  }
+  return playerClientHealthHydration;
+};
+
+const healthFor = (playerClient: DirectPlayerClient): PlayerClientHealth =>
+  playerClientHealth.get(playerClient) || {
+    successes: 0,
+    consecutiveFailures: 0,
+    averageLatencyMs: 0,
+    cooldownUntil: 0,
+  };
+
+const orderedPlayerClients = (): DirectPlayerClient[] => {
+  const now = Date.now();
+  const available = PLAYER_CLIENTS.filter(
+    (playerClient) => healthFor(playerClient).cooldownUntil <= now
+  );
+  const candidates = available.length > 0 ? available : [...PLAYER_CLIENTS];
+
+  return [...candidates].sort((left, right) => {
+    const leftHealth = healthFor(left);
+    const rightHealth = healthFor(right);
+    const leftScore = leftHealth.successes * 2 - leftHealth.consecutiveFailures * 3;
+    const rightScore =
+      rightHealth.successes * 2 - rightHealth.consecutiveFailures * 3;
+    if (rightScore !== leftScore) return rightScore - leftScore;
+    if (leftHealth.averageLatencyMs !== rightHealth.averageLatencyMs) {
+      return leftHealth.averageLatencyMs - rightHealth.averageLatencyMs;
+    }
+    return PLAYER_CLIENTS.indexOf(left) - PLAYER_CLIENTS.indexOf(right);
+  });
+};
+
+const recordPlayerClientSuccess = async (
+  playerClient: DirectPlayerClient,
+  latencyMs: number
+) => {
+  const previous = healthFor(playerClient);
+  const successes = previous.successes + 1;
+  playerClientHealth.set(playerClient, {
+    successes,
+    consecutiveFailures: 0,
+    averageLatencyMs:
+      (previous.averageLatencyMs * previous.successes + latencyMs) / successes,
+    cooldownUntil: 0,
+  });
+  await persistPlayerClientHealth();
+};
+
+const recordPlayerClientFailure = async (playerClient: DirectPlayerClient) => {
+  const previous = healthFor(playerClient);
+  const consecutiveFailures = previous.consecutiveFailures + 1;
+  const cooldownMs = Math.min(
+    CLIENT_FAILURE_COOLDOWN_MS * 2 ** (consecutiveFailures - 1),
+    CLIENT_MAX_COOLDOWN_MS
+  );
+  playerClientHealth.set(playerClient, {
+    ...previous,
+    consecutiveFailures,
+    cooldownUntil: Date.now() + cooldownMs,
+  });
+  await persistPlayerClientHealth();
+};
 
 const isSearchVideo = (value: unknown): value is SearchVideo => {
   if (!value || typeof value !== 'object') return false;
@@ -82,7 +265,7 @@ const getClient = (): Promise<DirectInnertubeClient> => {
       return Innertube.create({
         generate_session_locally: true,
         retrieve_innertube_config: false,
-        retrieve_player: false,
+        retrieve_player: true,
       });
     });
   }
@@ -109,36 +292,91 @@ const withTimeout = async <T>(request: Promise<T>, label: string): Promise<T> =>
   }
 };
 
+const isPlayableAudioResponse = (response: Response) => {
+  if (!response.ok && response.status !== 206) return false;
+  const mimeType = response.headers.get('content-type') || '';
+  return mimeType.startsWith('audio/') || mimeType.startsWith('video/mp4');
+};
+
+const probeStream = async (url: string): Promise<boolean> => {
+  try {
+    const response = await withTimeout(
+      fetch(url, { headers: { Range: `bytes=0-${STREAM_PROBE_BYTES - 1}` } }),
+      'YouTube audio probe'
+    );
+    if (!isPlayableAudioResponse(response)) return false;
+    return (await response.arrayBuffer()).byteLength > 0;
+  } catch {
+    return false;
+  }
+};
+
 const resolveVideoAudio = async (
   videoId: string,
-  imageURL?: string
+  imageURL?: string,
+  fresh = false
 ): Promise<DirectYouTubeAudio | null> => {
-  try {
-    // The iOS InnerTube client returns an already playable AAC stream, so it
-    // does not need Node, yt-dlp, a proxy, or a JavaScript player decipherer.
-    const client = await withTimeout(getClient(), 'YouTube client initialization');
-    const stream = await withTimeout(
-      client.getStreamingData(videoId, {
-        client: 'IOS',
-        quality: 'best',
-        type: 'audio',
-      }),
-      'YouTube audio resolution'
-    );
-    if (!stream.url || !/^https:\/\//i.test(stream.url)) return null;
-
-    return {
-      videoId,
-      url: stream.url,
-      format: formatFromMimeType(stream.mime_type),
-      ...(imageURL ? { imageURL } : {}),
-    };
-  } catch (error) {
-    console.warn(
-      `[DirectYouTube] iOS audio stream failed for ${videoId}: ${error instanceof Error ? error.message : String(error)}`
-    );
-    return null;
+  const cached = streamCache.get(videoId);
+  if (!fresh && cached && cached.expiresAt > Date.now()) {
+    return imageURL && !cached.value.imageURL
+      ? { ...cached.value, imageURL }
+      : cached.value;
   }
+
+  const active = fresh ? null : pendingStreams.get(videoId);
+  if (active) return active;
+
+  const request = (async (): Promise<DirectYouTubeAudio | null> => {
+    try {
+      const [client] = await Promise.all([
+        withTimeout(getClient(), 'YouTube client initialization'),
+        hydratePlayerClientHealth(),
+      ]);
+      for (const playerClient of orderedPlayerClients()) {
+        const startedAt = Date.now();
+        const stream = await withTimeout(
+          client.getStreamingData(videoId, {
+            client: playerClient,
+            quality: 'best',
+            type: 'audio',
+          }),
+          `YouTube ${playerClient} audio resolution`
+        ).catch(() => null);
+        if (!stream?.url || !/^https:\/\//i.test(stream.url)) {
+          await recordPlayerClientFailure(playerClient);
+          continue;
+        }
+        if (!(await probeStream(stream.url))) {
+          await recordPlayerClientFailure(playerClient);
+          continue;
+        }
+
+        const resolved = {
+          videoId,
+          url: stream.url,
+          format: formatFromMimeType(stream.mime_type),
+          ...(imageURL ? { imageURL } : {}),
+        };
+        streamCache.set(videoId, {
+          value: resolved,
+          expiresAt: Date.now() + STREAM_CACHE_TTL_MS,
+        });
+        await recordPlayerClientSuccess(playerClient, Date.now() - startedAt);
+        console.log(`[DirectYouTube] ${playerClient} stream verified for ${videoId}`);
+        return resolved;
+      }
+    } catch (error) {
+      console.warn(
+        `[DirectYouTube] local stream failed for ${videoId}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    return null;
+  })().finally(() => {
+    if (!fresh) pendingStreams.delete(videoId);
+  });
+
+  if (!fresh) pendingStreams.set(videoId, request);
+  return request;
 };
 
 /** Resolves metadata and audio for an exact pasted YouTube video on-device. */
@@ -177,7 +415,7 @@ export const resolveDirectYouTubeTrack = async (
 export const resolveDirectYouTubeAudio = async (
   request: DirectYouTubeRequest
 ): Promise<DirectYouTubeAudio | null> => {
-  if (request.videoId) return resolveVideoAudio(request.videoId);
+  if (request.videoId) return resolveVideoAudio(request.videoId, undefined, request.fresh);
   if (!request.title) return null;
 
   const primaryArtist = (request.artist || '')
@@ -237,7 +475,8 @@ export const resolveDirectYouTubeAudio = async (
         const imageURL = candidate.video.best_thumbnail?.url;
         const resolved = await resolveVideoAudio(
           candidate.video.video_id,
-          imageURL
+          imageURL,
+          request.fresh
         );
         if (resolved) return resolved;
       }
@@ -253,4 +492,9 @@ export const resolveDirectYouTubeAudio = async (
 
 export const resetDirectYouTubeResolverForTests = () => {
   innertubeClient = null;
+  streamCache.clear();
+  pendingStreams.clear();
+  playerClientHealth.clear();
+  playerClientHealthHydration = null;
+  playerClientHealthWrite = Promise.resolve();
 };

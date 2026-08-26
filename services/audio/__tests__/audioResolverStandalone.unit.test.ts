@@ -1,4 +1,5 @@
 jest.mock('@config', () => ({
+  LOCAL_AUDIO_ONLY: true,
   MUSIC_SERVER_URL: '',
 }));
 

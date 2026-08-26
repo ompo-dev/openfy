@@ -6,6 +6,7 @@ jest.mock('youtubei.js', () => ({
   },
 }));
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   resetDirectYouTubeResolverForTests,
   resolveDirectYouTubeAudio,
@@ -13,9 +14,16 @@ import {
 } from '../directYouTubeResolver';
 
 describe('resolveDirectYouTubeAudio', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
     mockCreate.mockReset();
     resetDirectYouTubeResolverForTests();
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 206,
+      headers: { get: () => 'audio/mp4' },
+      arrayBuffer: async () => new ArrayBuffer(16_384),
+    });
   });
 
   it('resolves an exact YouTube video through the iOS streaming client', async () => {
@@ -32,6 +40,175 @@ describe('resolveDirectYouTubeAudio', () => {
       url: 'https://media.youtube.test/mafinoso.m4a',
       format: 'm4a',
     });
+    expect(getStreamingData).toHaveBeenCalledWith('V1M1hYxmRvA', {
+      client: 'IOS',
+      quality: 'best',
+      type: 'audio',
+    });
+  });
+
+  it('tries another local player client when the first stream cannot serve audio bytes', async () => {
+    const getStreamingData = jest
+      .fn()
+      .mockResolvedValueOnce({
+        url: 'https://media.youtube.test/refused.m4a',
+        mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+      })
+      .mockResolvedValueOnce({
+        url: 'https://media.youtube.test/working.m4a',
+        mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+      });
+    mockCreate.mockResolvedValue({ getStreamingData });
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: { get: () => 'text/html' },
+        arrayBuffer: async () => new ArrayBuffer(0),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 206,
+        headers: { get: () => 'audio/mp4' },
+        arrayBuffer: async () => new ArrayBuffer(16_384),
+      });
+
+    await expect(
+      resolveDirectYouTubeAudio({ videoId: 'V1M1hYxmRvA' })
+    ).resolves.toMatchObject({
+      url: 'https://media.youtube.test/working.m4a',
+      format: 'm4a',
+    });
+
+    expect(getStreamingData).toHaveBeenNthCalledWith(1, 'V1M1hYxmRvA', {
+      client: 'IOS',
+      quality: 'best',
+      type: 'audio',
+    });
+    expect(getStreamingData).toHaveBeenNthCalledWith(2, 'V1M1hYxmRvA', {
+      client: 'YTMUSIC_ANDROID',
+      quality: 'best',
+      type: 'audio',
+    });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://media.youtube.test/working.m4a',
+      expect.objectContaining({ headers: { Range: 'bytes=0-16383' } })
+    );
+  });
+
+  it('learns the verified client and uses it before a recently rejected client', async () => {
+    const getStreamingData = jest
+      .fn()
+      .mockResolvedValueOnce({
+        url: 'https://media.youtube.test/refused.m4a',
+        mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+      })
+      .mockResolvedValueOnce({
+        url: 'https://media.youtube.test/working.m4a',
+        mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+      })
+      .mockResolvedValueOnce({
+        url: 'https://media.youtube.test/learned.m4a',
+        mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+      });
+    mockCreate.mockResolvedValue({ getStreamingData });
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: { get: () => 'text/html' },
+        arrayBuffer: async () => new ArrayBuffer(0),
+      })
+      .mockResolvedValue({
+        ok: true,
+        status: 206,
+        headers: { get: () => 'audio/mp4' },
+        arrayBuffer: async () => new ArrayBuffer(16_384),
+      });
+
+    await resolveDirectYouTubeAudio({ videoId: 'V1M1hYxmRvA' });
+    await expect(
+      resolveDirectYouTubeAudio({ videoId: 'XcJ3NZqm7bQ' })
+    ).resolves.toMatchObject({
+      url: 'https://media.youtube.test/learned.m4a',
+    });
+
+    expect(getStreamingData).toHaveBeenNthCalledWith(3, 'XcJ3NZqm7bQ', {
+      client: 'YTMUSIC_ANDROID',
+      quality: 'best',
+      type: 'audio',
+    });
+  });
+
+  it('keeps the learned client order after the resolver is recreated', async () => {
+    const getStreamingData = jest
+      .fn()
+      .mockResolvedValueOnce({
+        url: 'https://media.youtube.test/refused.m4a',
+        mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+      })
+      .mockResolvedValueOnce({
+        url: 'https://media.youtube.test/working.m4a',
+        mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+      })
+      .mockResolvedValueOnce({
+        url: 'https://media.youtube.test/restored.m4a',
+        mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+      });
+    mockCreate.mockResolvedValue({ getStreamingData });
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: { get: () => 'text/html' },
+        arrayBuffer: async () => new ArrayBuffer(0),
+      })
+      .mockResolvedValue({
+        ok: true,
+        status: 206,
+        headers: { get: () => 'audio/mp4' },
+        arrayBuffer: async () => new ArrayBuffer(16_384),
+      });
+
+    await resolveDirectYouTubeAudio({ videoId: 'V1M1hYxmRvA' });
+    resetDirectYouTubeResolverForTests();
+
+    await expect(
+      resolveDirectYouTubeAudio({ videoId: 'XcJ3NZqm7bQ' })
+    ).resolves.toMatchObject({
+      url: 'https://media.youtube.test/restored.m4a',
+    });
+
+    expect(getStreamingData).toHaveBeenNthCalledWith(3, 'XcJ3NZqm7bQ', {
+      client: 'YTMUSIC_ANDROID',
+      quality: 'best',
+      type: 'audio',
+    });
+  });
+
+  it('ignores invalid persisted client health', async () => {
+    await AsyncStorage.setItem(
+      '@openfy/youtube-player-client-health-v1',
+      JSON.stringify({
+        savedAt: Date.now(),
+        clients: {
+          YTMUSIC_ANDROID: {
+            successes: 1_000_000,
+            consecutiveFailures: 0,
+            averageLatencyMs: 0,
+            cooldownUntil: 0,
+          },
+        },
+      })
+    );
+    const getStreamingData = jest.fn().mockResolvedValue({
+      url: 'https://media.youtube.test/mafinoso.m4a',
+      mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+    });
+    mockCreate.mockResolvedValue({ getStreamingData });
+
+    await resolveDirectYouTubeAudio({ videoId: 'V1M1hYxmRvA' });
+
     expect(getStreamingData).toHaveBeenCalledWith('V1M1hYxmRvA', {
       client: 'IOS',
       quality: 'best',

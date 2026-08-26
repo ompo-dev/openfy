@@ -6,7 +6,7 @@
  */
 
 import { Platform } from 'react-native';
-import { MUSIC_SERVER_URL } from '@config';
+import { LOCAL_AUDIO_ONLY, MUSIC_SERVER_URL } from '@config';
 import { fetchWithTimeout as fetchWithHermesTimeout } from '@utils';
 import {
   evaluateCandidateMatch,
@@ -107,6 +107,7 @@ export const getPlayableAudioUrl = (streamUrl: string): string =>
           : streamUrl;
 
       if (!isProxyableProviderUrl(proxiedSource)) return streamUrl;
+      if (LOCAL_AUDIO_ONLY) return proxiedSource;
       if (!MUSIC_SERVER_URL) return proxiedSource;
       return /^https:\/\//i.test(proxiedSource)
         ? `${MUSIC_SERVER_URL}/api/audio/proxy?url=${encodeURIComponent(proxiedSource)}`
@@ -117,6 +118,7 @@ export const getPlayableAudioUrl = (streamUrl: string): string =>
   })();
 
 const getRenewableYouTubeAudioUrl = (videoId?: string): string | null => {
+  if (LOCAL_AUDIO_ONLY) return null;
   if (!MUSIC_SERVER_URL || !videoId || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
     return null;
   }
@@ -129,8 +131,23 @@ const getYouTubeVideoIdFromTrackId = (trackId?: string): string | null => {
 };
 
 const resolveExactYouTubeVideo = async (
-  videoId: string
+  videoId: string,
+  fresh = false
 ): Promise<ResolvedAudio | null> => {
+  const direct = await resolveDirectYouTubeAudio({ videoId, fresh });
+  if (direct) {
+    return {
+      url: direct.url,
+      quality: 'high',
+      format: direct.format,
+      source: 'youtube',
+      confidence: 100,
+      imageURL: direct.imageURL,
+    };
+  }
+
+  if (LOCAL_AUDIO_ONLY) return null;
+
   if (MUSIC_SERVER_URL) {
     try {
       const response = await fetchWithHermesTimeout(
@@ -167,22 +184,7 @@ const resolveExactYouTubeVideo = async (
     }
   }
 
-  // Native retains a local fallback for a temporarily unavailable deployment.
-  // Web never tries this path because browser media fetches need the proxy.
-  if (Platform.OS === 'web') return null;
-  const direct = await resolveDirectYouTubeAudio({ videoId });
-  return direct
-    ? {
-        url:
-          getRenewableYouTubeAudioUrl(direct.videoId) ||
-          getPlayableAudioUrl(direct.url),
-        quality: 'high',
-        format: direct.format,
-        source: 'youtube',
-        confidence: 100,
-        imageURL: direct.imageURL,
-      }
-    : null;
+  return null;
 };
 
 /**
@@ -609,7 +611,8 @@ export const resolveAudioUrl = async (
   artistName: string,
   spotifyId?: string,
   durationMs?: number,
-  releaseDate?: string
+  releaseDate?: string,
+  forceFresh = false
 ): Promise<ResolvedAudio | null> => {
   const resolveKey = getAudioResolveKey(
     trackName,
@@ -618,9 +621,9 @@ export const resolveAudioUrl = async (
     durationMs,
     releaseDate
   );
-  const cached = resolvedAudioCache.get(resolveKey);
+  const cached = forceFresh ? null : resolvedAudioCache.get(resolveKey);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
-  const active = activeAudioResolves.get(resolveKey);
+  const active = forceFresh ? null : activeAudioResolves.get(resolveKey);
   if (active) return active;
 
   const request = resolveAudioUrlInternal(
@@ -628,10 +631,11 @@ export const resolveAudioUrl = async (
     artistName,
     spotifyId,
     durationMs,
-    releaseDate
+    releaseDate,
+    forceFresh
   )
     .then((result) => {
-      if (result?.url) {
+      if (result?.url && !forceFresh) {
         resolvedAudioCache.set(resolveKey, {
           value: result,
           expiresAt: Date.now() + AUDIO_RESOLVE_TTL_MS,
@@ -639,9 +643,11 @@ export const resolveAudioUrl = async (
       }
       return result;
     })
-    .finally(() => activeAudioResolves.delete(resolveKey));
+    .finally(() => {
+      if (!forceFresh) activeAudioResolves.delete(resolveKey);
+    });
 
-  activeAudioResolves.set(resolveKey, request);
+  if (!forceFresh) activeAudioResolves.set(resolveKey, request);
   return request;
 };
 
@@ -650,7 +656,8 @@ const resolveAudioUrlInternal = async (
   artistName: string,
   spotifyId?: string,
   durationMs?: number,
-  releaseDate?: string
+  releaseDate?: string,
+  forceFresh = false
 ): Promise<ResolvedAudio | null> => {
   const youtubeVideoId = getYouTubeVideoIdFromTrackId(spotifyId);
   if (youtubeVideoId) {
@@ -658,7 +665,7 @@ const resolveAudioUrlInternal = async (
     // search result while its stream endpoint is available. If that signed
     // stream cannot be obtained, continue through the strict title/artist
     // resolver instead of making the track impossible to download.
-    const exactResult = await resolveExactYouTubeVideo(youtubeVideoId);
+    const exactResult = await resolveExactYouTubeVideo(youtubeVideoId, forceFresh);
     if (exactResult) return exactResult;
   }
 
@@ -669,13 +676,43 @@ const resolveAudioUrlInternal = async (
     artistName.trim() === trackName.trim();
 
   const primaryArtist = isUnknownArtist ? '' : artistName;
+  const resolverMode = LOCAL_AUDIO_ONLY
+    ? 'mode: local'
+    : `backend: ${MUSIC_SERVER_URL || 'unavailable'}`;
 
   console.log(
-    `[AudioResolver] ${Platform.OS} resolving "${artistName} - ${trackName}" (${durationMs || 0}ms), backend: ${MUSIC_SERVER_URL || 'unavailable'}`
+    `[AudioResolver] ${Platform.OS} resolving "${artistName} - ${trackName}" (${durationMs || 0}ms), ${resolverMode}`
   );
 
-  // 0. PRIMARY: one remote resolver for web, Android and iPhone. This gives
-  // every build the same extraction and proxy contract after deployment.
+  const directResult = await resolveDirectYouTubeAudio({
+    title: trackName,
+    artist: primaryArtist,
+    durationMs,
+    fresh: forceFresh,
+  });
+  if (directResult?.url) {
+    console.log(
+      `[AudioResolver] Resolved verified local stream: "${artistName} - ${trackName}"`
+    );
+    return {
+      url: directResult.url,
+      quality: 'high',
+      format: directResult.format,
+      source: 'youtube',
+      confidence: 100,
+      imageURL: directResult.imageURL,
+    };
+  }
+
+  if (LOCAL_AUDIO_ONLY) {
+    console.warn(
+      `[AudioResolver] Local stream unavailable for "${artistName} - ${trackName}"; server fallback disabled.`
+    );
+    return null;
+  }
+
+  // Server is an explicit fallback. Local resolution keeps Googlevideo bytes
+  // off Openfy infrastructure whenever the platform can fetch them directly.
   let backendFallback: ResolvedAudio | null = null;
   if (MUSIC_SERVER_URL) {
     try {
@@ -753,9 +790,8 @@ const resolveAudioUrlInternal = async (
     console.warn(`[AudioResolver] Music server URL is empty on ${Platform.OS}.`);
   }
 
-  // Browser provider requests are blocked by CORS. The music backend/proxy
-  // is the only supported web resolver, so never turn a backend failure
-  // into a long sequence of public proxy requests.
+  // Browser CORS can reject a direct provider URL. Do not hide that behind
+  // public proxies; only an explicitly configured server may be used here.
   if (Platform.OS === 'web') {
     if (backendFallback?.url && !isPreviewUrl(backendFallback.url)) {
       return backendFallback;
@@ -765,29 +801,6 @@ const resolveAudioUrlInternal = async (
       `[AudioResolver] Web backend returned no playable stream for "${artistName} - ${trackName}".`
     );
     return null;
-  }
-
-  // A physical native build can recover from an intermittent backend failure
-  // without returning to Metro or a browser-only provider route.
-  const directResult = await resolveDirectYouTubeAudio({
-    title: trackName,
-    artist: primaryArtist,
-    durationMs,
-  });
-  if (directResult?.url) {
-    console.log(
-      `[AudioResolver] Resolved direct native fallback: "${artistName} - ${trackName}"`
-    );
-    return {
-      url:
-        getRenewableYouTubeAudioUrl(directResult.videoId) ||
-        getPlayableAudioUrl(directResult.url),
-      quality: 'high',
-      format: directResult.format,
-      source: 'youtube',
-      confidence: 100,
-      imageURL: directResult.imageURL,
-    };
   }
 
   // Keep the same strict title, artist and duration matching on every

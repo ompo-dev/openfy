@@ -529,7 +529,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         track.title,
         track.artistName,
         track.spotifyId,
-        track.duration_ms
+        track.duration_ms,
+        undefined,
+        true
       );
       if (get().activeRequestId === requestId && fallbackResolved?.url) {
         await loadAndPlay(fallbackResolved.url, handleStatusUpdate, {

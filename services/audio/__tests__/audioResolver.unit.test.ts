@@ -1,4 +1,5 @@
 jest.mock('@config', () => ({
+  LOCAL_AUDIO_ONLY: false,
   MUSIC_SERVER_URL: 'http://192.168.100.27:3001',
 }));
 
@@ -48,8 +49,7 @@ describe('resolveAudioUrl', () => {
     });
   });
 
-  it('routes a client-resolved iOS provider stream through the backend proxy', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 503 });
+  it('uses a client-resolved stream directly before contacting a configured backend', async () => {
     directYouTubeMock.mockResolvedValueOnce({
       videoId: 'V1M1hYxmRvA',
       url: 'https://rr4.googlevideo.com/videoplayback?itag=140',
@@ -60,20 +60,18 @@ describe('resolveAudioUrl', () => {
       resolveAudioUrl('Mafioso', 'ÉoDan', 'spotify_id', 237000)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'http://192.168.100.27:3001/api/audio/youtube?videoId=V1M1hYxmRvA',
+      url: 'https://rr4.googlevideo.com/videoplayback?itag=140',
     });
     expect(directYouTubeMock).toHaveBeenCalledWith({
       artist: 'ÉoDan',
       durationMs: 237000,
+      fresh: false,
       title: 'Mafioso',
     });
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://192.168.100.27:3001/api/music/resolve',
-      expect.objectContaining({ method: 'POST' })
-    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('uses the configured backend before invoking the native fallback', async () => {
+  it('keeps a verified local stream instead of replacing it with a server URL', async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -98,9 +96,15 @@ describe('resolveAudioUrl', () => {
       resolveAudioUrl('Faixa do servidor', 'Artista', 'server_id', 180000)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'http://192.168.100.27:3001/api/audio/youtube?videoId=V1M1hYxmRvA',
+      url: 'https://media.youtube.test/fallback.m4a',
     });
-    expect(directYouTubeMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(directYouTubeMock).toHaveBeenCalledWith({
+      artist: '',
+      durationMs: 180000,
+      fresh: false,
+      title: 'Faixa do servidor',
+    });
   });
 
   it('tries the configured backend before an exact iPhone fallback', async () => {
@@ -114,7 +118,7 @@ describe('resolveAudioUrl', () => {
     );
   });
 
-  it('uses the renewable YouTube endpoint after the backend resolver is unavailable', async () => {
+  it('keeps direct URLs local after a server resolver is unavailable', async () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) });
     directYouTubeMock.mockResolvedValueOnce({
       videoId: 'abc123DEF45',
@@ -126,8 +130,9 @@ describe('resolveAudioUrl', () => {
       resolveAudioUrl('Faixa canônica', 'Artista canônico', 'spotify_id', 180000)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'http://192.168.100.27:3001/api/audio/youtube?videoId=abc123DEF45',
+      url: 'https://media.test/direct-canonical.m4a',
     });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('does not call browser-only CORS fallbacks after the web backend fails', async () => {

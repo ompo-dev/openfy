@@ -7,7 +7,7 @@
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { MUSIC_SERVER_URL } from '@config';
+import { LOCAL_AUDIO_ONLY, MUSIC_SERVER_URL } from '@config';
 import { fetchLyrics, saveLyricsOffline } from '../lyrics/lyricsService';
 import {
   getPlayableAudioUrl,
@@ -798,14 +798,14 @@ const downloadTrackInternal = async (
       });
     }
 
-    // The shared resolver uses the configured music server first on every
-    // platform, with a native-only local fallback if the server is unavailable.
+    // Audio is resolved on the current device by default. A server is only an
+    // explicit legacy fallback when EXPO_PUBLIC_LOCAL_AUDIO_ONLY is false.
     if (!resolvedUrl) {
       recordDownloadDiagnostic(track.spotifyId, 'audio.resolve.request', {
         platform: Platform.OS,
       });
       console.log(
-        `[DownloadManager] ${Platform.OS} resolving "${track.artistName} - ${track.title}", backend: ${MUSIC_SERVER_URL || 'unavailable'}`
+        `[DownloadManager] ${Platform.OS} resolving "${track.artistName} - ${track.title}", ${LOCAL_AUDIO_ONLY ? 'mode: local' : `backend: ${MUSIC_SERVER_URL || 'unavailable'}`}`
       );
       const mainResult = await resolveAudioUrl(
         track.title,
@@ -857,7 +857,7 @@ const downloadTrackInternal = async (
 
     if (!resolvedUrl) {
       console.warn(
-        `[DownloadManager] No verified stream for "${track.artistName} - ${track.title}". Check backend logs at ${MUSIC_SERVER_URL || 'unavailable'}.`
+        `[DownloadManager] No verified stream for "${track.artistName} - ${track.title}". ${LOCAL_AUDIO_ONLY ? 'Check the device connection and retry.' : `Check backend logs at ${MUSIC_SERVER_URL || 'unavailable'}.`}`
       );
       throw new Error('Could not resolve audio stream URL');
     }
@@ -880,7 +880,9 @@ const downloadTrackInternal = async (
         track.title,
         track.artistName,
         track.spotifyId,
-        track.duration_ms
+        track.duration_ms,
+        undefined,
+        true
       );
       if (refreshed?.url && refreshed.url !== resolvedUrl) {
         resolvedUrl = refreshed.url;

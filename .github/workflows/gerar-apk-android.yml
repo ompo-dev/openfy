@@ -14,7 +14,7 @@ jobs:
     env:
       CI: "1"
       EXPO_NO_TELEMETRY: "1"
-      EXPO_PUBLIC_MUSIC_SERVER_URL: ${{ vars.EXPO_PUBLIC_MUSIC_SERVER_URL }}
+      EXPO_PUBLIC_LOCAL_AUDIO_ONLY: "true"
       EXPO_PUBLIC_SPOTIFY_CLIENT_ID: ${{ vars.EXPO_PUBLIC_SPOTIFY_CLIENT_ID }}
 
     steps:
@@ -30,14 +30,10 @@ jobs:
       - name: Instalar dependências
         run: npm ci --legacy-peer-deps
 
-      - name: Validar conexão do build
+      - name: Configurar áudio local
         shell: bash
         run: |
-          if [ -z "$EXPO_PUBLIC_MUSIC_SERVER_URL" ]; then
-            echo "Defina EXPO_PUBLIC_MUSIC_SERVER_URL nas Actions Variables do repositório."
-            exit 1
-          fi
-          echo "Servidor remoto configurado para o build Android."
+          echo "Build Android sem servidor de áudio."
 
       - name: Definir versionCode = run_number
         shell: bash

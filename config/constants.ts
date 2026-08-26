@@ -154,3 +154,7 @@ export const MUSIC_SERVER_URL = resolveMusicServerUrl({
   developmentHost,
   platform: Platform.OS,
 });
+
+/** Server audio fallback is opt-in. `false` keeps legacy Vercel/API behavior. */
+export const LOCAL_AUDIO_ONLY =
+  (Constants.expoConfig?.extra?.localAudioOnly as boolean | undefined) !== false;

@@ -86,6 +86,7 @@ module.exports = {
       clientID: process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID || process.env.CLIENT_ID || '',
       tokenKey: process.env.TOKEN_KEY || 'spotify_token',
       musicServerUrl: apiOrigin,
+      localAudioOnly: process.env.EXPO_PUBLIC_LOCAL_AUDIO_ONLY !== 'false',
       refreshTokenKey: process.env.REFRESH_TOKEN_KEY || 'spotify_refresh_token',
       expirationKey: process.env.EXPIRATION_KEY || 'spotify_expiration_key',
       authorizationEndpoint:
