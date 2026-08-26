@@ -32,7 +32,9 @@ export const LoginScreen = () => {
         'playlist-read-private',
       ],
       responseType: ResponseType.Token,
-      redirectUri: makeRedirectUri(),
+      // Spotify requires native redirect URIs to include a path. This must
+      // match the dashboard entry: openfy://callback.
+      redirectUri: makeRedirectUri({ scheme: 'openfy', path: 'callback' }),
     },
     {
       authorizationEndpoint: authorizationEndpoint as string,
