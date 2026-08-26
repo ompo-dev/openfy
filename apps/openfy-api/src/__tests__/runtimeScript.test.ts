@@ -27,6 +27,7 @@ describe('Next runtime scripts', () => {
     const dockerfile = await readFile(new URL('../../../../Dockerfile.vercel', import.meta.url), 'utf8');
 
     expect(dockerfile).toContain('python3');
+    expect(dockerfile).toContain('FROM oven/bun:1.3.14-debian');
     expect(dockerfile).toContain('CMD ["sh", "-c", "bunx next start -H 0.0.0.0 -p ${PORT:-3000}"]');
   });
 
@@ -56,6 +57,7 @@ describe('Next runtime scripts', () => {
 
     expect(config.services.audio.runtime).toBe('container');
     expect(config.services.audio.entrypoint).toBe('Dockerfile.vercel');
+    expect(dockerfile).toContain('FROM oven/bun:1.3.14-debian');
     expect(dockerfile).toContain('python3');
   });
 });
