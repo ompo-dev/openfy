@@ -42,6 +42,7 @@ describe('resolveYoutubeCookiesPath', () => {
     const cookieFile = [
       cookies,
       '.youtube.com\tTRUE\t/\tTRUE\t2147483647\tSID\tsession-token',
+      '.youtube.com\tTRUE\t/\tTRUE\t2147483647\t__Secure-3PAPISID\tsecure-sapisid-token',
       '.google.com\tTRUE\t/\tTRUE\t2147483647\tSID\tgoogle-session',
     ].join('\n');
 
@@ -50,7 +51,9 @@ describe('resolveYoutubeCookiesPath', () => {
         env: { YOUTUBE_COOKIES_BASE64: Buffer.from(cookieFile).toString('base64') },
         temporaryDirectory,
       })
-    ).resolves.toBe('VISITOR_INFO1_LIVE=visitor-token; SID=session-token');
+    ).resolves.toBe(
+      'VISITOR_INFO1_LIVE=visitor-token; SID=session-token; __Secure-3PAPISID=secure-sapisid-token; SAPISID=secure-sapisid-token'
+    );
   });
 
   it('rejects a cookie payload that is not in Netscape format', async () => {

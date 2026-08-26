@@ -37,6 +37,12 @@ const toYoutubeCookieHeader = (contents) => {
     cookies.set(name, value);
   }
 
+  // YouTube accepts __Secure-3PAPISID as SAPISID when the latter is absent.
+  // youtubei.js only checks the latter before creating SAPISIDHASH.
+  if (!cookies.has('SAPISID') && cookies.has('__Secure-3PAPISID')) {
+    cookies.set('SAPISID', cookies.get('__Secure-3PAPISID'));
+  }
+
   return cookies.size
     ? [...cookies].map(([name, value]) => `${name}=${value}`).join('; ')
     : null;
