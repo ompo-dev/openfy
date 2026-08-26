@@ -12,6 +12,10 @@ describe('Next runtime scripts', () => {
     expect(packageJson.trustedDependencies).toContain('youtube-dl-exec');
   });
 
+  it('ships the TypeScript native compiler for the Linux audio container', () => {
+    expect(packageJson.optionalDependencies['@typescript/typescript-linux-x64']).toBe('7.0.2');
+  });
+
   it('uses the browser-compatible YouTube client when extracting audio', async () => {
     const engine = await readFile(new URL('../legacyEngine.js', import.meta.url), 'utf8');
 

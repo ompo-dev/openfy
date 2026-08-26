@@ -9,7 +9,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY apps/openfy-api/package.json apps/openfy-api/package-lock.json ./
-RUN npm ci
+RUN npm ci --include=optional
 
 COPY apps/openfy-api/ ./
 # @distube/ytdl-core uses Node's Undici APIs. Running Next through Bun in a

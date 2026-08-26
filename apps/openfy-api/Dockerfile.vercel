@@ -7,7 +7,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --include=optional
 
 COPY . ./
 # @distube/ytdl-core uses Node's Undici APIs. Running Next through Bun in a
