@@ -19,6 +19,7 @@ const YOUTUBE_SEARCH_PRINT_FORMAT = '%(id)s\t%(title)s\t%(channel)s\t%(duration)
 
 // In-memory LRU-like TTL cache
 const cache = new Map();
+let innertubeClientPromise = null;
 
 function getCached(key) {
   const item = cache.get(key);
@@ -146,6 +147,57 @@ function isCanonicalTitleMatch(candidateTitle, targetTitle) {
     });
   });
 }
+
+const getInnertubeClient = async () => {
+  if (!innertubeClientPromise) {
+    innertubeClientPromise = import('youtubei.js')
+      .then(({ Innertube }) =>
+        Innertube.create({
+          generate_session_locally: true,
+          retrieve_innertube_config: false,
+          retrieve_player: false,
+        })
+      )
+      .catch((error) => {
+        innertubeClientPromise = null;
+        throw error;
+      });
+  }
+  return innertubeClientPromise;
+};
+
+const audioFormatFromMimeType = (mimeType) =>
+  mimeType?.includes('audio/webm') ? 'webm' : 'm4a';
+
+const fetchYouTubeTrackViaInnertube = async (videoId, youtubeUrl) => {
+  const client = await getInnertubeClient();
+  const [info, stream] = await Promise.all([
+    client.getBasicInfo(videoId),
+    client.getStreamingData(videoId, {
+      client: 'IOS',
+      quality: 'best',
+      type: 'audio',
+    }),
+  ]);
+
+  if (!stream?.url || !/^https:\/\//i.test(stream.url)) return null;
+
+  const details = info?.basic_info || {};
+  const thumbnails = details.thumbnail || [];
+  const artistName = details.author || 'YouTube';
+  return {
+    videoId,
+    youtubeUrl,
+    streamUrl: stream.url,
+    title: details.title || 'Vídeo do YouTube',
+    artistName,
+    albumName: artistName,
+    imageURL: thumbnails.at(-1)?.url || '',
+    duration_ms: Number(details.duration || 0) * 1000,
+    viewCount: 0,
+    format: audioFormatFromMimeType(stream.mime_type),
+  };
+};
 
 function getLyricTitleVariants(title) {
   const fullTitle = (title || '').trim();
@@ -491,12 +543,28 @@ const getYouTubeVideoId = (input) => {
   }
 };
 
-async function fetchYouTubeTrack(videoId) {
+async function fetchYouTubeTrack(videoId, { fresh = false } = {}) {
   const cacheKey = `youtube_track:${videoId}`;
-  const cached = getCached(cacheKey);
+  const cached = fresh ? null : getCached(cacheKey);
   if (cached) return cached;
 
   const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+  // Serverless environments cannot reliably launch yt-dlp and are often
+  // challenged by the old web extractor. InnerTube resolves the stream in
+  // Node, which lets the renewable audio endpoint fetch it immediately.
+  try {
+    const result = await fetchYouTubeTrackViaInnertube(videoId, youtubeUrl);
+    if (result) {
+      setCache(cacheKey, result, 1800);
+      return result;
+    }
+  } catch (error) {
+    const details = String(error?.message || error || '')
+      .replace(/\s+/g, ' ')
+      .slice(0, 300);
+    console.warn(`[YouTube Extractor] InnerTube failed for ${videoId}:`, details);
+  }
 
   // The Safari/Android clients still expose a progressive MP4 source for
   // public videos when YouTube rejects the default web extractor as a bot.
@@ -1364,6 +1432,42 @@ const server = http.createServer(async (req, res) => {
         const status = error.message === 'Unsupported audio stream URL' ? 400 : 502;
         res.writeHead(status, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: status === 400 ? error.message : 'Failed to proxy audio stream' }));
+      }
+      return;
+    }
+  }
+
+  // Resolves and streams YouTube audio in the same server request. Googlevideo
+  // signatures can be bound to the resolver's network, so a client must never
+  // receive and replay this short-lived URL directly.
+  if (pathname === '/api/audio/youtube' && req.method === 'GET') {
+    const videoId = String(parsedUrl.query.videoId || '');
+    if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid YouTube video ID' }));
+      return;
+    }
+
+    try {
+      const track = await fetchYouTubeTrack(videoId, { fresh: true });
+      if (!track?.streamUrl) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'YouTube audio stream unavailable' }));
+        return;
+      }
+      await streamAudioResponse(
+        res,
+        await fetchAllowedAudioStream(track.streamUrl, req.headers.range)
+      );
+      return;
+    } catch (error) {
+      if (!res.headersSent && !res.destroyed) {
+        console.warn(
+          `[YouTube Audio] Failed for ${videoId}:`,
+          String(error?.message || error || '').slice(0, 300)
+        );
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to stream YouTube audio' }));
       }
       return;
     }

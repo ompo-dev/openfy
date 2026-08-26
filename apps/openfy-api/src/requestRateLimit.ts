@@ -19,7 +19,9 @@ const MUSIC_RULE: RateLimitRule = { limit: 20, windowMs: 60_000 };
 const AUDIO_RULE: RateLimitRule = { limit: 240, windowMs: 60_000 };
 
 const getRule = (pathname: string): RateLimitRule => {
-  if (pathname === '/api/audio/proxy') return AUDIO_RULE;
+  if (pathname === '/api/audio/proxy' || pathname === '/api/audio/youtube') {
+    return AUDIO_RULE;
+  }
   if (pathname.startsWith('/api/music/') || pathname.startsWith('/api/spotify/')) {
     return MUSIC_RULE;
   }

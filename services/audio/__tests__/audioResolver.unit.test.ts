@@ -60,7 +60,7 @@ describe('resolveAudioUrl', () => {
       resolveAudioUrl('Mafioso', 'ÉoDan', 'spotify_id', 237000)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Frr4.googlevideo.com%2Fvideoplayback%3Fitag%3D140',
+      url: 'http://192.168.100.27:3001/api/audio/youtube?videoId=V1M1hYxmRvA',
     });
     expect(directYouTubeMock).toHaveBeenCalledWith({
       artist: 'ÉoDan',
@@ -79,6 +79,7 @@ describe('resolveAudioUrl', () => {
       json: async () => ({
         data: {
           source: {
+            id: 'V1M1hYxmRvA',
             streamUrl: 'https://rr1.googlevideo.com/videoplayback?itag=140',
             provider: 'youtube',
             format: 'm4a',
@@ -97,7 +98,7 @@ describe('resolveAudioUrl', () => {
       resolveAudioUrl('Faixa do servidor', 'Artista', 'server_id', 180000)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Frr1.googlevideo.com%2Fvideoplayback%3Fitag%3D140',
+      url: 'http://192.168.100.27:3001/api/audio/youtube?videoId=V1M1hYxmRvA',
     });
     expect(directYouTubeMock).not.toHaveBeenCalled();
   });
@@ -113,7 +114,7 @@ describe('resolveAudioUrl', () => {
     );
   });
 
-  it('keeps iPhone on a strict direct fallback when the backend is unavailable', async () => {
+  it('uses the renewable YouTube endpoint after the backend resolver is unavailable', async () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) });
     directYouTubeMock.mockResolvedValueOnce({
       videoId: 'abc123DEF45',
@@ -125,7 +126,7 @@ describe('resolveAudioUrl', () => {
       resolveAudioUrl('Faixa canônica', 'Artista canônico', 'spotify_id', 180000)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'https://media.test/direct-canonical.m4a',
+      url: 'http://192.168.100.27:3001/api/audio/youtube?videoId=abc123DEF45',
     });
   });
 

@@ -128,16 +128,27 @@ describe('Openfy API', () => {
     expect(forwardedRange).toBe('bytes=0-1023');
   });
 
-  it('does not expose the removed renewable YouTube audio route', async () => {
-    const response = await app.handle(
-      new Request('http://localhost:3001/api/audio/youtube?videoId=m1a_GqJf02M')
+  it('forwards a renewable YouTube audio request with its byte range', async () => {
+    let forwardedPath = '';
+    let forwardedRange = '';
+    const forwardingApp = createApiApp({
+      forwardLegacyRequest: async (request) => {
+        forwardedPath = new URL(request.url).pathname;
+        forwardedRange = request.headers.get('range') || '';
+        return new Response('audio', { status: 206 });
+      },
+    });
+
+    const response = await forwardingApp.handle(
+      new Request(
+        'http://localhost:3001/api/audio/youtube?videoId=m1a_GqJf02M',
+        { headers: { range: 'bytes=0-1023' } }
+      )
     );
 
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      success: false,
-      error: { code: 'NOT_FOUND', message: 'Route not found' },
-    });
+    expect(response.status).toBe(206);
+    expect(forwardedPath).toBe('/api/audio/youtube');
+    expect(forwardedRange).toBe('bytes=0-1023');
   });
 
   it('forwards a valid YouTube URL after Elysia validates its body', async () => {

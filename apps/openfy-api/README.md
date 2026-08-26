@@ -22,6 +22,7 @@ A API escuta em `0.0.0.0:3001` e expõe:
 - `GET /swagger`
 - `POST /api/music/resolve`
 - `POST /api/music/youtube`
+- `GET /api/audio/youtube?videoId=...`
 - `GET /api/audio/proxy`
 - letras, Spotify e imagem de artista nos mesmos caminhos já usados pelo Expo
 

@@ -32,6 +32,10 @@ const proxyQuerySchema = t.Object({
   url: t.String({ format: 'uri', maxLength: 8_192 }),
 });
 
+const youtubeAudioQuerySchema = t.Object({
+  videoId: t.String({ pattern: '^[A-Za-z0-9_-]{11}$' }),
+});
+
 const spotifyRefreshSchema = t.Object({
   refreshToken: t.String({ minLength: 1, maxLength: 2_048 }),
 });
@@ -221,6 +225,13 @@ export const createApiApp = ({ forwardLegacyRequest }: ApiAppOptions) => {
     .get('/api/audio/proxy', ({ request }) => forwardLegacyRequest(request), {
       query: proxyQuerySchema,
       detail: { tags: ['Audio'], summary: 'Transmite um stream de áudio permitido' },
+    })
+    .get('/api/audio/youtube', ({ request }) => forwardLegacyRequest(request), {
+      query: youtubeAudioQuerySchema,
+      detail: {
+        tags: ['Audio'],
+        summary: 'Resolve e transmite áudio do YouTube na mesma requisição',
+      },
     })
     .post(
       '/api/music/youtube',

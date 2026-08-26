@@ -116,6 +116,13 @@ export const getPlayableAudioUrl = (streamUrl: string): string =>
     }
   })();
 
+const getRenewableYouTubeAudioUrl = (videoId?: string): string | null => {
+  if (!MUSIC_SERVER_URL || !videoId || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+    return null;
+  }
+  return `${MUSIC_SERVER_URL}/api/audio/youtube?videoId=${encodeURIComponent(videoId)}`;
+};
+
 const getYouTubeVideoIdFromTrackId = (trackId?: string): string | null => {
   const match = trackId?.match(/^yt_([A-Za-z0-9_-]{11})$/);
   return match?.[1] || null;
@@ -140,7 +147,9 @@ const resolveExactYouTubeVideo = async (
       };
       if (response.ok && data.track?.videoId === videoId && data.track.streamUrl) {
         return {
-          url: getPlayableAudioUrl(data.track.streamUrl),
+          url:
+            getRenewableYouTubeAudioUrl(data.track.videoId) ||
+            getPlayableAudioUrl(data.track.streamUrl),
           quality: 'high',
           format: data.track.format || 'm4a',
           source: 'youtube',
@@ -164,7 +173,9 @@ const resolveExactYouTubeVideo = async (
   const direct = await resolveDirectYouTubeAudio({ videoId });
   return direct
     ? {
-        url: getPlayableAudioUrl(direct.url),
+        url:
+          getRenewableYouTubeAudioUrl(direct.videoId) ||
+          getPlayableAudioUrl(direct.url),
         quality: 'high',
         format: direct.format,
         source: 'youtube',
@@ -703,7 +714,10 @@ const resolveAudioUrlInternal = async (
             `[AudioResolver] Resolved Playable Stream via Backend Server: "${payload.track?.title}"`
           );
           const backendResult: ResolvedAudio = {
-            url: getPlayableAudioUrl(streamUrl),
+            url:
+              (source?.provider === 'youtube'
+                ? getRenewableYouTubeAudioUrl(source.id)
+                : null) || getPlayableAudioUrl(streamUrl),
             quality: source?.quality || 'high',
             format: source?.format || 'm4a',
             source: source?.provider === 'youtube' ? 'youtube' : 'soundcloud',
@@ -765,7 +779,9 @@ const resolveAudioUrlInternal = async (
       `[AudioResolver] Resolved direct native fallback: "${artistName} - ${trackName}"`
     );
     return {
-      url: getPlayableAudioUrl(directResult.url),
+      url:
+        getRenewableYouTubeAudioUrl(directResult.videoId) ||
+        getPlayableAudioUrl(directResult.url),
       quality: 'high',
       format: directResult.format,
       source: 'youtube',
