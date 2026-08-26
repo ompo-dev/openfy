@@ -164,7 +164,7 @@ const resolveExactYouTubeVideo = async (
   const direct = await resolveDirectYouTubeAudio({ videoId });
   return direct
     ? {
-        url: direct.url,
+        url: getPlayableAudioUrl(direct.url),
         quality: 'high',
         format: direct.format,
         source: 'youtube',
@@ -431,7 +431,7 @@ export const resolveViaYouTubeTopic = async (
               `[AudioResolver] Verified Official YouTube Master: "${video.title}" by "${video.author}" (${video.viewCount?.toLocaleString()} views, score: ${video.score})`
             );
             return {
-              url: best.url,
+              url: getPlayableAudioUrl(best.url),
               quality: 'high',
               format: 'm4a',
               source: 'youtube',
@@ -569,7 +569,7 @@ export const resolveViaSoundCloud = async (
                   `[AudioResolver] Verified SoundCloud Track: "${track.title}" by "${track.user?.username}" (Confidence: ${track.matchReport.sourceConfidence}%)`
                 );
                 return {
-                  url: streamData.url,
+                  url: getPlayableAudioUrl(streamData.url),
                   quality: 'high',
                   format: isProgressive ? 'mp3' : isM3u8 ? 'm3u8' : 'mp3',
                   source: 'soundcloud',
@@ -765,7 +765,7 @@ const resolveAudioUrlInternal = async (
       `[AudioResolver] Resolved direct native fallback: "${artistName} - ${trackName}"`
     );
     return {
-      url: directResult.url,
+      url: getPlayableAudioUrl(directResult.url),
       quality: 'high',
       format: directResult.format,
       source: 'youtube',
@@ -783,11 +783,14 @@ const resolveAudioUrlInternal = async (
     durationMs
   );
   if (ytResult?.url && !isPreviewUrl(ytResult.url)) {
-    return ytResult;
+    return { ...ytResult, url: getPlayableAudioUrl(ytResult.url) };
   }
 
   if (backendFallback?.url && !isPreviewUrl(backendFallback.url)) {
-    return backendFallback;
+    return {
+      ...backendFallback,
+      url: getPlayableAudioUrl(backendFallback.url),
+    };
   }
 
   // 2. Last fallback: SoundCloud still must pass canonical title, artist and
@@ -798,7 +801,10 @@ const resolveAudioUrlInternal = async (
     durationMs
   );
   if (soundcloudResult?.url && !isPreviewUrl(soundcloudResult.url)) {
-    return soundcloudResult;
+    return {
+      ...soundcloudResult,
+      url: getPlayableAudioUrl(soundcloudResult.url),
+    };
   }
 
   console.warn(

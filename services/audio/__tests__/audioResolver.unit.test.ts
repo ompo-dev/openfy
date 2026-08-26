@@ -48,11 +48,11 @@ describe('resolveAudioUrl', () => {
     });
   });
 
-  it('keeps a client-resolved iOS stream direct instead of sending it back through a proxy', async () => {
+  it('routes a client-resolved iOS provider stream through the backend proxy', async () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 503 });
     directYouTubeMock.mockResolvedValueOnce({
       videoId: 'V1M1hYxmRvA',
-      url: 'https://media.youtube.test/mafinoso.m4a',
+      url: 'https://rr4.googlevideo.com/videoplayback?itag=140',
       format: 'm4a',
     });
 
@@ -60,7 +60,7 @@ describe('resolveAudioUrl', () => {
       resolveAudioUrl('Mafioso', 'ÉoDan', 'spotify_id', 237000)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'https://media.youtube.test/mafinoso.m4a',
+      url: 'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Frr4.googlevideo.com%2Fvideoplayback%3Fitag%3D140',
     });
     expect(directYouTubeMock).toHaveBeenCalledWith({
       artist: 'ÉoDan',
