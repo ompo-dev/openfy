@@ -16,10 +16,17 @@ describe('Next runtime scripts', () => {
     const engine = await readFile(new URL('../legacyEngine.js', import.meta.url), 'utf8');
 
     expect(engine).toContain('retrieve_player: true');
-    expect(engine).toContain('requestOptions: cookie ? { headers: { cookie } } : undefined');
+    expect(engine).toContain('const ytdlpResult = await fetchYouTubeTrackViaYtDlp');
     expect(engine).toContain('InnerTube returned no playable stream');
     expect(engine).toContain('ytdl-core failed');
     expect(engine).toContain("format: 'best[ext=mp4]/bestaudio/best'");
     expect(engine).toContain("extractorArgs: 'youtube:player_client=web_safari,android,ios'");
+  });
+
+  it('ships the persistent audio engine with Python for yt-dlp', async () => {
+    const dockerfile = await readFile(new URL('../../Dockerfile', import.meta.url), 'utf8');
+
+    expect(dockerfile).toContain('python3');
+    expect(dockerfile).toContain('CMD ["bun", "run", "start"]');
   });
 });

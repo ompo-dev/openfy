@@ -4,9 +4,9 @@ Serviço Next.js que entrega a API Elysia usada pelo Openfy Web, Android e iPhon
 O Bun instala as dependências e executa o desenvolvimento local; na Vercel, a
 rota Next usa o adaptador Node do Elysia.
 
-O pacote `youtube-dl-exec` é explicitamente confiado no `package.json` porque
-seu pós-instalação baixa o binário `yt-dlp` exigido pelo resolvedor. O binário é
-incluído no trace de deploy do Next.
+O resolvedor de áudio usa `yt-dlp` como o servidor local original. Ele exige
+`python3`, portanto deve rodar em uma máquina ou contêiner persistente — não em
+uma função serverless da Vercel.
 
 ## Desenvolvimento local
 
@@ -31,17 +31,14 @@ Em um dispositivo físico, ele utiliza o IP LAN provido pelo Metro. Para usar a
 API remota, defina `EXPO_PUBLIC_MUSIC_SERVER_URL=https://api.exemplo.com` antes
 de iniciar ou gerar o bundle Expo.
 
-## Deploy na Vercel
+## Deploy da engine de áudio
 
-O deploy não exige alterações de código no Expo: a URL do projeto Vercel é a
-única configuração necessária para Web, iOS e Android.
+Use o `Dockerfile` deste diretório em um servidor que aceite contêineres. A
+imagem instala Python e mantém o processo de áudio ativo, como no fluxo local
+que funcionava antes. A Vercel pode continuar hospedando apenas o site.
 
-1. Importe este repositório na Vercel e defina **Root Directory** como
-   `apps/openfy-api`.
-2. Mantenha os comandos definidos em `vercel.json`: `bun install
-   --frozen-lockfile` e `bun run build`.
-3. Em **Settings → Environment Variables**, copie as variáveis de
-   `.env.example` que forem necessárias. Para produção, configure:
+1. Faça o deploy com a raiz `apps/openfy-api`.
+2. Configure as variáveis de `.env.example`. Para produção, configure:
 
 - `OPENFY_ALLOWED_ORIGINS`: lista separada por vírgulas com as origens web
   permitidas, por exemplo `https://openfy.exemplo.com`. Inclua também cada
@@ -51,20 +48,10 @@ O deploy não exige alterações de código no Expo: a URL do projeto Vercel é 
   cadastre no Expo/EAS nem com prefixo `EXPO_PUBLIC_`.
 - `OPENFY_LEGACY_ENGINE_URL` (opcional): URL HTTPS de uma engine dedicada para
   tarefas pesadas. Quando ausente, a API usa a engine compatível no mesmo
-  processo durante a migração.
-- `YOUTUBE_COOKIES_BASE64` (opcional, segredo): arquivo de cookies **somente
-  do YouTube**, em formato Netscape e codificado em Base64. É materializado
-  apenas no diretório temporário da função para permitir que `yt-dlp` passe por
-  desafios de login/CAPTCHA do YouTube. Nunca use o prefixo `EXPO_PUBLIC_` e
-  nunca versione esse valor.
+  processo.
 
-Para desenvolvimento local, `YOUTUBE_COOKIES_PATH` pode apontar para o mesmo
-arquivo de cookies. O serviço valida o formato, mas não registra nem retorna o
-conteúdo. Crie/renove essa credencial em uma conta dedicada e configure-a como
-segredo no provedor de deploy.
-
-4. Faça o deploy e confirme `https://<seu-projeto>.vercel.app/health`. A
-   interface da API fica em `https://<seu-projeto>.vercel.app/swagger`.
+3. Faça o deploy e confirme `https://<seu-dominio>/health`. A
+interface da API fica em `https://<seu-dominio>/swagger`.
 
 ## Conectar o Expo (Web, iPhone e Android)
 
@@ -73,7 +60,7 @@ Na raiz do repositório, crie um arquivo local `.env.local` a partir do arquivo
 anterior:
 
 ```dotenv
-EXPO_PUBLIC_MUSIC_SERVER_URL=https://<seu-projeto>.vercel.app
+EXPO_PUBLIC_MUSIC_SERVER_URL=https://<seu-dominio>
 ```
 
 Reinicie o Expo com cache limpo após trocar a URL:
@@ -88,14 +75,11 @@ depois de alterar a variável. Em Expo Go, basta reiniciar o bundler. O iPhone e
 o Android usam a mesma URL HTTPS e não dependem de `localhost`, IP LAN ou de
 um servidor no computador.
 
-Não inclua chaves, cookies de navegador ou credenciais de terceiros no
-repositório nem em variáveis `EXPO_PUBLIC_*`.
+Não inclua chaves ou credenciais de terceiros no repositório nem em variáveis
+`EXPO_PUBLIC_*`.
 
 ## Proteção de produção
 
-A API aplica limite local por IP e rota como proteção adicional. Na Vercel,
-adicione uma regra de **Firewall → Rate Limiting** para `/api/*`; o limite do
-Firewall é compartilhado entre instâncias serverless. Comece com 240 requisições
-por minuto/IP, monitore `Functions → Usage` e ajuste conforme o volume real de
-streaming. O proxy aceita somente HTTPS para `googlevideo.com`, `sndcdn.com` e
-`soundcloud.com`.
+A API aplica limite local por IP e rota. Configure um firewall/rate limit no
+provedor para `/api/*`. O proxy aceita somente HTTPS para `googlevideo.com`,
+`sndcdn.com` e `soundcloud.com`.

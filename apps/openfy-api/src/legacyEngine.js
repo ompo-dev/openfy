@@ -10,10 +10,6 @@ const { promisify } = require('node:util');
 const ytdl = require('@distube/ytdl-core');
 const youtubeDl = require('youtube-dl-exec');
 const { fetchAllowedAudioStream } = require('./audioStreamProxy');
-const {
-  resolveYoutubeCookieHeader,
-  resolveYoutubeCookiesPath,
-} = require('./youtubeCredentials');
 
 const PORT = process.env.PORT || 3001;
 const execFileAsync = promisify(execFile);
@@ -151,7 +147,7 @@ function isCanonicalTitleMatch(candidateTitle, targetTitle) {
   });
 }
 
-const getInnertubeClient = async (cookie) => {
+const getInnertubeClient = async () => {
   if (!innertubeClientPromise) {
     innertubeClientPromise = import('youtubei.js')
       .then(({ Innertube }) =>
@@ -159,7 +155,6 @@ const getInnertubeClient = async (cookie) => {
           generate_session_locally: true,
           retrieve_innertube_config: false,
           retrieve_player: true,
-          ...(cookie ? { cookie } : {}),
         })
       )
       .catch((error) => {
@@ -174,8 +169,7 @@ const audioFormatFromMimeType = (mimeType) =>
   mimeType?.includes('audio/webm') ? 'webm' : 'm4a';
 
 const fetchYouTubeTrackViaInnertube = async (videoId, youtubeUrl) => {
-  const cookie = await resolveYoutubeCookieHeader();
-  const client = await getInnertubeClient(cookie || undefined);
+  const client = await getInnertubeClient();
   const [info, stream] = await Promise.all([
     client.getBasicInfo(videoId),
     client.getStreamingData(videoId, {
@@ -186,11 +180,7 @@ const fetchYouTubeTrackViaInnertube = async (videoId, youtubeUrl) => {
   ]);
 
   if (!stream?.url || !/^https:\/\//i.test(stream.url)) {
-    console.warn(`[YouTube Extractor] InnerTube returned no playable stream for ${videoId}:`, {
-      hasSessionCookie: Boolean(cookie),
-      mimeType: stream?.mime_type || null,
-      itag: stream?.itag || null,
-    });
+    console.warn(`[YouTube Extractor] InnerTube returned no playable stream for ${videoId}`);
     return null;
   }
 
@@ -555,45 +545,18 @@ const getYouTubeVideoId = (input) => {
   }
 };
 
-async function fetchYouTubeTrack(videoId, { fresh = false } = {}) {
-  const cacheKey = `youtube_track:${videoId}`;
-  const cached = fresh ? null : getCached(cacheKey);
-  if (cached) return cached;
-
-  const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
-  // Serverless environments cannot reliably launch yt-dlp and are often
-  // challenged by the old web extractor. InnerTube resolves the stream in
-  // Node, which lets the renewable audio endpoint fetch it immediately.
+const fetchYouTubeTrackViaYtDlp = async (videoId, youtubeUrl) => {
   try {
-    const result = await fetchYouTubeTrackViaInnertube(videoId, youtubeUrl);
-    if (result) {
-      setCache(cacheKey, result, 1800);
-      return result;
-    }
-  } catch (error) {
-    const details = String(error?.message || error || '')
-      .replace(/\s+/g, ' ')
-      .slice(0, 300);
-    console.warn(`[YouTube Extractor] InnerTube failed for ${videoId}:`, details);
-  }
-
-  // The Safari/Android clients still expose a progressive MP4 source for
-  // public videos when YouTube rejects the default web extractor as a bot.
-  // Prefer MP4 because it is playable by the browser and AVFoundation.
-  try {
-    const cookies = await resolveYoutubeCookiesPath();
     const details = await youtubeDl(youtubeUrl, {
       dumpSingleJson: true,
       noWarnings: true,
       noPlaylist: true,
       format: 'best[ext=mp4]/bestaudio/best',
       extractorArgs: 'youtube:player_client=web_safari,android,ios',
-      ...(cookies ? { cookies } : {}),
     });
     if (details?.id !== videoId || !details.url) return null;
 
-    const result = {
+    return {
       videoId: details.id,
       youtubeUrl,
       streamUrl: details.url,
@@ -611,8 +574,6 @@ async function fetchYouTubeTrack(videoId, { fresh = false } = {}) {
             : 'm4a',
     };
 
-    setCache(cacheKey, result, 1800);
-    return result;
   } catch (error) {
     const details = String(error?.stderr || error?.message || error || '')
       .replace(/\s+/g, ' ')
@@ -620,13 +581,41 @@ async function fetchYouTubeTrack(videoId, { fresh = false } = {}) {
     console.warn(`[YouTube Extractor] yt-dlp failed for ${videoId}:`, details);
   }
 
-  // Retain the previous extractor as a lightweight fallback for environments
-  // where the yt-dlp binary cannot be started.
+  return null;
+};
+
+async function fetchYouTubeTrack(videoId, { fresh = false } = {}) {
+  const cacheKey = `youtube_track:${videoId}`;
+  const cached = fresh ? null : getCached(cacheKey);
+  if (cached) return cached;
+
+  const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+  // Keep the original fast path: yt-dlp is what served local downloads before
+  // the serverless migration. The persistent container supplies its python3
+  // runtime; InnerTube remains only a resilient fallback.
+  const ytdlpResult = await fetchYouTubeTrackViaYtDlp(videoId, youtubeUrl);
+  if (ytdlpResult) {
+    setCache(cacheKey, ytdlpResult, 1800);
+    return ytdlpResult;
+  }
+
   try {
-    const cookie = await resolveYoutubeCookieHeader();
-    const info = await ytdl.getInfo(youtubeUrl, {
-      requestOptions: cookie ? { headers: { cookie } } : undefined,
-    });
+    const innertubeResult = await fetchYouTubeTrackViaInnertube(videoId, youtubeUrl);
+    if (innertubeResult) {
+      setCache(cacheKey, innertubeResult, 1800);
+      return innertubeResult;
+    }
+  } catch (error) {
+    const details = String(error?.message || error || '')
+      .replace(/\s+/g, ' ')
+      .slice(0, 300);
+    console.warn(`[YouTube Extractor] InnerTube failed for ${videoId}:`, details);
+  }
+
+  // Last fallback for a temporarily unavailable yt-dlp process.
+  try {
+    const info = await ytdl.getInfo(youtubeUrl);
     const details = info.videoDetails;
     const audio = ytdl.filterFormats(info.formats, 'audioonly').find((format) => format.url);
     if (details?.videoId !== videoId || !audio?.url) return null;
