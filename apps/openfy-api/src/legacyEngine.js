@@ -616,7 +616,10 @@ async function fetchYouTubeTrack(videoId, { fresh = false } = {}) {
   // Retain the previous extractor as a lightweight fallback for environments
   // where the yt-dlp binary cannot be started.
   try {
-    const info = await ytdl.getInfo(youtubeUrl);
+    const cookie = await resolveYoutubeCookieHeader();
+    const info = await ytdl.getInfo(youtubeUrl, {
+      requestOptions: cookie ? { headers: { cookie } } : undefined,
+    });
     const details = info.videoDetails;
     const audio = ytdl.filterFormats(info.formats, 'audioonly').find((format) => format.url);
     if (details?.videoId !== videoId || !audio?.url) return null;

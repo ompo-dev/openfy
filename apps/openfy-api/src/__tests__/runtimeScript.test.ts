@@ -16,6 +16,7 @@ describe('Next runtime scripts', () => {
     const engine = await readFile(new URL('../legacyEngine.js', import.meta.url), 'utf8');
 
     expect(engine).toContain('retrieve_player: true');
+    expect(engine).toContain('requestOptions: cookie ? { headers: { cookie } } : undefined');
     expect(engine).toContain("format: 'best[ext=mp4]/bestaudio/best'");
     expect(engine).toContain("extractorArgs: 'youtube:player_client=web_safari,android,ios'");
   });
