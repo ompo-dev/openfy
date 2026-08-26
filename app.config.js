@@ -1,3 +1,6 @@
+const apiOrigin =
+  process.env.EXPO_PUBLIC_MUSIC_SERVER_URL || process.env.EXPO_PUBLIC_API_URL || '';
+
 module.exports = {
   expo: {
     name: 'Openfy',
@@ -14,7 +17,7 @@ module.exports = {
           NSAllowsLocalNetworking: true,
         },
         NSLocalNetworkUsageDescription:
-          'Openfy usa rede local durante desenvolvimento para buscar música e letras no seu computador.',
+          'Openfy conecta ao servidor Expo apenas durante desenvolvimento.',
       },
       icon: {
         light: './assets/images/app-icon/openfy-light.png',
@@ -39,6 +42,7 @@ module.exports = {
     },
     web: {
       bundler: 'metro',
+      output: 'server',
       favicon: './assets/images/app-icon/openfy-light.png',
     },
     plugins: [
@@ -81,7 +85,7 @@ module.exports = {
     extra: {
       clientID: process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID || process.env.CLIENT_ID || '',
       tokenKey: process.env.TOKEN_KEY || 'spotify_token',
-      musicServerUrl: process.env.EXPO_PUBLIC_MUSIC_SERVER_URL || '',
+      musicServerUrl: apiOrigin,
       refreshTokenKey: process.env.REFRESH_TOKEN_KEY || 'spotify_refresh_token',
       expirationKey: process.env.EXPIRATION_KEY || 'spotify_expiration_key',
       authorizationEndpoint:
@@ -89,7 +93,7 @@ module.exports = {
         'https://accounts.spotify.com/authorize',
       tokenEndpoint:
         process.env.TOKEN_ENDPOINT || 'https://accounts.spotify.com/api/token',
-      router: { origin: false },
+      router: {},
       eas: { projectId: '33b0281a-b127-47fe-ab16-e94caf272493' },
     },
   },

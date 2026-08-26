@@ -416,12 +416,20 @@ export const fetchLyrics = async (
           source: 'backend',
         };
       }
+      console.warn(
+        `[LyricsService] Backend rejected lyrics identity for "${artistName} - ${trackName}".`
+      );
+    } else {
+      console.warn(
+        `[LyricsService] Backend returned HTTP ${bRes.status} for "${artistName} - ${trackName}".`
+      );
     }
-  } catch {}
-
-  // iOS must use the same canonical verifier as the backend. Direct provider
-  // fallback can return a different track with a similar title.
-  if (Platform.OS === 'ios') return null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[LyricsService] Backend unavailable at ${MUSIC_SERVER_URL || 'unavailable'} for "${artistName} - ${trackName}": ${message}. Using strict provider fallback.`
+    );
+  }
 
   let exactLyrics: LyricsData | null = null;
 

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -17,6 +17,7 @@ import {
 } from '@context';
 import { MiniPlayer, FullPlayer } from '@components';
 import { registerBackgroundDownloadTask } from '@services';
+import { MUSIC_SERVER_URL } from '@config';
 
 import 'react-native-reanimated';
 
@@ -56,6 +57,12 @@ export default function RootLayout() {
 
   React.useEffect(() => {
     registerBackgroundDownloadTask().catch(() => {});
+  }, []);
+
+  React.useEffect(() => {
+    console.log(
+      `[MusicBackend] ${Platform.OS} endpoint: ${MUSIC_SERVER_URL || 'unavailable'}`
+    );
   }, []);
 
   if (!fontsLoaded) {

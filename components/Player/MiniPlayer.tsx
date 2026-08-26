@@ -82,7 +82,6 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
         <GlassSurface
           glass="regular"
           isInteractive={!!onPress}
-          tintColor="rgba(20, 22, 26, 0.64)"
           style={styles.glassContainer}
         >
           <View style={styles.contentRow}>
@@ -195,12 +194,11 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
   },
   pressableWrapper: {
-    borderRadius: 36,
-    overflow: 'hidden',
+    // Keep the native GlassView as the clipping surface. An outer clipped
+    // Pressable prevents iOS from composing the real Liquid Glass material.
+    alignSelf: 'stretch',
   },
   glassContainer: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.22)',
     borderRadius: 36,
     overflow: 'hidden',
     minHeight: 64,

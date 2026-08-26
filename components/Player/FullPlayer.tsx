@@ -41,6 +41,8 @@ import {
   moveLyricGap,
   moveLyricSegment,
   parseSpotifyLink,
+  resolveDirectYouTubeAudio,
+  resolveDirectYouTubeTrack,
   resizeLyricGapEnd,
   resizeLyricGapStart,
   resizeLyricSegmentEnd,
@@ -48,6 +50,7 @@ import {
 } from '@services';
 import { GlassSurface, LoggedPressable } from '../native';
 import { LyricSyncEditor } from './LyricSyncEditor';
+import { PlayerActionPill } from './PlayerActionPill';
 import { MarqueeText } from '../common/MarqueeText';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -307,29 +310,46 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     if (exactTrackUrl) return;
 
     let isMounted = true;
-    if (!MUSIC_SERVER_URL) return;
-    fetch(`${MUSIC_SERVER_URL}/api/music/resolve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: currentTrack.title,
-        artist: currentTrack.artistName,
-        durationMs: currentTrack.duration_ms,
-        spotifyId: currentTrack.spotifyId,
-      }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (isMounted) {
+    const resolveYoutubeUrl = async () => {
+      if (MUSIC_SERVER_URL) {
+        try {
+          const response = await fetch(`${MUSIC_SERVER_URL}/api/music/resolve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: currentTrack.title,
+              artist: currentTrack.artistName,
+              durationMs: currentTrack.duration_ms,
+              spotifyId: currentTrack.spotifyId,
+            }),
+          });
+          const data = await response.json();
           if (/^[A-Za-z0-9_-]{11}$/.test(data.source?.id || '')) {
-            setYoutubeUrl(`https://www.youtube.com/watch?v=${data.source.id}`);
-          } else {
-            const resolvedUrl = getExactYouTubeUrl(data.playback?.url);
-            if (resolvedUrl) setYoutubeUrl(resolvedUrl);
+            if (isMounted) {
+              setYoutubeUrl(`https://www.youtube.com/watch?v=${data.source.id}`);
+            }
+            return;
           }
+          const resolvedUrl = getExactYouTubeUrl(data.playback?.url);
+          if (resolvedUrl && isMounted) {
+            setYoutubeUrl(resolvedUrl);
+            return;
+          }
+        } catch {}
+      }
+
+      if (Platform.OS !== 'web') {
+        const direct = await resolveDirectYouTubeAudio({
+          title: currentTrack.title,
+          artist: currentTrack.artistName,
+          durationMs: currentTrack.duration_ms,
+        });
+        if (direct && isMounted) {
+          setYoutubeUrl(`https://www.youtube.com/watch?v=${direct.videoId}`);
         }
-      })
-      .catch(() => {});
+      }
+    };
+    void resolveYoutubeUrl();
 
     return () => {
       isMounted = false;
@@ -530,20 +550,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     setIsUpdatingAudio(true);
 
     try {
-      if (!MUSIC_SERVER_URL) throw new Error('Music server unavailable');
-      const response = await fetch(`${MUSIC_SERVER_URL}/api/music/youtube`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: newUrl }),
-      });
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => null);
-        throw new Error(
-          errorBody?.error?.code || 'Could not resolve YouTube track'
-        );
-      }
-
-      const data = (await response.json()) as {
+      type YouTubeTrackResponse = {
         track?: {
           videoId: string;
           youtubeUrl: string;
@@ -553,8 +560,53 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           albumName: string;
           imageURL: string;
           duration_ms: number;
+          format?: string;
         };
       };
+      let data: YouTubeTrackResponse | null = null;
+      let backendError: Error | null = null;
+
+      if (MUSIC_SERVER_URL) {
+        try {
+          const response = await fetch(`${MUSIC_SERVER_URL}/api/music/youtube`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: newUrl }),
+          });
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => null);
+            throw new Error(errorBody?.error?.code || 'Could not resolve YouTube track');
+          }
+          data = (await response.json()) as YouTubeTrackResponse;
+        } catch (error) {
+          backendError = error instanceof Error ? error : new Error(String(error));
+        }
+      } else {
+        backendError = new Error('Music server unavailable');
+      }
+
+      // Keep a device-local escape hatch when an installed native build cannot
+      // reach the deployed resolver. Browsers always require the backend proxy.
+      if (!data && Platform.OS !== 'web') {
+        const directTrack = await resolveDirectYouTubeTrack(parsedLink.id);
+        if (directTrack) {
+          data = {
+            track: {
+              videoId: directTrack.videoId,
+              youtubeUrl: `https://www.youtube.com/watch?v=${directTrack.videoId}`,
+              streamUrl: directTrack.url,
+              title: directTrack.title,
+              artistName: directTrack.artistName,
+              albumName: 'YouTube Track',
+              imageURL: directTrack.imageURL || '',
+              duration_ms: directTrack.durationMs,
+              format: directTrack.format,
+            },
+          };
+        }
+      }
+
+      if (!data) throw backendError || new Error('Could not resolve YouTube track');
       const track = data.track;
       if (!track?.streamUrl || currentTrackRef.current !== trackBeingEdited)
         return;
@@ -579,8 +631,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     } catch (error) {
       Alert.alert(
         'Não foi possível atualizar',
-        error instanceof Error &&
-          error.message === YOUTUBE_STREAM_UNAVAILABLE_ERROR
+        error instanceof Error && error.message === YOUTUBE_STREAM_UNAVAILABLE_ERROR
           ? YOUTUBE_STREAM_UNAVAILABLE_MESSAGE
           : 'Verifique o link e tente novamente.'
       );
@@ -1104,50 +1155,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   />
                 </GlassSurface>
               ) : (
-                <GlassSurface
-                  glass="regular"
-                  isInteractive
-                  style={styles.centerActionPill}
-                >
-                  <LoggedPressable
-                    onPress={() => setIsLiked(!isLiked)}
-                    style={styles.pillSegment}
-                  >
-                    <Ionicons
-                      name={isLiked ? 'heart' : 'heart-outline'}
-                      size={19}
-                      color={isLiked ? '#FF3B30' : 'rgba(255,255,255,0.8)'}
-                    />
-                  </LoggedPressable>
-
-                  <View style={styles.pillDivider} />
-
-                  <LoggedPressable
-                    onPress={openLyricsView}
-                    style={styles.pillSegment}
-                  >
-                    <Ionicons
-                      name="musical-note"
-                      size={19}
-                      color="rgba(255,255,255,0.8)"
-                    />
-                  </LoggedPressable>
-
-                  <View style={styles.pillDivider} />
-
-                  <LoggedPressable
-                    style={styles.pillSegment}
-                    onPress={handleOpenYoutubeMenu}
-                    accessibilityRole="button"
-                    accessibilityLabel="Opções do YouTube"
-                  >
-                    <Ionicons
-                      name="ellipsis-horizontal"
-                      size={19}
-                      color="rgba(255,255,255,0.8)"
-                    />
-                  </LoggedPressable>
-                </GlassSurface>
+                <PlayerActionPill
+                  isLiked={isLiked}
+                  onToggleLike={() => setIsLiked(!isLiked)}
+                  onOpenLyrics={openLyricsView}
+                  onOpenOptions={handleOpenYoutubeMenu}
+                />
               )}
 
               {/* Right Pill: YouTube Button with Clean Glass Theme */}
@@ -1650,13 +1663,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  centerActionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 44,
-    paddingHorizontal: 16,
-    borderRadius: 22,
-  },
   lyricsTrackPill: {
     height: 44,
     paddingHorizontal: 20,
@@ -1672,17 +1678,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   lyricsTrackPillMarquee: { flex: 1 },
-  pillSegment: {
-    paddingHorizontal: 12,
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pillDivider: {
-    width: 1,
-    height: 16,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-  },
   progressContainer: {
     width: '100%',
     marginVertical: 8,

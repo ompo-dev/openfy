@@ -1,34 +1,31 @@
-jest.mock('@config', () => ({
-  MUSIC_SERVER_URL: 'http://music.test',
-}));
-
 jest.mock('../../audio/audioResolver', () => ({
-  getPlayableAudioUrl: (url: string) => `proxy:${url}`,
+  resolveAudioUrl: jest.fn(),
 }));
 
 import { refreshHomeTracks } from '../homeTrackRefresh';
+import { resolveAudioUrl } from '../../audio/audioResolver';
+import { Platform } from 'react-native';
+
+const resolveAudioUrlMock = resolveAudioUrl as jest.Mock;
 
 describe('refreshHomeTracks', () => {
-  const fetchMock = jest.fn();
+  const originalPlatform = Platform.OS;
 
   beforeEach(() => {
-    fetchMock.mockReset();
-    global.fetch = fetchMock;
+    resolveAudioUrlMock.mockReset();
+  });
+
+  afterEach(() => {
+    Object.defineProperty(Platform, 'OS', {
+      configurable: true,
+      value: originalPlatform,
+    });
   });
 
   it('uses canonical metadata and a playable stream for every matching Home card', async () => {
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        source: { streamUrl: 'https://media.test/track.m4a' },
-        track: {
-          title: 'Título canônico',
-          artistName: 'Artista canônico',
-          albumName: 'Álbum canônico',
-          imageURL: 'https://images.test/cover.jpg',
-          duration_ms: 181000,
-        },
-      }),
+    resolveAudioUrlMock.mockResolvedValue({
+      url: 'https://media.test/track.m4a',
+      imageURL: 'https://images.test/cover.jpg',
     });
 
     const onTrackResolved = jest.fn();
@@ -47,35 +44,34 @@ describe('refreshHomeTracks', () => {
       onTrackResolved
     );
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://music.test/api/music/resolve',
-      expect.objectContaining({
-        method: 'POST',
-        body: expect.stringContaining('"includeLyrics":false'),
-      })
+    expect(resolveAudioUrlMock).toHaveBeenCalledWith(
+      'Título original',
+      'Artista original',
+      'source-id',
+      180000
     );
     expect(refreshed).toEqual({
       'home-card': expect.objectContaining({
         spotifyId: 'source-id',
-        title: 'Título canônico',
-        artistName: 'Artista canônico',
-        albumName: 'Álbum canônico',
+        title: 'Título original',
+        artistName: 'Artista original',
+        albumName: 'Single',
         imageURL: 'https://images.test/cover.jpg',
-        duration_ms: 181000,
-        streamUrl: 'proxy:https://media.test/track.m4a',
+        duration_ms: 180000,
+        streamUrl: 'https://media.test/track.m4a',
         streamExpiresAt: expect.any(Number),
       }),
     });
     expect(onTrackResolved).toHaveBeenCalledWith(
       expect.objectContaining({ key: 'home-card' }),
       expect.objectContaining({
-        streamUrl: 'proxy:https://media.test/track.m4a',
+        streamUrl: 'https://media.test/track.m4a',
       })
     );
   });
 
   it('does not replace the visible card when its audio source cannot be verified', async () => {
-    fetchMock.mockResolvedValue({ ok: false });
+    resolveAudioUrlMock.mockResolvedValue(null);
 
     await expect(
       refreshHomeTracks([
@@ -90,5 +86,28 @@ describe('refreshHomeTracks', () => {
         },
       ])
     ).resolves.toEqual({});
+  });
+
+  it('does not resolve every Home card before a web user requests playback', async () => {
+    Object.defineProperty(Platform, 'OS', {
+      configurable: true,
+      value: 'web',
+    });
+
+    await expect(
+      refreshHomeTracks([
+        {
+          key: 'web-card',
+          spotifyId: 'source-id',
+          title: 'Título',
+          artistName: 'Artista',
+          albumName: 'Single',
+          imageURL: '',
+          duration_ms: 180000,
+        },
+      ])
+    ).resolves.toEqual({});
+
+    expect(resolveAudioUrlMock).not.toHaveBeenCalled();
   });
 });

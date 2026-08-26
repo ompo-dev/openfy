@@ -1,7 +1,6 @@
-import { MUSIC_SERVER_URL } from '@config';
-import { fetchWithTimeout } from '@utils';
+import { Platform } from 'react-native';
 
-import { getPlayableAudioUrl } from '../audio/audioResolver';
+import { resolveAudioUrl } from '../audio/audioResolver';
 import { preloadAudio } from '../audio/playerService';
 
 export type HomeTrackSeed = {
@@ -17,17 +16,6 @@ export type HomeTrackSeed = {
 export type RefreshedHomeTrack = Omit<HomeTrackSeed, 'key'> & {
   streamUrl?: string;
   streamExpiresAt?: number;
-};
-
-type ResolveResponse = {
-  source?: { streamUrl?: string; id?: string };
-  track?: {
-    title?: string;
-    artistName?: string;
-    albumName?: string;
-    imageURL?: string;
-    duration_ms?: number;
-  };
 };
 
 const HOME_STREAM_TTL_MS = 10 * 60_000;
@@ -69,42 +57,40 @@ const resolveHomeTrack = (track: HomeTrackSeed) => {
   if (active) return active;
 
   const request = runQueuedResolve(async (): Promise<RefreshedHomeTrack | null> => {
-    if (!MUSIC_SERVER_URL) return null;
-
     try {
-      const response = await fetchWithTimeout(
-        `${MUSIC_SERVER_URL}/api/music/resolve`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: track.title,
-            artist: track.artistName,
-            durationMs: track.duration_ms,
-            includeLyrics: false,
-          }),
-        },
-        15_000
+      // Reuse playback's resolver: in an IPA it resolves directly on device;
+      // in Expo development it can still use the local API route.
+      const resolved = await resolveAudioUrl(
+        track.title,
+        track.artistName,
+        track.spotifyId,
+        track.duration_ms
       );
-      if (!response.ok) return null;
-
-      const data = (await response.json()) as ResolveResponse;
-      if (!data.source?.streamUrl) return null;
+      if (!resolved?.url) {
+        console.warn(
+          `[HomeRefresh] No verified stream for "${track.artistName} - ${track.title}".`
+        );
+        return null;
+      }
 
       const streamExpiresAt = Date.now() + HOME_STREAM_TTL_MS;
-      const streamUrl = getPlayableAudioUrl(data.source.streamUrl);
+      const streamUrl = resolved.url;
       void preloadAudio(streamUrl);
       return {
         spotifyId: track.spotifyId,
-        title: data.track?.title || track.title,
-        artistName: data.track?.artistName || track.artistName,
-        albumName: data.track?.albumName || track.albumName,
-        imageURL: data.track?.imageURL || track.imageURL,
-        duration_ms: data.track?.duration_ms || track.duration_ms,
+        title: track.title,
+        artistName: track.artistName,
+        albumName: track.albumName,
+        imageURL: resolved.imageURL || track.imageURL,
+        duration_ms: track.duration_ms,
         streamUrl,
         streamExpiresAt,
       };
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[HomeRefresh] Resolution failed for "${track.artistName} - ${track.title}": ${message}`
+      );
       return null;
     }
   });
@@ -129,6 +115,11 @@ export const refreshHomeTracks = async (
     refreshed: RefreshedHomeTrack
   ) => void
 ): Promise<Record<string, RefreshedHomeTrack>> => {
+  // Resolving every visible card starts several yt-dlp processes. On web that
+  // starves the actual play/download request, so resolve only after a user
+  // chooses a track.
+  if (Platform.OS === 'web') return {};
+
   const unique = tracks.filter(
     (track, index) =>
       tracks.findIndex(

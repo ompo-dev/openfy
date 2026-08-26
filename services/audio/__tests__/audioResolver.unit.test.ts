@@ -2,119 +2,142 @@ jest.mock('@config', () => ({
   MUSIC_SERVER_URL: 'http://192.168.100.27:3001',
 }));
 
-jest.mock('react-native', () => ({
-  Platform: { OS: 'web' },
+jest.mock('../directYouTubeResolver', () => ({
+  resolveDirectYouTubeAudio: jest.fn(),
 }));
 
 import { getPlayableAudioUrl, resolveAudioUrl } from '../audioResolver';
+import { resolveDirectYouTubeAudio } from '../directYouTubeResolver';
+import { Platform } from 'react-native';
+
+const directYouTubeMock = resolveDirectYouTubeAudio as jest.Mock;
 
 describe('getPlayableAudioUrl', () => {
-  it('routes provider streams through the configured backend proxy', () => {
+  it('keeps provider streams direct on native builds', () => {
     expect(getPlayableAudioUrl('https://r1.googlevideo.com/audio.m4a')).toBe(
-      'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fr1.googlevideo.com%2Faudio.m4a'
+      'https://r1.googlevideo.com/audio.m4a'
     );
   });
 
-  it('rewrites an old proxy URL instead of proxying it twice', () => {
+  it('unwraps old proxy URLs on native builds', () => {
     expect(
       getPlayableAudioUrl(
         'http://localhost:3001/api/audio/proxy?url=https%3A%2F%2Fcf-media.sndcdn.com%2Ftrack.mp3'
       )
     ).toBe(
-      'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fcf-media.sndcdn.com%2Ftrack.mp3'
+      'https://cf-media.sndcdn.com/track.mp3'
     );
   });
-
 });
 
 describe('resolveAudioUrl', () => {
   const fetchMock = jest.fn();
+  const originalPlatform = Platform.OS;
 
   beforeEach(() => {
     fetchMock.mockReset();
+    directYouTubeMock.mockReset();
+    directYouTubeMock.mockResolvedValue(null);
     global.fetch = fetchMock;
   });
 
-  it('falls back to the strict canonical lookup when an exact YouTube stream expires', async () => {
-    fetchMock
-      .mockResolvedValueOnce({ ok: false })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          source: {
-            streamUrl: 'https://media.test/canonical.m4a',
-            provider: 'youtube',
-            id: 'm1a_GqJf02M',
-          },
-          track: { title: 'Faixa canônica' },
-        }),
-      });
+  afterEach(() => {
+    Object.defineProperty(Platform, 'OS', {
+      configurable: true,
+      value: originalPlatform,
+    });
+  });
+
+  it('keeps a client-resolved iOS stream direct instead of sending it back through a proxy', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 503 });
+    directYouTubeMock.mockResolvedValueOnce({
+      videoId: 'V1M1hYxmRvA',
+      url: 'https://media.youtube.test/mafinoso.m4a',
+      format: 'm4a',
+    });
 
     await expect(
-      resolveAudioUrl('Faixa canônica', 'Artista canônico', 'yt_12345678901', 180000)
+      resolveAudioUrl('Mafioso', 'ÉoDan', 'spotify_id', 237000)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fmedia.test%2Fcanonical.m4a',
+      url: 'https://media.youtube.test/mafinoso.m4a',
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+    expect(directYouTubeMock).toHaveBeenCalledWith({
+      artist: 'ÉoDan',
+      durationMs: 237000,
+      title: 'Mafioso',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
       'http://192.168.100.27:3001/api/music/resolve',
       expect.objectContaining({ method: 'POST' })
     );
   });
 
-  it('accepts the Next API response envelope for backend streams', async () => {
+  it('uses the configured backend before invoking the native fallback', async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
-        success: true,
         data: {
           source: {
-            id: 'm1a_GqJf02M',
-            streamUrl: 'https://media.test/canonical.m4a',
+            streamUrl: 'https://music.test/api/audio/youtube?videoId=12345678901',
             provider: 'youtube',
+            format: 'm4a',
           },
-          track: { title: 'Gods Plan' },
+          track: { title: 'Faixa do servidor' },
         },
       }),
     });
+    directYouTubeMock.mockResolvedValueOnce({
+      videoId: 'V1M1hYxmRvA',
+      url: 'https://media.youtube.test/fallback.m4a',
+      format: 'm4a',
+    });
 
     await expect(
-      resolveAudioUrl("God's Plan", 'Drake', '5b8WiNjA6ihEvaeB9J3eyQ', 198973)
+      resolveAudioUrl('Faixa do servidor', 'Artista', 'server_id', 180000)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fmedia.test%2Fcanonical.m4a',
+      url: 'https://music.test/api/audio/youtube?videoId=12345678901',
+    });
+    expect(directYouTubeMock).not.toHaveBeenCalled();
+  });
+
+  it('tries the configured backend before an exact iPhone fallback', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+    await expect(
+      resolveAudioUrl('Faixa canônica', 'Artista canônico', 'yt_12345678901', 180000)
+    ).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('192.168.100.27:3001'),
+      expect.anything()
+    );
+  });
+
+  it('keeps iPhone on a strict direct fallback when the backend is unavailable', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) });
+    directYouTubeMock.mockResolvedValueOnce({
+      videoId: 'abc123DEF45',
+      url: 'https://media.test/direct-canonical.m4a',
+      format: 'm4a',
+    });
+
+    await expect(
+      resolveAudioUrl('Faixa canônica', 'Artista canônico', 'spotify_id', 180000)
+    ).resolves.toMatchObject({
+      source: 'youtube',
+      url: 'https://media.test/direct-canonical.m4a',
     });
   });
 
-  it('accepts the playback URL returned by the backend', async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        success: true,
-        data: {
-          playback: {
-            url: 'https://media.test/playback.m4a',
-            provider: 'youtube',
-          },
-          track: { title: 'Gods Plan' },
-        },
-      }),
+  it('does not call browser-only CORS fallbacks after the web backend fails', async () => {
+    Object.defineProperty(Platform, 'OS', {
+      configurable: true,
+      value: 'web',
     });
+    fetchMock.mockRejectedValueOnce(new Error('backend timeout'));
 
     await expect(
-      resolveAudioUrl('Resposta do player', 'Servidor de teste', 'playback-url-001', 212000)
-    ).resolves.toMatchObject({
-      source: 'youtube',
-      url: 'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fmedia.test%2Fplayback.m4a',
-    });
-  });
-
-  it('does not call CORS-prone browser providers after a backend miss on web', async () => {
-    fetchMock.mockResolvedValue({ ok: false });
-
-    await expect(
-      resolveAudioUrl('Pique Narutão', 'Sidney Scaccio', '5b8WiNjA6ihEvaeB9J3eyQ', 181834)
+      resolveAudioUrl('Faixa web', 'Artista web', 'web-regression', 180000)
     ).resolves.toBeNull();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -122,5 +145,12 @@ describe('resolveAudioUrl', () => {
       'http://192.168.100.27:3001/api/music/resolve',
       expect.objectContaining({ method: 'POST' })
     );
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://192.168.100.27:3001/api/music/resolve',
+      expect.objectContaining({ signal: expect.anything() })
+    );
+    expect(
+      JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    ).toMatchObject({ includeLyrics: false });
   });
 });

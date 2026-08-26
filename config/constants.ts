@@ -101,13 +101,13 @@ const serverUrlFromDevelopmentHost = (value?: string) => {
     const host = url.hostname.includes(':')
       ? `[${url.hostname}]`
       : url.hostname;
-    return `http://${host}:3001`;
+    return `http://${host}${url.port ? `:${url.port}` : ''}`;
   } catch {
     return '';
   }
 };
 
-/** Uses Metro's LAN address on a physical device when local backend is selected. */
+/** Uses Expo Router API Routes on the same Metro origin during development. */
 export const resolveMusicServerUrl = ({
   configuredUrl,
   developmentHost,
@@ -120,7 +120,11 @@ export const resolveMusicServerUrl = ({
     return configured;
   }
 
-  if (platform === 'web') return configured || 'http://localhost:3001';
+  if (platform === 'web') {
+    if (configured) return configured;
+    if (typeof window !== 'undefined') return window.location.origin;
+    return '';
+  }
 
   return serverUrlFromDevelopmentHost(developmentHost);
 };
@@ -140,11 +144,11 @@ const developmentHost = [
   runtimeManifest?.extra?.expoGo?.debuggerHost,
   legacyManifest?.hostUri,
   legacyManifest?.debuggerHost,
+  Constants.linkingUri,
   Constants.experienceUrl,
 ].find((host): host is string => typeof host === 'string' && host.length > 0);
 
-// A phone's localhost is the phone. Expo Go provides Metro's LAN host, so
-// iPhone reaches the same local Node backend that web uses.
+// Expo Go provides Metro's host, where Expo Router serves the app API Routes.
 export const MUSIC_SERVER_URL = resolveMusicServerUrl({
   configuredUrl: configuredMusicServerUrl,
   developmentHost,

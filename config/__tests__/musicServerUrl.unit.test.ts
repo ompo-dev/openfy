@@ -1,23 +1,34 @@
 import { resolveMusicServerUrl } from '../constants';
 
 describe('resolveMusicServerUrl', () => {
-  it('keeps localhost for web development', () => {
-    expect(
-      resolveMusicServerUrl({
-        configuredUrl: 'http://localhost:3001',
-        platform: 'web',
-      })
-    ).toBe('http://localhost:3001');
+  it('uses the current web origin when no API origin is configured', () => {
+    const originalWindow = global.window;
+    Object.defineProperty(global, 'window', {
+      configurable: true,
+      value: { location: { origin: 'http://localhost:8081' } },
+    });
+
+    try {
+      expect(
+        resolveMusicServerUrl({
+          platform: 'web',
+        })
+      ).toBe('http://localhost:8081');
+    } finally {
+      Object.defineProperty(global, 'window', {
+        configurable: true,
+        value: originalWindow,
+      });
+    }
   });
 
-  it('derives the LAN backend from Metro for an iPhone', () => {
+  it('uses the Expo API Route origin on an iPhone during development', () => {
     expect(
       resolveMusicServerUrl({
-        configuredUrl: 'http://localhost:3001',
         developmentHost: '192.168.100.27:8081',
         platform: 'ios',
       })
-    ).toBe('http://192.168.100.27:3001');
+    ).toBe('http://192.168.100.27:8081');
   });
 
   it('uses an explicitly configured non-loopback server on native', () => {

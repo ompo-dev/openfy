@@ -12,6 +12,7 @@ import {
   evaluateCandidateMatch,
   hasUnwantedForbiddenWords,
 } from '../canonical/canonicalMatcher';
+import { resolveDirectYouTubeAudio } from './directYouTubeResolver';
 
 export type ResolvedAudio = {
   url: string;
@@ -33,38 +34,30 @@ type BackendResolveSource = {
 
 type BackendResolvePayload = {
   source?: BackendResolveSource;
-  playback?: BackendResolveSource & {
-    directUrl?: string;
-    url?: string;
-  };
-  track?: {
-    title?: string;
-    imageURL?: string;
-  };
-  artwork?: {
-    url?: string;
-  };
+  playback?: BackendResolveSource & { directUrl?: string; url?: string };
+  track?: { title?: string; imageURL?: string };
+  artwork?: { url?: string };
 };
 
 type BackendResolveResponse = BackendResolvePayload & {
   data?: BackendResolvePayload;
-  error?: {
-    code?: string;
-    message?: string;
-  };
+  error?: { code?: string; message?: string };
 };
 
 const unwrapBackendResolvePayload = (
-  data: BackendResolveResponse
-): BackendResolvePayload => data.data || data;
+  response: BackendResolveResponse
+): BackendResolvePayload => response.data || response;
 
-const requiresCanonicalBackend = Platform.OS === 'ios';
 const AUDIO_RESOLVE_TTL_MS = 8 * 60_000;
+const WEB_BACKEND_TIMEOUT_MS = 120_000;
 const resolvedAudioCache = new Map<
   string,
   { value: ResolvedAudio; expiresAt: number }
 >();
 const activeAudioResolves = new Map<string, Promise<ResolvedAudio | null>>();
+
+const errorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
 
 const getAudioResolveKey = (
   trackName: string,
@@ -84,21 +77,28 @@ const getAudioResolveKey = (
     .toLowerCase();
 
 /**
- * Keep the original download contract: the resolver returns the provider's
- * signed URL and the server only relays it through the safe audio proxy.
- * Native clients can therefore persist the completed local file instead of a
- * server endpoint that changes its source between byte-range requests.
+ * The backend proxy refreshes compatibility with provider streams for every
+ * client. Native must use it too: signed provider URLs behave differently in
+ * AVFoundation and may expire while a background download waits.
  */
 export const getPlayableAudioUrl = (streamUrl: string): string =>
   (() => {
-    if (!MUSIC_SERVER_URL) return streamUrl;
-
     try {
       const input = new URL(streamUrl);
       const proxiedSource =
         input.pathname === '/api/audio/proxy'
           ? input.searchParams.get('url') || ''
           : streamUrl;
+
+      // Native URLSession downloads signed provider URLs itself. Sending them
+      // back through Metro makes an iPhone depend on a dev server and breaks
+      // sideloaded builds. Unwrap stale proxy URLs before every native play or
+      // download attempt.
+      if (Platform.OS !== 'web') {
+        return /^https:\/\//i.test(proxiedSource) ? proxiedSource : streamUrl;
+      }
+
+      if (!MUSIC_SERVER_URL) return streamUrl;
       return /^https:\/\//i.test(proxiedSource)
         ? `${MUSIC_SERVER_URL}/api/audio/proxy?url=${encodeURIComponent(proxiedSource)}`
         : streamUrl;
@@ -115,43 +115,54 @@ const getYouTubeVideoIdFromTrackId = (trackId?: string): string | null => {
 const resolveExactYouTubeVideo = async (
   videoId: string
 ): Promise<ResolvedAudio | null> => {
-  if (!MUSIC_SERVER_URL) return null;
-
-  try {
-    const response = await fetchWithHermesTimeout(
-      `${MUSIC_SERVER_URL}/api/music/youtube`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: `https://www.youtube.com/watch?v=${videoId}`,
-        }),
-      },
-      8000
-    );
-    if (!response.ok) return null;
-
-    const data = (await response.json()) as {
-      track?: {
-        videoId?: string;
-        streamUrl?: string;
-        imageURL?: string;
-        format?: string;
+  if (MUSIC_SERVER_URL) {
+    try {
+      const response = await fetchWithHermesTimeout(
+        `${MUSIC_SERVER_URL}/api/music/youtube`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${videoId}` }),
+        },
+        WEB_BACKEND_TIMEOUT_MS
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        track?: { videoId?: string; streamUrl?: string; imageURL?: string; format?: string };
       };
-    };
-    if (data.track?.videoId !== videoId || !data.track.streamUrl) return null;
-
-    return {
-      url: getPlayableAudioUrl(data.track.streamUrl),
-      quality: 'high',
-      format: data.track.format || 'm4a',
-      source: 'youtube',
-      confidence: 100,
-      imageURL: data.track.imageURL,
-    };
-  } catch {
-    return null;
+      if (response.ok && data.track?.videoId === videoId && data.track.streamUrl) {
+        return {
+          url: getPlayableAudioUrl(data.track.streamUrl),
+          quality: 'high',
+          format: data.track.format || 'm4a',
+          source: 'youtube',
+          confidence: 100,
+          imageURL: data.track.imageURL,
+        };
+      }
+      console.warn(
+        `[AudioResolver] Exact YouTube backend returned HTTP ${response.status ?? 'unknown'}.`
+      );
+    } catch (error) {
+      console.warn(
+        `[AudioResolver] Exact YouTube backend failed at ${MUSIC_SERVER_URL}: ${errorMessage(error)}`
+      );
+    }
   }
+
+  // Native retains a local fallback for a temporarily unavailable deployment.
+  // Web never tries this path because browser media fetches need the proxy.
+  if (Platform.OS === 'web') return null;
+  const direct = await resolveDirectYouTubeAudio({ videoId });
+  return direct
+    ? {
+        url: direct.url,
+        quality: 'high',
+        format: direct.format,
+        source: 'youtube',
+        confidence: 100,
+        imageURL: direct.imageURL,
+      }
+    : null;
 };
 
 /**
@@ -640,77 +651,123 @@ const resolveAudioUrlInternal = async (
   const primaryArtist = isUnknownArtist ? '' : artistName;
 
   console.log(
-    `[AudioResolver] Resolving Audio for Canonical: "${artistName} - ${trackName}" (${durationMs || 0}ms)`
+    `[AudioResolver] ${Platform.OS} resolving "${artistName} - ${trackName}" (${durationMs || 0}ms), backend: ${MUSIC_SERVER_URL || 'unavailable'}`
   );
 
-  // 0. PRIMARY: Dedicated Node.js Resolution Backend API (Structured Entity & Strict Matching)
-  // Keep a server-side SoundCloud answer only as a fallback.  The server may
-  // have identified the exact official YouTube video but be unable to extract
-  // its stream; in that case the device must still try its YouTube resolver
-  // before accepting another provider.
+  // 0. PRIMARY: one remote resolver for web, Android and iPhone. This gives
+  // every build the same extraction and proxy contract after deployment.
   let backendFallback: ResolvedAudio | null = null;
-  try {
-    if (!MUSIC_SERVER_URL) throw new Error('Music server unavailable');
-    const backendRes = await fetchWithHermesTimeout(
-      `${MUSIC_SERVER_URL}/api/music/resolve`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: trackName,
-          artist: primaryArtist,
-          durationMs,
-          spotifyId,
-          releaseDate,
-        }),
-      },
-      15000
-    );
+  if (MUSIC_SERVER_URL) {
+    try {
+      const backendRes = await fetchWithHermesTimeout(
+        `${MUSIC_SERVER_URL}/api/music/resolve`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: trackName,
+            artist: primaryArtist,
+            durationMs,
+            spotifyId,
+            releaseDate,
+            includeLyrics: false,
+          }),
+        },
+        WEB_BACKEND_TIMEOUT_MS
+      );
+      const data = (await (
+        typeof backendRes.json === 'function'
+          ? backendRes.json().catch(() => ({}))
+          : Promise.resolve({})
+      )) as BackendResolveResponse;
 
-    const data = (await backendRes
-      .json()
-      .catch(() => ({}))) as BackendResolveResponse;
-    if (backendRes.ok) {
-      const payload = unwrapBackendResolvePayload(data);
-      const source = payload.source || payload.playback;
-      const streamUrl =
-        payload.source?.streamUrl ||
-        payload.playback?.directUrl ||
-        payload.playback?.streamUrl ||
-        payload.playback?.url;
-      if (streamUrl) {
-        console.log(
-          `[AudioResolver] Resolved Playable Stream via Backend Server: "${payload.track?.title}"`
-        );
-        const backendResult: ResolvedAudio = {
-          url: getPlayableAudioUrl(streamUrl),
-          quality: source?.quality || 'high',
-          format: source?.format || 'm4a',
-          source: source?.provider === 'youtube' ? 'youtube' : 'soundcloud',
-          confidence: Math.round((source?.score || 0.9) * 100),
-          imageURL: payload.track?.imageURL || payload.artwork?.url,
-        };
+      if (backendRes.ok) {
+        const payload = unwrapBackendResolvePayload(data);
+        const source = payload.source || payload.playback;
+        const streamUrl =
+          payload.source?.streamUrl ||
+          payload.playback?.directUrl ||
+          payload.playback?.streamUrl ||
+          payload.playback?.url;
+        if (streamUrl) {
+          console.log(
+            `[AudioResolver] Resolved Playable Stream via Backend Server: "${payload.track?.title}"`
+          );
+          const backendResult: ResolvedAudio = {
+            url: getPlayableAudioUrl(streamUrl),
+            quality: source?.quality || 'high',
+            format: source?.format || 'm4a',
+            source: source?.provider === 'youtube' ? 'youtube' : 'soundcloud',
+            confidence: Math.round((source?.score || 0.9) * 100),
+            imageURL: payload.track?.imageURL || payload.artwork?.url,
+          };
 
-        if (backendResult.source === 'youtube') {
-          return backendResult;
+          if (backendResult.source === 'youtube') {
+            return backendResult;
+          }
+
+          backendFallback = backendResult;
+        } else {
+          console.warn(
+            `[AudioResolver] Backend returned no playable stream for "${artistName} - ${trackName}".`
+          );
         }
-
-        backendFallback = backendResult;
+      } else if (data.error?.code) {
+        console.warn(
+          `[AudioResolver] Backend resolve failed with ${data.error.code}: ${data.error.message || 'no details'}`
+        );
+      } else {
+        console.warn(
+          `[AudioResolver] Backend resolve returned HTTP ${backendRes.status ?? 'unknown'} for "${artistName} - ${trackName}".`
+        );
       }
-    } else if (data.error?.code) {
+    } catch (error) {
       console.warn(
-        `[AudioResolver] Backend resolve failed with ${data.error.code}: ${data.error.message || 'no details'}`
+        `[AudioResolver] Backend resolve failed at ${MUSIC_SERVER_URL} for "${artistName} - ${trackName}": ${errorMessage(error)}`
       );
     }
-  } catch {}
+  } else {
+    console.warn(`[AudioResolver] Music server URL is empty on ${Platform.OS}.`);
+  }
 
-  // Browser fallbacks call public provider instances directly and therefore
-  // fail under CORS. iOS also requires the backend proxy for compatible
-  // background downloads. In both cases, a server miss must stay a miss.
-  if (requiresCanonicalBackend || Platform.OS === 'web') return backendFallback;
+  // Browser provider requests are blocked by CORS. The music backend/proxy
+  // is the only supported web resolver, so never turn a backend failure
+  // into a long sequence of public proxy requests.
+  if (Platform.OS === 'web') {
+    if (backendFallback?.url && !isPreviewUrl(backendFallback.url)) {
+      return backendFallback;
+    }
 
-  // 1. SECONDARY: Official YouTube channel/topic match. Keep original source
-  // priority even when the local backend is unavailable.
+    console.warn(
+      `[AudioResolver] Web backend returned no playable stream for "${artistName} - ${trackName}".`
+    );
+    return null;
+  }
+
+  // A physical native build can recover from an intermittent backend failure
+  // without returning to Metro or a browser-only provider route.
+  const directResult = await resolveDirectYouTubeAudio({
+    title: trackName,
+    artist: primaryArtist,
+    durationMs,
+  });
+  if (directResult?.url) {
+    console.log(
+      `[AudioResolver] Resolved direct native fallback: "${artistName} - ${trackName}"`
+    );
+    return {
+      url: directResult.url,
+      quality: 'high',
+      format: directResult.format,
+      source: 'youtube',
+      confidence: 100,
+      imageURL: directResult.imageURL,
+    };
+  }
+
+  // Keep the same strict title, artist and duration matching on every
+  // native platform. This lets iPhone recover when a local development
+  // backend is unavailable instead of failing every track at once.
   const ytResult = await resolveViaYouTubeTopic(
     trackName,
     primaryArtist,
@@ -735,5 +792,8 @@ const resolveAudioUrlInternal = async (
     return soundcloudResult;
   }
 
+  console.warn(
+    `[AudioResolver] No verified source found for "${artistName} - ${trackName}" on ${Platform.OS}.`
+  );
   return null;
 };
