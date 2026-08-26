@@ -13,19 +13,19 @@ import { Platform } from 'react-native';
 const directYouTubeMock = resolveDirectYouTubeAudio as jest.Mock;
 
 describe('getPlayableAudioUrl', () => {
-  it('keeps provider streams direct on native builds', () => {
+  it('routes provider streams through the configured backend proxy on native builds', () => {
     expect(getPlayableAudioUrl('https://r1.googlevideo.com/audio.m4a')).toBe(
-      'https://r1.googlevideo.com/audio.m4a'
+      'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fr1.googlevideo.com%2Faudio.m4a'
     );
   });
 
-  it('unwraps old proxy URLs on native builds', () => {
+  it('rewrites an old proxy URL to the configured backend on native builds', () => {
     expect(
       getPlayableAudioUrl(
         'http://localhost:3001/api/audio/proxy?url=https%3A%2F%2Fcf-media.sndcdn.com%2Ftrack.mp3'
       )
     ).toBe(
-      'https://cf-media.sndcdn.com/track.mp3'
+      'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fcf-media.sndcdn.com%2Ftrack.mp3'
     );
   });
 });
@@ -79,7 +79,7 @@ describe('resolveAudioUrl', () => {
       json: async () => ({
         data: {
           source: {
-            streamUrl: 'https://music.test/api/audio/youtube?videoId=12345678901',
+            streamUrl: 'https://rr1.googlevideo.com/videoplayback?itag=140',
             provider: 'youtube',
             format: 'm4a',
           },
@@ -97,7 +97,7 @@ describe('resolveAudioUrl', () => {
       resolveAudioUrl('Faixa do servidor', 'Artista', 'server_id', 180000)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'https://music.test/api/audio/youtube?videoId=12345678901',
+      url: 'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Frr1.googlevideo.com%2Fvideoplayback%3Fitag%3D140',
     });
     expect(directYouTubeMock).not.toHaveBeenCalled();
   });

@@ -76,10 +76,26 @@ const getAudioResolveKey = (
     .join('\u0000')
     .toLowerCase();
 
+const isProxyableProviderUrl = (value: string) => {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return (
+      host === 'googlevideo.com' ||
+      host.endsWith('.googlevideo.com') ||
+      host === 'sndcdn.com' ||
+      host.endsWith('.sndcdn.com') ||
+      host === 'soundcloud.com' ||
+      host.endsWith('.soundcloud.com')
+    );
+  } catch {
+    return false;
+  }
+};
+
 /**
- * The backend proxy refreshes compatibility with provider streams for every
- * client. Native must use it too: signed provider URLs behave differently in
- * AVFoundation and may expire while a background download waits.
+ * Provider URLs are signed for the machine that resolved them. Route known
+ * provider hosts through the same API server that created the URL so iOS,
+ * Android and Web do not receive a Googlevideo 403 on download.
  */
 export const getPlayableAudioUrl = (streamUrl: string): string =>
   (() => {
@@ -90,15 +106,8 @@ export const getPlayableAudioUrl = (streamUrl: string): string =>
           ? input.searchParams.get('url') || ''
           : streamUrl;
 
-      // Native URLSession downloads signed provider URLs itself. Sending them
-      // back through Metro makes an iPhone depend on a dev server and breaks
-      // sideloaded builds. Unwrap stale proxy URLs before every native play or
-      // download attempt.
-      if (Platform.OS !== 'web') {
-        return /^https:\/\//i.test(proxiedSource) ? proxiedSource : streamUrl;
-      }
-
-      if (!MUSIC_SERVER_URL) return streamUrl;
+      if (!isProxyableProviderUrl(proxiedSource)) return streamUrl;
+      if (!MUSIC_SERVER_URL) return proxiedSource;
       return /^https:\/\//i.test(proxiedSource)
         ? `${MUSIC_SERVER_URL}/api/audio/proxy?url=${encodeURIComponent(proxiedSource)}`
         : streamUrl;
