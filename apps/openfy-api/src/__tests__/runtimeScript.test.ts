@@ -15,6 +15,7 @@ describe('Next runtime scripts', () => {
   it('uses the browser-compatible YouTube client when extracting audio', async () => {
     const engine = await readFile(new URL('../legacyEngine.js', import.meta.url), 'utf8');
 
+    expect(engine).toContain('retrieve_player: true');
     expect(engine).toContain("format: 'best[ext=mp4]/bestaudio/best'");
     expect(engine).toContain("extractorArgs: 'youtube:player_client=web_safari,android,ios'");
   });

@@ -158,7 +158,7 @@ const getInnertubeClient = async (cookie) => {
         Innertube.create({
           generate_session_locally: true,
           retrieve_innertube_config: false,
-          retrieve_player: false,
+          retrieve_player: true,
           ...(cookie ? { cookie } : {}),
         })
       )
