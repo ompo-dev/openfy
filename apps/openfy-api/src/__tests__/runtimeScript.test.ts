@@ -47,6 +47,7 @@ describe('Next runtime scripts', () => {
       entrypoint: 'Dockerfile.vercel',
       runtime: 'container',
     });
+    expect(config.regions).toEqual(['gru1']);
     expect(config.rewrites).toEqual([
       { source: '/(.*)', destination: { service: 'audio' } },
     ]);
@@ -63,6 +64,7 @@ describe('Next runtime scripts', () => {
 
     expect(config.services.audio.runtime).toBe('container');
     expect(config.services.audio.entrypoint).toBe('Dockerfile.vercel');
+    expect(config.regions).toEqual(['gru1']);
     expect(dockerfile).toContain('FROM node:22-bookworm-slim');
     expect(dockerfile).toContain('python3');
   });
