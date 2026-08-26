@@ -23,12 +23,12 @@ describe('Next runtime scripts', () => {
     expect(engine).toContain("extractorArgs: 'youtube:player_client=web_safari,android,ios'");
   });
 
-  it('ships the persistent audio engine with Python for yt-dlp', async () => {
+  it('ships the persistent audio engine with Node and Python for yt-dlp', async () => {
     const dockerfile = await readFile(new URL('../../../../Dockerfile.vercel', import.meta.url), 'utf8');
 
     expect(dockerfile).toContain('python3');
-    expect(dockerfile).toContain('FROM oven/bun:1.3.14-debian');
-    expect(dockerfile).toContain('CMD ["sh", "-c", "bunx next start -H 0.0.0.0 -p ${PORT:-3000}"]');
+    expect(dockerfile).toContain('FROM node:22-bookworm-slim');
+    expect(dockerfile).toContain('node node_modules/next/dist/bin/next start');
   });
 
   it('routes public requests to the Vercel container service', async () => {
@@ -57,7 +57,7 @@ describe('Next runtime scripts', () => {
 
     expect(config.services.audio.runtime).toBe('container');
     expect(config.services.audio.entrypoint).toBe('Dockerfile.vercel');
-    expect(dockerfile).toContain('FROM oven/bun:1.3.14-debian');
+    expect(dockerfile).toContain('FROM node:22-bookworm-slim');
     expect(dockerfile).toContain('python3');
   });
 });
