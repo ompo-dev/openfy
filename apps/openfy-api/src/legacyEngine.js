@@ -185,7 +185,14 @@ const fetchYouTubeTrackViaInnertube = async (videoId, youtubeUrl) => {
     }),
   ]);
 
-  if (!stream?.url || !/^https:\/\//i.test(stream.url)) return null;
+  if (!stream?.url || !/^https:\/\//i.test(stream.url)) {
+    console.warn(`[YouTube Extractor] InnerTube returned no playable stream for ${videoId}:`, {
+      hasSessionCookie: Boolean(cookie),
+      mimeType: stream?.mime_type || null,
+      itag: stream?.itag || null,
+    });
+    return null;
+  }
 
   const details = info?.basic_info || {};
   const thumbnails = details.thumbnail || [];
@@ -644,7 +651,13 @@ async function fetchYouTubeTrack(videoId, { fresh = false } = {}) {
     };
     setCache(cacheKey, result, 1800);
     return result;
-  } catch {}
+  } catch (error) {
+    const details = String(error?.message || error || '')
+      .replace(/https?:\/\/\S+/g, '[url]')
+      .replace(/\s+/g, ' ')
+      .slice(0, 300);
+    console.warn(`[YouTube Extractor] ytdl-core failed for ${videoId}:`, details);
+  }
 
   // Do not replace an explicit YouTube URL with a similarly named SoundCloud
   // result. The caller can retry, but it must never receive another song.

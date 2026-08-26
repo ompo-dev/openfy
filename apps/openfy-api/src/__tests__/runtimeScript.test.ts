@@ -17,6 +17,8 @@ describe('Next runtime scripts', () => {
 
     expect(engine).toContain('retrieve_player: true');
     expect(engine).toContain('requestOptions: cookie ? { headers: { cookie } } : undefined');
+    expect(engine).toContain('InnerTube returned no playable stream');
+    expect(engine).toContain('ytdl-core failed');
     expect(engine).toContain("format: 'best[ext=mp4]/bestaudio/best'");
     expect(engine).toContain("extractorArgs: 'youtube:player_client=web_safari,android,ios'");
   });
