@@ -3,18 +3,22 @@
 import * as React from 'react';
 import {
   FlatList,
-  Image,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { Href, useFocusEffect, useRouter } from 'expo-router';
 import { Swipeable } from 'react-native-gesture-handler';
+import { getYouTubeArtistImage } from '@api';
 
 import {
   deleteDownloadedTrack,
+  getCachedArtistImage,
   getDownloadedTracks,
+  groupLocalAlbums,
+  groupLocalArtists,
   getLocalPlaylists,
   removeTrackFromLocalPlaylists,
   type DownloadedTrack,
@@ -25,14 +29,6 @@ import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { LoggedPressable } from '../native';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
-
-type LocalCollection = {
-  id: string;
-  title: string;
-  subtitle: string;
-  imageURL: string;
-  tracks: DownloadedTrack[];
-};
 
 const toPlayerTrack = (track: DownloadedTrack) => ({
   spotifyId: track.spotifyId,
@@ -49,7 +45,10 @@ export const OfflineLibrary = () => {
   const router = useRouter();
   const [tracks, setTracks] = React.useState<DownloadedTrack[]>([]);
   const [playlists, setPlaylists] = React.useState<LocalPlaylist[]>([]);
-  const { playDownloadedTrack, playWithQueue, currentTrack, playerState } = usePlayer();
+  const [artistImageURLs, setArtistImageURLs] = React.useState<Record<string, string>>({});
+  const requestedArtistImages = React.useRef(new Set<string>());
+  const loadingArtistImages = React.useRef(new Set<string>());
+  const { playWithQueue, currentTrack, playerState } = usePlayer();
   const {
     libraryRevision,
     librarySearchQuery,
@@ -80,10 +79,6 @@ export const OfflineLibrary = () => {
     loadLibrary();
   }, [libraryRevision, loadLibrary]);
 
-  const handlePlay = async (track: DownloadedTrack) => {
-    await playDownloadedTrack(track);
-  };
-
   const handleDelete = async (spotifyId: string) => {
     await deleteDownloadedTrack(spotifyId);
     await removeTrackFromLocalPlaylists(spotifyId);
@@ -104,6 +99,13 @@ export const OfflineLibrary = () => {
       ? [...filtered].sort((a, b) => a.title.localeCompare(b.title))
       : filtered;
   }, [librarySort, normalizedQuery, tracks]);
+  const handlePlay = async (startIndex: number) => {
+    await playWithQueue(
+      visibleTracks.map(toPlayerTrack),
+      startIndex,
+      'library:songs'
+    );
+  };
   const visiblePlaylists = React.useMemo(() => {
     const filtered = normalizedQuery
       ? playlists.filter((playlist) =>
@@ -119,53 +121,45 @@ export const OfflineLibrary = () => {
     () => new Map(tracks.map((track) => [track.spotifyId, track])),
     [tracks]
   );
-  const localAlbums = React.useMemo<LocalCollection[]>(() => {
-    const grouped = new Map<string, LocalCollection>();
-    tracks.forEach((track) => {
-      const title = track.albumName.trim() || 'Singles';
-      const id = `${title}\u0000${track.artistName}`.toLocaleLowerCase();
-      const current = grouped.get(id);
-      grouped.set(
-        id,
-        current
-          ? { ...current, tracks: [...current.tracks, track] }
-          : {
-              id,
-              title,
-              subtitle: track.artistName,
-              imageURL: track.localImagePath || track.imageURL,
-              tracks: [track],
-            }
+  const localAlbums = React.useMemo(() => groupLocalAlbums(tracks), [tracks]);
+  const localArtists = React.useMemo(() => groupLocalArtists(tracks), [tracks]);
+  React.useEffect(() => {
+    const artistsToLoad = localArtists.filter(
+      (artist) =>
+        !requestedArtistImages.current.has(artist.id) &&
+        !loadingArtistImages.current.has(artist.id)
+    );
+    if (artistsToLoad.length === 0) return;
+
+    artistsToLoad.forEach((artist) => loadingArtistImages.current.add(artist.id));
+    let active = true;
+    void Promise.all(
+      artistsToLoad.map(async (artist) => ({
+        id: artist.id,
+        imageURL: await getCachedArtistImage(artist.title, () =>
+          getYouTubeArtistImage(artist.title)
+        ),
+      }))
+    ).then((images) => {
+      images.forEach((image) => loadingArtistImages.current.delete(image.id));
+      if (!active) return;
+      const resolvedImages = images.filter(
+        (image): image is { id: string; imageURL: string } => Boolean(image.imageURL)
       );
+      if (resolvedImages.length === 0) return;
+      images.forEach((image) => requestedArtistImages.current.add(image.id));
+      setArtistImageURLs((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          resolvedImages.map((image) => [image.id, image.imageURL])
+        ),
+      }));
     });
-    return [...grouped.values()];
-  }, [tracks]);
-  const localArtists = React.useMemo<LocalCollection[]>(() => {
-    const grouped = new Map<string, LocalCollection>();
-    tracks.forEach((track) => {
-      track.artistName
-        .split(/\s*(?:,|&| feat\.?)\s*/i)
-        .filter(Boolean)
-        .forEach((artistName) => {
-          const title = artistName.trim();
-          const id = title.toLocaleLowerCase();
-          const current = grouped.get(id);
-          grouped.set(
-            id,
-            current
-              ? { ...current, tracks: [...current.tracks, track] }
-              : {
-                  id,
-                  title,
-                  subtitle: `${track.albumName || 'Single'}`,
-                  imageURL: track.localImagePath || track.imageURL,
-                  tracks: [track],
-                }
-          );
-        });
-    });
-    return [...grouped.values()];
-  }, [tracks]);
+
+    return () => {
+      active = false;
+    };
+  }, [localArtists]);
   const visibleCollections = React.useMemo(() => {
     const collections = libraryView === 'albums' ? localAlbums : localArtists;
     const filtered = normalizedQuery
@@ -180,7 +174,7 @@ export const OfflineLibrary = () => {
       : filtered;
   }, [librarySort, libraryView, localAlbums, localArtists, normalizedQuery]);
 
-  const renderTrack = ({ item }: { item: DownloadedTrack }) => {
+  const renderTrack = ({ item, index }: { item: DownloadedTrack; index: number }) => {
     const isCurrentTrack = currentTrack?.spotifyId === item.spotifyId;
     const isPlaying = isCurrentTrack && playerState.isPlaying;
 
@@ -202,12 +196,16 @@ export const OfflineLibrary = () => {
       >
         <LoggedPressable
           style={styles.trackItem}
-          onPress={() => handlePlay(item)}
+          onPress={() => void handlePlay(index)}
           accessibilityLabel={`Tocar ${item.title}`}
         >
           <View style={styles.trackContent}>
-            {item.imageURL ? (
-              <Image source={{ uri: item.imageURL }} style={styles.cover} />
+            {item.localImagePath || item.imageURL ? (
+              <Image
+                cachePolicy="memory-disk"
+                source={{ uri: item.localImagePath || item.imageURL }}
+                style={styles.cover}
+              />
             ) : (
               <View style={[styles.cover, styles.coverFallback]}>
                 <Ionicons name="musical-note" size={22} color="#888" />
@@ -242,10 +240,10 @@ export const OfflineLibrary = () => {
     const playlistTracks = item.trackIds
       .map((trackId) => tracksById.get(trackId))
       .filter((track): track is DownloadedTrack => Boolean(track));
-    const imageURLs = [
-      ...playlistTracks.map((track) => track.imageURL),
+    const imageURLs = [...new Set([
+      ...playlistTracks.map((track) => track.localImagePath || track.imageURL),
       ...(item.coverImageURLs || []),
-    ].filter(Boolean);
+    ].filter((url): url is string => Boolean(url)))];
 
     return (
       <LoggedPressable
@@ -268,23 +266,30 @@ export const OfflineLibrary = () => {
     );
   };
 
-  const renderCollection = ({ item }: { item: LocalCollection }) => {
+  const renderCollection = ({ item }: { item: (typeof visibleCollections)[number] }) => {
     const isArtist = libraryView === 'artists';
+    const imageURL = isArtist ? artistImageURLs[item.id] || '' : item.imageURL;
     return (
       <LoggedPressable
         accessibilityRole="button"
-        accessibilityLabel={`${isArtist ? 'Abrir artista' : 'Tocar álbum'} ${item.title}`}
+        accessibilityLabel={`${isArtist ? 'Abrir artista' : 'Abrir álbum'} ${item.title}`}
         onPress={() => {
           if (isArtist) {
             router.push(`/library/artist/local_artist_${encodeURIComponent(item.title)}` as Href);
             return;
           }
-          void playWithQueue(item.tracks.map(toPlayerTrack));
+          router.push(
+            `/library/album/local_album_${encodeURIComponent(item.id)}` as Href
+          );
         }}
         style={styles.playlistItem}
       >
-        {item.imageURL ? (
-          <Image source={{ uri: item.imageURL }} style={[styles.collectionCover, isArtist && styles.artistCover]} />
+        {imageURL ? (
+          <Image
+            cachePolicy="memory-disk"
+            source={{ uri: imageURL }}
+            style={[styles.collectionCover, isArtist && styles.artistCover]}
+          />
         ) : (
           <View style={[styles.collectionCover, styles.coverFallback, isArtist && styles.artistCover]}>
             <Ionicons name={isArtist ? 'person' : 'disc'} size={22} color="#888" />

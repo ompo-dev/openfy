@@ -43,6 +43,7 @@ module.exports = {
     },
     plugins: [
       'expo-router',
+      'expo-asset',
       [
         'expo-audio',
         {
@@ -78,8 +79,7 @@ module.exports = {
       reactCompiler: true,
     },
     extra: {
-      clientID: process.env.CLIENT_ID || '',
-      clientSecret: process.env.CLIENT_SECRET || '',
+      clientID: process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID || process.env.CLIENT_ID || '',
       tokenKey: process.env.TOKEN_KEY || 'spotify_token',
       musicServerUrl: process.env.EXPO_PUBLIC_MUSIC_SERVER_URL || '',
       refreshTokenKey: process.env.REFRESH_TOKEN_KEY || 'spotify_refresh_token',

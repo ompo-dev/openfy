@@ -14,6 +14,8 @@ jest.mock('expo-constants', () => ({
   },
 }));
 
+jest.mock('@config', () => ({ MUSIC_SERVER_URL: 'https://api.openfy.test' }));
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 
@@ -35,10 +37,8 @@ describe('spotifyGet', () => {
     mockedAxios.isAxiosError.mockReturnValue(true);
     mockedAxios.get
       .mockRejectedValueOnce({ response: { status: 401 } })
+      .mockResolvedValueOnce({ data: { accessToken: 'fresh-token' } } as any)
       .mockResolvedValueOnce({ data: { id: 'playlist' } } as any);
-    mockedAxios.post.mockResolvedValue({
-      data: { access_token: 'fresh-token', expires_in: 3600 },
-    } as any);
 
     await expect(spotifyGet<{ id: string }>('https://spotify.test/playlist')).resolves.toEqual(
       expect.objectContaining({ data: { id: 'playlist' } })
@@ -52,11 +52,15 @@ describe('spotifyGet', () => {
       })
     );
     expect(mockedAxios.get).toHaveBeenNthCalledWith(
-      2,
+      3,
       'https://spotify.test/playlist',
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer fresh-token' }),
       })
+    );
+    expect(mockedAxios.get).toHaveBeenNthCalledWith(
+      2,
+      'https://api.openfy.test/api/spotify/token'
     );
   });
 });

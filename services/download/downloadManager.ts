@@ -500,7 +500,7 @@ export const downloadCover = async (
 const downloadTrackInternal = async (
   track: DownloadTrackInput,
   audioUrl?: string,
-  audioFormat: string = 'mp3',
+  audioFormat?: string,
   onProgress?: (progress: number) => void
 ): Promise<DownloadedTrack | null> => {
   try {
@@ -513,12 +513,10 @@ const downloadTrackInternal = async (
     const trackId = `track_${track.spotifyId}`;
     let effectiveTrack = track;
 
-    // iOS can begin a background download after provider signatures expire.
-    // Resolve a fresh proxied stream at execution time on that platform.
-    let resolvedUrl = Platform.OS === 'ios' ? undefined : audioUrl || track.audioUrl;
+    let resolvedUrl = audioUrl || track.audioUrl;
     let format = audioFormat || track.audioFormat || 'mp3';
     if (resolvedUrl) {
-      resolvedUrl = getPlayableAudioUrl(resolvedUrl, track.spotifyId);
+      resolvedUrl = getPlayableAudioUrl(resolvedUrl);
     }
 
     // If no URL provided, resolve audio source
@@ -559,7 +557,11 @@ const downloadTrackInternal = async (
     if (cancelledDownloads.has(track.spotifyId)) return null;
 
     if (!resolvedUrl) {
-      throw new Error('Could not resolve audio stream URL');
+      // A resolver miss is terminal for this attempt. Keeping it in the
+      // persisted queue makes every Web startup retry the same unavailable
+      // provider stream and floods the app with errors.
+      await removePendingDownload(track.spotifyId);
+      return null;
     }
 
     // Download audio file
@@ -668,7 +670,7 @@ const downloadTrackInternal = async (
 export const downloadTrack = (
   track: DownloadTrackInput,
   audioUrl?: string,
-  audioFormat: string = 'mp3',
+  audioFormat?: string,
   onProgress?: (progress: number) => void
 ): Promise<DownloadedTrack | null> => {
   const active = activeDownloads.get(track.spotifyId);

@@ -2,28 +2,19 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
+import { MUSIC_SERVER_URL } from '@config';
+
 const refreshAccessToken = async (refreshToken: string) => {
   if (!Constants.expoConfig || !Constants.expoConfig.extra) {
     return null;
   }
 
-  const { tokenEndpoint, clientID, clientSecret } = Constants.expoConfig.extra;
+  if (!MUSIC_SERVER_URL) return null;
 
   try {
-    const response = await axios.post(
-      tokenEndpoint,
-      new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-        client_id: clientID as string,
-        client_secret: clientSecret as string,
-      }),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
-    );
+    const response = await axios.post(`${MUSIC_SERVER_URL}/api/spotify/refresh`, {
+      refreshToken,
+    });
 
     return response.data;
   } catch (error) {

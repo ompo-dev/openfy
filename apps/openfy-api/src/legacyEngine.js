@@ -5,14 +5,17 @@
 
 const http = require('http');
 const url = require('url');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
 const ytdl = require('@distube/ytdl-core');
 const youtubeDl = require('youtube-dl-exec');
 const { fetchAllowedAudioStream } = require('./audioStreamProxy');
 const { resolveYoutubeCookiesPath } = require('./youtubeCredentials');
-const { createInnertubeTrackResolver } = require('./youtubeInnertube');
 
 const PORT = process.env.PORT || 3001;
-const resolveYouTubeInnertubeTrack = createInnertubeTrackResolver();
+const execFileAsync = promisify(execFile);
+const YOUTUBE_BROWSER_CLIENTS = 'youtube:player_client=web_safari,android,ios';
+const YOUTUBE_SEARCH_PRINT_FORMAT = '%(id)s\t%(title)s\t%(channel)s\t%(duration)s\t%(view_count)s';
 
 // In-memory LRU-like TTL cache
 const cache = new Map();
@@ -117,23 +120,30 @@ function getArtistSearchName(artist) {
 
 function isCanonicalTitleMatch(candidateTitle, targetTitle) {
   const candidate = normalizeText(candidateTitle);
-  const target = normalizeText(targetTitle);
-  const escapedTarget = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // A numeric suffix is part of a song's identity. This rejects a different
-  // numbered song only when the requested title itself omits that number.
-  const hasUnexpectedContinuation =
-    !!target &&
-    new RegExp(`(?:^|\\s)${escapedTarget}\\s+\\d+\\b`).test(candidate);
+  const targets = [
+    targetTitle,
+    targetTitle.replace(/\s*[\[(]?\s*(?:remake|remastered(?:\s+\d{4})?)\s*[\])]?/gi, ' '),
+  ]
+    .map(normalizeText)
+    .filter(Boolean);
 
-  if (!target || hasUnexpectedContinuation) return false;
+  return targets.some((target) => {
+    const escapedTarget = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // A numeric suffix is part of a song's identity. This rejects a different
+    // numbered song only when the requested title itself omits that number.
+    const hasUnexpectedContinuation = new RegExp(
+      `(?:^|\\s)${escapedTarget}\\s+\\d+\\b`
+    ).test(candidate);
+    if (hasUnexpectedContinuation) return false;
 
-  const candidateWords = candidate.split(' ');
-  let candidateIndex = 0;
-  return target.split(' ').every((word) => {
-    const nextIndex = candidateWords.indexOf(word, candidateIndex);
-    if (nextIndex < 0) return false;
-    candidateIndex = nextIndex + 1;
-    return true;
+    const candidateWords = candidate.split(' ');
+    let candidateIndex = 0;
+    return target.split(' ').every((word) => {
+      const nextIndex = candidateWords.indexOf(word, candidateIndex);
+      if (nextIndex < 0) return false;
+      candidateIndex = nextIndex + 1;
+      return true;
+    });
   });
 }
 
@@ -183,15 +193,16 @@ function isCanonicalArtistMatch(candidateTitle, candidateArtist, targetArtist) {
     .filter((artist) => artist.length >= 3);
 
   const sourceArtist = normalizeText(candidateArtist);
+  const candidateContext = normalizeText(candidateTitle);
   if (isKnownArtist(candidateArtist)) {
     return artistAliases.some(
       (artist) =>
         sourceArtist.includes(artist) ||
-        sourceArtist.replace(/\s/g, '').includes(artist.replace(/\s/g, ''))
+        sourceArtist.replace(/\s/g, '').includes(artist.replace(/\s/g, '')) ||
+        candidateContext.includes(artist) ||
+        candidateContext.replace(/\s/g, '').includes(artist.replace(/\s/g, ''))
     );
   }
-
-  const candidateContext = normalizeText(candidateTitle);
 
   return artistAliases.some(
     (artist) =>
@@ -480,31 +491,24 @@ const getYouTubeVideoId = (input) => {
   }
 };
 
-async function fetchYouTubeTrack(videoId, forceRefresh = false) {
+async function fetchYouTubeTrack(videoId) {
   const cacheKey = `youtube_track:${videoId}`;
   const cached = getCached(cacheKey);
-  if (cached && !forceRefresh) return cached;
+  if (cached) return cached;
 
   const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-  // Prefer InnerTube's iOS client. It yields an AAC URL without spawning
-  // yt-dlp, which is the path YouTube currently rejects with its bot check.
-  const innertubeTrack = await resolveYouTubeInnertubeTrack(videoId);
-  if (innertubeTrack) {
-    setCache(cacheKey, innertubeTrack, 1800);
-    return innertubeTrack;
-  }
-
-  // yt-dlp is bundled through the existing youtube-dl-exec dependency and is
-  // kept current by its postinstall.  It is resilient to YouTube player-script
-  // changes that can leave ytdl-core with no playable formats.
+  // The Safari/Android clients still expose a progressive MP4 source for
+  // public videos when YouTube rejects the default web extractor as a bot.
+  // Prefer MP4 because it is playable by the browser and AVFoundation.
   try {
     const cookies = await resolveYoutubeCookiesPath();
     const details = await youtubeDl(youtubeUrl, {
       dumpSingleJson: true,
       noWarnings: true,
       noPlaylist: true,
-      format: 'bestaudio[ext=m4a]/bestaudio',
+      format: 'best[ext=mp4]/bestaudio/best',
+      extractorArgs: 'youtube:player_client=web_safari,android,ios',
       ...(cookies ? { cookies } : {}),
     });
     if (details?.id !== videoId || !details.url) return null;
@@ -519,7 +523,12 @@ async function fetchYouTubeTrack(videoId, forceRefresh = false) {
       imageURL: details.thumbnail || '',
       duration_ms: Number(details.duration || 0) * 1000,
       viewCount: Number(details.view_count || 0),
-      format: details.ext === 'webm' ? 'webm' : 'm4a',
+      format:
+        details.ext === 'webm'
+          ? 'webm'
+          : details.ext === 'mp4'
+            ? 'mp4'
+            : 'm4a',
     };
 
     setCache(cacheKey, result, 1800);
@@ -569,8 +578,12 @@ async function fetchYouTubeTrack(videoId, forceRefresh = false) {
 const streamAudioResponse = async (res, audioRes) => {
   const contentLength = audioRes.headers.get('content-length');
   const contentRange = audioRes.headers.get('content-range');
+  const upstreamContentType = audioRes.headers.get('content-type') || 'audio/mpeg';
+  const contentType = upstreamContentType.startsWith('video/mp4')
+    ? 'audio/mp4'
+    : upstreamContentType;
   res.writeHead(audioRes.status, {
-    'Content-Type': audioRes.headers.get('content-type') || 'audio/mpeg',
+    'Content-Type': contentType,
     ...(contentLength ? { 'Content-Length': contentLength } : {}),
     ...(contentRange ? { 'Content-Range': contentRange } : {}),
     'Accept-Ranges': audioRes.headers.get('accept-ranges') || 'bytes',
@@ -584,22 +597,6 @@ const streamAudioResponse = async (res, audioRes) => {
     if (!res.destroyed) res.write(Buffer.from(value));
   }
   if (!res.writableEnded && !res.destroyed) res.end();
-};
-
-const fetchYouTubeAudioStream = async (videoId, range) => {
-  const track = await fetchYouTubeTrack(videoId);
-  if (!track?.streamUrl) throw new Error('YouTube audio stream unavailable');
-
-  try {
-    return await fetchAllowedAudioStream(track.streamUrl, range);
-  } catch (firstError) {
-    // The signed provider URL can expire before an iPhone starts its queued
-    // transfer. Refresh once inside this request so the client keeps one
-    // stable audio URL instead of persisting a short-lived Google URL.
-    const refreshedTrack = await fetchYouTubeTrack(videoId, true);
-    if (!refreshedTrack?.streamUrl) throw firstError;
-    return fetchAllowedAudioStream(refreshedTrack.streamUrl, range);
-  }
 };
 
 async function fetchYouTubeArtistImage(artistName) {
@@ -649,7 +646,6 @@ async function fetchYouTubeArtistImage(artistName) {
     const result = await youtubeDl(`ytsearch1:${normalizedName} official music`, {
       dumpSingleJson: true,
       noWarnings: true,
-      noCallHome: true,
       noPlaylist: true,
       skipDownload: true,
     });
@@ -659,7 +655,6 @@ async function fetchYouTubeArtistImage(artistName) {
       const channel = await youtubeDl(result.channel_url, {
         dumpSingleJson: true,
         noWarnings: true,
-        noCallHome: true,
         noPlaylist: true,
         playlistEnd: 1,
         skipDownload: true,
@@ -674,6 +669,48 @@ async function fetchYouTubeArtistImage(artistName) {
   }
 }
 
+const formatDuration = (durationSec) => {
+  const total = Math.max(0, Number(durationSec) || 0);
+  const minutes = Math.floor(total / 60);
+  const seconds = Math.floor(total % 60);
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+};
+
+const searchYouTubeWithBrowserClient = async (query) => {
+  const binaryPath = youtubeDl.constants?.YOUTUBE_DL_PATH;
+  if (!binaryPath) return [];
+
+  try {
+    const { stdout } = await execFileAsync(
+      binaryPath,
+      [
+        `ytsearch5:${query}`,
+        '--flat-playlist',
+        '--no-warnings',
+        '--print',
+        YOUTUBE_SEARCH_PRINT_FORMAT,
+        '--extractor-args',
+        YOUTUBE_BROWSER_CLIENTS,
+      ],
+      { timeout: 12_000, windowsHide: true, maxBuffer: 512 * 1024 }
+    );
+
+    return String(stdout)
+      .split(/\r?\n/)
+      .map((line) => line.split('\t'))
+      .map(([videoId, title, channel, durationSec, viewCount]) => ({
+        videoId: videoId || '',
+        title: title || '',
+        channel: channel || '',
+        durationSec: Number(durationSec) || 0,
+        views: Number(viewCount) || 0,
+      }))
+      .filter((candidate) => /^[A-Za-z0-9_-]{11}$/.test(candidate.videoId));
+  } catch {
+    return [];
+  }
+};
+
 /**
  * 1. YouTube Official Channel & Timing Ranker
  */
@@ -685,32 +722,46 @@ async function fetchYouTubeOfficialVideo(target, searchQuery) {
   if (cached) return cached;
 
   try {
-    const res = await fetch(
-      `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
-      {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-        },
-        signal: AbortSignal.timeout(5000),
+    let contents = [];
+    try {
+      const res = await fetch(
+        `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
+        {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+          },
+          signal: AbortSignal.timeout(5000),
+        }
+      );
+
+      if (res.ok) {
+        const html = await res.text();
+        const match =
+          html.match(/var ytInitialData = ({[\s\S]*?});<\/script>/) ||
+          html.match(/ytInitialData\s*=\s*({[\s\S]*?});/);
+        if (match) {
+          const data = JSON.parse(match[1]);
+          contents =
+            data.contents?.twoColumnSearchResultsRenderer?.primaryContents
+              ?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents ||
+            [];
+        }
       }
-    );
+    } catch {}
 
-    if (!res.ok) return null;
-
-    const html = await res.text();
-    const match =
-      html.match(/var ytInitialData = ({[\s\S]*?});<\/script>/) ||
-      html.match(/ytInitialData\s*=\s*({[\s\S]*?});/);
-
-    if (!match) return null;
-
-    const data = JSON.parse(match[1]);
-    const contents =
-      data.contents?.twoColumnSearchResultsRenderer?.primaryContents
-        ?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents ||
-      [];
+    if (contents.length === 0) {
+      contents = (await searchYouTubeWithBrowserClient(query)).map((candidate) => ({
+        videoRenderer: {
+          videoId: candidate.videoId,
+          title: { runs: [{ text: candidate.title }] },
+          ownerText: { runs: [{ text: candidate.channel }] },
+          lengthText: { simpleText: formatDuration(candidate.durationSec) },
+          viewCountText: { simpleText: String(candidate.views) },
+        },
+      }));
+    }
 
     const candidates = [];
     const targetDurationSec =
@@ -1297,31 +1348,6 @@ const server = http.createServer(async (req, res) => {
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ imageURL }));
-    return;
-  }
-
-  // Renewable YouTube audio stream. The client only persists this stable
-  // endpoint; signed Google URLs stay private to the server request.
-  if (pathname === '/api/audio/youtube') {
-    const videoId = String(parsedUrl.query.videoId || '');
-    if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Invalid YouTube video ID' }));
-      return;
-    }
-
-    try {
-      await streamAudioResponse(
-        res,
-        await fetchYouTubeAudioStream(videoId, req.headers.range)
-      );
-    } catch (error) {
-      if (!res.headersSent && !res.destroyed) {
-        console.warn(`[YouTube Audio] Stream failed for ${videoId}:`, error.message);
-        res.writeHead(502, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Failed to stream YouTube audio' }));
-      }
-    }
     return;
   }
 

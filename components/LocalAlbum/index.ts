@@ -1,0 +1,1 @@
+export { LocalAlbum } from './LocalAlbum';

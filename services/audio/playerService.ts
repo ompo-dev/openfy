@@ -4,6 +4,7 @@
  * Supports streaming HLS, local files, and progressive mp3/m4a playback.
  */
 import {
+  clearPreloadedSource,
   createAudioPlayer,
   preload,
   setAudioModeAsync,
@@ -131,6 +132,14 @@ export const preloadAudio = async (uri: string): Promise<void> => {
   } catch {
     preloadedSources.delete(uri);
   }
+};
+
+/** Release a queued neighbor once it is no longer adjacent to the current track. */
+export const releasePreloadedAudio = (uri: string): void => {
+  if (!uri || !preloadedSources.delete(uri)) return;
+  try {
+    void Promise.resolve(clearPreloadedSource(uri)).catch(() => {});
+  } catch {}
 };
 
 /**

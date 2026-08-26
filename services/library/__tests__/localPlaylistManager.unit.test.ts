@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
+  deleteLocalPlaylist,
   getLocalPlaylist,
   getLocalPlaylists,
   upsertLocalPlaylist,
@@ -30,5 +31,25 @@ describe('localPlaylistManager', () => {
     expect(updated.trackIds).toEqual(['track-3', 'track-2']);
     await expect(getLocalPlaylists()).resolves.toEqual([updated]);
     await expect(getLocalPlaylist(updated.id)).resolves.toEqual(updated);
+  });
+
+  it('deletes only the selected local playlist', async () => {
+    const first = await upsertLocalPlaylist({
+      sourcePlatform: 'spotify',
+      sourceId: 'first',
+      title: 'Primeira',
+      trackIds: ['track-1'],
+    });
+    const second = await upsertLocalPlaylist({
+      sourcePlatform: 'youtube',
+      sourceId: 'second',
+      title: 'Segunda',
+      trackIds: ['track-2'],
+    });
+
+    await deleteLocalPlaylist(first.id);
+
+    await expect(getLocalPlaylist(first.id)).resolves.toBeNull();
+    await expect(getLocalPlaylists()).resolves.toEqual([second]);
   });
 });

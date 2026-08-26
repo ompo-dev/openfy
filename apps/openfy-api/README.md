@@ -45,6 +45,9 @@ O deploy não exige alterações de código no Expo: a URL do projeto Vercel é 
 - `OPENFY_ALLOWED_ORIGINS`: lista separada por vírgulas com as origens web
   permitidas, por exemplo `https://openfy.exemplo.com`. Inclua também cada
   domínio de preview que deve abrir o app web. Não use `*`.
+- `SPOTIFY_CLIENT_ID` e `SPOTIFY_CLIENT_SECRET`: credenciais do app Spotify
+  usadas somente pela API para dados públicos e renovação de sessão. Nunca as
+  cadastre no Expo/EAS nem com prefixo `EXPO_PUBLIC_`.
 - `OPENFY_LEGACY_ENGINE_URL` (opcional): URL HTTPS de uma engine dedicada para
   tarefas pesadas. Quando ausente, a API usa a engine compatível no mesmo
   processo durante a migração.
@@ -86,3 +89,12 @@ um servidor no computador.
 
 Não inclua chaves, cookies de navegador ou credenciais de terceiros no
 repositório nem em variáveis `EXPO_PUBLIC_*`.
+
+## Proteção de produção
+
+A API aplica limite local por IP e rota como proteção adicional. Na Vercel,
+adicione uma regra de **Firewall → Rate Limiting** para `/api/*`; o limite do
+Firewall é compartilhado entre instâncias serverless. Comece com 240 requisições
+por minuto/IP, monitore `Functions → Usage` e ajuste conforme o volume real de
+streaming. O proxy aceita somente HTTPS para `googlevideo.com`, `sndcdn.com` e
+`soundcloud.com`.

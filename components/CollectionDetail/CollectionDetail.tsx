@@ -18,6 +18,7 @@ import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { usePlayer } from '@context';
 import { formatCollectionMeta } from '@utils';
 import { GlassSurface, LoggedPressable, NativeIconButton } from '../native';
+import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
 
 type CollectionTrack = TrackModel & { localAudioPath?: string };
@@ -27,6 +28,7 @@ export type CollectionDetailProps = {
   collectionId: string;
   title: string;
   imageURL: string;
+  imageURLs?: string[];
   description?: string;
   metadata?: string;
   createdAt?: string;
@@ -34,8 +36,11 @@ export type CollectionDetailProps = {
   totalDurationMs?: number;
   tracks: CollectionTrack[];
   artists?: { id: string; name: string }[];
+  onAddTracksPress?: () => void | Promise<void>;
   onArtistPress?: (artistId: string) => void;
+  onDeletePress?: () => void | Promise<void>;
   onEndReached?: () => void;
+  onSharePress?: () => void | Promise<void>;
   resolveTracksForPlayback?: () => Promise<CollectionTrack[]>;
   sectionTitle?: string;
   footer?: React.ReactNode;
@@ -57,6 +62,7 @@ export const CollectionDetail = ({
   collectionId,
   title,
   imageURL,
+  imageURLs,
   description,
   metadata: metadataProp,
   createdAt,
@@ -64,8 +70,11 @@ export const CollectionDetail = ({
   totalDurationMs,
   tracks,
   artists,
+  onAddTracksPress,
   onArtistPress,
+  onDeletePress,
   onEndReached,
+  onSharePress,
   resolveTracksForPlayback,
   sectionTitle,
   footer,
@@ -134,6 +143,14 @@ export const CollectionDetail = ({
     addToQueue(playableTracks.map((track) => toPlayerTrack(track, title)));
   }, [addToQueue, resolveTracksForPlayback, title, tracks]);
 
+  const handleAdd = React.useCallback(async () => {
+    if (onAddTracksPress) {
+      await onAddTracksPress();
+      return;
+    }
+    await handleAddToQueue();
+  }, [handleAddToQueue, onAddTracksPress]);
+
   const handlePrimaryPlay = React.useCallback(async () => {
     if (isCollectionPlayback) {
       await togglePlayPause();
@@ -143,10 +160,14 @@ export const CollectionDetail = ({
   }, [isCollectionPlayback, playCollection, togglePlayPause]);
 
   const handleShare = React.useCallback(async () => {
+    if (onSharePress) {
+      await onSharePress();
+      return;
+    }
     try {
       await Share.share({ message: `${title} · Openfy Music` });
     } catch {}
-  }, [title]);
+  }, [onSharePress, title]);
 
   const handleBack = React.useCallback(() => {
     const section = segments.join('/').includes('library') ? 'library' : 'home';
@@ -164,7 +185,11 @@ export const CollectionDetail = ({
         >
           {kind === 'playlist' || kind === 'artist' ? (
             item.imageURL ? (
-              <Image source={{ uri: item.imageURL }} style={styles.trackArtwork} />
+              <Image
+                cachePolicy="memory-disk"
+                source={{ uri: item.imageURL }}
+                style={styles.trackArtwork}
+              />
             ) : (
               <View style={[styles.trackArtwork, styles.artworkFallback]}>
                 <Ionicons name="musical-note" size={18} color="#9A9A9A" />
@@ -227,8 +252,15 @@ export const CollectionDetail = ({
         ListHeaderComponent={
           <>
             <View style={[styles.hero, { paddingTop: insets.top + 8 }]}>
-            {imageURL ? (
-              <Image source={{ uri: imageURL }} style={styles.heroArtwork} contentFit="cover" />
+            {kind === 'playlist' && imageURLs?.length ? (
+              <PlaylistMosaic imageURLs={imageURLs} style={styles.heroArtwork} />
+            ) : imageURL ? (
+              <Image
+                cachePolicy="memory-disk"
+                source={{ uri: imageURL }}
+                style={styles.heroArtwork}
+                contentFit="cover"
+              />
             ) : kind === 'artist' ? (
               <View style={styles.artistHeroFallback}>
                 <Ionicons name="person" size={74} color="rgba(255,255,255,0.82)" />
@@ -301,8 +333,8 @@ export const CollectionDetail = ({
               />
               <GlassSurface glass="regular" isInteractive style={styles.actionPill}>
                 <LoggedPressable
-                  accessibilityLabel="Adicionar faixas à fila"
-                  onPress={() => void handleAddToQueue()}
+                  accessibilityLabel={onAddTracksPress ? 'Adicionar músicas à playlist' : 'Adicionar faixas à fila'}
+                  onPress={() => void handleAdd()}
                   style={styles.pillAction}
                 >
                   <Ionicons name="add" size={22} color="#FFFFFF" />
@@ -317,11 +349,21 @@ export const CollectionDetail = ({
                 </LoggedPressable>
                 <View style={styles.pillDivider} />
                 <LoggedPressable
-                  accessibilityLabel="Mais opções"
-                  onPress={() => Alert.alert(title, 'Opções da coleção em breve.')}
+                  accessibilityLabel={onDeletePress ? 'Excluir playlist' : 'Mais opções'}
+                  onPress={() => {
+                    if (onDeletePress) {
+                      void onDeletePress();
+                      return;
+                    }
+                    Alert.alert(title, 'Opções da coleção em breve.');
+                  }}
                   style={styles.pillAction}
                 >
-                  <Ionicons name="ellipsis-horizontal" size={22} color="#FFFFFF" />
+                  <Ionicons
+                    name={onDeletePress ? 'trash-outline' : 'ellipsis-horizontal'}
+                    size={22}
+                    color="#FFFFFF"
+                  />
                 </LoggedPressable>
               </GlassSurface>
               <NativeIconButton

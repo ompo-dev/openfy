@@ -78,7 +78,34 @@ describe('Openfy API', () => {
     expect(forwardedBody).toEqual({ title: 'Gods Plan', artist: 'Drake' });
   });
 
-  it('forwards validated YouTube audio requests with the requested byte range', async () => {
+  it('limits expensive music resolution requests per client', async () => {
+    const rateLimitedApp = createApiApp({
+      forwardLegacyRequest: async () => Response.json({ ok: true }),
+    });
+    const request = () =>
+      new Request('http://localhost:3001/api/music/resolve', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-real-ip': '192.0.2.10',
+        },
+        body: JSON.stringify({ title: 'Gods Plan' }),
+      });
+
+    for (let index = 0; index < 20; index += 1) {
+      expect((await rateLimitedApp.handle(request())).status).toBe(200);
+    }
+
+    const response = await rateLimitedApp.handle(request());
+    expect(response.status).toBe(429);
+    expect(response.headers.get('retry-after')).toBeTruthy();
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      error: { code: 'RATE_LIMITED' },
+    });
+  });
+
+  it('forwards proxy requests with the requested byte range', async () => {
     let forwardedPath = '';
     let forwardedRange = '';
     const forwardingApp = createApiApp({
@@ -90,22 +117,27 @@ describe('Openfy API', () => {
     });
 
     const response = await forwardingApp.handle(
-      new Request('http://localhost:3001/api/audio/youtube?videoId=m1a_GqJf02M', {
-        headers: { range: 'bytes=0-1023' },
-      })
+      new Request(
+        'http://localhost:3001/api/audio/proxy?url=https%3A%2F%2Fr1.googlevideo.com%2Faudio.m4a',
+        { headers: { range: 'bytes=0-1023' } }
+      )
     );
 
     expect(response.status).toBe(206);
-    expect(forwardedPath).toBe('/api/audio/youtube');
+    expect(forwardedPath).toBe('/api/audio/proxy');
     expect(forwardedRange).toBe('bytes=0-1023');
   });
 
-  it('rejects malformed stable YouTube audio requests', async () => {
+  it('does not expose the removed renewable YouTube audio route', async () => {
     const response = await app.handle(
-      new Request('http://localhost:3001/api/audio/youtube?videoId=not-a-video-id')
+      new Request('http://localhost:3001/api/audio/youtube?videoId=m1a_GqJf02M')
     );
 
-    expect(response.status).toBe(422);
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: { code: 'NOT_FOUND', message: 'Route not found' },
+    });
   });
 
   it('forwards a valid YouTube URL after Elysia validates its body', async () => {

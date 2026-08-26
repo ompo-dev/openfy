@@ -84,37 +84,17 @@ const getAudioResolveKey = (
     .toLowerCase();
 
 /**
- * The backend proxy refreshes compatibility with provider streams for every
- * client. A known YouTube video uses a renewable endpoint so neither the
- * browser nor AVFoundation stores a signed Google URL as its audio source.
+ * Keep the original download contract: the resolver returns the provider's
+ * signed URL and the server only relays it through the safe audio proxy.
+ * Native clients can therefore persist the completed local file instead of a
+ * server endpoint that changes its source between byte-range requests.
  */
-const getYouTubeVideoId = (sourceId?: string): string | null => {
-  const match = sourceId?.match(/^(?:yt_)?([A-Za-z0-9_-]{11})$/);
-  return match?.[1] || null;
-};
-
-export const getPlayableAudioUrl = (
-  streamUrl: string,
-  sourceId?: string
-): string =>
+export const getPlayableAudioUrl = (streamUrl: string): string =>
   (() => {
     if (!MUSIC_SERVER_URL) return streamUrl;
 
-    const youtubeVideoId = getYouTubeVideoId(sourceId);
-    if (youtubeVideoId) {
-      return `${MUSIC_SERVER_URL}/api/audio/youtube?videoId=${youtubeVideoId}`;
-    }
-
     try {
       const input = new URL(streamUrl);
-      if (input.pathname === '/api/audio/youtube') {
-        const videoId = getYouTubeVideoId(
-          input.searchParams.get('videoId') || undefined
-        );
-        return videoId
-          ? `${MUSIC_SERVER_URL}/api/audio/youtube?videoId=${videoId}`
-          : streamUrl;
-      }
       const proxiedSource =
         input.pathname === '/api/audio/proxy'
           ? input.searchParams.get('url') || ''
@@ -127,8 +107,10 @@ export const getPlayableAudioUrl = (
     }
   })();
 
-const getYouTubeVideoIdFromTrackId = (trackId?: string): string | null =>
-  getYouTubeVideoId(trackId);
+const getYouTubeVideoIdFromTrackId = (trackId?: string): string | null => {
+  const match = trackId?.match(/^yt_([A-Za-z0-9_-]{11})$/);
+  return match?.[1] || null;
+};
 
 const resolveExactYouTubeVideo = async (
   videoId: string
@@ -160,7 +142,7 @@ const resolveExactYouTubeVideo = async (
     if (data.track?.videoId !== videoId || !data.track.streamUrl) return null;
 
     return {
-      url: getPlayableAudioUrl(data.track.streamUrl, data.track.videoId),
+      url: getPlayableAudioUrl(data.track.streamUrl),
       quality: 'high',
       format: data.track.format || 'm4a',
       source: 'youtube',
@@ -694,13 +676,14 @@ const resolveAudioUrlInternal = async (
       const streamUrl =
         payload.source?.streamUrl ||
         payload.playback?.directUrl ||
-        payload.playback?.streamUrl;
+        payload.playback?.streamUrl ||
+        payload.playback?.url;
       if (streamUrl) {
         console.log(
           `[AudioResolver] Resolved Playable Stream via Backend Server: "${payload.track?.title}"`
         );
         const backendResult: ResolvedAudio = {
-          url: getPlayableAudioUrl(streamUrl, source?.id),
+          url: getPlayableAudioUrl(streamUrl),
           quality: source?.quality || 'high',
           format: source?.format || 'm4a',
           source: source?.provider === 'youtube' ? 'youtube' : 'soundcloud',

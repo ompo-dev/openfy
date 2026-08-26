@@ -9,6 +9,7 @@ export { ImportModal } from './ImportModal';
 export { OfflineLibrary } from './OfflineLibrary';
 export { PlaylistMosaic } from './PlaylistMosaic';
 export { LocalPlaylist } from './LocalPlaylist';
+export { LocalAlbum } from './LocalAlbum';
 export { CollectionDetail } from './CollectionDetail';
 export type { CollectionDetailProps } from './CollectionDetail';
 export * from './native';

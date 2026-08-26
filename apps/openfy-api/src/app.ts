@@ -3,6 +3,12 @@ import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
 import { Elysia, t } from 'elysia';
 
+import { createRequestRateLimiter } from './requestRateLimit';
+import {
+  getSpotifyClientAccessToken,
+  refreshSpotifyUserAccessToken,
+} from './spotifyCredentials';
+
 export type LegacyRequestForwarder = (request: Request) => Promise<Response>;
 
 type ApiAppOptions = {
@@ -26,8 +32,8 @@ const proxyQuerySchema = t.Object({
   url: t.String({ format: 'uri', maxLength: 8_192 }),
 });
 
-const youtubeAudioQuerySchema = t.Object({
-  videoId: t.String({ pattern: '^[A-Za-z0-9_-]{11}$' }),
+const spotifyRefreshSchema = t.Object({
+  refreshToken: t.String({ minLength: 1, maxLength: 2_048 }),
 });
 
 const isKnownResolveRequest = (body: { title?: string; spotifyId?: string }) =>
@@ -76,8 +82,10 @@ const isAllowedCorsOrigin = (origin: string | null) => {
   }
 };
 
-export const createApiApp = ({ forwardLegacyRequest }: ApiAppOptions) =>
-  new Elysia({ adapter: node() })
+export const createApiApp = ({ forwardLegacyRequest }: ApiAppOptions) => {
+  const limitRequest = createRequestRateLimiter();
+
+  return new Elysia({ adapter: node() })
     .use(
       cors({
         origin: (request) => isAllowedCorsOrigin(request.headers.get('origin')),
@@ -104,7 +112,29 @@ export const createApiApp = ({ forwardLegacyRequest }: ApiAppOptions) =>
         },
       })
     )
+    .onBeforeHandle(({ request, set }) => {
+      const result = limitRequest(request);
+      if (result.allowed) return;
+
+      set.status = 429;
+      set.headers['retry-after'] = String(result.retryAfterSeconds);
+      return {
+        success: false,
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'Too many requests. Try again shortly.',
+        },
+      };
+    })
     .onError(({ code, error, set }) => {
+      if (code === 'NOT_FOUND') {
+        set.status = 404;
+        return {
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Route not found' },
+        };
+      }
+
       if (code === 'VALIDATION') {
         set.status = 422;
         return {
@@ -132,6 +162,37 @@ export const createApiApp = ({ forwardLegacyRequest }: ApiAppOptions) =>
       }),
       { detail: { tags: ['Health'], summary: 'Verifica a disponibilidade da API' } }
     )
+    .get('/api/spotify/token', async ({ set }) => {
+      const accessToken = await getSpotifyClientAccessToken();
+      if (accessToken) return { accessToken };
+
+      set.status = 503;
+      return {
+        success: false,
+        error: {
+          code: 'SPOTIFY_UNAVAILABLE',
+          message: 'Spotify credentials are not configured on the server.',
+        },
+      };
+    }, {
+      detail: { tags: ['Metadata'], summary: 'Obtém token público temporário do Spotify' },
+    })
+    .post('/api/spotify/refresh', async ({ body, set }) => {
+      const token = await refreshSpotifyUserAccessToken(body.refreshToken);
+      if (token?.access_token) return token;
+
+      set.status = 503;
+      return {
+        success: false,
+        error: {
+          code: 'SPOTIFY_UNAVAILABLE',
+          message: 'Spotify credentials are not configured on the server.',
+        },
+      };
+    }, {
+      body: spotifyRefreshSchema,
+      detail: { tags: ['Metadata'], summary: 'Renova um token de usuário Spotify' },
+    })
     .get('/api/lyrics', ({ request }) => forwardLegacyRequest(request), {
       query: t.Object({
         title: t.String({ minLength: 1, maxLength: 300 }),
@@ -160,13 +221,6 @@ export const createApiApp = ({ forwardLegacyRequest }: ApiAppOptions) =>
     .get('/api/audio/proxy', ({ request }) => forwardLegacyRequest(request), {
       query: proxyQuerySchema,
       detail: { tags: ['Audio'], summary: 'Transmite um stream de áudio permitido' },
-    })
-    .get('/api/audio/youtube', ({ request }) => forwardLegacyRequest(request), {
-      query: youtubeAudioQuerySchema,
-      detail: {
-        tags: ['Audio'],
-        summary: 'Transmite áudio do YouTube por uma fonte renovável',
-      },
     })
     .post(
       '/api/music/youtube',
@@ -198,3 +252,4 @@ export const createApiApp = ({ forwardLegacyRequest }: ApiAppOptions) =>
         detail: { tags: ['Music'], summary: 'Resolve metadados e stream de uma faixa' },
       }
     );
+};

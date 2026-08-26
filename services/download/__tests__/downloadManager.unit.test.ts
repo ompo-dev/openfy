@@ -13,8 +13,25 @@ jest.mock('expo-file-system/legacy', () => ({
   FileSystemSessionType: { BACKGROUND: 'background' },
 }));
 
+jest.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
+
+jest.mock('../../audio/audioResolver', () => ({
+  getPlayableAudioUrl: jest.fn((url: string) => `https://api.test/audio/proxy?url=${url}`),
+  resolveAudioUrl: jest.fn(),
+  resolveViaSoundCloud: jest.fn(),
+  resolveViaYouTubeTopic: jest.fn(),
+}));
+
+jest.mock('../../lyrics/lyricsService', () => ({
+  fetchLyrics: jest.fn().mockResolvedValue(null),
+  saveLyricsOffline: jest.fn(),
+}));
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
+import { getPlayableAudioUrl, resolveAudioUrl } from '../../audio/audioResolver';
 import {
+  downloadTrack,
   getPendingDownloads,
   isCompleteAudioDownload,
   queueDownloads,
@@ -57,5 +74,56 @@ describe('queueDownloads', () => {
         },
       },
     ]);
+  });
+});
+
+describe('downloadTrack', () => {
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    await AsyncStorage.clear();
+  });
+
+  it('uses a supplied stream on iPhone and persists its completed local file', async () => {
+    const suppliedUrl = 'https://r1.googlevideo.com/audio.m4a';
+
+    const downloaded = await downloadTrack({
+      spotifyId: 'home_7minutoz_aladdin',
+      title: 'Aladdin',
+      artistName: '7 Minutoz',
+      albumName: 'Single',
+      imageURL: '',
+      duration_ms: 200188,
+      audioUrl: suppliedUrl,
+      audioFormat: 'm4a',
+    });
+
+    expect(getPlayableAudioUrl).toHaveBeenCalledWith(suppliedUrl);
+    expect(FileSystem.createDownloadResumable).toHaveBeenCalledWith(
+      `https://api.test/audio/proxy?url=${suppliedUrl}`,
+      expect.stringContaining('track_home_7minutoz_aladdin.m4a'),
+      expect.anything(),
+      expect.any(Function)
+    );
+    expect(downloaded).toMatchObject({
+      localAudioPath: 'file:///mock_dir/audio.m4a',
+      audioUrl: `https://api.test/audio/proxy?url=${suppliedUrl}`,
+    });
+  });
+
+  it('drops a pending item when no playable stream can be resolved', async () => {
+    (resolveAudioUrl as jest.Mock).mockResolvedValue(null);
+
+    await expect(
+      downloadTrack({
+        spotifyId: 'unavailable_track',
+        title: 'Sem stream',
+        artistName: 'Artista',
+        albumName: 'Single',
+        imageURL: '',
+        duration_ms: 180000,
+      })
+    ).resolves.toBeNull();
+
+    await expect(getPendingDownloads()).resolves.toEqual([]);
   });
 });

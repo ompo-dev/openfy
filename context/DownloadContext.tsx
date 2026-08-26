@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Platform } from 'react-native';
 
 import {
   cancelDownload as cancelPersistentDownload,
@@ -30,6 +31,7 @@ type DownloadContextValue = {
   activeDownloadsCount: number;
   enqueueDownloads: (tracks: DownloadTrackInput[]) => void;
   cancelDownload: (spotifyId: string) => Promise<void>;
+  clearCompletedDownloads: () => void;
   retryDownload: (spotifyId: string) => Promise<void>;
   refreshDownloads: () => Promise<void>;
 };
@@ -152,6 +154,8 @@ export function DownloadProvider({ children }: { children: React.ReactNode }) {
   );
 
   React.useEffect(() => {
+    if (Platform.OS === 'web') return;
+
     void (async () => {
       const pending = await getPendingDownloads();
       const downloadsToResume = pending.slice(0, 3);
@@ -177,6 +181,12 @@ export function DownloadProvider({ children }: { children: React.ReactNode }) {
       current.filter((job) => job.spotifyId !== spotifyId)
     );
     await cancelPersistentDownload(spotifyId);
+  }, []);
+
+  const clearCompletedDownloads = React.useCallback(() => {
+    setDownloads((current) =>
+      current.filter((job) => job.status !== 'completed')
+    );
   }, []);
 
   const retryDownload = React.useCallback(
@@ -251,12 +261,14 @@ export function DownloadProvider({ children }: { children: React.ReactNode }) {
       activeDownloadsCount,
       enqueueDownloads,
       cancelDownload,
+      clearCompletedDownloads,
       retryDownload,
       refreshDownloads,
     }),
     [
       activeDownloadsCount,
       cancelDownload,
+      clearCompletedDownloads,
       downloads,
       enqueueDownloads,
       refreshDownloads,

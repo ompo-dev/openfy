@@ -11,9 +11,4 @@ describe('getExistingLocalAudioPath', () => {
       getExistingLocalAudioPath('http://localhost:3001/api/audio/proxy?url=https%3A%2F%2Fr1.googlevideo.com%2Fstale.m4a')
     ).resolves.toBeNull();
   });
-
-  it('keeps the renewable YouTube endpoint for an existing web download', async () => {
-    const stableUrl = 'http://localhost:3001/api/audio/youtube?videoId=iciIG5tw-hk';
-    await expect(getExistingLocalAudioPath(stableUrl)).resolves.toBe(stableUrl);
-  });
 });

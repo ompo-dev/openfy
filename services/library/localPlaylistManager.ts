@@ -89,6 +89,14 @@ export const upsertLocalPlaylist = async (
   return playlist;
 };
 
+export const deleteLocalPlaylist = async (playlistId: string): Promise<void> => {
+  const playlists = await getLocalPlaylists();
+  await AsyncStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify(playlists.filter((playlist) => playlist.id !== playlistId))
+  );
+};
+
 export const removeTrackFromLocalPlaylists = async (
   trackId: string
 ): Promise<void> => {

@@ -38,6 +38,7 @@ export type {
 } from './download/downloadManager';
 
 export {
+  deleteLocalPlaylist,
   getLocalPlaylist,
   getLocalPlaylists,
   removeTrackFromLocalPlaylists,
@@ -47,6 +48,18 @@ export type {
   LocalPlaylist,
   LocalPlaylistInput,
 } from './library/localPlaylistManager';
+
+export { getCachedArtistImage } from './library/artistImageCache';
+
+export {
+  getLocalAlbumId,
+  groupLocalAlbums,
+  groupLocalArtists,
+} from './library/localCollections';
+export type {
+  LocalAlbumCollection,
+  LocalArtistCollection,
+} from './library/localCollections';
 
 export {
   BACKGROUND_DOWNLOAD_TASK,
@@ -67,6 +80,7 @@ export {
   fadeOutCurrent,
   restoreCurrentVolume,
   preloadAudio,
+  releasePreloadedAudio,
   configureAudioSession,
   DEFAULT_STATE,
 } from './audio/playerService';

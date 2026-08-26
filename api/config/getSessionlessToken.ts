@@ -2,6 +2,8 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
+import { MUSIC_SERVER_URL } from '@config';
+
 const getSessionTokenFromAsynceStorage = async (): Promise<{
   token: string | null;
   tokenExpiration: string | null;
@@ -52,28 +54,13 @@ export const getSessionlessToken = async (
       throw Error("Failed to read 'Constants.expoConfig.extra' variable");
     }
 
-    const clientID = Constants.expoConfig.extra.clientID;
-    const clientSecret = Constants.expoConfig.extra.clientSecret;
-
-    if (!clientID || !clientSecret) {
+    if (!MUSIC_SERVER_URL) {
       return { token: null, tokenExpiration: null };
     }
 
-    const response = await axios.post(
-      'https://accounts.spotify.com/api/token',
-      new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: clientID,
-        client_secret: clientSecret,
-      }),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
-    );
+    const response = await axios.get(`${MUSIC_SERVER_URL}/api/spotify/token`);
 
-    const newToken = response.data.access_token;
+    const newToken = response.data.accessToken;
 
     if (!newToken) {
       throw new Error('Failed to authenticate with Spotify.');

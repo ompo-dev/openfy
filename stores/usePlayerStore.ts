@@ -22,11 +22,13 @@ import {
   PlayerState,
   DEFAULT_STATE,
   resolveAudioUrl,
+  getPlayableAudioUrl,
   downloadTrack,
   getDownloadedTrack,
   fadeOutCurrent,
   restoreCurrentVolume,
   preloadAudio,
+  releasePreloadedAudio,
   recordInteraction,
 } from '@services';
 import {
@@ -113,6 +115,7 @@ const MIN_PRELOADED_SOURCE_LIFETIME_MS = 5_000;
 const IS_SPOTIFY_ID = /^[a-zA-Z0-9]{22}$/;
 const warmedAudioSources = new Map<string, { uri: string; expiresAt: number }>();
 const activeAudioWarmups = new Map<string, Promise<void>>();
+const queuePreloadKeys = new Set<string>();
 
 // Helper: Normalize cache key to prevent cross-song cache collisions
 const getCacheKey = (track: PlayerTrack) => {
@@ -134,17 +137,7 @@ const getLyricsCacheKey = (track: PlayerTrack) =>
 export const getExistingLocalAudioPath = async (path?: string): Promise<string | null> => {
   if (!path || path.endsWith('.m3u8')) return null;
 
-  if (Platform.OS === 'web') {
-    try {
-      const url = new URL(path);
-      const videoId = url.searchParams.get('videoId') || '';
-      return url.pathname === '/api/audio/youtube' && /^[A-Za-z0-9_-]{11}$/.test(videoId)
-        ? path
-        : null;
-    } catch {
-      return null;
-    }
-  }
+  if (Platform.OS === 'web') return null;
 
   if (!path.startsWith('file:')) return null;
 
@@ -156,11 +149,34 @@ export const getExistingLocalAudioPath = async (path?: string): Promise<string |
   }
 };
 
+const getSavedAudioSource = async (
+  track?: (Partial<PlayerTrack> & { audioUrl?: string }) | null
+): Promise<string | null> => {
+  if (!track) return null;
+
+  const localPath = await getExistingLocalAudioPath(track.localAudioPath);
+  if (localPath) return localPath;
+
+  if (Platform.OS !== 'web') return null;
+
+  const webSource = track.streamUrl || track.audioUrl || track.localAudioPath;
+  if (
+    !webSource ||
+    webSource.endsWith('.m3u8') ||
+    !/^(https?:|blob:)/i.test(webSource)
+  ) {
+    return null;
+  }
+
+  return getPlayableAudioUrl(webSource);
+};
+
 const getFreshPreloadedSource = (track: PlayerTrack): string | null => {
   const now = Date.now();
   if (
     track.streamUrl &&
-    (track.streamExpiresAt || 0) > now + MIN_PRELOADED_SOURCE_LIFETIME_MS
+    (Platform.OS === 'web' ||
+      (track.streamExpiresAt || 0) > now + MIN_PRELOADED_SOURCE_LIFETIME_MS)
   ) {
     return track.streamUrl;
   }
@@ -178,21 +194,35 @@ const cacheAudioSource = (track: PlayerTrack, uri: string) => {
   });
 };
 
-const warmTrackAudio = (track?: PlayerTrack) => {
+const warmTrackAudio = (
+  track?: PlayerTrack,
+  isStillNeeded: () => boolean = () => true
+) => {
   if (!track) return;
+  if (!isStillNeeded()) return;
   const cacheKey = getCacheKey(track);
   const suppliedSource = getFreshPreloadedSource(track);
   if (suppliedSource) {
-    void preloadAudio(suppliedSource);
+    if (isStillNeeded()) void preloadAudio(suppliedSource);
     return;
   }
   if (activeAudioWarmups.has(cacheKey)) return;
 
   const warmup = (async () => {
-    if (await getExistingLocalAudioPath(track.localAudioPath)) return;
+    const directSavedSource = await getSavedAudioSource(track);
+    if (directSavedSource) {
+      cacheAudioSource(track, directSavedSource);
+      if (isStillNeeded()) void preloadAudio(directSavedSource);
+      return;
+    }
 
     const downloaded = await getDownloadedTrack(track.spotifyId);
-    if (await getExistingLocalAudioPath(downloaded?.localAudioPath)) return;
+    const downloadedSavedSource = await getSavedAudioSource(downloaded);
+    if (downloadedSavedSource) {
+      cacheAudioSource(track, downloadedSavedSource);
+      if (isStillNeeded()) void preloadAudio(downloadedSavedSource);
+      return;
+    }
 
     if (getFreshPreloadedSource(track)) return;
     const resolved = await resolveAudioUrl(
@@ -202,7 +232,7 @@ const warmTrackAudio = (track?: PlayerTrack) => {
       track.duration_ms,
       track.releaseDate
     );
-    if (resolved?.url) {
+    if (resolved?.url && isStillNeeded()) {
       cacheAudioSource(track, resolved.url);
       void preloadAudio(resolved.url);
     }
@@ -211,6 +241,30 @@ const warmTrackAudio = (track?: PlayerTrack) => {
     .finally(() => activeAudioWarmups.delete(cacheKey));
 
   activeAudioWarmups.set(cacheKey, warmup);
+};
+
+const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
+  const currentTrack = queue[queueIndex];
+  const neighbors = [queue[queueIndex - 1], queue[queueIndex + 1]].filter(
+    (track): track is PlayerTrack => Boolean(track)
+  );
+  const retainedKeys = new Set(
+    [currentTrack, ...neighbors].filter(Boolean).map(getCacheKey)
+  );
+
+  queuePreloadKeys.clear();
+  neighbors.forEach((track) => queuePreloadKeys.add(getCacheKey(track)));
+
+  warmedAudioSources.forEach(({ uri }, cacheKey) => {
+    if (!retainedKeys.has(cacheKey)) {
+      warmedAudioSources.delete(cacheKey);
+      releasePreloadedAudio(uri);
+    }
+  });
+
+  neighbors.forEach((track) =>
+    warmTrackAudio(track, () => queuePreloadKeys.has(getCacheKey(track)))
+  );
 };
 
 export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
@@ -237,6 +291,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     // explicitly preserve their queue below so the controls never point at
     // tracks selected previously on another screen.
     const { showPlayer = true, setQueue = true } = options;
+    let hasSavedWebDownload = false;
 
     // 1. ATOMIC GENERATION LOCK 🔒: Increments request counter to cancel any stale in-flight fetches
     const requestId = get().activeRequestId + 1;
@@ -270,22 +325,29 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         ? { queue: [track], queueIndex: 0, queueSourceId: null }
         : {}),
     });
+    warmQueueNeighbors(get().queue, get().queueIndex);
 
     // Record interaction metric
     recordInteraction(track, 'play').catch(() => {});
 
     // 2. CONCURRENT AUDIO STREAM RESOLUTION & PERSISTENT CACHE
     const resolveAudioPromise = (async (): Promise<string | null> => {
-      const directLocalPath = await getExistingLocalAudioPath(track.localAudioPath);
-      if (directLocalPath) return directLocalPath;
+      const directSavedSource = await getSavedAudioSource(track);
+      if (directSavedSource) {
+        cacheAudioSource(track, directSavedSource);
+        hasSavedWebDownload = Platform.OS === 'web';
+        return directSavedSource;
+      }
 
       // Screens normally know only a Spotify id. Resolve that id against the
       // download registry here so every caller gets offline playback.
       const downloaded = await getDownloadedTrack(track.spotifyId);
-      const downloadedLocalPath = await getExistingLocalAudioPath(
-        downloaded?.localAudioPath
-      );
-      if (downloadedLocalPath) return downloadedLocalPath;
+      const downloadedSavedSource = await getSavedAudioSource(downloaded);
+      if (downloadedSavedSource) {
+        cacheAudioSource(track, downloadedSavedSource);
+        hasSavedWebDownload = Platform.OS === 'web';
+        return downloadedSavedSource;
+      }
 
       const preloadedSource = getFreshPreloadedSource(track);
       if (preloadedSource) {
@@ -440,7 +502,11 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       }));
 
       // Background download cache for offline listening
-      if (track.spotifyId && !streamUri.startsWith('file:')) {
+      if (
+        track.spotifyId &&
+        !streamUri.startsWith('file:') &&
+        !hasSavedWebDownload
+      ) {
         const isMp3 = streamUri.includes('.mp3') || !streamUri.includes('.m4a');
         downloadTrack(
           {
@@ -484,7 +550,6 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       queueIndex: safeIndex,
       queueSourceId: sourceId ?? null,
     });
-    warmTrackAudio(tracks[safeIndex + 1]);
     await get().playTrack(tracks[safeIndex], { setQueue: false });
   },
 
@@ -546,7 +611,6 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     }
 
     set({ queueIndex: nextIndex });
-    warmTrackAudio(queue[nextIndex + 1]);
     await playTrack(queue[nextIndex], { setQueue: false });
   },
 

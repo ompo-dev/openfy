@@ -20,6 +20,13 @@ npx expo prebuild --clean --platform ios
 eas build --platform ios
 ```
 
+O repositório já tem os perfis EAS: use `eas build --platform ios --profile preview`
+para instalar no iPhone de teste e `eas build --platform ios --profile production`
+para TestFlight/App Store. Nos ambientes EAS correspondentes, configure
+`EXPO_PUBLIC_MUSIC_SERVER_URL` com a URL HTTPS da API Vercel e, se houver login
+Spotify, `EXPO_PUBLIC_SPOTIFY_CLIENT_ID`. Os dois valores são públicos; nunca
+configure `SPOTIFY_CLIENT_SECRET` no EAS.
+
 Valide em um iPhone físico: inicie uma faixa, bloqueie a tela, use play/pause e avanço/retrocesso na Tela Bloqueada, e confira a Ilha Dinâmica. Para downloads, inicie uma faixa para enfileirá-la, coloque o app em segundo plano e confira a Biblioteca após a próxima janela do sistema.
 
 `expo-apple-targets` continua sendo apropriado para uma Live Activity proprietária. Ele não é necessário para a experiência de mídia “Now Playing” do iOS e criaria uma superfície duplicada de controles.

@@ -27,13 +27,23 @@ const statusColor: Record<DownloadJobStatus, string> = {
 };
 
 export function DownloadsModal({ visible, onClose }: DownloadsModalProps) {
-  const { downloads, activeDownloadsCount, cancelDownload, retryDownload } = useDownloads();
+  const {
+    downloads,
+    activeDownloadsCount,
+    cancelDownload,
+    clearCompletedDownloads,
+    retryDownload,
+  } = useDownloads();
+  const handleClose = React.useCallback(() => {
+    clearCompletedDownloads();
+    onClose();
+  }, [clearCompletedDownloads, onClose]);
 
   return (
     <SheetFrame
       visible={visible}
       title={activeDownloadsCount ? `Downloads (${activeDownloadsCount})` : 'Downloads'}
-      onClose={onClose}
+      onClose={handleClose}
     >
       {downloads.length === 0 ? (
         <View style={styles.empty}>
@@ -77,15 +87,26 @@ export function DownloadsModal({ visible, onClose }: DownloadsModalProps) {
             {download.status === 'completed' ? (
               <Ionicons name="checkmark-circle" color="#1ED760" size={22} />
             ) : download.status === 'error' ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Tentar baixar ${download.title} novamente`}
-                hitSlop={10}
-                onPress={() => void retryDownload(download.spotifyId)}
-                style={styles.cancelButton}
-              >
-                <Ionicons name="refresh" color="#F6B26B" size={19} />
-              </Pressable>
+              <View style={styles.errorActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Tentar baixar ${download.title} novamente`}
+                  hitSlop={10}
+                  onPress={() => void retryDownload(download.spotifyId)}
+                  style={styles.cancelButton}
+                >
+                  <Ionicons name="refresh" color="#F6B26B" size={19} />
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Excluir download de ${download.title}`}
+                  hitSlop={10}
+                  onPress={() => void cancelDownload(download.spotifyId)}
+                  style={styles.cancelButton}
+                >
+                  <Ionicons name="trash-outline" color="#FFFFFF" size={17} />
+                </Pressable>
+              </View>
             ) : (
               <Pressable
                 accessibilityRole="button"
@@ -182,5 +203,9 @@ const styles = StyleSheet.create({
     height: 32,
     justifyContent: 'center',
     width: 32,
+  },
+  errorActions: {
+    flexDirection: 'row',
+    gap: 8,
   },
 });

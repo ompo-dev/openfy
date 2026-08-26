@@ -92,7 +92,7 @@ const resolveHomeTrack = (track: HomeTrackSeed) => {
       if (!data.source?.streamUrl) return null;
 
       const streamExpiresAt = Date.now() + HOME_STREAM_TTL_MS;
-      const streamUrl = getPlayableAudioUrl(data.source.streamUrl, data.source.id);
+      const streamUrl = getPlayableAudioUrl(data.source.streamUrl);
       void preloadAudio(streamUrl);
       return {
         spotifyId: track.spotifyId,

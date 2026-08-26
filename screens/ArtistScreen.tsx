@@ -6,7 +6,7 @@ import { getArtist, getArtistAlbums, getArtistTopTracks, getYouTubeArtistImage }
 import { CollectionDetail } from '@components';
 import { ArtistModel, LibraryItemModel, TrackModel } from '@models';
 import { Shapes, Sizes } from '@config';
-import { getDownloadedTracks } from '@services';
+import { getCachedArtistImage, getDownloadedTracks } from '@services';
 import { Slider } from '../components/Slider';
 
 export type ArtistScreenPropsType = {
@@ -30,7 +30,10 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     setAlbums([]);
 
     if (localArtistName) {
-      void Promise.all([getDownloadedTracks(), getYouTubeArtistImage(localArtistName)]).then(([
+      void Promise.all([getDownloadedTracks(), getCachedArtistImage(
+        localArtistName,
+        () => getYouTubeArtistImage(localArtistName)
+      )]).then(([
         downloaded,
         profileImage,
       ]) => {

@@ -2,7 +2,7 @@ import * as React from 'react';
 import { View } from 'react-native';
 import { Href, useRouter, useSegments } from 'expo-router';
 
-import { CollectionDetail } from '@components';
+import { CollectionDetail, LocalAlbum } from '@components';
 import { getAlbum, getArtist } from '@api';
 import { AlbumModel, ArtistModel } from '@models';
 import { getDisplayTime } from '@utils';
@@ -11,7 +11,25 @@ export type AlbumScreenPropsType = {
   albumId: string;
 };
 
-export const AlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
+const LOCAL_ALBUM_PREFIX = 'local_album_';
+
+const getLocalAlbumId = (albumId: string): string => {
+  const encodedId = albumId.slice(LOCAL_ALBUM_PREFIX.length);
+  try {
+    return decodeURIComponent(encodedId);
+  } catch {
+    return encodedId;
+  }
+};
+
+export const AlbumScreen = ({ albumId }: AlbumScreenPropsType) =>
+  albumId.startsWith(LOCAL_ALBUM_PREFIX) ? (
+    <LocalAlbum albumId={getLocalAlbumId(albumId)} />
+  ) : (
+    <RemoteAlbumScreen albumId={albumId} />
+  );
+
+const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
   const router = useRouter();
   const segments = useSegments();
   const [album, setAlbum] = React.useState<AlbumModel | null>(null);

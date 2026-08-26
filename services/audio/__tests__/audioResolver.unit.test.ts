@@ -25,11 +25,6 @@ describe('getPlayableAudioUrl', () => {
     );
   });
 
-  it('routes known YouTube videos through the stable backend audio endpoint', () => {
-    expect(
-      getPlayableAudioUrl('https://r1.googlevideo.com/audio.m4a', 'm1a_GqJf02M')
-    ).toBe('http://192.168.100.27:3001/api/audio/youtube?videoId=m1a_GqJf02M');
-  });
 });
 
 describe('resolveAudioUrl', () => {
@@ -59,7 +54,7 @@ describe('resolveAudioUrl', () => {
       resolveAudioUrl('Faixa canônica', 'Artista canônico', 'yt_12345678901', 180000)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'http://192.168.100.27:3001/api/audio/youtube?videoId=m1a_GqJf02M',
+      url: 'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fmedia.test%2Fcanonical.m4a',
     });
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
@@ -88,7 +83,30 @@ describe('resolveAudioUrl', () => {
       resolveAudioUrl("God's Plan", 'Drake', '5b8WiNjA6ihEvaeB9J3eyQ', 198973)
     ).resolves.toMatchObject({
       source: 'youtube',
-      url: 'http://192.168.100.27:3001/api/audio/youtube?videoId=m1a_GqJf02M',
+      url: 'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fmedia.test%2Fcanonical.m4a',
+    });
+  });
+
+  it('accepts the playback URL returned by the backend', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          playback: {
+            url: 'https://media.test/playback.m4a',
+            provider: 'youtube',
+          },
+          track: { title: 'Gods Plan' },
+        },
+      }),
+    });
+
+    await expect(
+      resolveAudioUrl('Resposta do player', 'Servidor de teste', 'playback-url-001', 212000)
+    ).resolves.toMatchObject({
+      source: 'youtube',
+      url: 'http://192.168.100.27:3001/api/audio/proxy?url=https%3A%2F%2Fmedia.test%2Fplayback.m4a',
     });
   });
 

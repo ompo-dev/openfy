@@ -1,6 +1,7 @@
 jest.mock('expo-audio', () => ({
   createAudioPlayer: jest.fn(),
   preload: jest.fn(),
+  clearPreloadedSource: jest.fn(),
   setAudioModeAsync: jest.fn().mockResolvedValue(undefined),
 }));
 
@@ -8,11 +9,13 @@ jest.mock('react-native', () => ({
   Platform: { OS: 'web' },
 }));
 
-import { createAudioPlayer, preload } from 'expo-audio';
+import { clearPreloadedSource, createAudioPlayer, preload } from 'expo-audio';
+import { Platform } from 'react-native';
 import {
   fadeOutCurrent,
   loadAndPlay,
   preloadAudio,
+  releasePreloadedAudio,
   unload,
 } from '../playerService';
 
@@ -33,6 +36,7 @@ describe('playerService fades', () => {
 
   afterEach(async () => {
     await unload();
+    (Platform as { OS: string }).OS = 'web';
     jest.useRealTimers();
     jest.clearAllMocks();
   });
@@ -59,8 +63,20 @@ describe('playerService fades', () => {
   });
 
   it('does not fetch remote audio into a blob on web', async () => {
-    await preloadAudio('http://localhost:3001/api/audio/youtube?videoId=iciIG5tw-hk');
+    await preloadAudio(
+      'http://localhost:3001/api/audio/proxy?url=https%3A%2F%2Fr1.googlevideo.com%2Faudio.m4a'
+    );
 
     expect(preload).not.toHaveBeenCalled();
+  });
+
+  it('releases a preloaded neighbor that leaves the playback window', async () => {
+    (Platform as { OS: string }).OS = 'ios';
+    const uri = 'https://media.test/previous.m4a';
+
+    await preloadAudio(uri);
+    releasePreloadedAudio(uri);
+
+    expect(clearPreloadedSource).toHaveBeenCalledWith(uri);
   });
 });

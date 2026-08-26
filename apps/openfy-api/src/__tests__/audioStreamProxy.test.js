@@ -21,10 +21,10 @@ describe('fetchAllowedAudioStream', () => {
     ).resolves.toBeInstanceOf(Response);
   });
 
-  it('requests Googlevideo audio from its first byte when the client sends no Range header', async () => {
+  it('does not add a Range header when the client did not request one', async () => {
     const fetchImpl = async (url, options) => {
       expect(url.toString()).toBe('https://r1.googlevideo.com/audio.m4a');
-      expect(options.headers).toEqual({ Range: 'bytes=0-1048575' });
+      expect(options.headers).toBeUndefined();
       return audioResponse();
     };
 
@@ -33,9 +33,9 @@ describe('fetchAllowedAudioStream', () => {
     ).resolves.toBeInstanceOf(Response);
   });
 
-  it('limits an open browser range to a Googlevideo-compatible block', async () => {
+  it('preserves an open browser range', async () => {
     const fetchImpl = async (_url, options) => {
-      expect(options.headers).toEqual({ Range: 'bytes=0-1048575' });
+      expect(options.headers).toEqual({ Range: 'bytes=0-' });
       return audioResponse();
     };
 
