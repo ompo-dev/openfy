@@ -10,7 +10,10 @@ const { promisify } = require('node:util');
 const ytdl = require('@distube/ytdl-core');
 const youtubeDl = require('youtube-dl-exec');
 const { fetchAllowedAudioStream } = require('./audioStreamProxy');
-const { resolveYoutubeCookiesPath } = require('./youtubeCredentials');
+const {
+  resolveYoutubeCookieHeader,
+  resolveYoutubeCookiesPath,
+} = require('./youtubeCredentials');
 
 const PORT = process.env.PORT || 3001;
 const execFileAsync = promisify(execFile);
@@ -148,7 +151,7 @@ function isCanonicalTitleMatch(candidateTitle, targetTitle) {
   });
 }
 
-const getInnertubeClient = async () => {
+const getInnertubeClient = async (cookie) => {
   if (!innertubeClientPromise) {
     innertubeClientPromise = import('youtubei.js')
       .then(({ Innertube }) =>
@@ -156,6 +159,7 @@ const getInnertubeClient = async () => {
           generate_session_locally: true,
           retrieve_innertube_config: false,
           retrieve_player: false,
+          ...(cookie ? { cookie } : {}),
         })
       )
       .catch((error) => {
@@ -170,7 +174,8 @@ const audioFormatFromMimeType = (mimeType) =>
   mimeType?.includes('audio/webm') ? 'webm' : 'm4a';
 
 const fetchYouTubeTrackViaInnertube = async (videoId, youtubeUrl) => {
-  const client = await getInnertubeClient();
+  const cookie = await resolveYoutubeCookieHeader();
+  const client = await getInnertubeClient(cookie || undefined);
   const [info, stream] = await Promise.all([
     client.getBasicInfo(videoId),
     client.getStreamingData(videoId, {

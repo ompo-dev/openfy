@@ -21,6 +21,27 @@ const decodeBase64Cookies = (encoded) => {
   return Buffer.from(normalized, 'base64').toString('utf8');
 };
 
+const toYoutubeCookieHeader = (contents) => {
+  const cookies = new Map();
+
+  for (const rawLine of contents.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || (line.startsWith('#') && !line.startsWith('#HttpOnly_'))) continue;
+
+    const fields = line.replace(/^#HttpOnly_/, '').split('\t');
+    if (fields.length < 7) continue;
+
+    const [domain, , , , , name, value] = fields;
+    const normalizedDomain = domain.toLowerCase().replace(/^\./, '');
+    if (!normalizedDomain.endsWith('youtube.com') || !name || !value) continue;
+    cookies.set(name, value);
+  }
+
+  return cookies.size
+    ? [...cookies].map(([name, value]) => `${name}=${value}`).join('; ')
+    : null;
+};
+
 const resolveYoutubeCookiesPath = async ({
   env = process.env,
   temporaryDirectory = tmpdir(),
@@ -47,4 +68,15 @@ const resolveYoutubeCookiesPath = async ({
   return cookiePath;
 };
 
-module.exports = { resolveYoutubeCookiesPath };
+const resolveYoutubeCookieHeader = async (options = {}) => {
+  const cookiePath = await resolveYoutubeCookiesPath(options);
+  if (!cookiePath) return null;
+
+  // turbopackIgnore: path is a runtime-only file under the server temporary directory.
+  return toYoutubeCookieHeader(await readFile(/* turbopackIgnore: true */ cookiePath, 'utf8'));
+};
+
+module.exports = {
+  resolveYoutubeCookieHeader,
+  resolveYoutubeCookiesPath,
+};

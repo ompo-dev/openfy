@@ -11,3 +11,7 @@ export type YoutubeCookieOptions = {
 export function resolveYoutubeCookiesPath(
   options?: YoutubeCookieOptions
 ): Promise<string | null>;
+
+export function resolveYoutubeCookieHeader(
+  options?: YoutubeCookieOptions
+): Promise<string | null>;

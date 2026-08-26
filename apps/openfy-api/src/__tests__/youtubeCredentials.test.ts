@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { resolveYoutubeCookiesPath } from '../youtubeCredentials';
+import {
+  resolveYoutubeCookieHeader,
+  resolveYoutubeCookiesPath,
+} from '../youtubeCredentials';
 
 const cookies = [
   '# Netscape HTTP Cookie File',
@@ -31,6 +34,23 @@ describe('resolveYoutubeCookiesPath', () => {
 
     expect(cookiePath).toContain(temporaryDirectory);
     await expect(readFile(cookiePath!, 'utf8')).resolves.toBe(cookies);
+  });
+
+  it('converts YouTube entries into an authenticated InnerTube cookie header', async () => {
+    const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'openfy-youtube-test-'));
+    temporaryDirectories.push(temporaryDirectory);
+    const cookieFile = [
+      cookies,
+      '.youtube.com\tTRUE\t/\tTRUE\t2147483647\tSID\tsession-token',
+      '.google.com\tTRUE\t/\tTRUE\t2147483647\tSID\tgoogle-session',
+    ].join('\n');
+
+    await expect(
+      resolveYoutubeCookieHeader({
+        env: { YOUTUBE_COOKIES_BASE64: Buffer.from(cookieFile).toString('base64') },
+        temporaryDirectory,
+      })
+    ).resolves.toBe('VISITOR_INFO1_LIVE=visitor-token; SID=session-token');
   });
 
   it('rejects a cookie payload that is not in Netscape format', async () => {
