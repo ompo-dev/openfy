@@ -44,4 +44,18 @@ describe('Next runtime scripts', () => {
       { source: '/(.*)', destination: { service: 'audio' } },
     ]);
   });
+
+  it('keeps the API-root Vercel project on the container runtime too', async () => {
+    const config = JSON.parse(
+      await readFile(new URL('../../vercel.json', import.meta.url), 'utf8')
+    );
+    const dockerfile = await readFile(
+      new URL('../../Dockerfile.vercel', import.meta.url),
+      'utf8'
+    );
+
+    expect(config.services.audio.runtime).toBe('container');
+    expect(config.services.audio.entrypoint).toBe('Dockerfile.vercel');
+    expect(dockerfile).toContain('python3');
+  });
 });
