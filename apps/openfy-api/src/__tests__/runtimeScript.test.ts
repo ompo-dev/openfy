@@ -29,4 +29,19 @@ describe('Next runtime scripts', () => {
     expect(dockerfile).toContain('python3');
     expect(dockerfile).toContain('CMD ["sh", "-c", "bunx next start -H 0.0.0.0 -p ${PORT:-3000}"]');
   });
+
+  it('routes public requests to the Vercel container service', async () => {
+    const config = JSON.parse(
+      await readFile(new URL('../../../../vercel.json', import.meta.url), 'utf8')
+    );
+
+    expect(config.services.audio).toEqual({
+      root: '.',
+      entrypoint: 'Dockerfile.vercel',
+      runtime: 'container',
+    });
+    expect(config.rewrites).toEqual([
+      { source: '/(.*)', destination: { service: 'audio' } },
+    ]);
+  });
 });
