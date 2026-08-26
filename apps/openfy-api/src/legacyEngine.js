@@ -546,39 +546,52 @@ const getYouTubeVideoId = (input) => {
 };
 
 const fetchYouTubeTrackViaYtDlp = async (videoId, youtubeUrl) => {
-  try {
-    const details = await youtubeDl(youtubeUrl, {
-      dumpSingleJson: true,
-      noWarnings: true,
-      noPlaylist: true,
-      format: 'best[ext=mp4]/bestaudio/best',
-      extractorArgs: 'youtube:player_client=web_safari,android,ios',
-    });
-    if (details?.id !== videoId || !details.url) return null;
+  // These clients are the current signed-out yt-dlp fallback. Unlike web,
+  // Android and iOS, they do not require a PO Token for Googlevideo requests.
+  // This matters when the resolver runs from Vercel's datacenter IPs.
+  const clientStrategies = [
+    'youtube:player_client=tv,web_embedded,android_vr',
+    'youtube:player_client=default,android;formats=missing_pot',
+    'youtube:player_client=web_safari,android,ios',
+  ];
 
-    return {
-      videoId: details.id,
-      youtubeUrl,
-      streamUrl: details.url,
-      title: details.title || 'Vídeo do YouTube',
-      artistName: details.artist || details.channel || 'YouTube',
-      albumName: details.album || details.channel || 'YouTube',
-      imageURL: details.thumbnail || '',
-      duration_ms: Number(details.duration || 0) * 1000,
-      viewCount: Number(details.view_count || 0),
-      format:
-        details.ext === 'webm'
-          ? 'webm'
-          : details.ext === 'mp4'
-            ? 'mp4'
-            : 'm4a',
-    };
+  for (const extractorArgs of clientStrategies) {
+    try {
+      const details = await youtubeDl(youtubeUrl, {
+        dumpSingleJson: true,
+        noWarnings: true,
+        noPlaylist: true,
+        format: 'best[ext=mp4]/bestaudio/best',
+        extractorArgs,
+      });
+      if (details?.id !== videoId || !details.url) continue;
 
-  } catch (error) {
-    const details = String(error?.stderr || error?.message || error || '')
-      .replace(/\s+/g, ' ')
-      .slice(0, 1000);
-    console.warn(`[YouTube Extractor] yt-dlp failed for ${videoId}:`, details);
+      return {
+        videoId: details.id,
+        youtubeUrl,
+        streamUrl: details.url,
+        title: details.title || 'Vídeo do YouTube',
+        artistName: details.artist || details.channel || 'YouTube',
+        albumName: details.album || details.channel || 'YouTube',
+        imageURL: details.thumbnail || '',
+        duration_ms: Number(details.duration || 0) * 1000,
+        viewCount: Number(details.view_count || 0),
+        format:
+          details.ext === 'webm'
+            ? 'webm'
+            : details.ext === 'mp4'
+              ? 'mp4'
+              : 'm4a',
+      };
+    } catch (error) {
+      const details = String(error?.stderr || error?.message || error || '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 300);
+      console.warn(
+        `[YouTube Extractor] yt-dlp failed for ${videoId} using ${extractorArgs}:`,
+        details
+      );
+    }
   }
 
   return null;

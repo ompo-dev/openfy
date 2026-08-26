@@ -24,7 +24,9 @@ describe('Next runtime scripts', () => {
     expect(engine).toContain('InnerTube returned no playable stream');
     expect(engine).toContain('ytdl-core failed');
     expect(engine).toContain("format: 'best[ext=mp4]/bestaudio/best'");
-    expect(engine).toContain("extractorArgs: 'youtube:player_client=web_safari,android,ios'");
+    expect(engine).toContain("'youtube:player_client=tv,web_embedded,android_vr'");
+    expect(engine).toContain("'youtube:player_client=default,android;formats=missing_pot'");
+    expect(engine).toContain("'youtube:player_client=web_safari,android,ios'");
   });
 
   it('ships the persistent audio engine with Node and Python for yt-dlp', async () => {
