@@ -24,9 +24,9 @@ describe('Next runtime scripts', () => {
   });
 
   it('ships the persistent audio engine with Python for yt-dlp', async () => {
-    const dockerfile = await readFile(new URL('../../Dockerfile', import.meta.url), 'utf8');
+    const dockerfile = await readFile(new URL('../../../../Dockerfile.vercel', import.meta.url), 'utf8');
 
     expect(dockerfile).toContain('python3');
-    expect(dockerfile).toContain('CMD ["bun", "run", "start"]');
+    expect(dockerfile).toContain('CMD ["sh", "-c", "bunx next start -H 0.0.0.0 -p ${PORT:-3000}"]');
   });
 });

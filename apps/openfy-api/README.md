@@ -33,11 +33,10 @@ de iniciar ou gerar o bundle Expo.
 
 ## Deploy da engine de áudio
 
-Use o `Dockerfile` deste diretório em um servidor que aceite contêineres. A
-imagem instala Python e mantém o processo de áudio ativo, como no fluxo local
-que funcionava antes. A Vercel pode continuar hospedando apenas o site.
+Use o `Dockerfile.vercel` na raiz do repositório. A imagem instala Python e
+executa o `yt-dlp`, como no fluxo local que funcionava antes.
 
-1. Faça o deploy com a raiz `apps/openfy-api`.
+1. Na Vercel, escolha **Container** e mantenha **Root Directory** como `./`.
 2. Configure as variáveis de `.env.example`. Para produção, configure:
 
 - `OPENFY_ALLOWED_ORIGINS`: lista separada por vírgulas com as origens web
