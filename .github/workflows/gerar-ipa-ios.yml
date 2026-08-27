@@ -5,7 +5,8 @@ on:
 
 jobs:
   gerar-ipa:
-    runs-on: macos-26-intel
+    # Use the Apple Silicon image; Xcode 26.6 is available there as well.
+    runs-on: macos-26
     timeout-minutes: 60
 
     # Needed so GITHUB_TOKEN can publish the Release that hosts the IPA.
@@ -137,6 +138,8 @@ jobs:
           echo "Iniciando compilação:"
           echo "Workspace: $WORKSPACE"
           echo "Scheme: $SCHEME"
+          BUILD_JOBS="$(sysctl -n hw.ncpu)"
+          echo "Jobs de compilação: $BUILD_JOBS"
 
           xcodebuild \
             -workspace "$WORKSPACE" \
@@ -146,7 +149,7 @@ jobs:
             -destination "generic/platform=iOS" \
             -derivedDataPath "$PWD/build" \
             -parallelizeTargets \
-            -jobs 4 \
+            -jobs "$BUILD_JOBS" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
