@@ -15,7 +15,10 @@ import {
   resolveViaSoundCloud,
   resolveViaYouTubeTopic,
 } from '../audio/audioResolver';
-import { reportDirectYouTubeStreamRefusal } from '../audio/directYouTubeResolver';
+import {
+  getDirectYouTubeMediaHeaders,
+  reportDirectYouTubeStreamRefusal,
+} from '../audio/directYouTubeResolver';
 import {
   recordDownloadDiagnostic,
   startDownloadDiagnostics,
@@ -92,14 +95,8 @@ const audioUrlOrigin = (url: string) => {
 // Googlevideo accepts the same Range transport used to validate local streams.
 // iOS URLSession may reject the otherwise identical whole-file request with 403.
 const audioRequestHeaders = (url: string): Record<string, string> | undefined => {
-  try {
-    const hostname = new URL(url).hostname.toLowerCase();
-    return hostname === 'googlevideo.com' || hostname.endsWith('.googlevideo.com')
-      ? { Range: 'bytes=0-' }
-      : undefined;
-  } catch {
-    return undefined;
-  }
+  const mediaHeaders = getDirectYouTubeMediaHeaders(url);
+  return mediaHeaders ? { ...mediaHeaders, Range: 'bytes=0-' } : undefined;
 };
 
 const diagnosticsIdFromTrackId = (trackId: string) =>
@@ -107,7 +104,14 @@ const diagnosticsIdFromTrackId = (trackId: string) =>
 
 const selectResponseHeaders = (headers?: Record<string, string>) => {
   if (!headers) return undefined;
-  const wanted = ['content-type', 'content-length', 'accept-ranges', 'date', 'server'];
+  const wanted = [
+    'content-type',
+    'content-length',
+    'content-range',
+    'accept-ranges',
+    'date',
+    'server',
+  ];
   const selected = Object.fromEntries(
     Object.entries(headers).filter(([name]) => wanted.includes(name.toLowerCase()))
   );
@@ -433,6 +437,107 @@ const bufferToBase64 = (buffer: ArrayBuffer): string => {
 };
 
 const FETCH_AUDIO_FALLBACK_MAX_BYTES = 32 * 1024 * 1024;
+const GOOGLEVIDEO_FETCH_CHUNK_BYTES = 1024 * 1024;
+
+const googleVideoContentLength = (url: string) => {
+  if (!getDirectYouTubeMediaHeaders(url)) return null;
+  try {
+    const value = Number(new URL(url).searchParams.get('clen'));
+    return Number.isInteger(value) && value > 0 && value <= FETCH_AUDIO_FALLBACK_MAX_BYTES
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const responseHeaders = (response: Response) =>
+  Object.fromEntries(
+    ['content-type', 'content-length', 'content-range', 'accept-ranges', 'date', 'server'].flatMap(
+      (name) => {
+        const value = response.headers.get(name);
+        return value ? [[name, value]] : [];
+      }
+    )
+  );
+
+const downloadGoogleVideoChunks = async (
+  audioUrl: string,
+  localPath: string,
+  trackId: string,
+  totalBytes: number,
+  headers: Record<string, string>
+): Promise<string | null> => {
+  const spotifyId = diagnosticsIdFromTrackId(trackId);
+  let written = 0;
+  let lastResponse: Response | null = null;
+  let lastHeaders: Record<string, string> | undefined;
+  let lastMimeType: string | null = null;
+
+  await FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+  while (written < totalBytes) {
+    const end = Math.min(written + GOOGLEVIDEO_FETCH_CHUNK_BYTES, totalBytes) - 1;
+    const range = `bytes=${written}-${end}`;
+    const response = await fetch(audioUrl, { headers: { ...headers, Range: range } });
+    const currentHeaders = responseHeaders(response);
+    const mimeType = response.headers.get('content-type');
+    const contentRange = response.headers.get('content-range');
+
+    if (!response.ok || !isAudioMimeType(mimeType)) {
+      recordDownloadDiagnostic(spotifyId, 'audio.invalid_response', {
+        transport: 'fetch',
+        session: 'foreground',
+        status: response.status,
+        mimeType,
+        headers: currentHeaders,
+        range,
+        reason: !response.ok ? 'http_status' : 'unexpected_mime_type',
+      });
+      if (!response.ok) await reportDirectYouTubeStreamRefusal(audioUrl, response.status);
+      return null;
+    }
+
+    const buffer = await response.arrayBuffer();
+    const expectedBytes = end - written + 1;
+    const wrongRange =
+      response.status === 206 && !contentRange?.startsWith(`bytes ${written}-`);
+    if (!buffer.byteLength || buffer.byteLength > expectedBytes || wrongRange) {
+      recordDownloadDiagnostic(spotifyId, 'audio.invalid_response', {
+        transport: 'fetch',
+        session: 'foreground',
+        status: response.status,
+        mimeType,
+        headers: currentHeaders,
+        range,
+        bytes: buffer.byteLength,
+        reason: wrongRange ? 'invalid_content_range' : 'invalid_range_body',
+      });
+      return null;
+    }
+
+    await FileSystem.writeAsStringAsync(localPath, bufferToBase64(buffer), {
+      encoding: FileSystem.EncodingType.Base64,
+      append: written > 0,
+    });
+    written += buffer.byteLength;
+    lastResponse = response;
+    lastHeaders = currentHeaders;
+    lastMimeType = mimeType;
+  }
+
+  return validateDownloadedAudio(
+    {
+      uri: localPath,
+      status: lastResponse?.status,
+      mimeType: lastMimeType,
+      headers: lastHeaders,
+      sourceUrl: audioUrl,
+    },
+    trackId,
+    'fetch',
+    'foreground'
+  );
+};
 
 const downloadAudioWithFetch = async (
   audioUrl: string,
@@ -444,6 +549,7 @@ const downloadAudioWithFetch = async (
   const transport = 'fetch';
   const session = 'foreground';
   const headers = audioRequestHeaders(audioUrl);
+  const chunkedTotalBytes = googleVideoContentLength(audioUrl);
 
   try {
     recordDownloadDiagnostic(spotifyId, 'audio.request', {
@@ -454,15 +560,17 @@ const downloadAudioWithFetch = async (
       format,
       range: headers?.Range,
     });
+    if (headers && chunkedTotalBytes) {
+      return await downloadGoogleVideoChunks(
+        audioUrl,
+        localPath,
+        trackId,
+        chunkedTotalBytes,
+        headers
+      );
+    }
     const response = await fetch(audioUrl, headers ? { headers } : undefined);
-    const responseHeaders = Object.fromEntries(
-      ['content-type', 'content-length', 'accept-ranges', 'date', 'server'].flatMap(
-        (name) => {
-          const value = response.headers.get(name);
-          return value ? [[name, value]] : [];
-        }
-      )
-    );
+    const receivedHeaders = responseHeaders(response);
     const mimeType = response.headers.get('content-type');
     const contentLength = Number(response.headers.get('content-length') || 0);
 
@@ -472,7 +580,7 @@ const downloadAudioWithFetch = async (
         session,
         status: response.status,
         mimeType,
-        headers: responseHeaders,
+        headers: receivedHeaders,
         reason: !response.ok ? 'http_status' : 'unexpected_mime_type',
       });
       if (!response.ok) {
@@ -513,7 +621,7 @@ const downloadAudioWithFetch = async (
         uri: localPath,
         status: response.status,
         mimeType,
-        headers: responseHeaders,
+        headers: receivedHeaders,
         sourceUrl: audioUrl,
       },
       trackId,

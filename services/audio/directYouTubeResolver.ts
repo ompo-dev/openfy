@@ -68,7 +68,8 @@ type DirectInnertubeClient = {
 
 const SEARCH_LIMIT = 8;
 const REQUEST_TIMEOUT_MS = 8_000;
-const STREAM_PROBE_BYTES = 16_384;
+// Must match the real fallback chunk. Tiny probes can pass while downloads 403.
+const STREAM_PROBE_BYTES = 1024 * 1024;
 const STREAM_CACHE_TTL_MS = 10 * 60_000;
 const CLIENT_FAILURE_COOLDOWN_MS = 30_000;
 const CLIENT_MAX_COOLDOWN_MS = 5 * 60_000;
@@ -83,6 +84,13 @@ const PLAYER_CLIENTS: readonly DirectPlayerClient[] = [
   'ANDROID_VR',
   'TV',
 ];
+const IOS_MEDIA_USER_AGENT =
+  'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)';
+const ANDROID_MEDIA_USER_AGENT =
+  'com.google.android.youtube/21.03.36(Linux; U; Android 16; en_US; SM-S908E Build/TP1A.220624.014) gzip';
+const ANDROID_VR_MEDIA_USER_AGENT =
+  'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip';
+const TV_MEDIA_USER_AGENT = 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version';
 let innertubeClient: Promise<DirectInnertubeClient> | null = null;
 const streamCache = new Map<
   string,
@@ -99,6 +107,35 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isPlayerClient = (value: string): value is DirectPlayerClient =>
   PLAYER_CLIENTS.includes(value as DirectPlayerClient);
+
+/** googlevideo checks that media fetch uses identity which minted its URL. */
+export const getDirectYouTubeMediaHeaders = (
+  value: string
+): Record<string, string> | undefined => {
+  try {
+    const url = new URL(value);
+    if (url.hostname !== 'googlevideo.com' && !url.hostname.endsWith('.googlevideo.com')) {
+      return undefined;
+    }
+    switch (url.searchParams.get('c')?.toUpperCase()) {
+      case 'ANDROID_VR':
+        return { 'User-Agent': ANDROID_VR_MEDIA_USER_AGENT };
+      case 'ANDROID':
+      case 'ANDROID_MUSIC':
+        return { 'User-Agent': ANDROID_MEDIA_USER_AGENT };
+      case 'TVHTML5':
+        return {
+          'User-Agent': TV_MEDIA_USER_AGENT,
+          Origin: 'https://www.youtube.com',
+          Referer: 'https://www.youtube.com/',
+        };
+      default:
+        return { 'User-Agent': IOS_MEDIA_USER_AGENT };
+    }
+  } catch {
+    return undefined;
+  }
+};
 
 const isNonNegativeFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -320,8 +357,12 @@ const isPlayableAudioResponse = (response: Response) => {
 
 const probeStream = async (url: string): Promise<boolean> => {
   try {
+    const headers = {
+      ...getDirectYouTubeMediaHeaders(url),
+      Range: `bytes=0-${STREAM_PROBE_BYTES - 1}`,
+    };
     const response = await withTimeout(
-      fetch(url, { headers: { Range: `bytes=0-${STREAM_PROBE_BYTES - 1}` } }),
+      fetch(url, { headers }),
       'YouTube audio probe'
     );
     if (!isPlayableAudioResponse(response)) return false;

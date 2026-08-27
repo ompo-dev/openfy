@@ -29,7 +29,7 @@ describe('resolveDirectYouTubeAudio', () => {
 
   it('resolves an exact YouTube video through the iOS streaming client', async () => {
     const getStreamingData = jest.fn().mockResolvedValue({
-      url: 'https://media.youtube.test/mafinoso.m4a',
+      url: 'https://rr1.googlevideo.com/mafinoso.m4a?c=IOS',
       mime_type: 'audio/mp4; codecs="mp4a.40.2"',
     });
     mockCreate.mockResolvedValue({ getStreamingData });
@@ -38,7 +38,7 @@ describe('resolveDirectYouTubeAudio', () => {
       resolveDirectYouTubeAudio({ videoId: 'V1M1hYxmRvA' })
     ).resolves.toEqual({
       videoId: 'V1M1hYxmRvA',
-      url: 'https://media.youtube.test/mafinoso.m4a',
+      url: 'https://rr1.googlevideo.com/mafinoso.m4a?c=IOS',
       format: 'm4a',
     });
     expect(getStreamingData).toHaveBeenCalledWith('V1M1hYxmRvA', {
@@ -46,6 +46,15 @@ describe('resolveDirectYouTubeAudio', () => {
       quality: 'best',
       type: 'audio',
     });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://rr1.googlevideo.com/mafinoso.m4a?c=IOS',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'User-Agent':
+            'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)',
+        }),
+      })
+    );
   });
 
   it('tries another local player client when the first stream cannot serve audio bytes', async () => {
@@ -93,7 +102,7 @@ describe('resolveDirectYouTubeAudio', () => {
     });
     expect(global.fetch).toHaveBeenCalledWith(
       'https://media.youtube.test/working.m4a',
-      expect.objectContaining({ headers: { Range: 'bytes=0-16383' } })
+      expect.objectContaining({ headers: { Range: 'bytes=0-1048575' } })
     );
   });
 
