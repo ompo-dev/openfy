@@ -78,14 +78,14 @@ public final class OpenfyYouTubeModule: Module {
     let mimeType = initial.response.mimeType
 
     guard initial.response.statusCode == 200 || initial.response.statusCode == 206 else {
-      return GoogleVideoTransferResult(
+      return transferResult(
         status: initial.response.statusCode,
         mimeType: mimeType,
         headers: initialHeaders
       )
     }
     guard isAudioContentType(mimeType) else {
-      return GoogleVideoTransferResult(
+      return transferResult(
         status: initial.response.statusCode,
         mimeType: mimeType,
         headers: initialHeaders
@@ -97,7 +97,7 @@ public final class OpenfyYouTubeModule: Module {
     // below in fixed byte ranges.
     if initial.response.statusCode == 200 {
       try initial.data.write(to: destinationURL, options: .atomic)
-      return GoogleVideoTransferResult(
+      return transferResult(
         uri: destinationURL.absoluteString,
         status: initial.response.statusCode,
         mimeType: mimeType,
@@ -136,7 +136,7 @@ public final class OpenfyYouTubeModule: Module {
         let rangeMimeType = range.response.mimeType
         guard range.response.statusCode == 206 else {
           try? fileManager.removeItem(at: destinationURL)
-          return GoogleVideoTransferResult(
+          return transferResult(
             status: range.response.statusCode,
             mimeType: rangeMimeType,
             headers: rangeHeaders,
@@ -159,13 +159,32 @@ public final class OpenfyYouTubeModule: Module {
       throw error
     }
 
-    return GoogleVideoTransferResult(
+    return transferResult(
       uri: destinationURL.absoluteString,
       status: initial.response.statusCode,
       mimeType: mimeType,
       headers: initialHeaders,
       totalBytes: initialRange.total
     )
+  }
+
+  // `@Field` turns Record properties into property wrappers. Its synthesized
+  // memberwise initializer therefore accepts `Field<T>`, not `T`; populate the
+  // record through its public wrapped values instead.
+  private static func transferResult(
+    uri: String? = nil,
+    status: Int,
+    mimeType: String? = nil,
+    headers: [String: String]? = nil,
+    totalBytes: Int? = nil
+  ) -> GoogleVideoTransferResult {
+    var result = GoogleVideoTransferResult()
+    result.uri = uri
+    result.status = status
+    result.mimeType = mimeType
+    result.headers = headers
+    result.totalBytes = totalBytes
+    return result
   }
 
   private static func requestRange(
