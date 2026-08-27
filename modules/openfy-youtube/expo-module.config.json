@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["OpenfyYouTubeModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.openfyyoutube.OpenfyYouTubeModule"]
+  }
+}

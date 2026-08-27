@@ -13,6 +13,15 @@ jest.mock('expo-file-system/legacy', () => ({
   FileSystemSessionType: { BACKGROUND: 'background', FOREGROUND: 'foreground' },
 }));
 
+const mockNativeGoogleVideoDownload = jest.fn();
+
+jest.mock('../../../modules/openfy-youtube', () => ({
+  __esModule: true,
+  default: {
+    downloadGoogleVideoAsync: mockNativeGoogleVideoDownload,
+  },
+}));
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { resolveAudioUrl } from '../../audio/audioResolver';
@@ -51,6 +60,7 @@ describe('queueDownloads', () => {
     } as ReturnType<typeof FileSystem.createDownloadResumable>);
     fileSystemMock.downloadAsync.mockReset();
     fileSystemMock.downloadAsync.mockResolvedValue({ uri: 'file:///mock_dir/cover.jpg' });
+    mockNativeGoogleVideoDownload.mockReset();
     fetchMock.mockReset();
     global.fetch = fetchMock;
   });
@@ -228,5 +238,34 @@ describe('queueDownloads', () => {
       expect.any(String),
       expect.objectContaining({ encoding: 'base64' })
     );
+  });
+
+  it('uses the single native range transport before Expo FileSystem for googlevideo', async () => {
+    mockNativeGoogleVideoDownload.mockResolvedValue({
+      uri: 'file:///mock_dir/openfy_downloads/track_native.m4a',
+      status: 206,
+      mimeType: 'audio/mp4',
+      headers: { 'Content-Range': 'bytes 0-99999/100000' },
+      totalBytes: 100000,
+    });
+
+    await expect(
+      downloadAudio(
+        'https://rr1.googlevideo.com/audio.m4a?c=IOS&clen=100000',
+        'track_native',
+        'm4a'
+      )
+    ).resolves.toBe('file:///mock_dir/openfy_downloads/track_native.m4a');
+
+    expect(mockNativeGoogleVideoDownload).toHaveBeenCalledWith(
+      'https://rr1.googlevideo.com/audio.m4a?c=IOS&clen=100000',
+      'file:///mock_dir/openfy_downloads/track_native.m4a',
+      {
+        'User-Agent':
+          'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)',
+      },
+      2 * 1024 * 1024
+    );
+    expect(fileSystemMock.createDownloadResumable).not.toHaveBeenCalled();
   });
 });

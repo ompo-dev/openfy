@@ -19,6 +19,7 @@ import {
   getDirectYouTubeMediaHeaders,
   reportDirectYouTubeStreamRefusal,
 } from '../audio/directYouTubeResolver';
+import { downloadYouTubeStreamNatively } from '../audio/nativeYouTubeTransfer';
 import {
   recordDownloadDiagnostic,
   startDownloadDiagnostics,
@@ -743,12 +744,52 @@ export const downloadAudio = async (
     const localPath = `${DOWNLOADS_DIR}${trackId}.${cleanFormat}`;
     const spotifyId = diagnosticsIdFromTrackId(trackId);
     const headers = audioRequestHeaders(audioUrl);
+    const googleVideoHeaders = getDirectYouTubeMediaHeaders(audioUrl);
 
     // 1. If HLS .m3u8 playlist
     if (audioUrl.includes('.m3u8')) {
       console.log('[DownloadManager] Downloading HLS stream to local MP3...');
       const hlsResult = await downloadHlsAudio(audioUrl, localPath, onProgress);
       if (hlsResult) return hlsResult;
+    }
+
+    // Keep every googlevideo range in the same native transport. This is the
+    // critical BitChord behaviour: URLSession/OkHttp sends the identity that
+    // minted the signed stream instead of mixing it with Expo FileSystem.
+    if (googleVideoHeaders) {
+      try {
+        recordDownloadDiagnostic(spotifyId, 'audio.request', {
+          method: 'GET',
+          transport: 'native_range',
+          session: 'foreground',
+          url: audioUrl,
+          format: cleanFormat,
+          range: 'bytes=0-2097151',
+        });
+        const nativeResult = await downloadYouTubeStreamNatively(
+          audioUrl,
+          localPath,
+          googleVideoHeaders
+        );
+        if (nativeResult) {
+          const validResult = await validateDownloadedAudio(
+            nativeResult,
+            trackId,
+            'native_range',
+            'foreground'
+          );
+          if (validResult) return validResult;
+        }
+      } catch (error) {
+        recordDownloadDiagnostic(spotifyId, 'audio.failed', {
+          transport: 'native_range',
+          session: 'foreground',
+          error: errorMessage(error),
+        });
+        console.warn(
+          `[DownloadManager] Native range transfer failed from ${audioUrlOrigin(audioUrl)}: ${errorMessage(error)}. Trying Expo fallback.`
+        );
+      }
     }
 
     // 2. Direct progressive download via createDownloadResumable
