@@ -84,7 +84,7 @@ describe('queueDownloads', () => {
 
   it('BUG-R1: iPhone resolves a fresh on-device stream before a server-provided URL', async () => {
     resolveAudioUrlMock.mockResolvedValue({
-      url: 'https://rr1.googlevideo.test/fresh-on-device.m4a',
+      url: 'https://rr1.googlevideo.com/fresh-on-device.m4a',
       format: 'm4a',
       quality: 'high',
       source: 'youtube',
@@ -112,16 +112,19 @@ describe('queueDownloads', () => {
       180000
     );
     expect(fileSystemMock.createDownloadResumable).toHaveBeenCalledWith(
-      'https://rr1.googlevideo.test/fresh-on-device.m4a',
+      'https://rr1.googlevideo.com/fresh-on-device.m4a',
       expect.any(String),
-      expect.objectContaining({ sessionType: 'background' }),
+      expect.objectContaining({
+        sessionType: 'background',
+        headers: { Range: 'bytes=0-' },
+      }),
       expect.any(Function)
     );
   });
 
   it('BUG-R2: iPhone retries direct download in foreground when background returns an invalid file', async () => {
     resolveAudioUrlMock.mockResolvedValue({
-      url: 'https://rr1.googlevideo.test/fresh-on-device.m4a',
+      url: 'https://rr1.googlevideo.com/fresh-on-device.m4a',
       format: 'm4a',
       quality: 'high',
       source: 'youtube',
@@ -159,15 +162,21 @@ describe('queueDownloads', () => {
 
     expect(fileSystemMock.downloadAsync).toHaveBeenNthCalledWith(
       1,
-      'https://rr1.googlevideo.test/fresh-on-device.m4a',
+      'https://rr1.googlevideo.com/fresh-on-device.m4a',
       expect.any(String),
-      expect.objectContaining({ sessionType: 'background' })
+      expect.objectContaining({
+        sessionType: 'background',
+        headers: { Range: 'bytes=0-' },
+      })
     );
     expect(fileSystemMock.downloadAsync).toHaveBeenNthCalledWith(
       2,
-      'https://rr1.googlevideo.test/fresh-on-device.m4a',
+      'https://rr1.googlevideo.com/fresh-on-device.m4a',
       expect.any(String),
-      expect.objectContaining({ sessionType: 'foreground' })
+      expect.objectContaining({
+        sessionType: 'foreground',
+        headers: { Range: 'bytes=0-' },
+      })
     );
   });
 
@@ -191,10 +200,13 @@ describe('queueDownloads', () => {
     });
 
     await expect(
-      downloadAudio('https://rr1.googlevideo.test/audio.m4a', 'track_3', 'm4a')
+      downloadAudio('https://rr1.googlevideo.com/audio.m4a', 'track_3', 'm4a')
     ).resolves.toBe('file:///mock_dir/openfy_downloads/track_3.m4a');
 
-    expect(fetchMock).toHaveBeenCalledWith('https://rr1.googlevideo.test/audio.m4a');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://rr1.googlevideo.com/audio.m4a',
+      expect.objectContaining({ headers: { Range: 'bytes=0-' } })
+    );
     expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledWith(
       'file:///mock_dir/openfy_downloads/track_3.m4a',
       expect.any(String),

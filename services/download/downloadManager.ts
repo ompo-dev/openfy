@@ -15,6 +15,7 @@ import {
   resolveViaSoundCloud,
   resolveViaYouTubeTopic,
 } from '../audio/audioResolver';
+import { reportDirectYouTubeStreamRefusal } from '../audio/directYouTubeResolver';
 import {
   recordDownloadDiagnostic,
   startDownloadDiagnostics,
@@ -88,6 +89,19 @@ const audioUrlOrigin = (url: string) => {
   }
 };
 
+// Googlevideo accepts the same Range transport used to validate local streams.
+// iOS URLSession may reject the otherwise identical whole-file request with 403.
+const audioRequestHeaders = (url: string): Record<string, string> | undefined => {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === 'googlevideo.com' || hostname.endsWith('.googlevideo.com')
+      ? { Range: 'bytes=0-' }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const diagnosticsIdFromTrackId = (trackId: string) =>
   trackId.startsWith('track_') ? trackId.slice('track_'.length) : trackId;
 
@@ -105,6 +119,7 @@ type NativeDownloadResult = {
   status?: number;
   mimeType?: string | null;
   headers?: Record<string, string>;
+  sourceUrl?: string;
 };
 
 const isAudioMimeType = (mimeType?: string | null) =>
@@ -131,6 +146,13 @@ const validateDownloadedAudio = async (
       ...details,
       reason: 'missing_file_uri',
     });
+    if (
+      result?.sourceUrl &&
+      typeof result.status === 'number' &&
+      (result.status < 200 || result.status >= 300)
+    ) {
+      await reportDirectYouTubeStreamRefusal(result.sourceUrl, result.status);
+    }
     return null;
   }
 
@@ -160,6 +182,9 @@ const validateDownloadedAudio = async (
         ? 'unexpected_mime_type'
         : 'file_too_small',
   });
+  if (!successfulStatus && result.sourceUrl && typeof result.status === 'number') {
+    await reportDirectYouTubeStreamRefusal(result.sourceUrl, result.status);
+  }
   await FileSystem.deleteAsync(result.uri, { idempotent: true }).catch(() => {});
   return null;
 };
@@ -418,6 +443,7 @@ const downloadAudioWithFetch = async (
   const spotifyId = diagnosticsIdFromTrackId(trackId);
   const transport = 'fetch';
   const session = 'foreground';
+  const headers = audioRequestHeaders(audioUrl);
 
   try {
     recordDownloadDiagnostic(spotifyId, 'audio.request', {
@@ -426,9 +452,10 @@ const downloadAudioWithFetch = async (
       session,
       url: audioUrl,
       format,
+      range: headers?.Range,
     });
-    const response = await fetch(audioUrl);
-    const headers = Object.fromEntries(
+    const response = await fetch(audioUrl, headers ? { headers } : undefined);
+    const responseHeaders = Object.fromEntries(
       ['content-type', 'content-length', 'accept-ranges', 'date', 'server'].flatMap(
         (name) => {
           const value = response.headers.get(name);
@@ -445,9 +472,12 @@ const downloadAudioWithFetch = async (
         session,
         status: response.status,
         mimeType,
-        headers,
+        headers: responseHeaders,
         reason: !response.ok ? 'http_status' : 'unexpected_mime_type',
       });
+      if (!response.ok) {
+        await reportDirectYouTubeStreamRefusal(audioUrl, response.status);
+      }
       return null;
     }
     if (contentLength > FETCH_AUDIO_FALLBACK_MAX_BYTES) {
@@ -483,7 +513,8 @@ const downloadAudioWithFetch = async (
         uri: localPath,
         status: response.status,
         mimeType,
-        headers,
+        headers: responseHeaders,
+        sourceUrl: audioUrl,
       },
       trackId,
       transport,
@@ -603,6 +634,7 @@ export const downloadAudio = async (
     const cleanFormat = format === 'm3u8' ? 'mp3' : format || 'mp3';
     const localPath = `${DOWNLOADS_DIR}${trackId}.${cleanFormat}`;
     const spotifyId = diagnosticsIdFromTrackId(trackId);
+    const headers = audioRequestHeaders(audioUrl);
 
     // 1. If HLS .m3u8 playlist
     if (audioUrl.includes('.m3u8')) {
@@ -619,11 +651,15 @@ export const downloadAudio = async (
         session: 'background',
         url: audioUrl,
         format: cleanFormat,
+        range: headers?.Range,
       });
       const downloadResumable = FileSystem.createDownloadResumable(
         audioUrl,
         localPath,
-        { sessionType: FileSystem.FileSystemSessionType.BACKGROUND },
+        {
+          sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+          ...(headers ? { headers } : {}),
+        },
         (downloadProgress) => {
           const progress =
             downloadProgress.totalBytesWritten /
@@ -635,7 +671,7 @@ export const downloadAudio = async (
 
       const result = await downloadResumable.downloadAsync();
       const validResult = await validateDownloadedAudio(
-        result,
+        { ...result, sourceUrl: audioUrl },
         trackId,
         'resumable',
         'background'
@@ -660,12 +696,14 @@ export const downloadAudio = async (
         session: 'background',
         url: audioUrl,
         format: cleanFormat,
+        range: headers?.Range,
       });
       const directResult = await FileSystem.downloadAsync(audioUrl, localPath, {
         sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+        ...(headers ? { headers } : {}),
       });
       const validResult = await validateDownloadedAudio(
-        directResult,
+        { ...directResult, sourceUrl: audioUrl },
         trackId,
         'direct',
         'background'
@@ -692,12 +730,14 @@ export const downloadAudio = async (
           session: 'foreground',
           url: audioUrl,
           format: cleanFormat,
+          range: headers?.Range,
         });
         const directResult = await FileSystem.downloadAsync(audioUrl, localPath, {
           sessionType: FileSystem.FileSystemSessionType.FOREGROUND,
+          ...(headers ? { headers } : {}),
         });
         const validResult = await validateDownloadedAudio(
-          directResult,
+          { ...directResult, sourceUrl: audioUrl },
           trackId,
           'direct',
           'foreground'

@@ -8,6 +8,7 @@ jest.mock('youtubei.js', () => ({
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  reportDirectYouTubeStreamRefusal,
   resetDirectYouTubeResolverForTests,
   resolveDirectYouTubeAudio,
   resolveDirectYouTubeTrack,
@@ -134,6 +135,33 @@ describe('resolveDirectYouTubeAudio', () => {
     });
 
     expect(getStreamingData).toHaveBeenNthCalledWith(3, 'XcJ3NZqm7bQ', {
+      client: 'YTMUSIC_ANDROID',
+      quality: 'best',
+      type: 'audio',
+    });
+  });
+
+  it('cools down a verified client when iOS refuses its real stream transfer', async () => {
+    const getStreamingData = jest
+      .fn()
+      .mockResolvedValueOnce({
+        url: 'https://media.youtube.test/initial.m4a',
+        mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+      })
+      .mockResolvedValueOnce({
+        url: 'https://media.youtube.test/retried.m4a',
+        mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+      });
+    mockCreate.mockResolvedValue({ getStreamingData });
+
+    const initial = await resolveDirectYouTubeAudio({ videoId: 'V1M1hYxmRvA' });
+    await reportDirectYouTubeStreamRefusal(initial!.url, 403);
+
+    await expect(
+      resolveDirectYouTubeAudio({ videoId: 'XcJ3NZqm7bQ', fresh: true })
+    ).resolves.toMatchObject({ url: 'https://media.youtube.test/retried.m4a' });
+
+    expect(getStreamingData).toHaveBeenNthCalledWith(2, 'XcJ3NZqm7bQ', {
       client: 'YTMUSIC_ANDROID',
       quality: 'best',
       type: 'audio',

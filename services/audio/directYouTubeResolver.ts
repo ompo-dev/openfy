@@ -89,6 +89,7 @@ const streamCache = new Map<
   { value: DirectYouTubeAudio; expiresAt: number }
 >();
 const pendingStreams = new Map<string, Promise<DirectYouTubeAudio | null>>();
+const streamClientByUrl = new Map<string, DirectPlayerClient>();
 const playerClientHealth = new Map<DirectPlayerClient, PlayerClientHealth>();
 let playerClientHealthHydration: Promise<void> | null = null;
 let playerClientHealthWrite: Promise<void> = Promise.resolve();
@@ -237,6 +238,25 @@ const recordPlayerClientFailure = async (playerClient: DirectPlayerClient) => {
   await persistPlayerClientHealth();
 };
 
+/** Learns from the real transfer, not only the small resolver probe. */
+export const reportDirectYouTubeStreamRefusal = async (
+  url: string,
+  status: number
+) => {
+  if (![403, 404, 410].includes(status)) return;
+  const playerClient = streamClientByUrl.get(url);
+  if (!playerClient) return;
+
+  streamClientByUrl.delete(url);
+  for (const [videoId, cached] of streamCache) {
+    if (cached.value.url === url) streamCache.delete(videoId);
+  }
+  await recordPlayerClientFailure(playerClient);
+  console.warn(
+    `[DirectYouTube] ${playerClient} stream refused with HTTP ${status}; client cooled down.`
+  );
+};
+
 const isSearchVideo = (value: unknown): value is SearchVideo => {
   if (!value || typeof value !== 'object') return false;
   const video = value as Partial<SearchVideo>;
@@ -361,6 +381,7 @@ const resolveVideoAudio = async (
           value: resolved,
           expiresAt: Date.now() + STREAM_CACHE_TTL_MS,
         });
+        streamClientByUrl.set(resolved.url, playerClient);
         await recordPlayerClientSuccess(playerClient, Date.now() - startedAt);
         console.log(`[DirectYouTube] ${playerClient} stream verified for ${videoId}`);
         return resolved;
@@ -494,6 +515,7 @@ export const resetDirectYouTubeResolverForTests = () => {
   innertubeClient = null;
   streamCache.clear();
   pendingStreams.clear();
+  streamClientByUrl.clear();
   playerClientHealth.clear();
   playerClientHealthHydration = null;
   playerClientHealthWrite = Promise.resolve();
