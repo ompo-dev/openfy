@@ -56,6 +56,10 @@ jobs:
       - name: Instalar dependências
         # SDK 57 tree resolves only with legacy-peer-deps (expo-audio / expo-glass-effect
         # peer chains); lockfile was generated the same way, so npm ci must match.
+        # The IPA contains no Node audio extractor. Skipping youtube-dl-exec's
+        # postinstall download avoids GitHub API rate limits on hosted runners.
+        env:
+          YOUTUBE_DL_SKIP_DOWNLOAD: "true"
         run: npm ci --legacy-peer-deps
 
       - name: Configurar áudio local
