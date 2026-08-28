@@ -15,6 +15,14 @@ private struct ContentRange {
   let total: Int
 }
 
+private struct AndroidMusicPlayerClient {
+  static let name = "ANDROID_MUSIC"
+  static let id = "21"
+  static let version = "8.39.42"
+  static let userAgent =
+    "com.google.android.apps.youtube.music/8.39.42 (Linux; U; Android 15; en_US; Pixel 9 Pro; Build/AP4A.250205.002) gzip"
+}
+
 /**
  * Owns the complete native media transfer. Googlevideo signed URLs are bound
  * to the player identity that issued them, so every byte range uses the same
@@ -45,6 +53,65 @@ public final class OpenfyYouTubeModule: Module {
         chunkBytes: chunkBytes
       )
     }
+
+    // The player request and media ranges must share one URLSession. A signed
+    // googlevideo URL can be rejected before its first byte when JavaScript
+    // mints it through one networking stack and URLSession fetches it through
+    // another.
+    AsyncFunction("resolveAndDownloadGoogleVideoAsync") {
+      (videoId: String, destination: String, chunkBytes: Int) async throws -> GoogleVideoTransferResult in
+      return try await Self.resolveAndDownload(
+        videoId: videoId,
+        destination: destination,
+        chunkBytes: chunkBytes
+      )
+    }
+  }
+
+  private static func resolveAndDownload(
+    videoId: String,
+    destination: String,
+    chunkBytes: Int
+  ) async throws -> GoogleVideoTransferResult {
+    guard isValidVideoId(videoId) else {
+      throw transferError("invalid_video_id")
+    }
+    guard (minimumChunkBytes...maximumChunkBytes).contains(chunkBytes) else {
+      throw transferError("invalid_chunk_size")
+    }
+
+    let visitorData = try? await freshVisitorData()
+    let player = try await playerResponse(videoId: videoId, visitorData: visitorData)
+    let playerHeaders = headersFrom(player.response)
+    guard (200...299).contains(player.response.statusCode) else {
+      return transferResult(
+        status: player.response.statusCode,
+        mimeType: player.response.mimeType,
+        headers: playerHeaders
+      )
+    }
+
+    guard playerStatus(from: player.payload) == "OK" else {
+      return transferResult(
+        status: 403,
+        mimeType: "text/plain",
+        headers: playerHeaders
+      )
+    }
+    guard let streamURL = bestAudioStreamURL(from: player.payload) else {
+      return transferResult(
+        status: 502,
+        mimeType: "text/plain",
+        headers: playerHeaders
+      )
+    }
+
+    return try await download(
+      url: streamURL.absoluteString,
+      destination: destination,
+      headers: ["User-Agent": AndroidMusicPlayerClient.userAgent],
+      chunkBytes: chunkBytes
+    )
   }
 
   private static func download(
@@ -168,6 +235,112 @@ public final class OpenfyYouTubeModule: Module {
     )
   }
 
+  private static func freshVisitorData() async throws -> String? {
+    guard let url = URL(string: "https://www.youtube.com/sw.js_data") else {
+      return nil
+    }
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.timeoutInterval = 10
+    request.setValue(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+      forHTTPHeaderField: "User-Agent"
+    )
+    request.setValue("en-US", forHTTPHeaderField: "Accept-Language")
+    request.setValue("https://www.youtube.com/sw.js", forHTTPHeaderField: "Referer")
+    let (data, response) = try await session.data(for: request)
+    guard let httpResponse = response as? HTTPURLResponse,
+      (200...299).contains(httpResponse.statusCode),
+      let body = String(data: data, encoding: .utf8) else {
+      return nil
+    }
+    let expression = try NSRegularExpression(pattern: "Cg[A-Za-z0-9_%-]{40,}")
+    let range = NSRange(body.startIndex..<body.endIndex, in: body)
+    guard let match = expression.firstMatch(in: body, range: range),
+      let matchRange = Range(match.range, in: body) else {
+      return nil
+    }
+    return String(body[matchRange])
+  }
+
+  private static func playerResponse(
+    videoId: String,
+    visitorData: String?
+  ) async throws -> (payload: [String: Any], response: HTTPURLResponse) {
+    guard let url = URL(string: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false") else {
+      throw transferError("invalid_player_url")
+    }
+
+    var client: [String: Any] = [
+      "clientName": AndroidMusicPlayerClient.name,
+      "clientVersion": AndroidMusicPlayerClient.version,
+      "osName": "Android",
+      "osVersion": "15",
+      "deviceMake": "Google",
+      "deviceModel": "Pixel 9 Pro",
+      "androidSdkVersion": 35,
+      "hl": "en",
+      "gl": "US",
+    ]
+    if let visitorData, !visitorData.isEmpty {
+      client["visitorData"] = visitorData
+    }
+    let body: [String: Any] = [
+      "context": ["client": client],
+      "videoId": videoId,
+      "contentCheckOk": true,
+      "racyCheckOk": true,
+    ]
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.timeoutInterval = 15
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("*/*", forHTTPHeaderField: "Accept")
+    request.setValue(AndroidMusicPlayerClient.userAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue(AndroidMusicPlayerClient.id, forHTTPHeaderField: "X-YouTube-Client-Name")
+    request.setValue(AndroidMusicPlayerClient.version, forHTTPHeaderField: "X-YouTube-Client-Version")
+    request.setValue("2", forHTTPHeaderField: "X-GOOG-API-FORMAT-VERSION")
+    if let visitorData, !visitorData.isEmpty {
+      request.setValue(visitorData, forHTTPHeaderField: "X-Goog-Visitor-Id")
+    }
+    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+    let (data, response) = try await session.data(for: request)
+    guard let httpResponse = response as? HTTPURLResponse else {
+      throw transferError("player_non_http_response")
+    }
+    let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+    return (payload, httpResponse)
+  }
+
+  private static func playerStatus(from payload: [String: Any]) -> String? {
+    (payload["playabilityStatus"] as? [String: Any])?["status"] as? String
+  }
+
+  private static func bestAudioStreamURL(from payload: [String: Any]) -> URL? {
+    guard let streamingData = payload["streamingData"] as? [String: Any],
+      let formats = streamingData["adaptiveFormats"] as? [[String: Any]] else {
+      return nil
+    }
+
+    let candidates = formats.compactMap { format -> (url: URL, score: Int)? in
+      guard let rawURL = format["url"] as? String,
+        let url = URL(string: rawURL),
+        url.scheme?.lowercased() == "https",
+        let host = url.host?.lowercased(),
+        host == "googlevideo.com" || host.hasSuffix(".googlevideo.com"),
+        let mimeType = format["mimeType"] as? String,
+        mimeType.lowercased().hasPrefix("audio/") else {
+        return nil
+      }
+      let quality = (format["audioQuality"] as? String) == "AUDIO_QUALITY_HIGH" ? 1_000_000 : 0
+      let bitrate = format["bitrate"] as? Int ?? 0
+      return (url, quality + bitrate)
+    }
+    return candidates.max(by: { $0.score < $1.score })?.url
+  }
+
   // `@Field` turns Record properties into property wrappers. Its synthesized
   // memberwise initializer therefore accepts `Field<T>`, not `T`; populate the
   // record through its public wrapped values instead.
@@ -218,6 +391,13 @@ public final class OpenfyYouTubeModule: Module {
       throw transferError("invalid_googlevideo_url")
     }
     return url
+  }
+
+  private static func isValidVideoId(_ value: String) -> Bool {
+    guard value.count == 11 else { return false }
+    return value.allSatisfy {
+      $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-")
+    }
   }
 
   private static func validatedDestinationURL(_ rawDestination: String) throws -> URL {

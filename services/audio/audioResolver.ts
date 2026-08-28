@@ -19,6 +19,7 @@ export type ResolvedAudio = {
   quality: string;
   format: string;
   source: 'spotyloader' | 'soundcloud' | 'youtube';
+  videoId?: string;
   confidence?: number;
   imageURL?: string;
 };
@@ -141,6 +142,7 @@ const resolveExactYouTubeVideo = async (
       quality: 'high',
       format: direct.format,
       source: 'youtube',
+      videoId: direct.videoId,
       confidence: 100,
       imageURL: direct.imageURL,
     };
@@ -699,6 +701,7 @@ const resolveAudioUrlInternal = async (
       quality: 'high',
       format: directResult.format,
       source: 'youtube',
+      videoId: directResult.videoId,
       confidence: 100,
       imageURL: directResult.imageURL,
     };

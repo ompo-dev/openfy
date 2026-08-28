@@ -16,6 +16,11 @@ type OpenfyYouTubeNativeModule = {
     headers: Record<string, string>,
     chunkBytes: number
   ): Promise<unknown>;
+  resolveAndDownloadGoogleVideoAsync?(
+    videoId: string,
+    destination: string,
+    chunkBytes: number
+  ): Promise<unknown>;
 };
 
 const NATIVE_TRANSFER_CHUNK_BYTES = 2 * 1024 * 1024;
@@ -85,6 +90,44 @@ export const downloadYouTubeStreamNatively = async (
       ? { totalBytes: rawResult.totalBytes }
       : {}),
     sourceUrl: url,
+  };
+};
+
+/**
+ * iOS-only path that keeps the YouTube `player` request and every media
+ * range on one URLSession. Googlevideo can reject a URL when those requests
+ * leave through different networking stacks, even on the same device.
+ */
+export const resolveAndDownloadYouTubeVideoNatively = async (
+  videoId: string,
+  destination: string
+): Promise<NativeYouTubeTransferResult | null> => {
+  if (Platform.OS !== 'ios' || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+    return null;
+  }
+  const nativeModule = getNativeModule();
+  if (!nativeModule?.resolveAndDownloadGoogleVideoAsync) return null;
+
+  const rawResult = await nativeModule.resolveAndDownloadGoogleVideoAsync(
+    videoId,
+    destination,
+    NATIVE_TRANSFER_CHUNK_BYTES
+  );
+  if (!isRecord(rawResult)) return null;
+
+  return {
+    ...(typeof rawResult.uri === 'string' ? { uri: rawResult.uri } : {}),
+    ...(typeof rawResult.status === 'number' ? { status: rawResult.status } : {}),
+    ...(typeof rawResult.mimeType === 'string' || rawResult.mimeType === null
+      ? { mimeType: rawResult.mimeType }
+      : {}),
+    ...(asStringRecord(rawResult.headers)
+      ? { headers: asStringRecord(rawResult.headers) }
+      : {}),
+    ...(typeof rawResult.totalBytes === 'number'
+      ? { totalBytes: rawResult.totalBytes }
+      : {}),
+    sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
   };
 };
 

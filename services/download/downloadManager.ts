@@ -19,7 +19,10 @@ import {
   getDirectYouTubeMediaHeaders,
   reportDirectYouTubeStreamRefusal,
 } from '../audio/directYouTubeResolver';
-import { downloadYouTubeStreamNatively } from '../audio/nativeYouTubeTransfer';
+import {
+  downloadYouTubeStreamNatively,
+  resolveAndDownloadYouTubeVideoNatively,
+} from '../audio/nativeYouTubeTransfer';
 import {
   recordDownloadDiagnostic,
   startDownloadDiagnostics,
@@ -730,7 +733,8 @@ export const downloadAudio = async (
   audioUrl: string,
   trackId: string,
   format: string = 'mp3',
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void,
+  youtubeVideoId?: string
 ): Promise<string | null> => {
   if (!audioUrl) return null;
   if (Platform.OS === 'web') {
@@ -745,6 +749,42 @@ export const downloadAudio = async (
     const spotifyId = diagnosticsIdFromTrackId(trackId);
     const headers = audioRequestHeaders(audioUrl);
     const googleVideoHeaders = getDirectYouTubeMediaHeaders(audioUrl);
+
+    // Keep the minting `player` call and the media ranges inside one iOS
+    // URLSession. A signed URL resolved by JavaScript can be refused by the
+    // native transfer before its first byte when the two stacks choose
+    // different network paths.
+    if (youtubeVideoId) {
+      try {
+        recordDownloadDiagnostic(spotifyId, 'audio.request', {
+          method: 'POST + GET',
+          transport: 'native_player_range',
+          session: 'foreground',
+          url: `https://www.youtube.com/watch?v=${youtubeVideoId}`,
+          format: cleanFormat,
+          range: 'bytes=0-2097151',
+        });
+        const nativeResolvedResult = await resolveAndDownloadYouTubeVideoNatively(
+          youtubeVideoId,
+          localPath
+        );
+        if (nativeResolvedResult) {
+          const validResult = await validateDownloadedAudio(
+            nativeResolvedResult,
+            trackId,
+            'native_player_range',
+            'foreground'
+          );
+          if (validResult) return validResult;
+        }
+      } catch (error) {
+        recordDownloadDiagnostic(spotifyId, 'audio.failed', {
+          transport: 'native_player_range',
+          session: 'foreground',
+          error: errorMessage(error),
+        });
+      }
+    }
 
     // 1. If HLS .m3u8 playlist
     if (audioUrl.includes('.m3u8')) {
@@ -979,6 +1019,7 @@ const downloadTrackInternal = async (
     let format = Platform.OS === 'web'
       ? audioFormat || track.audioFormat || 'mp3'
       : 'mp3';
+    let youtubeVideoId: string | undefined;
     if (resolvedUrl) {
       resolvedUrl = getPlayableAudioUrl(resolvedUrl);
       recordDownloadDiagnostic(track.spotifyId, 'audio.source.preloaded', {
@@ -1017,10 +1058,12 @@ const downloadTrackInternal = async (
       if (fallbackResult?.url) {
         resolvedUrl = fallbackResult.url;
         format = fallbackResult.format || 'mp3';
+        youtubeVideoId = fallbackResult.videoId;
         recordDownloadDiagnostic(track.spotifyId, 'audio.source.resolved', {
           url: resolvedUrl,
           format,
           source: fallbackResult.source,
+          videoId: youtubeVideoId,
         });
         if (!effectiveTrack.imageURL && fallbackResult.imageURL) {
           effectiveTrack = {
@@ -1056,7 +1099,8 @@ const downloadTrackInternal = async (
       resolvedUrl,
       trackId,
       format,
-      (p) => onProgress?.(p * 0.7)
+      (p) => onProgress?.(p * 0.7),
+      youtubeVideoId
     );
 
     if (cancelledDownloads.has(track.spotifyId)) return null;
@@ -1076,17 +1120,20 @@ const downloadTrackInternal = async (
       if (refreshed?.url && refreshed.url !== resolvedUrl) {
         resolvedUrl = refreshed.url;
         format = refreshed.format || format;
+        youtubeVideoId = refreshed.videoId;
         recordDownloadDiagnostic(track.spotifyId, 'audio.source.refreshed', {
           url: resolvedUrl,
           format,
           source: refreshed.source,
+          videoId: youtubeVideoId,
         });
         await upsertPendingDownload(track, resolvedUrl, format);
         localAudioPath = await downloadAudio(
           resolvedUrl,
           trackId,
           format,
-          (p) => onProgress?.(p * 0.7)
+          (p) => onProgress?.(p * 0.7),
+          youtubeVideoId
         );
       }
     }

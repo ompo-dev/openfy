@@ -14,11 +14,13 @@ jest.mock('expo-file-system/legacy', () => ({
 }));
 
 const mockNativeGoogleVideoDownload = jest.fn();
+const mockNativePlayerAndDownload = jest.fn();
 
 jest.mock('../../../modules/openfy-youtube', () => ({
   __esModule: true,
   default: {
     downloadGoogleVideoAsync: mockNativeGoogleVideoDownload,
+    resolveAndDownloadGoogleVideoAsync: mockNativePlayerAndDownload,
   },
 }));
 
@@ -61,6 +63,7 @@ describe('queueDownloads', () => {
     fileSystemMock.downloadAsync.mockReset();
     fileSystemMock.downloadAsync.mockResolvedValue({ uri: 'file:///mock_dir/cover.jpg' });
     mockNativeGoogleVideoDownload.mockReset();
+    mockNativePlayerAndDownload.mockReset();
     fetchMock.mockReset();
     global.fetch = fetchMock;
   });
@@ -266,6 +269,33 @@ describe('queueDownloads', () => {
       },
       2 * 1024 * 1024
     );
+    expect(fileSystemMock.createDownloadResumable).not.toHaveBeenCalled();
+  });
+
+  it('keeps iOS player resolution and the media transfer in the native session', async () => {
+    mockNativePlayerAndDownload.mockResolvedValue({
+      uri: 'file:///mock_dir/openfy_downloads/track_player.m4a',
+      status: 206,
+      mimeType: 'audio/mp4',
+      totalBytes: 100000,
+    });
+
+    await expect(
+      downloadAudio(
+        'https://rr1.googlevideo.com/audio.m4a?c=IOS&clen=100000',
+        'track_player',
+        'm4a',
+        undefined,
+        'V1M1hYxmRvA'
+      )
+    ).resolves.toBe('file:///mock_dir/openfy_downloads/track_player.m4a');
+
+    expect(mockNativePlayerAndDownload).toHaveBeenCalledWith(
+      'V1M1hYxmRvA',
+      'file:///mock_dir/openfy_downloads/track_player.m4a',
+      2 * 1024 * 1024
+    );
+    expect(mockNativeGoogleVideoDownload).not.toHaveBeenCalled();
     expect(fileSystemMock.createDownloadResumable).not.toHaveBeenCalled();
   });
 });

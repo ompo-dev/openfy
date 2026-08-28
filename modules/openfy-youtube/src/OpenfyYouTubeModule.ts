@@ -20,6 +20,16 @@ declare class OpenfyYouTubeModule extends NativeModule<{}> {
     headers: Record<string, string>,
     chunkBytes: number
   ): Promise<NativeYouTubeTransferResult>;
+
+  /**
+   * iOS resolves a current Android Music player URL and downloads it through
+   * the same URLSession, preserving the network identity Google binds to it.
+   */
+  resolveAndDownloadGoogleVideoAsync(
+    videoId: string,
+    destination: string,
+    chunkBytes: number
+  ): Promise<NativeYouTubeTransferResult>;
 }
 
 export default requireNativeModule<OpenfyYouTubeModule>('OpenfyYouTube');
