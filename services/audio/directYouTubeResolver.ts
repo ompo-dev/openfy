@@ -108,6 +108,22 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isPlayerClient = (value: string): value is DirectPlayerClient =>
   PLAYER_CLIENTS.includes(value as DirectPlayerClient);
 
+const playerClientFromStreamUrl = (
+  clientName: string | null
+): DirectPlayerClient => {
+  switch (clientName?.toUpperCase()) {
+    case 'ANDROID_VR':
+      return 'ANDROID_VR';
+    case 'ANDROID':
+    case 'ANDROID_MUSIC':
+      return 'YTMUSIC_ANDROID';
+    case 'TVHTML5':
+      return 'TV';
+    default:
+      return 'IOS';
+  }
+};
+
 /** googlevideo checks that media fetch uses identity which minted its URL. */
 export const getDirectYouTubeMediaHeaders = (
   value: string
@@ -117,13 +133,18 @@ export const getDirectYouTubeMediaHeaders = (
     if (url.hostname !== 'googlevideo.com' && !url.hostname.endsWith('.googlevideo.com')) {
       return undefined;
     }
-    switch (url.searchParams.get('c')?.toUpperCase()) {
+    // Prefer the actual client that received this URL from the player API.
+    // `c` is a useful fallback, but Google does not guarantee it matches the
+    // request identity for every returned stream.
+    switch (
+      streamClientByUrl.get(value) ??
+      playerClientFromStreamUrl(url.searchParams.get('c'))
+    ) {
       case 'ANDROID_VR':
         return { 'User-Agent': ANDROID_VR_MEDIA_USER_AGENT };
-      case 'ANDROID':
-      case 'ANDROID_MUSIC':
+      case 'YTMUSIC_ANDROID':
         return { 'User-Agent': ANDROID_MEDIA_USER_AGENT };
-      case 'TVHTML5':
+      case 'TV':
         return {
           'User-Agent': TV_MEDIA_USER_AGENT,
           Origin: 'https://www.youtube.com',
@@ -288,6 +309,9 @@ export const reportDirectYouTubeStreamRefusal = async (
   for (const [videoId, cached] of streamCache) {
     if (cached.value.url === url) streamCache.delete(videoId);
   }
+  // A googlevideo refusal is tied to the session which minted the URL. Do not
+  // reuse that session when the caller asks the resolver for a fresh stream.
+  innertubeClient = null;
   await recordPlayerClientFailure(playerClient);
   console.warn(
     `[DirectYouTube] ${playerClient} stream refused with HTTP ${status}; client cooled down.`
@@ -320,8 +344,11 @@ const getClient = (): Promise<DirectInnertubeClient> => {
         };
       };
       return Innertube.create({
-        generate_session_locally: true,
-        retrieve_innertube_config: false,
+        // Fetch YouTube's current visitor/session data instead of inventing a
+        // local visitor id. Locally generated ids often pass the first byte
+        // probe, then Google rejects later media ranges with HTTP 403.
+        generate_session_locally: false,
+        retrieve_innertube_config: true,
         retrieve_player: true,
       });
     });

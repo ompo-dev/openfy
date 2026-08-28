@@ -8,6 +8,7 @@ jest.mock('youtubei.js', () => ({
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  getDirectYouTubeMediaHeaders,
   reportDirectYouTubeStreamRefusal,
   resetDirectYouTubeResolverForTests,
   resolveDirectYouTubeAudio,
@@ -46,6 +47,11 @@ describe('resolveDirectYouTubeAudio', () => {
       quality: 'best',
       type: 'audio',
     });
+    expect(mockCreate).toHaveBeenCalledWith({
+      generate_session_locally: false,
+      retrieve_innertube_config: true,
+      retrieve_player: true,
+    });
     expect(global.fetch).toHaveBeenCalledWith(
       'https://rr1.googlevideo.com/mafinoso.m4a?c=IOS',
       expect.objectContaining({
@@ -55,6 +61,23 @@ describe('resolveDirectYouTubeAudio', () => {
         }),
       })
     );
+  });
+
+  it('uses the player identity that minted a stream over the URL client hint', async () => {
+    const getStreamingData = jest.fn().mockResolvedValue({
+      url: 'https://rr1.googlevideo.com/mafinoso.m4a?c=ANDROID_MUSIC',
+      mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+    });
+    mockCreate.mockResolvedValue({ getStreamingData });
+
+    const resolved = await resolveDirectYouTubeAudio({
+      videoId: 'V1M1hYxmRvA',
+    });
+
+    expect(getDirectYouTubeMediaHeaders(resolved!.url)).toEqual({
+      'User-Agent':
+        'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)',
+    });
   });
 
   it('tries another local player client when the first stream cannot serve audio bytes', async () => {
@@ -175,6 +198,7 @@ describe('resolveDirectYouTubeAudio', () => {
       quality: 'best',
       type: 'audio',
     });
+    expect(mockCreate).toHaveBeenCalledTimes(2);
   });
 
   it('keeps the learned client order after the resolver is recreated', async () => {
