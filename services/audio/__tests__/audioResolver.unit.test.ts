@@ -68,6 +68,7 @@ describe('resolveAudioUrl', () => {
       durationMs: 237000,
       fresh: false,
       title: 'Mafioso',
+      spotifyId: 'spotify_id',
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -105,6 +106,7 @@ describe('resolveAudioUrl', () => {
       durationMs: 180000,
       fresh: false,
       title: 'Faixa do servidor',
+      spotifyId: 'server_id',
     });
   });
 

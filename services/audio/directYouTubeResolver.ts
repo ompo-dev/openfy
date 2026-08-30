@@ -1,7 +1,10 @@
 import {
   evaluateCandidateMatch,
+  hasCanonicalTitleMatch,
   hasUnwantedForbiddenWords,
+  splitCanonicalArtists,
 } from '../canonical/canonicalMatcher';
+import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type DirectYouTubeRequest = {
@@ -10,6 +13,7 @@ type DirectYouTubeRequest = {
   durationMs?: number;
   videoId?: string;
   fresh?: boolean;
+  spotifyId?: string;
 };
 
 export type DirectYouTubeAudio = {
@@ -411,7 +415,8 @@ const probeStream = async (url: string): Promise<boolean> => {
 const resolveVideoAudio = async (
   videoId: string,
   imageURL?: string,
-  fresh = false
+  fresh = false,
+  spotifyId?: string
 ): Promise<DirectYouTubeAudio | null> => {
   const cached = streamCache.get(videoId);
   if (!fresh && cached && cached.expiresAt > Date.now()) {
@@ -431,6 +436,12 @@ const resolveVideoAudio = async (
       ]);
       for (const playerClient of orderedPlayerClients()) {
         const startedAt = Date.now();
+        if (spotifyId) {
+          recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_attempt', {
+            videoId,
+            client: playerClient,
+          });
+        }
         const stream = await withTimeout(
           client.getStreamingData(videoId, {
             client: playerClient,
@@ -440,10 +451,24 @@ const resolveVideoAudio = async (
           `YouTube ${playerClient} audio resolution`
         ).catch(() => null);
         if (!stream?.url || !/^https:\/\//i.test(stream.url)) {
+          if (spotifyId) {
+            recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_failed', {
+              videoId,
+              client: playerClient,
+              reason: 'missing_stream_url',
+            });
+          }
           await recordPlayerClientFailure(playerClient);
           continue;
         }
         if (!(await probeStream(stream.url))) {
+          if (spotifyId) {
+            recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_failed', {
+              videoId,
+              client: playerClient,
+              reason: 'probe_failed',
+            });
+          }
           await recordPlayerClientFailure(playerClient);
           continue;
         }
@@ -460,6 +485,13 @@ const resolveVideoAudio = async (
         });
         streamClientByUrl.set(resolved.url, playerClient);
         await recordPlayerClientSuccess(playerClient, Date.now() - startedAt);
+        if (spotifyId) {
+          recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_verified', {
+            videoId,
+            client: playerClient,
+            format: resolved.format,
+          });
+        }
         console.log(`[DirectYouTube] ${playerClient} stream verified for ${videoId}`);
         return resolved;
       }
@@ -513,19 +545,36 @@ export const resolveDirectYouTubeTrack = async (
 export const resolveDirectYouTubeAudio = async (
   request: DirectYouTubeRequest
 ): Promise<DirectYouTubeAudio | null> => {
-  if (request.videoId) return resolveVideoAudio(request.videoId, undefined, request.fresh);
+  if (request.videoId) {
+    return resolveVideoAudio(
+      request.videoId,
+      undefined,
+      request.fresh,
+      request.spotifyId
+    );
+  }
   if (!request.title) return null;
 
-  const primaryArtist = (request.artist || '')
-    .split(/\s*(?:,|&)\s*/)[0]
-    .trim();
-  const queries = primaryArtist
-    ? [`${primaryArtist} - ${request.title} Official Audio`, `${primaryArtist} ${request.title}`]
-    : [`${request.title} Official Audio`];
+  const canonicalArtists = splitCanonicalArtists(request.artist || '');
+  const primaryArtist = canonicalArtists[0] || '';
+  const queries = Array.from(
+    new Set([
+      ...(request.artist ? [`${request.artist} - ${request.title} Official Audio`] : []),
+      ...(primaryArtist
+        ? [`${primaryArtist} - ${request.title} Official Audio`, `${primaryArtist} ${request.title}`]
+        : []),
+      `${request.title} Official Audio`,
+    ])
+  );
 
   try {
     const client = await withTimeout(getClient(), 'YouTube client initialization');
     for (const query of queries) {
+      if (request.spotifyId) {
+        recordDownloadDiagnostic(request.spotifyId, 'audio.youtube.search', {
+          query,
+        });
+      }
       const search = await withTimeout(
         client.search(query, { type: 'video' }),
         'YouTube search'
@@ -537,29 +586,69 @@ export const resolveDirectYouTubeAudio = async (
         },
         []
       );
-      const candidates = videos
-        .slice(0, SEARCH_LIMIT)
-        .map((video) => {
-          const title = video.title.toString();
-          const artist = video.author.name;
-          const durationMs = video.duration.seconds * 1000;
-          const match = evaluateCandidateMatch(
-            {
-              title,
-              artist,
-              durationMs,
-              provider: 'youtube',
-              url: `https://www.youtube.com/watch?v=${video.video_id}`,
-            },
-            {
-              title: request.title || '',
-              artists: primaryArtist ? [primaryArtist] : [],
-              durationMs: request.durationMs || 0,
-              spotifyId: '',
-            }
-          );
-          return { video, title, artist, durationMs, match };
-        })
+
+      if (request.spotifyId) {
+        recordDownloadDiagnostic(request.spotifyId, 'audio.youtube.search_results', {
+          query,
+          count: videos.length,
+        });
+      }
+
+      const evaluated = videos.slice(0, SEARCH_LIMIT).map((video) => {
+        const title = video.title.toString();
+        const artist = video.author.name;
+        const durationMs = video.duration.seconds * 1000;
+        const match = evaluateCandidateMatch(
+          {
+            title,
+            artist,
+            durationMs,
+            provider: 'youtube',
+            url: `https://www.youtube.com/watch?v=${video.video_id}`,
+          },
+          {
+            title: request.title || '',
+            artists: canonicalArtists,
+            durationMs: request.durationMs || 0,
+            spotifyId: request.spotifyId || '',
+          }
+        );
+        return { video, title, artist, durationMs, match };
+      });
+
+      for (const item of evaluated) {
+        if (!item.match.isVerified) {
+          if (request.spotifyId) {
+            recordDownloadDiagnostic(
+              request.spotifyId,
+              'audio.youtube.candidate.rejected',
+              {
+                videoId: item.video.video_id,
+                title: item.title,
+                author: item.artist,
+                reason: item.match.reasons[0] || 'rejected',
+                titleMatch: hasCanonicalTitleMatch(item.title, request.title || ''),
+                durationDiffMs: item.match.durationDifferenceMs,
+              }
+            );
+          }
+        } else {
+          if (request.spotifyId) {
+            recordDownloadDiagnostic(
+              request.spotifyId,
+              'audio.youtube.candidate.matched',
+              {
+                videoId: item.video.video_id,
+                title: item.title,
+                author: item.artist,
+                confidence: item.match.sourceConfidence,
+              }
+            );
+          }
+        }
+      }
+
+      const candidates = evaluated
         .filter(
           ({ title, match }) =>
             match.isVerified && !hasUnwantedForbiddenWords(title, request.title || '')
@@ -574,7 +663,8 @@ export const resolveDirectYouTubeAudio = async (
         const resolved = await resolveVideoAudio(
           candidate.video.video_id,
           imageURL,
-          request.fresh
+          request.fresh,
+          request.spotifyId
         );
         if (resolved) return resolved;
       }

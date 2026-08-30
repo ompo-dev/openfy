@@ -132,32 +132,125 @@ export const hasConflictingNumberedTitleInLyrics = (
   return new RegExp(`(?:^|\\s)${escapedTitle}\\s+\\d+\\b`).test(text);
 };
 
+const ARTIST_ROLE_WORDS = new Set([
+  'rapper',
+  'mc',
+  'dj',
+  'official',
+  'oficial',
+  'topic',
+  'vevo',
+  'music',
+  'band',
+  'banda',
+  'records',
+  'audio',
+  'channel',
+  'canal',
+  'som',
+  'prod',
+  'producoes',
+  'producao',
+]);
+
+export const extractArtistTokens = (artist: string): string[] => {
+  return normalizeString(artist)
+    .split(' ')
+    .filter((w) => w.length > 0 && !ARTIST_ROLE_WORDS.has(w));
+};
+
+export const splitCanonicalArtists = (
+  artistStringOrList: string | string[]
+): string[] => {
+  const list = Array.isArray(artistStringOrList)
+    ? artistStringOrList
+    : [artistStringOrList];
+  const result = new Set<string>();
+
+  for (const item of list) {
+    if (!item) continue;
+    const parts = item
+      .split(/\s*(?:,|&|\/|\bfeat\.?|\bft\.?|\bwith\b|\be\b|\bx\b)\s*/i)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    for (const p of parts) {
+      result.add(p);
+    }
+  }
+
+  return Array.from(result);
+};
+
 export const hasCanonicalArtistMatch = (
   candidateTitle: string,
   candidateArtist: string,
-  canonicalArtist: string
+  canonicalArtistInput: string | string[]
 ): boolean => {
-  if (!isKnownArtist(canonicalArtist)) return true;
-
-  const artist = normalizeString(canonicalArtist);
-  const sourceArtist = normalizeString(candidateArtist);
-  const hasSourceArtist = isKnownArtist(candidateArtist);
-
-  // A user upload can put the target artist in its title while belonging to a
-  // different creator. When provider exposes a creator, that creator is the
-  // identity signal; title-only matching is reserved for sources without one.
-  if (hasSourceArtist) {
-    return (
-      sourceArtist.includes(artist) ||
-      sourceArtist.replace(/\s/g, '').includes(artist.replace(/\s/g, ''))
-    );
+  const canonicalArtists = splitCanonicalArtists(canonicalArtistInput);
+  if (canonicalArtists.length === 0 || !canonicalArtists.some(isKnownArtist)) {
+    return true;
   }
 
-  const candidateContext = normalizeString(candidateTitle);
-  return (
-    candidateContext.includes(artist) ||
-    candidateContext.replace(/\s/g, '').includes(artist.replace(/\s/g, ''))
-  );
+  const candidateNorm = normalizeString(candidateArtist);
+  const candidateTokens = extractArtistTokens(candidateArtist);
+  const hasSourceArtist = isKnownArtist(candidateArtist);
+
+  for (const rawCanon of canonicalArtists) {
+    if (!isKnownArtist(rawCanon)) continue;
+    const canonNorm = normalizeString(rawCanon);
+    const canonTokens = extractArtistTokens(rawCanon);
+
+    if (hasSourceArtist) {
+      // 1. Direct equality or inclusion (e.g. "The Weeknd" in "The Weeknd - Topic")
+      if (
+        candidateNorm === canonNorm ||
+        candidateNorm.includes(canonNorm) ||
+        candidateNorm.replace(/\s/g, '').includes(canonNorm.replace(/\s/g, ''))
+      ) {
+        return true;
+      }
+
+      // 2. Canonical includes candidate when candidate is distinctive (>= 3 chars)
+      // e.g. Canonical: "Micael Rapper", Candidate author: "Micael"
+      if (
+        candidateNorm.length >= 3 &&
+        (canonNorm.includes(candidateNorm) ||
+          canonNorm.replace(/\s/g, '').includes(candidateNorm.replace(/\s/g, '')))
+      ) {
+        return true;
+      }
+
+      // 3. Meaningful token stem match (e.g. "Micael Rapper" vs "Micael" -> stem "micael")
+      if (candidateTokens.length > 0 && canonTokens.length > 0) {
+        const candidateStem = candidateTokens.join(' ');
+        const canonStem = canonTokens.join(' ');
+        if (
+          candidateStem === canonStem ||
+          candidateStem.includes(canonStem) ||
+          canonStem.includes(candidateStem)
+        ) {
+          return true;
+        }
+
+        // Shared significant token of length >= 4 (e.g. distinctive artist names)
+        const hasSharedToken = candidateTokens.some(
+          (t) => t.length >= 4 && canonTokens.includes(t)
+        );
+        if (hasSharedToken) return true;
+      }
+    } else {
+      // No source artist exposed — check in candidate title context
+      const candidateContext = normalizeString(candidateTitle);
+      if (
+        candidateContext.includes(canonNorm) ||
+        candidateContext.replace(/\s/g, '').includes(canonNorm.replace(/\s/g, ''))
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 };
 
 /**
@@ -234,7 +327,8 @@ export const evaluateCandidateMatch = (
     };
   }
 
-  const normPrimaryArtist = normalizeString(canonical.artists[0] || '');
+  const allCanonicalArtists = splitCanonicalArtists(canonical.artists);
+  const normPrimaryArtist = normalizeString(allCanonicalArtists[0] || '');
 
   if (!hasCanonicalTitleMatch(candidate.title, canonical.title)) {
     return {
@@ -254,7 +348,7 @@ export const evaluateCandidateMatch = (
     !hasCanonicalArtistMatch(
       candidate.title,
       candidate.artist || '',
-      canonical.artists[0] || ''
+      allCanonicalArtists
     )
   ) {
     return {
@@ -289,7 +383,7 @@ export const evaluateCandidateMatch = (
   let confidence = 45; // Title verified above. This is the strongest identity signal.
   reasons.push('Title verified');
 
-  if (isKnownArtist(canonical.artists[0] || '')) {
+  if (allCanonicalArtists.some(isKnownArtist)) {
     confidence += 25;
     reasons.push('Artist verified');
   }
@@ -307,12 +401,17 @@ export const evaluateCandidateMatch = (
 
   // 3. Official Artist Channel / Uploader Matching (+30 points)
   const isOfficialChannel =
-    normPrimaryArtist &&
-    (candAuthor.includes(normPrimaryArtist) ||
-      candAuthor.includes('vevo') ||
-      candAuthor.includes('topic') ||
-      candAuthor.includes('records') ||
-      candAuthor.includes('official'));
+    allCanonicalArtists.some((a) => {
+      const norm = normalizeString(a);
+      return (
+        norm.length >= 3 &&
+        (candAuthor.includes(norm) || norm.includes(candAuthor))
+      );
+    }) ||
+    candAuthor.includes('vevo') ||
+    candAuthor.includes('topic') ||
+    candAuthor.includes('records') ||
+    candAuthor.includes('official');
 
   if (isOfficialChannel) {
     confidence += 30;

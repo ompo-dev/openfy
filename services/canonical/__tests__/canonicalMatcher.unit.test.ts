@@ -146,4 +146,70 @@ describe('evaluateCandidateMatch', () => {
       )
     ).toBe(false);
   });
+
+  it('matches multi-artist canonical tracks when candidate author is the main artist stem', () => {
+    const result = evaluateCandidateMatch(
+      {
+        title: 'Minha Gang (Official Audio)',
+        artist: 'Micael',
+        durationMs: 180000,
+        provider: 'youtube',
+        url: 'https://www.youtube.com/watch?v=aj5_Cvp9je0',
+        viewCount: 500000,
+      },
+      {
+        title: 'Minha Gang',
+        artists: ['Micael Rapper', 'ÉoDan'],
+        durationMs: 180000,
+        spotifyId: '79UImvw2Pgrsvt8o0QnOMx',
+      }
+    );
+
+    expect(result.isVerified).toBe(true);
+    expect(result.status).toBe('verified');
+  });
+
+  it('matches multi-artist canonical tracks when canonical artists is a single comma-separated string', () => {
+    const result = evaluateCandidateMatch(
+      {
+        title: 'Minha Gang',
+        artist: 'Micael',
+        durationMs: 180000,
+        provider: 'youtube',
+        url: 'https://www.youtube.com/watch?v=aj5_Cvp9je0',
+        viewCount: 500000,
+      },
+      {
+        title: 'Minha Gang',
+        artists: ['Micael Rapper, ÉoDan'],
+        durationMs: 180000,
+        spotifyId: '79UImvw2Pgrsvt8o0QnOMx',
+      }
+    );
+
+    expect(result.isVerified).toBe(true);
+    expect(result.status).toBe('verified');
+  });
+
+  it('still rejects completely unrelated artists even if title matches', () => {
+    const result = evaluateCandidateMatch(
+      {
+        title: 'Minha Gang',
+        artist: 'Completely Different Person',
+        durationMs: 180000,
+        provider: 'youtube',
+        url: 'https://www.youtube.com/watch?v=fake',
+        viewCount: 100,
+      },
+      {
+        title: 'Minha Gang',
+        artists: ['Micael Rapper, ÉoDan'],
+        durationMs: 180000,
+        spotifyId: '79UImvw2Pgrsvt8o0QnOMx',
+      }
+    );
+
+    expect(result.isVerified).toBe(false);
+    expect(result.status).toBe('unavailable');
+  });
 });

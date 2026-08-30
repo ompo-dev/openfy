@@ -317,6 +317,38 @@ describe('resolveDirectYouTubeAudio', () => {
     });
   });
 
+  it('resolves multi-artist track "Micael Rapper, ÉoDan" matching "Micael" candidate with diagnostics', async () => {
+    const getStreamingData = jest.fn().mockResolvedValue({
+      url: 'https://media.youtube.test/minhagang.m4a',
+      mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+    });
+    const search = jest.fn().mockResolvedValue({
+      videos: [
+        {
+          video_id: 'aj5_Cvp9je0',
+          title: { toString: () => 'Minha Gang' },
+          author: { name: 'Micael' },
+          duration: { seconds: 180 },
+          best_thumbnail: { url: 'https://image.youtube.test/minhagang.jpg' },
+        },
+      ],
+    });
+    mockCreate.mockResolvedValue({ search, getStreamingData });
+
+    await expect(
+      resolveDirectYouTubeAudio({
+        title: 'Minha Gang',
+        artist: 'Micael Rapper, ÉoDan',
+        durationMs: 180_000,
+        spotifyId: '79UImvw2Pgrsvt8o0QnOMx',
+      })
+    ).resolves.toMatchObject({
+      videoId: 'aj5_Cvp9je0',
+      imageURL: 'https://image.youtube.test/minhagang.jpg',
+      url: 'https://media.youtube.test/minhagang.m4a',
+    });
+  });
+
   it('loads exact pasted video metadata and audio on device', async () => {
     const getStreamingData = jest.fn().mockResolvedValue({
       url: 'https://media.youtube.test/mafinoso.m4a',

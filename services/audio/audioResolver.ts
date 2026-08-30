@@ -698,6 +698,7 @@ const resolveAudioUrlInternal = async (
     artist: primaryArtist,
     durationMs,
     fresh: forceFresh,
+    spotifyId,
   });
   if (directResult?.url) {
     console.log(
