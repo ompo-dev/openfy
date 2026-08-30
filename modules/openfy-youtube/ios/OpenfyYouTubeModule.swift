@@ -78,14 +78,17 @@ public final class OpenfyYouTubeModule: Module {
         throw Self.transferError("invalid_video_id")
       }
 
+      NSLog("[NATIVE] Resolving videoId: %@", videoId)
       let visitorData = try? await Self.freshVisitorData()
       let playerRes = try await Self.playerResponse(videoId: videoId, visitorData: visitorData)
 
       guard (200...299).contains(playerRes.response.statusCode) else {
+        NSLog("[NATIVE] Player HTTP error: %ld", playerRes.response.statusCode)
         throw StreamTransportError.http(statusCode: playerRes.response.statusCode)
       }
 
       guard Self.playerStatus(from: playerRes.payload) == "OK" else {
+        NSLog("[NATIVE] Player status not OK: %@", Self.playerStatus(from: playerRes.payload) ?? "nil")
         throw StreamTransportError.audioTrackUnavailable
       }
 
@@ -96,6 +99,9 @@ public final class OpenfyYouTubeModule: Module {
         headers: headers,
         rangeClient: Self.rangeClient
       )
+
+      NSLog("[NATIVE] Selected descriptor itag=%ld mime=%@ bitrate=%ld contentLength=%lld",
+            descriptor.itag ?? 0, descriptor.mimeType, descriptor.bitrate, descriptor.contentLength)
 
       try await self.nativePlayer.play(
         descriptor: descriptor,

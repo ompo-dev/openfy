@@ -30,12 +30,16 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
   ) -> Bool {
     if let infoRequest = loadingRequest.contentInformationRequest {
       fillContentInformation(infoRequest)
+      NSLog("[RESOURCE] Content info filled: type=%@ length=%lld", descriptor.contentType, descriptor.contentLength)
     }
 
     guard let dataRequest = loadingRequest.dataRequest else {
       loadingRequest.finishLoading()
       return true
     }
+
+    NSLog("[RESOURCE] Data request offset=%lld requestedLength=%ld allToEnd=%@",
+          dataRequest.requestedOffset, dataRequest.requestedLength, dataRequest.requestsAllDataToEndOfResource ? "true" : "false")
 
     let requestKey = ObjectIdentifier(loadingRequest)
 
@@ -51,8 +55,9 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
       do {
         try await self.satisfy(loadingRequest, dataRequest: dataRequest)
       } catch is CancellationError {
-        // Loading request was cancelled by AVFoundation (e.g. user seeked or changed track)
+        NSLog("[RESOURCE] Task cancelled for request offset=%lld", dataRequest.requestedOffset)
       } catch {
+        NSLog("[RESOURCE] Task failed for request offset=%lld error=%@", dataRequest.requestedOffset, error.localizedDescription)
         if !loadingRequest.isCancelled && !loadingRequest.isFinished {
           loadingRequest.finishLoading(with: error)
         }
@@ -69,6 +74,7 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
     didCancel loadingRequest: AVAssetResourceLoadingRequest
   ) {
     let requestKey = ObjectIdentifier(loadingRequest)
+    NSLog("[RESOURCE] didCancel loadingRequest: %p", loadingRequest)
     // Already executing on loader.queue — remove and cancel task directly
     if let task = tasks.removeValue(forKey: requestKey) {
       task.cancel()
@@ -117,11 +123,15 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
         end: end
       )
       try Task.checkCancellation()
+      guard !loadingRequest.isCancelled, !loadingRequest.isFinished else { return }
       dataRequest.respond(with: data)
+      NSLog("[RESOURCE] Responded %ld bytes (offset %lld -> %lld of %lld)",
+            data.count, offset, offset + Int64(data.count), targetEnd + 1)
       offset += Int64(data.count)
     }
 
     guard !loadingRequest.isCancelled, !loadingRequest.isFinished else { return }
     loadingRequest.finishLoading()
+    NSLog("[RESOURCE] Finished loading request up to %lld", targetEnd)
   }
 }

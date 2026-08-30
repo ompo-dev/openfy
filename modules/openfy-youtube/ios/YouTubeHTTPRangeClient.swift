@@ -72,6 +72,7 @@ public final class YouTubeHTTPRangeClient: Sendable {
     start: Int64,
     end: Int64
   ) async throws -> Data {
+    NSLog("[RANGE] GET bytes=%lld-%lld for %@", start, end, descriptor.videoId)
     var request = URLRequest(url: descriptor.sourceURL)
     request.httpMethod = "GET"
     request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -88,6 +89,7 @@ public final class YouTubeHTTPRangeClient: Sendable {
     }
 
     guard http.statusCode == 206 else {
+      NSLog("[RANGE] HTTP error status %ld for bytes=%lld-%lld", http.statusCode, start, end)
       throw StreamTransportError.http(statusCode: http.statusCode)
     }
 
@@ -97,14 +99,18 @@ public final class YouTubeHTTPRangeClient: Sendable {
           parsed.end <= end,
           parsed.end >= parsed.start,
           parsed.total == descriptor.contentLength else {
+      NSLog("[RANGE] Invalid Content-Range: %@", http.value(forHTTPHeaderField: "Content-Range") ?? "nil")
       throw StreamTransportError.invalidContentRange
     }
 
     let expectedBytes = Int(parsed.end - parsed.start + 1)
     guard data.count == expectedBytes else {
+      NSLog("[RANGE] Byte count mismatch: expected %ld, received %ld", expectedBytes, data.count)
       throw StreamTransportError.byteCountMismatch(expected: expectedBytes, actual: data.count)
     }
 
+    NSLog("[RANGE] 206 bytes %lld-%lld/%lld (received %ld bytes)",
+          parsed.start, parsed.end, parsed.total, data.count)
     return data
   }
 

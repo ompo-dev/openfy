@@ -9,6 +9,8 @@ import Foundation
 public final class OpenfyNativeYouTubePlayer {
   private var player: AVPlayer?
   private var resourceLoader: OpenfyAssetResourceLoader?
+  private var itemStatusObserver: NSKeyValueObservation?
+  private var timeControlStatusObserver: NSKeyValueObservation?
 
   public init() {}
 
@@ -38,6 +40,35 @@ public final class OpenfyNativeYouTubePlayer {
     let item = AVPlayerItem(asset: asset)
     let player = AVPlayer(playerItem: item)
     self.player = player
+
+    // Diagnostic KVO state observations
+    itemStatusObserver = item.observe(\.status, options: [.new]) { item, _ in
+      switch item.status {
+      case .readyToPlay:
+        NSLog("[PLAYER] item.status = readyToPlay")
+      case .failed:
+        NSLog("[PLAYER] item.status = failed, error: %@", item.error?.localizedDescription ?? "nil")
+      case .unknown:
+        NSLog("[PLAYER] item.status = unknown")
+      @unknown default:
+        break
+      }
+    }
+
+    timeControlStatusObserver = player.observe(\.timeControlStatus, options: [.new]) { player, _ in
+      switch player.timeControlStatus {
+      case .playing:
+        NSLog("[PLAYER] timeControlStatus = playing")
+      case .paused:
+        NSLog("[PLAYER] timeControlStatus = paused")
+      case .waitingToPlayAtSpecifiedRate:
+        NSLog("[PLAYER] timeControlStatus = waitingToPlayAtSpecifiedRate (reason: %@)",
+              player.reasonForWaitingToPlay?.rawValue ?? "nil")
+      @unknown default:
+        break
+      }
+    }
+
     player.play()
   }
 
@@ -57,11 +88,16 @@ public final class OpenfyNativeYouTubePlayer {
   }
 
   public func stop() {
+    itemStatusObserver?.invalidate()
+    itemStatusObserver = nil
+    timeControlStatusObserver?.invalidate()
+    timeControlStatusObserver = nil
     player?.pause()
     player?.replaceCurrentItem(with: nil)
     resourceLoader?.cancelAll()
     player = nil
     resourceLoader = nil
+    NSLog("[PLAYER] Playback stopped and resources released")
   }
 
   public func getStatus() -> [String: Any] {
