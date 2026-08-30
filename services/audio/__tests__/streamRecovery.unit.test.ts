@@ -1,9 +1,10 @@
 /**
  * streamRecovery.unit.test.ts
  *
- * Tests header enrichment and the full transparent stream-recovery cycle:
- *   playbackStatusUpdate(error) → reportRefusal? → resolveAudioUrl(forceFresh)
- *   → loadAndPlay(newSource) → seekTo(lastPosMs)
+ * Tests playerService-level header enrichment and status error propagation:
+ *   - AudioSource identity headers passed to createAudioPlayer
+ *   - AudioStatus.error forwarded faithfully to status callback
+ *   - Playback position preserved during error status delivery
  */
 
 jest.mock('expo-audio', () => ({
@@ -135,27 +136,11 @@ describe('Stream Recovery & Refusal Tests', () => {
     expect(received[0]).toContain('NSURLErrorDomain');
   });
 
-  // ── 3. Mid-stream 403 error → refusal reported + fresh resolve + seekTo ──
+  // ── 3. Mid-stream error delivery & position capture ─────────────────────
 
-  it('reports stream refusal and re-resolves on 403-like error during playback', async () => {
+  it('forwards 403-like error and position accurately during playback', async () => {
     const { player, fireStatus } = createPlayerWithStatusCapture();
-    const recoveryPlayer = createPlayer();
-
-    (createAudioPlayer as jest.Mock)
-      .mockReturnValueOnce(player)
-      .mockReturnValueOnce(recoveryPlayer);
-
-    // Mock resolveAudioUrl returning a fresh URL on the second call
-    const resolveAudioUrl = jest.fn()
-      .mockResolvedValueOnce(null) // initial resolution not called directly here
-      .mockResolvedValueOnce({
-        url: 'https://rr9---sn-ab5szn7e.googlevideo.com/videoplayback?c=IOS',
-        headers: { 'User-Agent': 'com.google.ios.youtube/19.09.3' },
-      });
-
-    // Inject mock into module scope via jest.mock at the test level is not ideal;
-    // instead verify the downstream effect: reportDirectYouTubeStreamRefusal is
-    // called when the error text contains "403".
+    (createAudioPlayer as jest.Mock).mockReturnValue(player);
 
     const stateUpdates: { error?: string; positionMs: number }[] = [];
 

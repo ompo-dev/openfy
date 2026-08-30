@@ -60,7 +60,6 @@ export const getAudioSourceUri = (input: AudioSourceInput): string =>
   typeof input === 'string' ? input : input.uri;
 
 let playerInstance: AudioPlayer | null = null;
-let statusCallback: ((state: PlayerState) => void) | null = null;
 let isSeeking = false;
 let volumeRamp: {
   timer: ReturnType<typeof setInterval>;
@@ -204,7 +203,7 @@ export const loadAndPlay = async (
       playerInstance = null;
     }
 
-    statusCallback = onStatusUpdate || null;
+    const callbackForThisPlayer = onStatusUpdate || null;
     await configureAudioSession();
 
     console.log(
@@ -231,7 +230,7 @@ export const loadAndPlay = async (
 
     player.addListener('playbackStatusUpdate', (status: AudioStatus) => {
       const state = toState(status);
-      statusCallback?.(state);
+      callbackForThisPlayer?.(state);
     });
 
     player.play();
@@ -241,7 +240,8 @@ export const loadAndPlay = async (
     return true;
   } catch (error) {
     console.error('[PlayerService] Failed to load audio:', error, 'URI:', uri);
-    statusCallback?.({ ...DEFAULT_STATE, error: String(error) });
+    const callbackForThisPlayer = onStatusUpdate || null;
+    callbackForThisPlayer?.({ ...DEFAULT_STATE, error: String(error) });
     return false;
   }
 };

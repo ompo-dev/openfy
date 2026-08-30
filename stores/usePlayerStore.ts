@@ -459,6 +459,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     let activeStreamUri =
       typeof streamSource === 'string' ? streamSource : streamSource.uri;
     let isRecoveringStream = false;
+    let recoveryAttempts = 0;
+    const MAX_RECOVERY_ATTEMPTS = 3;
+    let initialLoadInProgress = true;
 
     console.log(`[PlayerStore #${requestId}] Playing stream:`, activeStreamUri);
     await fadeOutPromise;
@@ -489,49 +492,62 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       });
 
       // Mid-stream error auto-recovery (e.g. 403 or expired Googlevideo URL during playback)
-      if (state.error && !isRecoveringStream && activeStreamUri) {
+      // Guarded against initial-load errors (handled exclusively by loadAndPlay fallback)
+      // and limited to MAX_RECOVERY_ATTEMPTS to prevent infinite recovery loops.
+      if (
+        state.error &&
+        !initialLoadInProgress &&
+        !isRecoveringStream &&
+        recoveryAttempts < MAX_RECOVERY_ATTEMPTS &&
+        activeStreamUri
+      ) {
         isRecoveringStream = true;
+        recoveryAttempts++;
         const lastPosMs = state.positionMs || 0;
         const errorMsg = state.error ?? '';
         const isRefusal = isLikelyStreamRefusal(errorMsg);
         console.warn(
-          `[PlayerStore #${requestId}] Stream error for "${track.title}" at ${lastPosMs}ms: ${errorMsg}. isRefusal=${isRefusal}. Triggering auto-recovery...`
+          `[PlayerStore #${requestId}] Stream error for "${track.title}" at ${lastPosMs}ms (attempt ${recoveryAttempts}/${MAX_RECOVERY_ATTEMPTS}): ${errorMsg}. isRefusal=${isRefusal}. Triggering auto-recovery...`
         );
         void (async () => {
-          if (isRefusal && activeStreamUri) {
-            await reportDirectYouTubeStreamRefusal(activeStreamUri, 403);
-          }
-          const recovered = await resolveAudioUrl(
-            track.title,
-            track.artistName,
-            track.spotifyId,
-            track.duration_ms,
-            undefined,
-            true
-          );
-          if (get().activeRequestId === requestId && recovered?.url) {
-            activeStreamUri = recovered.url;
-            const newSource: AudioSourceInput = recovered.headers
-              ? { uri: recovered.url, headers: recovered.headers }
-              : recovered.url;
-            cacheAudioSource(track, newSource);
-            console.log(
-              `[PlayerStore #${requestId}] Auto-recovered stream for "${track.title}"; resuming at ${lastPosMs}ms`
-            );
-            const recoveredOk = await loadAndPlay(
-              newSource,
-              handleStatusUpdate,
-              {
-                title: track.title,
-                artist: track.artistName,
-                albumTitle: track.albumName,
-                artworkUrl: track.imageURL,
-              },
-              500
-            );
-            if (recoveredOk && lastPosMs > 1000) {
-              await seekTo(lastPosMs);
+          try {
+            if (isRefusal && activeStreamUri) {
+              await reportDirectYouTubeStreamRefusal(activeStreamUri, 403);
             }
+            const recovered = await resolveAudioUrl(
+              track.title,
+              track.artistName,
+              track.spotifyId,
+              track.duration_ms,
+              undefined,
+              true
+            );
+            if (get().activeRequestId === requestId && recovered?.url) {
+              activeStreamUri = recovered.url;
+              const newSource: AudioSourceInput = recovered.headers
+                ? { uri: recovered.url, headers: recovered.headers }
+                : recovered.url;
+              cacheAudioSource(track, newSource);
+              console.log(
+                `[PlayerStore #${requestId}] Auto-recovered stream for "${track.title}"; resuming at ${lastPosMs}ms`
+              );
+              const recoveredOk = await loadAndPlay(
+                newSource,
+                handleStatusUpdate,
+                {
+                  title: track.title,
+                  artist: track.artistName,
+                  albumTitle: track.albumName,
+                  artworkUrl: track.imageURL,
+                },
+                500
+              );
+              if (recoveredOk && lastPosMs > 1000) {
+                await seekTo(lastPosMs);
+              }
+            }
+          } finally {
+            isRecoveringStream = false;
           }
         })();
         return;
@@ -561,6 +577,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       albumTitle: track.albumName,
       artworkUrl: track.imageURL,
     }, 2000);
+
+    initialLoadInProgress = false;
 
     if (get().activeRequestId !== requestId) return;
 
