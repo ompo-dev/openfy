@@ -5,6 +5,7 @@ jest.mock('@config', () => ({
 
 jest.mock('../directYouTubeResolver', () => ({
   resolveDirectYouTubeAudio: jest.fn(),
+  getDirectYouTubeMediaHeaders: jest.fn().mockReturnValue(null),
 }));
 
 import { getPlayableAudioUrl, resolveAudioUrl } from '../audioResolver';
