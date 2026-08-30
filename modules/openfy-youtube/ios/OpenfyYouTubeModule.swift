@@ -42,7 +42,8 @@ public final class OpenfyYouTubeModule: Module {
   }()
 
   private static let rangeClient = YouTubeHTTPRangeClient(session: session)
-  private let nativePlayer = OpenfyNativeYouTubePlayer()
+  @MainActor
+  private lazy var nativePlayer = OpenfyNativeYouTubePlayer()
 
   public func definition() -> ModuleDefinition {
     Name("OpenfyYouTube")
@@ -80,9 +81,12 @@ public final class OpenfyYouTubeModule: Module {
       let visitorData = try? await Self.freshVisitorData()
       let playerRes = try await Self.playerResponse(videoId: videoId, visitorData: visitorData)
 
-      guard (200...299).contains(playerRes.response.statusCode),
-            Self.playerStatus(from: playerRes.payload) == "OK" else {
+      guard (200...299).contains(playerRes.response.statusCode) else {
         throw StreamTransportError.http(statusCode: playerRes.response.statusCode)
+      }
+
+      guard Self.playerStatus(from: playerRes.payload) == "OK" else {
+        throw StreamTransportError.audioTrackUnavailable
       }
 
       let headers = ["User-Agent": AndroidMusicPlayerClient.userAgent]

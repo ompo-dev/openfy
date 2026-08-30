@@ -94,12 +94,13 @@ public final class YouTubeHTTPRangeClient: Sendable {
     guard let rangeHeader = http.value(forHTTPHeaderField: "Content-Range") ?? http.value(forHTTPHeaderField: "content-range"),
           let parsed = ContentRange.parse(rangeHeader),
           parsed.start == start,
-          parsed.end == end,
+          parsed.end <= end,
+          parsed.end >= parsed.start,
           parsed.total == descriptor.contentLength else {
       throw StreamTransportError.invalidContentRange
     }
 
-    let expectedBytes = Int(end - start + 1)
+    let expectedBytes = Int(parsed.end - parsed.start + 1)
     guard data.count == expectedBytes else {
       throw StreamTransportError.byteCountMismatch(expected: expectedBytes, actual: data.count)
     }

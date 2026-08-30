@@ -53,7 +53,9 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
       } catch is CancellationError {
         // Loading request was cancelled by AVFoundation (e.g. user seeked or changed track)
       } catch {
-        loadingRequest.finishLoading(with: error)
+        if !loadingRequest.isCancelled && !loadingRequest.isFinished {
+          loadingRequest.finishLoading(with: error)
+        }
       }
     }
 
@@ -75,12 +77,12 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
 
   /**
    * Explicitly cancels all in-flight network requests and empties task dictionary.
+   * Captures strong [self] on queue dispatch so loader lives until cancellation completes.
    */
   public func cancelAll() {
-    queue.async { [weak self] in
-      guard let self = self else { return }
-      let activeTasks = Array(self.tasks.values)
-      self.tasks.removeAll()
+    queue.async { [self] in
+      let activeTasks = Array(tasks.values)
+      tasks.removeAll()
       activeTasks.forEach { $0.cancel() }
     }
   }
@@ -119,6 +121,7 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
       offset += Int64(data.count)
     }
 
+    guard !loadingRequest.isCancelled, !loadingRequest.isFinished else { return }
     loadingRequest.finishLoading()
   }
 }
