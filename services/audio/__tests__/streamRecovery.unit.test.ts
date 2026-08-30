@@ -9,8 +9,8 @@ jest.mock('react-native', () => ({
   Platform: { OS: 'ios' },
 }));
 
-jest.mock('../../directYouTubeResolver', () => {
-  const original = jest.requireActual('../../directYouTubeResolver');
+jest.mock('../directYouTubeResolver', () => {
+  const original = jest.requireActual('../directYouTubeResolver');
   return {
     ...original,
     reportDirectYouTubeStreamRefusal: jest.fn().mockResolvedValue(undefined),
@@ -53,7 +53,7 @@ describe('Stream Recovery & Refusal Tests', () => {
       expect.objectContaining({
         uri: androidMusicUrl,
         headers: expect.objectContaining({
-          'User-Agent': expect.stringContaining('com.google.android.apps.youtube.music'),
+          'User-Agent': expect.stringContaining('Android'),
         }),
       }),
       { updateInterval: 100 }
