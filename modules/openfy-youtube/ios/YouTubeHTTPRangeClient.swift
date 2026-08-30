@@ -26,9 +26,35 @@ public enum StreamTransportError: Error, LocalizedError {
   }
 }
 
+private struct ContentRange {
+  let start: Int64
+  let end: Int64
+  let total: Int64
+
+  static func parse(_ raw: String) -> ContentRange? {
+    // Format: "bytes <start>-<end>/<total>"
+    let lower = raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+    guard lower.hasPrefix("bytes ") else { return nil }
+    let clean = String(lower.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+    let parts = clean.components(separatedBy: "/")
+    guard parts.count == 2,
+          let total = Int64(parts[1].trimmingCharacters(in: .whitespaces)) else {
+      return nil
+    }
+    let rangeParts = parts[0].components(separatedBy: "-")
+    guard rangeParts.count == 2,
+          let start = Int64(rangeParts[0].trimmingCharacters(in: .whitespaces)),
+          let end = Int64(rangeParts[1].trimmingCharacters(in: .whitespaces)),
+          start <= end else {
+      return nil
+    }
+    return ContentRange(start: start, end: end, total: total)
+  }
+}
+
 /**
  * Dedicated HTTP range request client reusing a persistent URLSession.
- * Handles deterministic 206 Partial Content byte ranges with Content-Range validation.
+ * Handles deterministic 206 Partial Content byte ranges with strict Content-Range validation.
  */
 public final class YouTubeHTTPRangeClient: Sendable {
   private let session: URLSession
@@ -38,7 +64,8 @@ public final class YouTubeHTTPRangeClient: Sendable {
   }
 
   /**
-   * Fetches a specific [start, end] inclusive byte range for the given stream descriptor.
+   * Fetches a specific [start, end] inclusive byte range for the given stream descriptor,
+   * strictly verifying 206 status, Content-Range headers, and byte payload length.
    */
   public func request(
     descriptor: YouTubeStreamDescriptor,
@@ -64,6 +91,14 @@ public final class YouTubeHTTPRangeClient: Sendable {
       throw StreamTransportError.http(statusCode: http.statusCode)
     }
 
+    guard let rangeHeader = http.value(forHTTPHeaderField: "Content-Range") ?? http.value(forHTTPHeaderField: "content-range"),
+          let parsed = ContentRange.parse(rangeHeader),
+          parsed.start == start,
+          parsed.end == end,
+          parsed.total == descriptor.contentLength else {
+      throw StreamTransportError.invalidContentRange
+    }
+
     let expectedBytes = Int(end - start + 1)
     guard data.count == expectedBytes else {
       throw StreamTransportError.byteCountMismatch(expected: expectedBytes, actual: data.count)
@@ -84,6 +119,7 @@ public final class YouTubeHTTPRangeClient: Sendable {
     request.cachePolicy = .reloadIgnoringLocalCacheData
     request.timeoutInterval = 10
     request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+    request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
     for (name, value) in headers {
       request.setValue(value, forHTTPHeaderField: name)
     }
@@ -91,16 +127,13 @@ public final class YouTubeHTTPRangeClient: Sendable {
     let (_, response) = try await session.data(for: request)
     guard let http = response as? HTTPURLResponse,
           http.statusCode == 206,
-          let contentRangeHeader = http.value(forHTTPHeaderField: "Content-Range") ?? http.value(forHTTPHeaderField: "content-range") else {
+          let contentRangeHeader = http.value(forHTTPHeaderField: "Content-Range") ?? http.value(forHTTPHeaderField: "content-range"),
+          let parsed = ContentRange.parse(contentRangeHeader),
+          parsed.start == 0,
+          parsed.end == 0 else {
       throw StreamTransportError.invalidContentRange
     }
 
-    // Format: "bytes 0-0/3827481"
-    let parts = contentRangeHeader.components(separatedBy: "/")
-    guard parts.count == 2, let total = Int64(parts[1].trimmingCharacters(in: .whitespacesAndNewlines)) else {
-      throw StreamTransportError.invalidContentRange
-    }
-
-    return total
+    return parsed.total
   }
 }

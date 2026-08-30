@@ -4,6 +4,9 @@ import Foundation
 /**
  * Custom AVAssetResourceLoaderDelegate intercepting virtual `openfy-stream://` URLs.
  * Translates AVPlayer byte range requests into deterministic HTTP 206 chunk range requests.
+ *
+ * NOTE: All delegate callbacks from AVFoundation execute on `loader.queue`.
+ * Do NOT dispatch synchronously (`queue.sync`) within delegate callbacks as it causes deadlocks.
  */
 public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
   public let queue = DispatchQueue(label: "openfy.youtube.resource-loader", qos: .userInitiated)
@@ -35,21 +38,27 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
     }
 
     let requestKey = ObjectIdentifier(loadingRequest)
-    let task = Task { [weak self, weak loadingRequest] in
-      guard let self = self, let loadingRequest = loadingRequest else { return }
+
+    // Keep strong reference to loadingRequest inside Task until finishLoading() / cancellation
+    let task = Task { [weak self, loadingRequest] in
+      guard let self = self else { return }
+      defer {
+        self.queue.async { [weak self] in
+          self?.tasks.removeValue(forKey: requestKey)
+        }
+      }
+
       do {
         try await self.satisfy(loadingRequest, dataRequest: dataRequest)
       } catch is CancellationError {
-        // Loading request was cancelled (e.g. user seeked or changed track)
+        // Loading request was cancelled by AVFoundation (e.g. user seeked or changed track)
       } catch {
         loadingRequest.finishLoading(with: error)
       }
     }
 
-    queue.sync {
-      tasks[requestKey] = task
-    }
-
+    // Already executing on loader.queue — mutate tasks dictionary directly
+    tasks[requestKey] = task
     return true
   }
 
@@ -58,10 +67,21 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
     didCancel loadingRequest: AVAssetResourceLoadingRequest
   ) {
     let requestKey = ObjectIdentifier(loadingRequest)
-    queue.sync {
-      if let task = tasks.removeValue(forKey: requestKey) {
-        task.cancel()
-      }
+    // Already executing on loader.queue — remove and cancel task directly
+    if let task = tasks.removeValue(forKey: requestKey) {
+      task.cancel()
+    }
+  }
+
+  /**
+   * Explicitly cancels all in-flight network requests and empties task dictionary.
+   */
+  public func cancelAll() {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      let activeTasks = Array(self.tasks.values)
+      self.tasks.removeAll()
+      activeTasks.forEach { $0.cancel() }
     }
   }
 

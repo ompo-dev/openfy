@@ -59,6 +59,7 @@ public final class OpenfyNativeYouTubePlayer {
   public func stop() {
     player?.pause()
     player?.replaceCurrentItem(with: nil)
+    resourceLoader?.cancelAll()
     player = nil
     resourceLoader = nil
   }

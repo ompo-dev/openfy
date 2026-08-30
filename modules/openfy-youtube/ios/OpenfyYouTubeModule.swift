@@ -383,6 +383,8 @@ public final class OpenfyYouTubeModule: Module {
 
     // Phase 1 POC: Strictly restrict to audio/mp4 containers with AAC (mp4a) codec
     // for native Apple AVAssetResourceLoader playback compatibility.
+    // NOTE: Native POC currently requires a direct deciphered format["url"].
+    // Full decipher is handled by youtubei.js on the JS resolver side when needed.
     let candidates = formats.compactMap { format -> (url: URL, mimeType: String, bitrate: Int, contentLength: Int64?, itag: Int?, score: Int)? in
       guard let rawMimeType = format["mimeType"] as? String,
         rawMimeType.lowercased().hasPrefix("audio/mp4"),
