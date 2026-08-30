@@ -1,1 +1,4 @@
-export type { NativeYouTubeTransferResult } from './OpenfyYouTubeModule';
+export type {
+  NativeYouTubeTransferResult,
+  NativeYouTubePlaybackStatus,
+} from './OpenfyYouTubeModule';

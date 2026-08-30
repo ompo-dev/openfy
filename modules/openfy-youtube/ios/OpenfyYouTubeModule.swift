@@ -41,6 +41,9 @@ public final class OpenfyYouTubeModule: Module {
     return URLSession(configuration: configuration)
   }()
 
+  private static let rangeClient = YouTubeHTTPRangeClient(session: session)
+  private let nativePlayer = OpenfyNativeYouTubePlayer()
+
   public func definition() -> ModuleDefinition {
     Name("OpenfyYouTube")
 
@@ -65,6 +68,55 @@ public final class OpenfyYouTubeModule: Module {
         destination: destination,
         chunkBytes: chunkBytes
       )
+    }
+
+    // Native Phase 1 POC: Openfy native streaming engine directly driving AVPlayer
+    // via AVAssetResourceLoaderDelegate and Range requests over persistent URLSession.
+    AsyncFunction("playNativeYouTubeAsync") { (videoId: String) in
+      guard Self.isValidVideoId(videoId) else {
+        throw Self.transferError("invalid_video_id")
+      }
+
+      let visitorData = try? await Self.freshVisitorData()
+      let playerRes = try await Self.playerResponse(videoId: videoId, visitorData: visitorData)
+
+      guard (200...299).contains(playerRes.response.statusCode),
+            Self.playerStatus(from: playerRes.payload) == "OK" else {
+        throw StreamTransportError.http(statusCode: playerRes.response.statusCode)
+      }
+
+      let headers = ["User-Agent": AndroidMusicPlayerClient.userAgent]
+      let descriptor = try await Self.bestAudioStreamDescriptor(
+        videoId: videoId,
+        payload: playerRes.payload,
+        headers: headers,
+        rangeClient: Self.rangeClient
+      )
+
+      try await self.nativePlayer.play(
+        descriptor: descriptor,
+        rangeClient: Self.rangeClient
+      )
+    }
+
+    AsyncFunction("pauseNativeYouTubeAsync") {
+      await self.nativePlayer.pause()
+    }
+
+    AsyncFunction("resumeNativeYouTubeAsync") {
+      await self.nativePlayer.resume()
+    }
+
+    AsyncFunction("seekNativeYouTubeAsync") { (positionMs: Double) in
+      await self.nativePlayer.seek(to: positionMs)
+    }
+
+    AsyncFunction("stopNativeYouTubeAsync") {
+      await self.nativePlayer.stop()
+    }
+
+    AsyncFunction("getNativePlaybackStatusAsync") { () -> [String: Any] in
+      return await self.nativePlayer.getStatus()
     }
   }
 
@@ -316,6 +368,67 @@ public final class OpenfyYouTubeModule: Module {
 
   private static func playerStatus(from payload: [String: Any]) -> String? {
     (payload["playabilityStatus"] as? [String: Any])?["status"] as? String
+  }
+
+  private static func bestAudioStreamDescriptor(
+    videoId: String,
+    payload: [String: Any],
+    headers: [String: String],
+    rangeClient: YouTubeHTTPRangeClient
+  ) async throws -> YouTubeStreamDescriptor {
+    guard let streamingData = payload["streamingData"] as? [String: Any],
+      let formats = streamingData["adaptiveFormats"] as? [[String: Any]] else {
+      throw StreamTransportError.audioTrackUnavailable
+    }
+
+    // Phase 1 POC: Strictly restrict to audio/mp4 containers with AAC (mp4a) codec
+    // for native Apple AVAssetResourceLoader playback compatibility.
+    let candidates = formats.compactMap { format -> (url: URL, mimeType: String, bitrate: Int, contentLength: Int64?, itag: Int?, score: Int)? in
+      guard let rawMimeType = format["mimeType"] as? String,
+        rawMimeType.lowercased().hasPrefix("audio/mp4"),
+        rawMimeType.lowercased().contains("mp4a"),
+        let rawURL = format["url"] as? String,
+        !rawURL.isEmpty,
+        let url = URL(string: rawURL),
+        url.scheme?.lowercased() == "https",
+        let host = url.host?.lowercased(),
+        host == "googlevideo.com" || host.hasSuffix(".googlevideo.com") else {
+        return nil
+      }
+
+      let quality = (format["audioQuality"] as? String) == "AUDIO_QUALITY_HIGH" ? 1_000_000 : 0
+      let bitrate = format["bitrate"] as? Int ?? 0
+      let itag = format["itag"] as? Int
+      let contentLength: Int64? = (format["contentLength"] as? String).flatMap(Int64.init)
+
+      return (url, rawMimeType, bitrate, contentLength, itag, quality + bitrate)
+    }
+
+    guard let best = candidates.max(by: { $0.score < $1.score }) else {
+      throw StreamTransportError.audioTrackUnavailable
+    }
+
+    // Use reported contentLength or probe bytes=0-0 to obtain total stream length
+    let finalContentLength: Int64
+    if let len = best.contentLength, len > 0 {
+      finalContentLength = len
+    } else {
+      finalContentLength = try await rangeClient.probeContentLength(
+        url: best.url,
+        headers: headers
+      )
+    }
+
+    return YouTubeStreamDescriptor(
+      videoId: videoId,
+      sourceURL: best.url,
+      headers: headers,
+      contentLength: finalContentLength,
+      mimeType: best.mimeType,
+      contentType: "public.mpeg-4-audio",
+      bitrate: best.bitrate,
+      itag: best.itag
+    )
   }
 
   private static func bestAudioStreamURL(from payload: [String: Any]) -> URL? {

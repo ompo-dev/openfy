@@ -8,6 +8,14 @@ export type NativeYouTubeTransferResult = {
   totalBytes?: number;
 };
 
+export type NativeYouTubePlaybackStatus = {
+  isPlaying: boolean;
+  isLoaded: boolean;
+  positionMs: number;
+  durationMs: number;
+  error?: string;
+};
+
 declare class OpenfyYouTubeModule extends NativeModule<{}> {
   /**
    * Transfers an already-resolved googlevideo stream in deterministic byte
@@ -30,6 +38,17 @@ declare class OpenfyYouTubeModule extends NativeModule<{}> {
     destination: string,
     chunkBytes: number
   ): Promise<NativeYouTubeTransferResult>;
+
+  /**
+   * Phase 1 POC: Plays a YouTube stream natively on iOS via AVAssetResourceLoaderDelegate
+   * using deterministic range requests over a persistent URLSession.
+   */
+  playNativeYouTubeAsync(videoId: string): Promise<void>;
+  pauseNativeYouTubeAsync(): Promise<void>;
+  resumeNativeYouTubeAsync(): Promise<void>;
+  seekNativeYouTubeAsync(positionMs: number): Promise<void>;
+  stopNativeYouTubeAsync(): Promise<void>;
+  getNativePlaybackStatusAsync(): Promise<NativeYouTubePlaybackStatus>;
 }
 
 export default requireNativeModule<OpenfyYouTubeModule>('OpenfyYouTube');
