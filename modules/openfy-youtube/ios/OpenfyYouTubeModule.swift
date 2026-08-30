@@ -325,7 +325,26 @@ public final class OpenfyYouTubeModule: Module {
     }
 
     let candidates = formats.compactMap { format -> (url: URL, score: Int)? in
-      guard let rawURL = format["url"] as? String,
+      let rawURLString: String? = {
+        if let url = format["url"] as? String, !url.isEmpty {
+          return url
+        }
+        let cipher = (format["signatureCipher"] as? String) ?? (format["cipher"] as? String)
+        if let cipher, !cipher.isEmpty {
+          let components = cipher.components(separatedBy: "&")
+          for comp in components {
+            let pair = comp.components(separatedBy: "=")
+            if pair.count == 2 && pair[0] == "url",
+              let decoded = pair[1].removingPercentEncoding,
+              !decoded.isEmpty {
+              return decoded
+            }
+          }
+        }
+        return nil
+      }()
+
+      guard let rawURL = rawURLString,
         let url = URL(string: rawURL),
         url.scheme?.lowercased() == "https",
         let host = url.host?.lowercased(),

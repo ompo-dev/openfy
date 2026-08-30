@@ -14,6 +14,9 @@ export type { ResolvedAudio } from './audio/audioResolver';
 export {
   resolveDirectYouTubeAudio,
   resolveDirectYouTubeTrack,
+  reportDirectYouTubeStreamRefusal,
+  getDirectYouTubeMediaHeaders,
+  getAudioSourceWithHeaders,
 } from './audio/directYouTubeResolver';
 export type {
   DirectYouTubeAudio,
@@ -100,7 +103,7 @@ export {
   configureAudioSession,
   DEFAULT_STATE,
 } from './audio/playerService';
-export type { PlayerState } from './audio/playerService';
+export type { PlayerState, AudioSourceInput } from './audio/playerService';
 
 export {
   fetchLyrics,

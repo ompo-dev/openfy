@@ -30,6 +30,9 @@ import {
   preloadAudio,
   releasePreloadedAudio,
   recordInteraction,
+  reportDirectYouTubeStreamRefusal,
+  getDirectYouTubeMediaHeaders,
+  AudioSourceInput,
 } from '@services';
 import {
   fetchLyrics,
@@ -113,7 +116,10 @@ const AUDIO_SOURCE_TTL_MS = 10 * 60_000;
 const MIN_PRELOADED_SOURCE_LIFETIME_MS = 5_000;
 
 const IS_SPOTIFY_ID = /^[a-zA-Z0-9]{22}$/;
-const warmedAudioSources = new Map<string, { uri: string; expiresAt: number }>();
+const warmedAudioSources = new Map<
+  string,
+  { source: AudioSourceInput; expiresAt: number }
+>();
 const activeAudioWarmups = new Map<string, Promise<void>>();
 const queuePreloadKeys = new Set<string>();
 
@@ -171,7 +177,7 @@ const getSavedAudioSource = async (
   return getPlayableAudioUrl(webSource);
 };
 
-const getFreshPreloadedSource = (track: PlayerTrack): string | null => {
+const getFreshPreloadedSource = (track: PlayerTrack): AudioSourceInput | null => {
   const now = Date.now();
   if (
     track.streamUrl &&
@@ -183,13 +189,13 @@ const getFreshPreloadedSource = (track: PlayerTrack): string | null => {
 
   const warmed = warmedAudioSources.get(getCacheKey(track));
   return warmed && warmed.expiresAt > now + MIN_PRELOADED_SOURCE_LIFETIME_MS
-    ? warmed.uri
+    ? warmed.source
     : null;
 };
 
-const cacheAudioSource = (track: PlayerTrack, uri: string) => {
+const cacheAudioSource = (track: PlayerTrack, source: AudioSourceInput) => {
   warmedAudioSources.set(getCacheKey(track), {
-    uri,
+    source,
     expiresAt: Date.now() + AUDIO_SOURCE_TTL_MS,
   });
 };
@@ -233,8 +239,11 @@ const warmTrackAudio = (
       track.releaseDate
     );
     if (resolved?.url && isStillNeeded()) {
-      cacheAudioSource(track, resolved.url);
-      void preloadAudio(resolved.url);
+      const source = resolved.headers
+        ? { uri: resolved.url, headers: resolved.headers }
+        : resolved.url;
+      cacheAudioSource(track, source);
+      void preloadAudio(source);
     }
   })()
     .catch(() => {})
@@ -255,10 +264,10 @@ const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
   queuePreloadKeys.clear();
   neighbors.forEach((track) => queuePreloadKeys.add(getCacheKey(track)));
 
-  warmedAudioSources.forEach(({ uri }, cacheKey) => {
+  warmedAudioSources.forEach(({ source }, cacheKey) => {
     if (!retainedKeys.has(cacheKey)) {
       warmedAudioSources.delete(cacheKey);
-      releasePreloadedAudio(uri);
+      releasePreloadedAudio(source);
     }
   });
 
@@ -287,9 +296,6 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   },
 
   playTrack: async (track: PlayerTrack, options = {}) => {
-    // A direct selection is a new one-track session. Queue navigation paths
-    // explicitly preserve their queue below so the controls never point at
-    // tracks selected previously on another screen.
     const { showPlayer = true, setQueue = true } = options;
     let hasSavedWebDownload = false;
 
@@ -331,7 +337,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     recordInteraction(track, 'play').catch(() => {});
 
     // 2. CONCURRENT AUDIO STREAM RESOLUTION & PERSISTENT CACHE
-    const resolveAudioPromise = (async (): Promise<string | null> => {
+    const resolveAudioPromise = (async (): Promise<AudioSourceInput | null> => {
       const directSavedSource = await getSavedAudioSource(track);
       if (directSavedSource) {
         cacheAudioSource(track, directSavedSource);
@@ -339,8 +345,6 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         return directSavedSource;
       }
 
-      // Screens normally know only a Spotify id. Resolve that id against the
-      // download registry here so every caller gets offline playback.
       const downloaded = await getDownloadedTrack(track.spotifyId);
       const downloadedSavedSource = await getSavedAudioSource(downloaded);
       if (downloadedSavedSource) {
@@ -370,8 +374,11 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       );
 
       if (resolved?.url) {
-        cacheAudioSource(track, resolved.url);
-        return resolved.url;
+        const source: AudioSourceInput = resolved.headers
+          ? { uri: resolved.url, headers: resolved.headers }
+          : resolved.url;
+        cacheAudioSource(track, source);
+        return source;
       }
 
       return null;
@@ -422,7 +429,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     });
 
     // Execute Audio resolution
-    const streamUri = await resolveAudioPromise;
+    const streamSource = await resolveAudioPromise;
 
     // RACE CONDITION CHECK: Discard if user clicked another track in the meantime
     if (get().activeRequestId !== requestId) {
@@ -432,7 +439,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       return;
     }
 
-    if (!streamUri) {
+    if (!streamSource) {
       console.warn(
         `[PlayerStore #${requestId}] Failed to resolve audio for: "${track.title}"`
       );
@@ -449,12 +456,16 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       return;
     }
 
-    console.log(`[PlayerStore #${requestId}] Playing stream:`, streamUri);
+    let activeStreamUri =
+      typeof streamSource === 'string' ? streamSource : streamSource.uri;
+    let isRecoveringStream = false;
+
+    console.log(`[PlayerStore #${requestId}] Playing stream:`, activeStreamUri);
     await fadeOutPromise;
 
     if (get().activeRequestId !== requestId) return;
 
-    // Audio status update handler
+    // Audio status update handler with transparent stream recovery
     const handleStatusUpdate = (state: PlayerState) => {
       // Only process updates if this track is still the active one
       if (get().activeRequestId !== requestId) return;
@@ -467,6 +478,51 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           durationMs: currentDuration,
         },
       });
+
+      // Mid-stream error auto-recovery (e.g. 403 or expired Googlevideo URL during playback)
+      if (state.error && !isRecoveringStream && activeStreamUri) {
+        isRecoveringStream = true;
+        const lastPosMs = state.positionMs || 0;
+        console.warn(
+          `[PlayerStore #${requestId}] Stream error detected for "${track.title}" at ${lastPosMs}ms: ${state.error}. Triggering auto-recovery...`
+        );
+        void (async () => {
+          await reportDirectYouTubeStreamRefusal(activeStreamUri, 403);
+          const recovered = await resolveAudioUrl(
+            track.title,
+            track.artistName,
+            track.spotifyId,
+            track.duration_ms,
+            undefined,
+            true
+          );
+          if (get().activeRequestId === requestId && recovered?.url) {
+            activeStreamUri = recovered.url;
+            const newSource: AudioSourceInput = recovered.headers
+              ? { uri: recovered.url, headers: recovered.headers }
+              : recovered.url;
+            cacheAudioSource(track, newSource);
+            console.log(
+              `[PlayerStore #${requestId}] Auto-recovered stream for "${track.title}"; resuming at ${lastPosMs}ms`
+            );
+            const recoveredOk = await loadAndPlay(
+              newSource,
+              handleStatusUpdate,
+              {
+                title: track.title,
+                artist: track.artistName,
+                albumTitle: track.albumName,
+                artworkUrl: track.imageURL,
+              },
+              500
+            );
+            if (recoveredOk && lastPosMs > 1000) {
+              await seekTo(lastPosMs);
+            }
+          }
+        })();
+        return;
+      }
 
       // Auto-advance detection on track finish
       if (
@@ -486,7 +542,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       }
     };
 
-    const success = await loadAndPlay(streamUri, handleStatusUpdate, {
+    const success = await loadAndPlay(streamSource, handleStatusUpdate, {
       title: track.title,
       artist: track.artistName,
       albumTitle: track.albumName,
@@ -504,10 +560,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       // Background download cache for offline listening
       if (
         track.spotifyId &&
-        !streamUri.startsWith('file:') &&
+        !activeStreamUri.startsWith('file:') &&
         !hasSavedWebDownload
       ) {
-        const isMp3 = streamUri.includes('.mp3') || !streamUri.includes('.m4a');
+        const isMp3 = activeStreamUri.includes('.mp3') || !activeStreamUri.includes('.m4a');
         downloadTrack(
           {
             spotifyId: track.spotifyId,
@@ -517,14 +573,17 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
             imageURL: track.imageURL,
             duration_ms: track.duration_ms,
           },
-          streamUri,
+          activeStreamUri,
           isMp3 ? 'mp3' : 'm4a'
         ).catch(() => {});
       }
     } else {
       console.warn(
-        `[PlayerStore #${requestId}] Initial playback failed, retrying fresh resolution...`
+        `[PlayerStore #${requestId}] Initial playback failed, reporting stream refusal and retrying fresh resolution...`
       );
+      if (activeStreamUri) {
+        await reportDirectYouTubeStreamRefusal(activeStreamUri, 403);
+      }
       const fallbackResolved = await resolveAudioUrl(
         track.title,
         track.artistName,
@@ -534,7 +593,12 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         true
       );
       if (get().activeRequestId === requestId && fallbackResolved?.url) {
-        await loadAndPlay(fallbackResolved.url, handleStatusUpdate, {
+        activeStreamUri = fallbackResolved.url;
+        const newSource: AudioSourceInput = fallbackResolved.headers
+          ? { uri: fallbackResolved.url, headers: fallbackResolved.headers }
+          : fallbackResolved.url;
+        cacheAudioSource(track, newSource);
+        await loadAndPlay(newSource, handleStatusUpdate, {
           title: track.title,
           artist: track.artistName,
           albumTitle: track.albumName,
@@ -544,7 +608,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     }
   },
 
-  playWithQueue: async (tracks: PlayerTrack[], startIndex = 0, sourceId) => {
+  playWithQueue: async (tracks: PlayerTrack[], startIndex = 0, sourceId?: string) => {
     if (!tracks || tracks.length === 0) return;
     const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
     set({

@@ -12,6 +12,11 @@ import {
 } from 'expo-audio';
 import type { AudioPlayer } from 'expo-audio/build/AudioModule.types';
 import { Platform } from 'react-native';
+import { getDirectYouTubeMediaHeaders } from './directYouTubeResolver';
+
+export type AudioSourceInput =
+  | string
+  | { uri: string; headers?: Record<string, string> };
 
 export type LockScreenMetadata = {
   title: string;
@@ -36,6 +41,23 @@ export const DEFAULT_STATE: PlayerState = {
   positionMs: 0,
   durationMs: 0,
 };
+
+export const toAudioSource = (
+  input: AudioSourceInput
+): { uri: string; headers?: Record<string, string> } => {
+  if (typeof input !== 'string') {
+    if (!input.headers && input.uri) {
+      const headers = getDirectYouTubeMediaHeaders(input.uri);
+      return headers ? { uri: input.uri, headers } : input;
+    }
+    return input;
+  }
+  const headers = getDirectYouTubeMediaHeaders(input);
+  return headers ? { uri: input, headers } : { uri: input };
+};
+
+export const getAudioSourceUri = (input: AudioSourceInput): string =>
+  typeof input === 'string' ? input : input.uri;
 
 let playerInstance: AudioPlayer | null = null;
 let statusCallback: ((state: PlayerState) => void) | null = null;
@@ -121,21 +143,25 @@ export const restoreCurrentVolume = (): Promise<void> => {
 };
 
 /** Buffer a short lead-in; Expo reuses it when this URI starts playing. */
-export const preloadAudio = async (uri: string): Promise<void> => {
+export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void> => {
+  const source = toAudioSource(sourceInput);
+  const uri = source.uri;
   if (!uri || preloadedSources.has(uri)) return;
   // expo-audio preloads web URLs through fetch() and then plays the blob.
   // That bypasses the browser media element's Range handling for proxied audio.
   if (Platform.OS === 'web' && /^https?:\/\//i.test(uri)) return;
   preloadedSources.add(uri);
   try {
-    await Promise.resolve(preload(uri, { preferredForwardBufferDuration: 5 }));
+    const payload = source.headers ? source : uri;
+    await Promise.resolve(preload(payload as any, { preferredForwardBufferDuration: 5 }));
   } catch {
     preloadedSources.delete(uri);
   }
 };
 
 /** Release a queued neighbor once it is no longer adjacent to the current track. */
-export const releasePreloadedAudio = (uri: string): void => {
+export const releasePreloadedAudio = (sourceInput: AudioSourceInput): void => {
+  const uri = getAudioSourceUri(sourceInput);
   if (!uri || !preloadedSources.delete(uri)) return;
   try {
     void Promise.resolve(clearPreloadedSource(uri)).catch(() => {});
@@ -143,14 +169,16 @@ export const releasePreloadedAudio = (uri: string): void => {
 };
 
 /**
- * Load and play an audio URI (local file or remote stream).
+ * Load and play an audio URI or AudioSource (local file or remote stream).
  */
 export const loadAndPlay = async (
-  uri: string,
+  sourceInput: AudioSourceInput,
   onStatusUpdate?: (state: PlayerState) => void,
   lockScreenMetadata?: LockScreenMetadata,
   fadeInDurationMs = 0
 ): Promise<boolean> => {
+  const source = toAudioSource(sourceInput);
+  const uri = source.uri;
   try {
     stopVolumeRamp();
     // Unload existing player
@@ -167,9 +195,14 @@ export const loadAndPlay = async (
     statusCallback = onStatusUpdate || null;
     await configureAudioSession();
 
-    console.log('[PlayerService] Loading audio source:', uri);
+    console.log(
+      '[PlayerService] Loading audio source:',
+      uri,
+      source.headers ? 'with custom headers' : 'without headers'
+    );
 
-    const player = createAudioPlayer(uri, { updateInterval: 100 });
+    const playerSource = source.headers ? source : uri;
+    const player = createAudioPlayer(playerSource as any, { updateInterval: 100 });
     playerInstance = player;
     player.volume = fadeInDurationMs > 0 ? 0 : 1;
 

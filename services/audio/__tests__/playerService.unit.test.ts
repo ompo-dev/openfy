@@ -17,6 +17,7 @@ import {
   preloadAudio,
   releasePreloadedAudio,
   unload,
+  toAudioSource,
 } from '../playerService';
 
 const createPlayer = () => ({
@@ -78,5 +79,29 @@ describe('playerService fades', () => {
     releasePreloadedAudio(uri);
 
     expect(clearPreloadedSource).toHaveBeenCalledWith(uri);
+  });
+
+  it('enriches googlevideo URLs with User-Agent media headers', () => {
+    const googlevideoUrl = 'https://rr1---sn-ax87en7z.googlevideo.com/videoplayback?c=ANDROID_MUSIC';
+    const source = toAudioSource(googlevideoUrl);
+
+    expect(source.uri).toBe(googlevideoUrl);
+    expect(source.headers).toBeDefined();
+    expect(source.headers?.['User-Agent']).toBeDefined();
+  });
+
+  it('passes AudioSource object with headers to createAudioPlayer', async () => {
+    const googlevideoUrl = 'https://rr1---sn-ax87en7z.googlevideo.com/videoplayback?c=IOS';
+    await loadAndPlay(googlevideoUrl);
+
+    expect(createAudioPlayer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        uri: googlevideoUrl,
+        headers: expect.objectContaining({
+          'User-Agent': expect.any(String),
+        }),
+      }),
+      { updateInterval: 100 }
+    );
   });
 });

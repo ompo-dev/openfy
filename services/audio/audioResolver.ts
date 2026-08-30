@@ -12,7 +12,13 @@ import {
   evaluateCandidateMatch,
   hasUnwantedForbiddenWords,
 } from '../canonical/canonicalMatcher';
-import { resolveDirectYouTubeAudio } from './directYouTubeResolver';
+import {
+  resolveDirectYouTubeAudio,
+  getDirectYouTubeMediaHeaders,
+  getAudioSourceWithHeaders,
+} from './directYouTubeResolver';
+
+export { getDirectYouTubeMediaHeaders, getAudioSourceWithHeaders };
 
 export type ResolvedAudio = {
   url: string;
@@ -22,6 +28,7 @@ export type ResolvedAudio = {
   videoId?: string;
   confidence?: number;
   imageURL?: string;
+  headers?: Record<string, string>;
 };
 
 type BackendResolveSource = {

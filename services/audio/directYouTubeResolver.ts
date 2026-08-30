@@ -158,6 +158,15 @@ export const getDirectYouTubeMediaHeaders = (
   }
 };
 
+/** Get AudioSource object with headers for expo-audio. */
+export const getAudioSourceWithHeaders = (
+  value: string
+): { uri: string; headers?: Record<string, string> } => {
+  const headers = getDirectYouTubeMediaHeaders(value);
+  return headers ? { uri: value, headers } : { uri: value };
+};
+
+
 const isNonNegativeFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0;
 
