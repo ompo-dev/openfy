@@ -711,6 +711,7 @@ const resolveAudioUrlInternal = async (
       videoId: directResult.videoId,
       confidence: 100,
       imageURL: directResult.imageURL,
+      headers: getDirectYouTubeMediaHeaders(directResult.url) ?? undefined,
     };
   }
 

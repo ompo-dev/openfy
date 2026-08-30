@@ -465,6 +465,15 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     if (get().activeRequestId !== requestId) return;
 
+    /**
+     * Returns true when the error message is indicative of a server-side
+     * stream refusal (4xx / expired URL). Returns false for local failures
+     * such as decoder errors, network timeouts, or media services resets so
+     * we avoid penalising healthy player clients for non-refusal failures.
+     */
+    const isLikelyStreamRefusal = (error: string): boolean =>
+      /403|404|410|forbidden|expired|gone|not\s+found|unauthorized/i.test(error);
+
     // Audio status update handler with transparent stream recovery
     const handleStatusUpdate = (state: PlayerState) => {
       // Only process updates if this track is still the active one
@@ -483,11 +492,15 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       if (state.error && !isRecoveringStream && activeStreamUri) {
         isRecoveringStream = true;
         const lastPosMs = state.positionMs || 0;
+        const errorMsg = state.error ?? '';
+        const isRefusal = isLikelyStreamRefusal(errorMsg);
         console.warn(
-          `[PlayerStore #${requestId}] Stream error detected for "${track.title}" at ${lastPosMs}ms: ${state.error}. Triggering auto-recovery...`
+          `[PlayerStore #${requestId}] Stream error for "${track.title}" at ${lastPosMs}ms: ${errorMsg}. isRefusal=${isRefusal}. Triggering auto-recovery...`
         );
         void (async () => {
-          await reportDirectYouTubeStreamRefusal(activeStreamUri, 403);
+          if (isRefusal && activeStreamUri) {
+            await reportDirectYouTubeStreamRefusal(activeStreamUri, 403);
+          }
           const recovered = await resolveAudioUrl(
             track.title,
             track.artistName,
@@ -578,10 +591,13 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         ).catch(() => {});
       }
     } else {
+      const playerState = get().playerState;
+      const loadError = playerState.error ?? '';
+      const isRefusal = isLikelyStreamRefusal(loadError);
       console.warn(
-        `[PlayerStore #${requestId}] Initial playback failed, reporting stream refusal and retrying fresh resolution...`
+        `[PlayerStore #${requestId}] Initial playback failed. isRefusal=${isRefusal}. Retrying with fresh resolution...`
       );
-      if (activeStreamUri) {
+      if (isRefusal && activeStreamUri) {
         await reportDirectYouTubeStreamRefusal(activeStreamUri, 403);
       }
       const fallbackResolved = await resolveAudioUrl(

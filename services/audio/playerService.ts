@@ -66,7 +66,7 @@ let volumeRamp: {
   timer: ReturnType<typeof setInterval>;
   resolve: () => void;
 } | null = null;
-const preloadedSources = new Set<string>();
+
 
 const stopVolumeRamp = () => {
   if (!volumeRamp) return;
@@ -112,6 +112,8 @@ const toState = (status: AudioStatus): PlayerState => ({
   isLoaded: status.isLoaded ?? false,
   positionMs: (status.currentTime ?? 0) * 1000,
   durationMs: (status.duration ?? 0) * 1000,
+  // Propagate SDK error so the store can trigger transparent stream recovery.
+  error: status.error ?? undefined,
 });
 
 /**
@@ -142,6 +144,13 @@ export const restoreCurrentVolume = (): Promise<void> => {
   return player ? rampPlayerVolume(player, 1, 180) : Promise.resolve();
 };
 
+/**
+ * Tracks which sources have been preloaded, keyed by URI.
+ * Storing the full AudioSourceInput ensures clearPreloadedSource receives
+ * the same object that was passed to preload() (Expo SDK 57 requirement).
+ */
+const preloadedSources = new Map<string, AudioSourceInput>();
+
 /** Buffer a short lead-in; Expo reuses it when this URI starts playing. */
 export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void> => {
   const source = toAudioSource(sourceInput);
@@ -150,7 +159,7 @@ export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void>
   // expo-audio preloads web URLs through fetch() and then plays the blob.
   // That bypasses the browser media element's Range handling for proxied audio.
   if (Platform.OS === 'web' && /^https?:\/\//i.test(uri)) return;
-  preloadedSources.add(uri);
+  preloadedSources.set(uri, source.headers ? source : uri);
   try {
     const payload = source.headers ? source : uri;
     await Promise.resolve(preload(payload as any, { preferredForwardBufferDuration: 5 }));
@@ -162,9 +171,12 @@ export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void>
 /** Release a queued neighbor once it is no longer adjacent to the current track. */
 export const releasePreloadedAudio = (sourceInput: AudioSourceInput): void => {
   const uri = getAudioSourceUri(sourceInput);
-  if (!uri || !preloadedSources.delete(uri)) return;
+  const stored = preloadedSources.get(uri);
+  if (!stored) return;
+  preloadedSources.delete(uri);
   try {
-    void Promise.resolve(clearPreloadedSource(uri)).catch(() => {});
+    const payload = typeof stored === 'string' ? stored : toAudioSource(stored);
+    void Promise.resolve(clearPreloadedSource(payload as any)).catch(() => {});
   } catch {}
 };
 

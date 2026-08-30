@@ -329,6 +329,14 @@ public final class OpenfyYouTubeModule: Module {
         if let url = format["url"] as? String, !url.isEmpty {
           return url
         }
+        // Partial signatureCipher fallback: extract the raw `url` field only.
+        // NOTE: signatureCipher streams require deciphering the `s` parameter
+        // (using the player JS signature function) before the URL is valid.
+        // Full decipher is NOT performed here — that is intentionally handled
+        // by youtubei.js on the JS resolver side. This branch exists only to
+        // surface the URL for inspection / logging when the direct `url` field
+        // is missing from the response, e.g. on older Innertube responses.
+        // A URL extracted here without deciphering will likely return 403.
         let cipher = (format["signatureCipher"] as? String) ?? (format["cipher"] as? String)
         if let cipher, !cipher.isEmpty {
           let components = cipher.components(separatedBy: "&")
