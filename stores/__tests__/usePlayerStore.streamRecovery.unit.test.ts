@@ -1,4 +1,4 @@
-jest.mock('react-native', () => ({ Platform: { OS: 'web' } }));
+jest.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
 jest.mock('expo-file-system/legacy', () => ({ getInfoAsync: jest.fn() }));
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn().mockResolvedValue(null),
@@ -29,6 +29,12 @@ jest.mock('@services', () => ({
   releasePreloadedAudio: jest.fn(),
   recordInteraction: jest.fn().mockResolvedValue(undefined),
   reportDirectYouTubeStreamRefusal: jest.fn().mockResolvedValue(undefined),
+  getDirectYouTubeMediaHeaders: jest.fn((url: string) => {
+    if (url && url.includes('googlevideo.com')) {
+      return { 'User-Agent': 'com.google.ios.youtube/19.09.3' };
+    }
+    return null;
+  }),
 }));
 
 jest.mock('../../services/lyrics/lyricsService', () => ({
@@ -53,6 +59,9 @@ const sampleTrack: PlayerTrack = {
   imageURL: 'https://image.test/cover.jpg',
   duration_ms: 210000,
 };
+
+/** Deterministic promise/microtask flush helper (setTimeout 0 runs in next macrotask turn) */
+const flushPromises = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe('usePlayerStore — Stream Recovery Integration', () => {
   beforeEach(() => {
@@ -115,8 +124,9 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       error: 'HTTP 403 Forbidden',
     });
 
-    // Allow async recovery IIFE to complete
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Flush async recovery microtasks
+    await flushPromises();
+    await flushPromises();
 
     // 3. Verify report refusal was called with old URL
     expect(reportDirectYouTubeStreamRefusal).toHaveBeenCalledWith(oldUrl, 403);
@@ -163,7 +173,8 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       error: 'HTTP 410 Gone',
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
+    await flushPromises();
 
     expect(reportDirectYouTubeStreamRefusal).toHaveBeenCalledWith(freshUrl, 403);
     expect(loadAndPlay).toHaveBeenCalledTimes(3);
@@ -203,7 +214,8 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       error: 'AVFoundation decoder error -12939',
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
+    await flushPromises();
 
     // Refusal should NOT be reported (avoid penalising healthy client)
     expect(reportDirectYouTubeStreamRefusal).not.toHaveBeenCalled();
@@ -222,7 +234,7 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
     expect(seekTo).toHaveBeenCalledWith(45000);
   });
 
-  it('stops recovery attempts after MAX_RECOVERY_ATTEMPTS (3)', async () => {
+  it('stops recovery after 3 consecutive rapid failures without stability, but resets after 10s of stable playback', async () => {
     let capturedStatusCb: ((state: PlayerState) => void) | null = null;
 
     (resolveAudioUrl as jest.Mock).mockResolvedValue({
@@ -237,34 +249,85 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
 
     await usePlayerStore.getState().playTrack(sampleTrack);
 
-    // Trigger error 3 times (attempts 1, 2, 3)
+    // 1. Trigger recovery #1 at 10s
+    capturedStatusCb!({
+      isPlaying: false,
+      isBuffering: false,
+      isLoaded: false,
+      positionMs: 10000,
+      durationMs: 210000,
+      error: 'HTTP 403 Forbidden',
+    });
+    await flushPromises();
+    await flushPromises();
+    expect(loadAndPlay).toHaveBeenCalledTimes(2);
+
+    // 2. Stream plays stably for >=10s past the resume position (10s + 10s = 20s)
+    capturedStatusCb!({
+      isPlaying: true,
+      isBuffering: false,
+      isLoaded: true,
+      positionMs: 22000,
+      durationMs: 210000,
+    });
+
+    // 3. Now trigger 3 consecutive rapid failures (attempts 1, 2, 3 of new streak)
     for (let i = 1; i <= 3; i++) {
       capturedStatusCb!({
         isPlaying: false,
         isBuffering: false,
         isLoaded: false,
-        positionMs: 10000 * i,
+        positionMs: 22000 + i * 1000,
         durationMs: 210000,
         error: 'HTTP 403 Forbidden',
       });
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await flushPromises();
+      await flushPromises();
     }
 
-    expect(loadAndPlay).toHaveBeenCalledTimes(4); // 1 initial + 3 recoveries
+    // Total loadAndPlay calls: 1 initial + 1 (first recovery) + 3 (consecutive recoveries) = 5
+    expect(loadAndPlay).toHaveBeenCalledTimes(5);
 
-    // Trigger 4th error — should be ignored due to MAX_RECOVERY_ATTEMPTS limit
+    // 4. Trigger 4th consecutive failure without stable playback — blocked by limit
     capturedStatusCb!({
       isPlaying: false,
       isBuffering: false,
       isLoaded: false,
-      positionMs: 40000,
+      positionMs: 26000,
       durationMs: 210000,
       error: 'HTTP 403 Forbidden',
     });
+    await flushPromises();
+    await flushPromises();
 
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // Still 5 calls (4th rapid failure was ignored)
+    expect(loadAndPlay).toHaveBeenCalledTimes(5);
+  });
 
-    // loadAndPlay should NOT have been called a 5th time
-    expect(loadAndPlay).toHaveBeenCalledTimes(4);
+  it('preserves identity headers when replaying from track.streamUrl cache in getFreshPreloadedSource', async () => {
+    const googlevideoUrl = 'https://rr5---sn-ab5szn7e.googlevideo.com/videoplayback?c=IOS';
+    const cachedTrack: PlayerTrack = {
+      ...sampleTrack,
+      spotifyId: 'track_cached',
+      streamUrl: googlevideoUrl,
+      streamExpiresAt: Date.now() + 60_000,
+    };
+
+    (loadAndPlay as jest.Mock).mockResolvedValue(true);
+
+    await usePlayerStore.getState().playTrack(cachedTrack);
+
+    // loadAndPlay should have received an object with headers, not just a raw string
+    expect(loadAndPlay).toHaveBeenCalledWith(
+      expect.objectContaining({
+        uri: googlevideoUrl,
+        headers: expect.objectContaining({
+          'User-Agent': expect.stringContaining('youtube'),
+        }),
+      }),
+      expect.any(Function),
+      expect.any(Object),
+      expect.any(Number)
+    );
   });
 });

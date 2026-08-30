@@ -184,7 +184,8 @@ const getFreshPreloadedSource = (track: PlayerTrack): AudioSourceInput | null =>
     (Platform.OS === 'web' ||
       (track.streamExpiresAt || 0) > now + MIN_PRELOADED_SOURCE_LIFETIME_MS)
   ) {
-    return track.streamUrl;
+    const headers = getDirectYouTubeMediaHeaders(track.streamUrl);
+    return headers ? { uri: track.streamUrl, headers } : track.streamUrl;
   }
 
   const warmed = warmedAudioSources.get(getCacheKey(track));
@@ -460,7 +461,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       typeof streamSource === 'string' ? streamSource : streamSource.uri;
     let isRecoveringStream = false;
     let recoveryAttempts = 0;
-    const MAX_RECOVERY_ATTEMPTS = 3;
+    let recoveryResumePositionMs: number | null = null;
+    const MAX_CONSECUTIVE_RECOVERIES = 3;
+    const RECOVERY_STABLE_MS = 10_000;
     let initialLoadInProgress = true;
 
     console.log(`[PlayerStore #${requestId}] Playing stream:`, activeStreamUri);
@@ -491,23 +494,36 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         },
       });
 
+      // Reset consecutive recovery counter once stream has played stably past resume position
+      if (
+        recoveryAttempts > 0 &&
+        recoveryResumePositionMs !== null &&
+        state.isPlaying &&
+        !state.error &&
+        state.positionMs >= recoveryResumePositionMs + RECOVERY_STABLE_MS
+      ) {
+        recoveryAttempts = 0;
+        recoveryResumePositionMs = null;
+      }
+
       // Mid-stream error auto-recovery (e.g. 403 or expired Googlevideo URL during playback)
       // Guarded against initial-load errors (handled exclusively by loadAndPlay fallback)
-      // and limited to MAX_RECOVERY_ATTEMPTS to prevent infinite recovery loops.
+      // and limited to MAX_CONSECUTIVE_RECOVERIES to prevent infinite recovery loops on repeated immediate failures.
       if (
         state.error &&
         !initialLoadInProgress &&
         !isRecoveringStream &&
-        recoveryAttempts < MAX_RECOVERY_ATTEMPTS &&
+        recoveryAttempts < MAX_CONSECUTIVE_RECOVERIES &&
         activeStreamUri
       ) {
         isRecoveringStream = true;
         recoveryAttempts++;
         const lastPosMs = state.positionMs || 0;
+        recoveryResumePositionMs = lastPosMs;
         const errorMsg = state.error ?? '';
         const isRefusal = isLikelyStreamRefusal(errorMsg);
         console.warn(
-          `[PlayerStore #${requestId}] Stream error for "${track.title}" at ${lastPosMs}ms (attempt ${recoveryAttempts}/${MAX_RECOVERY_ATTEMPTS}): ${errorMsg}. isRefusal=${isRefusal}. Triggering auto-recovery...`
+          `[PlayerStore #${requestId}] Stream error for "${track.title}" at ${lastPosMs}ms (attempt ${recoveryAttempts}/${MAX_CONSECUTIVE_RECOVERIES}): ${errorMsg}. isRefusal=${isRefusal}. Triggering auto-recovery...`
         );
         void (async () => {
           try {
