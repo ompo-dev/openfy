@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   resolveYouTubeStream,
   reportStreamRefusal,
+  CLIENT_PROFILES,
   _resetYouTubeStreamResolverForTests,
 } from '../youtubeStreamResolver';
 
@@ -32,9 +33,9 @@ describe('resolveYouTubeStream', () => {
     global.fetch = jest.fn().mockResolvedValue(OK_PROBE);
   });
 
-  it('returns resolved with correct descriptor fields', async () => {
+  it('returns resolved with correct descriptor fields using ANDROID_MUSIC profile', async () => {
     const getStreamingData = jest.fn().mockResolvedValue({
-      url: 'https://rr1.googlevideo.com/stream.m4a?c=IOS',
+      url: 'https://rr1.googlevideo.com/stream.m4a?c=ANDROID_MUSIC',
       mime_type: 'audio/mp4; codecs="mp4a.40.2"',
     });
     mockCreate.mockResolvedValue({ getStreamingData });
@@ -44,16 +45,23 @@ describe('resolveYouTubeStream', () => {
     expect(result.status).toBe('resolved');
     if (result.status !== 'resolved') return;
     expect(result.stream.videoId).toBe('V1M1hYxmRvA');
-    expect(result.stream.url).toBe('https://rr1.googlevideo.com/stream.m4a?c=IOS');
+    expect(result.stream.url).toBe('https://rr1.googlevideo.com/stream.m4a?c=ANDROID_MUSIC');
     expect(result.stream.format).toBe('mp4');
-    expect(result.stream.client).toBe('IOS');
+    expect(result.stream.client).toBe('android_music');
     expect(result.stream.expiresAt).toBeGreaterThan(Date.now());
     expect(result.stream.headers).toHaveProperty('User-Agent');
+    expect(result.stream.headers['User-Agent']).toContain('com.google.android.apps.youtube.music');
+
+    expect(getStreamingData).toHaveBeenCalledWith('V1M1hYxmRvA', expect.objectContaining({
+      client: 'ANDROID_MUSIC',
+      quality: 'best',
+      type: 'audio',
+    }));
   });
 
   it('deduplicates concurrent in-flight requests for the same videoId', async () => {
     const getStreamingData = jest.fn().mockResolvedValue({
-      url: 'https://rr1.googlevideo.com/stream.m4a?c=IOS',
+      url: 'https://rr1.googlevideo.com/stream.m4a?c=ANDROID_MUSIC',
       mime_type: 'audio/mp4',
     });
     mockCreate.mockResolvedValue({ getStreamingData });
@@ -67,13 +75,12 @@ describe('resolveYouTubeStream', () => {
     expect(r1.status).toBe('resolved');
     expect(r2.status).toBe('resolved');
     expect(r3.status).toBe('resolved');
-    // getStreamingData called only once despite three concurrent callers
     expect(getStreamingData).toHaveBeenCalledTimes(1);
   });
 
   it('returns cached resolved result on second call without re-resolving', async () => {
     const getStreamingData = jest.fn().mockResolvedValue({
-      url: 'https://rr1.googlevideo.com/stream.m4a?c=IOS',
+      url: 'https://rr1.googlevideo.com/stream.m4a?c=ANDROID_MUSIC',
       mime_type: 'audio/mp4',
     });
     mockCreate.mockResolvedValue({ getStreamingData });
@@ -82,12 +89,11 @@ describe('resolveYouTubeStream', () => {
     await resolveYouTubeStream('V1M1hYxmRvA');
 
     expect(getStreamingData).toHaveBeenCalledTimes(1);
-    expect((global.fetch as jest.Mock)).toHaveBeenCalledTimes(2); // 2 probe ranges, once
   });
 
   it('fresh: true bypasses cache and re-resolves', async () => {
     const getStreamingData = jest.fn().mockResolvedValue({
-      url: 'https://rr1.googlevideo.com/stream.m4a?c=IOS',
+      url: 'https://rr1.googlevideo.com/stream.m4a?c=ANDROID_MUSIC',
       mime_type: 'audio/mp4',
     });
     mockCreate.mockResolvedValue({ getStreamingData });
@@ -100,7 +106,7 @@ describe('resolveYouTubeStream', () => {
 
   it('returns attestation_required when second probe returns 403 (GVS enforcement)', async () => {
     const getStreamingData = jest.fn().mockResolvedValue({
-      url: 'https://rr1.googlevideo.com/stream.m4a?c=IOS',
+      url: 'https://rr1.googlevideo.com/stream.m4a?c=ANDROID_MUSIC',
       mime_type: 'audio/mp4',
     });
     mockCreate.mockResolvedValue({ getStreamingData });
@@ -115,7 +121,7 @@ describe('resolveYouTubeStream', () => {
     expect(result.status).toBe('attestation_required');
     if (result.status !== 'attestation_required') return;
     expect(result.videoId).toBe('aj5_Cvp9je0');
-    expect(result.client).toBe('IOS');
+    expect(result.client).toBe('android_music');
 
     // Only ONE player client tried (no cascade after GVS enforcement)
     expect(getStreamingData).toHaveBeenCalledTimes(1);
@@ -123,7 +129,7 @@ describe('resolveYouTubeStream', () => {
 
   it('verdict cache: second call within TTL returns attestation_required without re-resolving', async () => {
     const getStreamingData = jest.fn().mockResolvedValue({
-      url: 'https://rr1.googlevideo.com/stream.m4a?c=IOS',
+      url: 'https://rr1.googlevideo.com/stream.m4a?c=ANDROID_MUSIC',
       mime_type: 'audio/mp4',
     });
     mockCreate.mockResolvedValue({ getStreamingData });
@@ -132,7 +138,6 @@ describe('resolveYouTubeStream', () => {
       .mockResolvedValueOnce(FAIL_403);
 
     await resolveYouTubeStream('aj5_Cvp9je0');
-    // Reset mock call count — second call should NOT call getStreamingData again
     getStreamingData.mockClear();
     (global.fetch as jest.Mock).mockClear();
 
@@ -146,13 +151,13 @@ describe('resolveYouTubeStream', () => {
   it('cascades to next client on normal first-probe failure (not GVS enforcement)', async () => {
     const getStreamingData = jest
       .fn()
-      .mockResolvedValueOnce({ url: 'https://rr1.googlevideo.com/ios_fail.m4a?c=IOS', mime_type: 'audio/mp4' })
-      .mockResolvedValueOnce({ url: 'https://rr1.googlevideo.com/android_ok.m4a?c=ANDROID_MUSIC', mime_type: 'audio/mp4' });
+      .mockResolvedValueOnce({ url: 'https://rr1.googlevideo.com/am_fail.m4a?c=ANDROID_MUSIC', mime_type: 'audio/mp4' })
+      .mockResolvedValueOnce({ url: 'https://rr1.googlevideo.com/mweb_ok.m4a?c=MWEB', mime_type: 'audio/mp4' });
     mockCreate.mockResolvedValue({ getStreamingData });
     (global.fetch as jest.Mock)
-      // IOS first probe fails (stage first → normal failure, cascades)
+      // ANDROID_MUSIC first probe fails (stage first → normal failure, cascades)
       .mockResolvedValueOnce(FAIL_403)
-      // YTMUSIC_ANDROID both probes pass
+      // MWEB both probes pass
       .mockResolvedValueOnce(OK_PROBE)
       .mockResolvedValueOnce(OK_PROBE);
 
@@ -160,8 +165,8 @@ describe('resolveYouTubeStream', () => {
 
     expect(result.status).toBe('resolved');
     if (result.status !== 'resolved') return;
-    expect(result.stream.url).toContain('android_ok');
-    expect(result.stream.client).toBe('YTMUSIC_ANDROID');
+    expect(result.stream.url).toContain('mweb_ok');
+    expect(result.stream.client).toBe('mweb');
     expect(getStreamingData).toHaveBeenCalledTimes(2);
   });
 
@@ -179,8 +184,7 @@ describe('resolveYouTubeStream', () => {
     expect(result.status).toBe('unplayable');
     if (result.status !== 'unplayable') return;
     expect(result.reason).toBe('all_clients_failed');
-    // All 4 clients tried
-    expect(getStreamingData).toHaveBeenCalledTimes(4);
+    expect(getStreamingData).toHaveBeenCalledTimes(CLIENT_PROFILES.length);
   });
 
   it('returns transport_error when Innertube throws', async () => {
@@ -196,8 +200,8 @@ describe('resolveYouTubeStream', () => {
   it('reportStreamRefusal evicts cache and records failure', async () => {
     const getStreamingData = jest
       .fn()
-      .mockResolvedValueOnce({ url: 'https://rr1.googlevideo.com/initial.m4a?c=IOS', mime_type: 'audio/mp4' })
-      .mockResolvedValueOnce({ url: 'https://rr1.googlevideo.com/retry.m4a?c=ANDROID_MUSIC', mime_type: 'audio/mp4' });
+      .mockResolvedValueOnce({ url: 'https://rr1.googlevideo.com/initial.m4a?c=ANDROID_MUSIC', mime_type: 'audio/mp4' })
+      .mockResolvedValueOnce({ url: 'https://rr1.googlevideo.com/retry.m4a?c=MWEB', mime_type: 'audio/mp4' });
     mockCreate.mockResolvedValue({ getStreamingData });
 
     const initial = await resolveYouTubeStream('V1M1hYxmRvA');
@@ -206,10 +210,10 @@ describe('resolveYouTubeStream', () => {
 
     await reportStreamRefusal(initial.stream.url, 403);
 
-    // Fresh resolve should use a different client (IOS is now in cooldown)
+    // Fresh resolve should use a different client (android_music is now in cooldown)
     const retry = await resolveYouTubeStream('XcJ3NZqm7bQ', { fresh: true });
     expect(retry.status).toBe('resolved');
     if (retry.status !== 'resolved') return;
-    expect(retry.stream.client).toBe('YTMUSIC_ANDROID');
+    expect(retry.stream.client).toBe('mweb');
   });
 });

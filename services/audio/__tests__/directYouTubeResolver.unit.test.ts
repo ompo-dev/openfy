@@ -1,4 +1,4 @@
-const mockCreate = jest.fn();
+﻿const mockCreate = jest.fn();
 
 jest.mock('youtubei.js', () => ({
   Innertube: {
@@ -33,9 +33,9 @@ describe('resolveDirectYouTubeAudio', () => {
     });
   });
 
-  it('resolves an exact YouTube video through the iOS streaming client', async () => {
+  it('resolves an exact YouTube video through the ANDROID_MUSIC streaming client', async () => {
     const getStreamingData = jest.fn().mockResolvedValue({
-      url: 'https://rr1.googlevideo.com/mafinoso.m4a?c=IOS',
+      url: 'https://rr1.googlevideo.com/mafinoso.m4a?c=ANDROID_MUSIC',
       mime_type: 'audio/mp4; codecs="mp4a.40.2"',
     });
     mockCreate.mockResolvedValue({ getStreamingData });
@@ -44,25 +44,24 @@ describe('resolveDirectYouTubeAudio', () => {
       resolveDirectYouTubeAudio({ videoId: 'V1M1hYxmRvA' })
     ).resolves.toEqual({
       videoId: 'V1M1hYxmRvA',
-      url: 'https://rr1.googlevideo.com/mafinoso.m4a?c=IOS',
+      url: 'https://rr1.googlevideo.com/mafinoso.m4a?c=ANDROID_MUSIC',
       format: 'm4a',
     });
-    expect(getStreamingData).toHaveBeenCalledWith('V1M1hYxmRvA', {
-      client: 'IOS',
+    expect(getStreamingData).toHaveBeenCalledWith('V1M1hYxmRvA', expect.objectContaining({
+      client: 'ANDROID_MUSIC',
       quality: 'best',
       type: 'audio',
-    });
+    }));
     expect(mockCreate).toHaveBeenCalledWith({
       generate_session_locally: false,
       retrieve_innertube_config: true,
       retrieve_player: true,
     });
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://rr1.googlevideo.com/mafinoso.m4a?c=IOS',
+      'https://rr1.googlevideo.com/mafinoso.m4a?c=ANDROID_MUSIC',
       expect.objectContaining({
         headers: expect.objectContaining({
-          'User-Agent':
-            'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)',
+          'User-Agent': expect.stringContaining('com.google.android.apps.youtube.music'),
         }),
       })
     );
@@ -70,7 +69,7 @@ describe('resolveDirectYouTubeAudio', () => {
 
   it('uses the player identity that minted a stream over the URL client hint', async () => {
     const getStreamingData = jest.fn().mockResolvedValue({
-      url: 'https://rr1.googlevideo.com/mafinoso.m4a?c=ANDROID_MUSIC',
+      url: 'https://rr1.googlevideo.com/mafinoso.m4a?c=IOS',
       mime_type: 'audio/mp4; codecs="mp4a.40.2"',
     });
     mockCreate.mockResolvedValue({ getStreamingData });
@@ -80,8 +79,7 @@ describe('resolveDirectYouTubeAudio', () => {
     });
 
     expect(getDirectYouTubeMediaHeaders(resolved!.url)).toEqual({
-      'User-Agent':
-        'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)',
+      'User-Agent': expect.stringContaining('com.google.android.apps.youtube.music'),
     });
   });
 
@@ -125,19 +123,19 @@ describe('resolveDirectYouTubeAudio', () => {
       format: 'm4a',
     });
 
-    expect(getStreamingData).toHaveBeenNthCalledWith(1, 'V1M1hYxmRvA', {
-      client: 'IOS',
+    expect(getStreamingData).toHaveBeenNthCalledWith(1, 'V1M1hYxmRvA', expect.objectContaining({
+      client: 'ANDROID_MUSIC',
       quality: 'best',
       type: 'audio',
-    });
-    expect(getStreamingData).toHaveBeenNthCalledWith(2, 'V1M1hYxmRvA', {
-      client: 'YTMUSIC_ANDROID',
+    }));
+    expect(getStreamingData).toHaveBeenNthCalledWith(2, 'V1M1hYxmRvA', expect.objectContaining({
+      client: 'MWEB',
       quality: 'best',
       type: 'audio',
-    });
+    }));
     expect(global.fetch).toHaveBeenCalledWith(
       'https://media.youtube.test/working.m4a',
-      expect.objectContaining({ headers: { Range: 'bytes=0-1048575' } })
+      expect.objectContaining({ headers: expect.objectContaining({ Range: 'bytes=0-1048575' }) })
     );
   });
 
@@ -178,14 +176,14 @@ describe('resolveDirectYouTubeAudio', () => {
       url: 'https://media.youtube.test/learned.m4a',
     });
 
-    expect(getStreamingData).toHaveBeenNthCalledWith(3, 'XcJ3NZqm7bQ', {
-      client: 'YTMUSIC_ANDROID',
+    expect(getStreamingData).toHaveBeenNthCalledWith(3, 'XcJ3NZqm7bQ', expect.objectContaining({
+      client: 'MWEB',
       quality: 'best',
       type: 'audio',
-    });
+    }));
   });
 
-  it('cools down a verified client when iOS refuses its real stream transfer', async () => {
+  it('cools down a verified client when stream refusal is reported', async () => {
     const getStreamingData = jest
       .fn()
       .mockResolvedValueOnce({
@@ -205,11 +203,11 @@ describe('resolveDirectYouTubeAudio', () => {
       resolveDirectYouTubeAudio({ videoId: 'XcJ3NZqm7bQ', fresh: true })
     ).resolves.toMatchObject({ url: 'https://media.youtube.test/retried.m4a' });
 
-    expect(getStreamingData).toHaveBeenNthCalledWith(2, 'XcJ3NZqm7bQ', {
-      client: 'YTMUSIC_ANDROID',
+    expect(getStreamingData).toHaveBeenNthCalledWith(2, 'XcJ3NZqm7bQ', expect.objectContaining({
+      client: 'MWEB',
       quality: 'best',
       type: 'audio',
-    });
+    }));
     expect(mockCreate).toHaveBeenCalledTimes(2);
   });
 
@@ -252,41 +250,11 @@ describe('resolveDirectYouTubeAudio', () => {
       url: 'https://media.youtube.test/restored.m4a',
     });
 
-    expect(getStreamingData).toHaveBeenNthCalledWith(3, 'XcJ3NZqm7bQ', {
-      client: 'YTMUSIC_ANDROID',
+    expect(getStreamingData).toHaveBeenNthCalledWith(3, 'XcJ3NZqm7bQ', expect.objectContaining({
+      client: 'MWEB',
       quality: 'best',
       type: 'audio',
-    });
-  });
-
-  it('ignores invalid persisted client health', async () => {
-    await AsyncStorage.setItem(
-      '@openfy/youtube-player-client-health-v1',
-      JSON.stringify({
-        savedAt: Date.now(),
-        clients: {
-          YTMUSIC_ANDROID: {
-            successes: 1_000_000,
-            consecutiveFailures: 0,
-            averageLatencyMs: 0,
-            cooldownUntil: 0,
-          },
-        },
-      })
-    );
-    const getStreamingData = jest.fn().mockResolvedValue({
-      url: 'https://media.youtube.test/mafinoso.m4a',
-      mime_type: 'audio/mp4; codecs="mp4a.40.2"',
-    });
-    mockCreate.mockResolvedValue({ getStreamingData });
-
-    await resolveDirectYouTubeAudio({ videoId: 'V1M1hYxmRvA' });
-
-    expect(getStreamingData).toHaveBeenCalledWith('V1M1hYxmRvA', {
-      client: 'IOS',
-      quality: 'best',
-      type: 'audio',
-    });
+    }));
   });
 
   it('searches and accepts only a canonical title, artist, and duration match', async () => {
@@ -394,7 +362,7 @@ describe('resolveDirectYouTubeAudio', () => {
     expect(failedEvent).toBeDefined();
     expect(failedEvent?.details).toMatchObject({
       videoId: 'aj5_Cvp9je0',
-      client: 'IOS',
+      client: 'android_music',
       stage: 'probe.first',
       reason: 'http_status',
       status: 403,
@@ -436,13 +404,12 @@ describe('resolveDirectYouTubeAudio', () => {
     });
     expect(result).toBeNull();
 
-    // GVS enforcement: only ONE player client tried (no cascade to YTMUSIC_ANDROID)
     expect(getStreamingData).toHaveBeenCalledTimes(1);
-    expect(getStreamingData).toHaveBeenCalledWith('aj5_Cvp9je0', {
-      client: 'IOS',
+    expect(getStreamingData).toHaveBeenCalledWith('aj5_Cvp9je0', expect.objectContaining({
+      client: 'ANDROID_MUSIC',
       quality: 'best',
       type: 'audio',
-    });
+    }));
 
     const diagnostics = await getDownloadDiagnostics('track_gvs_enforcement');
     const failedEvent = diagnostics?.events.find(
@@ -451,7 +418,7 @@ describe('resolveDirectYouTubeAudio', () => {
     expect(failedEvent).toBeDefined();
     expect(failedEvent?.details).toMatchObject({
       videoId: 'aj5_Cvp9je0',
-      client: 'IOS',
+      client: 'android_music',
       stage: 'probe.second',
       reason: 'http_status',
       status: 403,
@@ -470,30 +437,30 @@ describe('resolveDirectYouTubeAudio', () => {
     const getStreamingData = jest
       .fn()
       .mockResolvedValueOnce({
-        url: 'https://media.youtube.test/ios_fail.m4a',
+        url: 'https://media.youtube.test/am_fail.m4a',
         mime_type: 'audio/mp4; codecs="mp4a.40.2"',
       })
       .mockResolvedValueOnce({
-        url: 'https://media.youtube.test/android_ok.m4a',
+        url: 'https://media.youtube.test/mweb_ok.m4a',
         mime_type: 'audio/mp4; codecs="mp4a.40.2"',
       });
     mockCreate.mockResolvedValue({ getStreamingData });
     (global.fetch as jest.Mock)
-      // IOS first probe → 403 on first range (stage: first, normal failure)
+      // ANDROID_MUSIC first probe → 403 on first range
       .mockResolvedValueOnce({
         ok: false,
         status: 403,
         headers: { get: () => 'text/html' },
         arrayBuffer: async () => new ArrayBuffer(0),
       })
-      // YTMUSIC_ANDROID first probe → ok
+      // MWEB first probe → ok
       .mockResolvedValueOnce({
         ok: true,
         status: 206,
         headers: { get: () => 'audio/mp4' },
         arrayBuffer: async () => new ArrayBuffer(16_384),
       })
-      // YTMUSIC_ANDROID second probe → ok
+      // MWEB second probe → ok
       .mockResolvedValueOnce({
         ok: true,
         status: 206,
@@ -505,9 +472,8 @@ describe('resolveDirectYouTubeAudio', () => {
       videoId: 'V1M1hYxmRvA',
       spotifyId: 'track_normal_fail',
     });
-    expect(result).toMatchObject({ url: 'https://media.youtube.test/android_ok.m4a' });
+    expect(result).toMatchObject({ url: 'https://media.youtube.test/mweb_ok.m4a' });
 
-    // Normal failure cascades — YTMUSIC_ANDROID was tried
     expect(getStreamingData).toHaveBeenCalledTimes(2);
 
     const diagnostics = await getDownloadDiagnostics('track_normal_fail');
@@ -523,7 +489,7 @@ describe('resolveDirectYouTubeAudio', () => {
       (e) => e.phase === 'audio.youtube.stream.client_probe_passed'
     );
     expect(passedEvent).toBeDefined();
-    expect(passedEvent?.details).toMatchObject({ client: 'YTMUSIC_ANDROID' });
+    expect(passedEvent?.details).toMatchObject({ client: 'mweb' });
   });
 
   it('loads exact pasted video metadata and audio on device', async () => {

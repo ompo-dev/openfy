@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Media identity types — "what the content is", never "how to play it".
  *
  * A MediaReference uniquely identifies a piece of content from its source.
@@ -25,6 +25,31 @@ export type MediaReference =
   | { source: 'spotify';  type: 'album';    spotifyId: string }
   | { source: 'spotify';  type: 'playlist'; spotifyId: string };
 
+export type StreamClientId =
+  | 'android_music'
+  | 'ios'
+  | 'android_vr'
+  | 'mweb'
+  | 'web_embedded'
+  | 'tv';
+
+export type InnertubeClientName =
+  | 'ANDROID_MUSIC'
+  | 'IOS'
+  | 'ANDROID_VR'
+  | 'MWEB'
+  | 'WEB_EMBEDDED'
+  | 'TV';
+
+export type StreamClientProfile = {
+  id: StreamClientId;
+  innertubeClient: InnertubeClientName;
+  userAgent: string;
+  origin?: string;
+  referer?: string;
+  poTokenMode: 'none' | 'gvs' | 'player_and_gvs';
+};
+
 /**
  * A resolved, playable stream descriptor. All fields needed to fetch audio
  * bytes are present; the caller never needs to know which player client
@@ -36,8 +61,8 @@ export type YouTubeStreamDescriptor = {
   /** HTTP headers that must accompany every range request to GVS. */
   headers: Record<string, string>;
   format: 'mp4' | 'webm';
-  /** The player client identity that minted this URL. */
-  client: 'IOS' | 'YTMUSIC_ANDROID' | 'ANDROID_VR' | 'TV';
+  /** The internal stream client ID that minted this URL. */
+  client: StreamClientId;
   /** Unix ms after which this descriptor should not be used. */
   expiresAt: number;
   /**

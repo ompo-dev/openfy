@@ -670,12 +670,9 @@ const resolveAudioUrlInternal = async (
 ): Promise<ResolvedAudio | null> => {
   const youtubeVideoId = getYouTubeVideoIdFromTrackId(spotifyId);
   if (youtubeVideoId) {
-    // A pasted YouTube URL is an exact source. Never replace it with a text
-    // search result while its stream endpoint is available. If that signed
-    // stream cannot be obtained, continue through the strict title/artist
-    // resolver instead of making the track impossible to download.
-    const exactResult = await resolveExactYouTubeVideo(youtubeVideoId, forceFresh);
-    if (exactResult) return exactResult;
+    // An exact YouTube video URL/ID is an authoritative source. Never fall through
+    // to title/artist search if the specific video cannot be resolved.
+    return resolveExactYouTubeVideo(youtubeVideoId, forceFresh);
   }
 
   const isUnknownArtist =

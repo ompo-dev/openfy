@@ -1,6 +1,12 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { StreamResolveResult, YouTubeStreamDescriptor } from './mediaReference';
+﻿import AsyncStorage from '@react-native-async-storage/async-storage';
+import type {
+  StreamClientId,
+  StreamClientProfile,
+  StreamResolveResult,
+  YouTubeStreamDescriptor,
+} from './mediaReference';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
+import { getPOToken, invalidatePOToken } from './poTokenProvider';
 
 /**
  * YouTubeStreamResolver — videoId → StreamResolveResult
@@ -9,23 +15,74 @@ import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
  * This module never receives title, artist, spotifyId, or any catalog concern.
  * It does not retry by re-searching YouTube if a stream fails authorization.
  *
- * Architecture context:
- *   CatalogResolver → videoId → YouTubeStreamResolver → StreamResolveResult
- *
  * Key behaviours:
+ *   - ANDROID_MUSIC, MWEB, IOS, ANDROID_VR, WEB_EMBEDDED, TV client profiles
+ *   - Client name, version, User-Agent, Origin, Referer, and PO Token stay unified
  *   - Two-point GVS probe (bytes 0-1 MiB + 1-2 MiB) before marking a URL usable
- *   - GVS enforcement (probe.second 403) → attestation_required, not null
+ *   - Real HTTP AbortController cancellation on timeout
+ *   - Global resolution budget (14s) so resolution never hangs indefinitely
+ *   - Never re-activates clients in cooldown when all are blocked
  *   - inFlight dedup: concurrent callers for the same videoId share one Promise
- *   - Verdict cache: short TTL for attestation_required/unplayable so the caller
- *     does not hammer GVS with the same failing videoId
- *   - Player client health tracking persisted to AsyncStorage
+ *   - Verdict cache: short TTL for attestation_required/unplayable
  */
+
+// ---------------------------------------------------------------------------
+// Client Profiles
+// ---------------------------------------------------------------------------
+
+export const CLIENT_PROFILES: readonly StreamClientProfile[] = [
+  {
+    id: 'android_music',
+    innertubeClient: 'ANDROID_MUSIC',
+    userAgent:
+      'com.google.android.apps.youtube.music/8.39.42 (Linux; U; Android 15; en_US; Pixel 9 Pro; Build/AP4A.250205.002) gzip',
+    poTokenMode: 'gvs',
+  },
+  {
+    id: 'mweb',
+    innertubeClient: 'MWEB',
+    userAgent:
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    origin: 'https://m.youtube.com',
+    referer: 'https://m.youtube.com/',
+    poTokenMode: 'player_and_gvs',
+  },
+  {
+    id: 'ios',
+    innertubeClient: 'IOS',
+    userAgent:
+      'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)',
+    poTokenMode: 'gvs',
+  },
+  {
+    id: 'android_vr',
+    innertubeClient: 'ANDROID_VR',
+    userAgent:
+      'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+    poTokenMode: 'gvs',
+  },
+  {
+    id: 'web_embedded',
+    innertubeClient: 'WEB_EMBEDDED',
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    origin: 'https://www.youtube.com',
+    referer: 'https://www.youtube.com/',
+    poTokenMode: 'player_and_gvs',
+  },
+  {
+    id: 'tv',
+    innertubeClient: 'TV',
+    userAgent: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
+    origin: 'https://www.youtube.com',
+    referer: 'https://www.youtube.com/',
+    poTokenMode: 'none',
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-type PlayerClient = 'IOS' | 'YTMUSIC_ANDROID' | 'ANDROID_VR' | 'TV';
 
 type PlayerClientHealth = {
   successes: number;
@@ -43,10 +100,9 @@ type InnertubeClient = {
   getStreamingData(
     videoId: string,
     options: {
-      client: PlayerClient;
+      client: string;
       quality: 'best';
       type: 'audio';
-      /** Phase 2: PO Token for GVS Proof-of-Origin enforcement. */
       po_token?: string;
     }
   ): Promise<{ url?: string; mime_type?: string }>;
@@ -64,7 +120,6 @@ type StreamProbeResult =
   | { ok: true;  stage: 'first' | 'second'; status: number; byteLength: number; contentType: string }
   | { ok: false; stage: 'first' | 'second'; reason: 'http_status' | 'invalid_content_type' | 'empty_body' | 'timeout' | 'network_error'; status?: number; contentType?: string; error?: string };
 
-// Verdict cache entry — short-lived negative result so we don't hammer GVS.
 type VerdictCacheEntry = {
   result: Exclude<StreamResolveResult, { status: 'resolved' }>;
   expiresAt: number;
@@ -74,48 +129,36 @@ type VerdictCacheEntry = {
 // Constants
 // ---------------------------------------------------------------------------
 
-const REQUEST_TIMEOUT_MS = 8_000;
-const PROBE_FIRST_BYTES    = 1024 * 1024;
-const PROBE_SECOND_OFFSET  = 1024 * 1024;
-const PROBE_SECOND_BYTES   = 1024 * 1024;
-const STREAM_CACHE_TTL_MS  = 10 * 60_000;
-// Verdict TTLs — how long we avoid re-resolving a known failure
-const ATTESTATION_VERDICT_TTL_MS   = 2 * 60_000;   // 2 min: token might arrive
-const UNPLAYABLE_VERDICT_TTL_MS    = 10 * 60_000;  // 10 min: unlikely to change
-const BLOCKED_VERDICT_TTL_MS       = 60_000;        // 1 min: cooldowns are short
+const RESOLUTION_BUDGET_MS       = 14_000;
+const CLIENT_REQUEST_TIMEOUT_MS  = 5_000;
+const PROBE_TIMEOUT_MS           = 4_000;
+const PROBE_FIRST_BYTES          = 1024 * 1024;
+const PROBE_SECOND_OFFSET        = 1024 * 1024;
+const PROBE_SECOND_BYTES         = 1024 * 1024;
+const STREAM_CACHE_TTL_MS        = 10 * 60_000;
 
-const CLIENT_FAILURE_COOLDOWN_MS   = 30_000;
-const CLIENT_MAX_COOLDOWN_MS       = 5 * 60_000;
-const CLIENT_HEALTH_STORAGE_KEY    = '@openfy/youtube-stream-client-health-v1';
-const CLIENT_HEALTH_MAX_AGE_MS     = 24 * 60 * 60_000;
-const CLIENT_HEALTH_MAX_SUCCESSES  = 10_000;
-const CLIENT_HEALTH_MAX_FAILURES   = 20;
+const ATTESTATION_VERDICT_TTL_MS = 2 * 60_000;   // 2 min
+const UNPLAYABLE_VERDICT_TTL_MS  = 10 * 60_000;  // 10 min
+const BLOCKED_VERDICT_TTL_MS     = 60_000;        // 1 min
+
+const CLIENT_FAILURE_COOLDOWN_MS = 30_000;
+const CLIENT_MAX_COOLDOWN_MS     = 5 * 60_000;
+const CLIENT_HEALTH_STORAGE_KEY  = '@openfy/youtube-stream-client-health-v2';
+const CLIENT_HEALTH_MAX_AGE_MS   = 24 * 60 * 60_000;
+const CLIENT_HEALTH_MAX_SUCCESSES = 10_000;
+const CLIENT_HEALTH_MAX_FAILURES  = 20;
 const CLIENT_HEALTH_MAX_LATENCY_MS = 60_000;
-
-const PLAYER_CLIENTS: readonly PlayerClient[] = ['IOS', 'YTMUSIC_ANDROID', 'ANDROID_VR', 'TV'];
-
-const IOS_USER_AGENT =
-  'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)';
-const ANDROID_USER_AGENT =
-  'com.google.android.youtube/21.03.36(Linux; U; Android 16; en_US; SM-S908E Build/TP1A.220624.014) gzip';
-const ANDROID_VR_USER_AGENT =
-  'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip';
-const TV_USER_AGENT = 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version';
 
 // ---------------------------------------------------------------------------
 // Module state
 // ---------------------------------------------------------------------------
 
 let innertubeClient: Promise<InnertubeClient> | null = null;
-// Resolved stream descriptors — keyed by videoId
 const streamCache = new Map<string, { value: YouTubeStreamDescriptor; expiresAt: number }>();
-// In-flight promises — prevents duplicate parallel resolutions for the same videoId
 const inFlight = new Map<string, Promise<StreamResolveResult>>();
-// Short-lived verdict cache for non-resolved outcomes
 const verdictCache = new Map<string, VerdictCacheEntry>();
-// Map url → client that minted it (for header lookup)
-const urlToClient = new Map<string, PlayerClient>();
-const playerClientHealth = new Map<PlayerClient, PlayerClientHealth>();
+const urlToClient = new Map<string, StreamClientId>();
+const playerClientHealth = new Map<StreamClientId, PlayerClientHealth>();
 let healthHydration: Promise<void> | null = null;
 let healthWrite: Promise<void> = Promise.resolve();
 
@@ -129,8 +172,8 @@ const errorMsg = (error: unknown) =>
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object';
 
-const isPlayerClient = (v: string): v is PlayerClient =>
-  PLAYER_CLIENTS.includes(v as PlayerClient);
+const isStreamClientId = (v: string): v is StreamClientId =>
+  CLIENT_PROFILES.some(p => p.id === v);
 
 const isNonNegativeFinite = (v: unknown): v is number =>
   typeof v === 'number' && Number.isFinite(v) && v >= 0;
@@ -152,8 +195,8 @@ const isValidHealth = (v: unknown): v is PlayerClientHealth => {
   );
 };
 
-const healthFor = (client: PlayerClient): PlayerClientHealth =>
-  playerClientHealth.get(client) ?? {
+const healthFor = (id: StreamClientId): PlayerClientHealth =>
+  playerClientHealth.get(id) ?? {
     successes: 0, consecutiveFailures: 0, averageLatencyMs: 0, cooldownUntil: 0,
   };
 
@@ -183,35 +226,38 @@ const hydrateHealth = (): Promise<void> => {
           Date.now() - value.savedAt > CLIENT_HEALTH_MAX_AGE_MS ||
           !isRecord(value.clients)
         ) return;
-        for (const [client, health] of Object.entries(value.clients)) {
-          if (isPlayerClient(client) && isValidHealth(health)) {
-            playerClientHealth.set(client, { ...health });
+        for (const [id, health] of Object.entries(value.clients)) {
+          if (isStreamClientId(id) && isValidHealth(health)) {
+            playerClientHealth.set(id, { ...health });
           }
         }
-      } catch { /* Ignore malformed or unavailable storage. */ }
+      } catch { /* Ignore malformed storage */ }
     })();
   }
   return healthHydration;
 };
 
-const orderedClients = (): PlayerClient[] => {
+/**
+ * Returns available client profiles sorted by health.
+ * NEVER falls back to all clients if all are in cooldown.
+ */
+const orderedClients = (): StreamClientProfile[] => {
   const now = Date.now();
-  const available = PLAYER_CLIENTS.filter(c => healthFor(c).cooldownUntil <= now);
-  const candidates = available.length > 0 ? available : [...PLAYER_CLIENTS];
-  return [...candidates].sort((a, b) => {
-    const ha = healthFor(a), hb = healthFor(b);
+  const available = CLIENT_PROFILES.filter(p => healthFor(p.id).cooldownUntil <= now);
+  return [...available].sort((a, b) => {
+    const ha = healthFor(a.id), hb = healthFor(b.id);
     const sa = ha.successes * 2 - ha.consecutiveFailures * 3;
     const sb = hb.successes * 2 - hb.consecutiveFailures * 3;
     if (sb !== sa) return sb - sa;
     if (ha.averageLatencyMs !== hb.averageLatencyMs) return ha.averageLatencyMs - hb.averageLatencyMs;
-    return PLAYER_CLIENTS.indexOf(a) - PLAYER_CLIENTS.indexOf(b);
+    return CLIENT_PROFILES.indexOf(a) - CLIENT_PROFILES.indexOf(b);
   });
 };
 
-const recordSuccess = async (client: PlayerClient, latencyMs: number) => {
-  const prev = healthFor(client);
+const recordSuccess = async (id: StreamClientId, latencyMs: number) => {
+  const prev = healthFor(id);
   const successes = prev.successes + 1;
-  playerClientHealth.set(client, {
+  playerClientHealth.set(id, {
     successes,
     consecutiveFailures: 0,
     averageLatencyMs: (prev.averageLatencyMs * prev.successes + latencyMs) / successes,
@@ -220,10 +266,10 @@ const recordSuccess = async (client: PlayerClient, latencyMs: number) => {
   await persistHealth();
 };
 
-const recordFailure = async (client: PlayerClient) => {
-  const prev = healthFor(client);
+const recordFailure = async (id: StreamClientId) => {
+  const prev = healthFor(id);
   const f = prev.consecutiveFailures + 1;
-  playerClientHealth.set(client, {
+  playerClientHealth.set(id, {
     ...prev,
     consecutiveFailures: f,
     cooldownUntil: Date.now() + Math.min(CLIENT_FAILURE_COOLDOWN_MS * 2 ** (f - 1), CLIENT_MAX_COOLDOWN_MS),
@@ -232,19 +278,32 @@ const recordFailure = async (client: PlayerClient) => {
 };
 
 // ---------------------------------------------------------------------------
-// Media headers (exported — used by playerService and audioResolver)
+// Media headers
 // ---------------------------------------------------------------------------
 
-const clientFromUrl = (url: string): PlayerClient => {
+const clientFromUrl = (url: string): StreamClientId => {
   try {
     const params = new URL(url).searchParams;
-    switch (params.get('c')?.toUpperCase()) {
-      case 'ANDROID_VR': return 'ANDROID_VR';
-      case 'ANDROID': case 'ANDROID_MUSIC': return 'YTMUSIC_ANDROID';
-      case 'TVHTML5': return 'TV';
-      default: return 'IOS';
+    const c = params.get('c')?.toUpperCase();
+    switch (c) {
+      case 'ANDROID_MUSIC':
+      case 'ANDROID':
+        return 'android_music';
+      case 'ANDROID_VR':
+        return 'android_vr';
+      case 'MWEB':
+        return 'mweb';
+      case 'WEB_EMBEDDED':
+        return 'web_embedded';
+      case 'TVHTML5':
+      case 'TV':
+        return 'tv';
+      default:
+        return 'ios';
     }
-  } catch { return 'IOS'; }
+  } catch {
+    return 'ios';
+  }
 };
 
 /** Returns the HTTP headers required to fetch bytes from a GVS URL. */
@@ -254,14 +313,15 @@ export const getMediaHeaders = (url: string): Record<string, string> | undefined
     if (parsed.hostname !== 'googlevideo.com' && !parsed.hostname.endsWith('.googlevideo.com')) {
       return undefined;
     }
-    const client = urlToClient.get(url) ?? clientFromUrl(url);
-    switch (client) {
-      case 'ANDROID_VR':    return { 'User-Agent': ANDROID_VR_USER_AGENT };
-      case 'YTMUSIC_ANDROID': return { 'User-Agent': ANDROID_USER_AGENT };
-      case 'TV':            return { 'User-Agent': TV_USER_AGENT, Origin: 'https://www.youtube.com', Referer: 'https://www.youtube.com/' };
-      default:              return { 'User-Agent': IOS_USER_AGENT };
-    }
-  } catch { return undefined; }
+    const clientId = urlToClient.get(url) ?? clientFromUrl(url);
+    const profile = CLIENT_PROFILES.find(p => p.id === clientId) ?? CLIENT_PROFILES[0];
+    const headers: Record<string, string> = { 'User-Agent': profile.userAgent };
+    if (profile.origin) headers.Origin = profile.origin;
+    if (profile.referer) headers.Referer = profile.referer;
+    return headers;
+  } catch {
+    return undefined;
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -290,13 +350,13 @@ const getClient = (): Promise<InnertubeClient> => {
   return innertubeClient;
 };
 
-const withTimeout = async <T>(p: Promise<T>, label: string): Promise<T> => {
+const withTimeout = async <T>(p: Promise<T>, label: string, timeoutMs = CLIENT_REQUEST_TIMEOUT_MS): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       p,
       new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timed out`)), REQUEST_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
       }),
     ]);
   } finally {
@@ -305,8 +365,27 @@ const withTimeout = async <T>(p: Promise<T>, label: string): Promise<T> => {
 };
 
 // ---------------------------------------------------------------------------
-// Two-point probe
+// HTTP Abortable fetch for probes
 // ---------------------------------------------------------------------------
+
+const fetchWithAbort = async (
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err: any) {
+    if (err?.name === 'AbortError' || String(err).toLowerCase().includes('aborted')) {
+      throw new Error(`Probe timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 const isPlayableAudio = (r: Response) => {
   if (!r.ok && r.status !== 206) return false;
@@ -322,7 +401,7 @@ const fetchRange = async (
 ): Promise<StreamProbeResult> => {
   try {
     const headers = { ...getMediaHeaders(url), Range: `bytes=${start}-${end}` };
-    const response = await withTimeout(fetch(url, { headers }), `GVS probe (${stage})`);
+    const response = await fetchWithAbort(url, { headers }, PROBE_TIMEOUT_MS);
     const contentType = response.headers.get('content-type') ?? '';
     if (!response.ok && response.status !== 206)
       return { ok: false, stage, reason: 'http_status', status: response.status, contentType };
@@ -362,7 +441,6 @@ const doResolve = async (
   fresh: boolean,
   spotifyId?: string
 ): Promise<StreamResolveResult> => {
-  // Check verdict cache first (negative outcomes with TTL)
   if (!fresh) {
     const verdict = verdictCache.get(videoId);
     if (verdict && verdict.expiresAt > Date.now()) {
@@ -370,7 +448,6 @@ const doResolve = async (
     }
   }
 
-  // Check stream cache
   if (!fresh) {
     const cached = streamCache.get(videoId);
     if (cached && cached.expiresAt > Date.now()) {
@@ -380,47 +457,71 @@ const doResolve = async (
 
   try {
     const [client] = await Promise.all([
-      withTimeout(getClient(), 'Innertube client init'),
+      withTimeout(getClient(), 'Innertube client init', 6000),
       hydrateHealth(),
     ]);
 
     const clients = orderedClients();
 
-    // All clients in cooldown → temporarily_blocked
+    // All clients in cooldown → temporarily_blocked (NEVER fallback to all)
     if (clients.length === 0) {
-      const earliest = Math.min(...PLAYER_CLIENTS.map(c => healthFor(c).cooldownUntil));
+      const earliest = Math.min(...CLIENT_PROFILES.map(c => healthFor(c.id).cooldownUntil));
       const result: StreamResolveResult = { status: 'temporarily_blocked', videoId, retryAt: earliest };
       verdictCache.set(videoId, { result, expiresAt: Date.now() + BLOCKED_VERDICT_TTL_MS });
       return result;
     }
 
-    for (const playerClient of clients) {
+    const deadline = Date.now() + RESOLUTION_BUDGET_MS;
+
+    for (const profile of clients) {
+      if (Date.now() >= deadline) {
+        console.warn(`[StreamResolver] Resolution budget exceeded for ${videoId}`);
+        break;
+      }
+
       const startedAt = Date.now();
       if (spotifyId) {
         recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_attempt', {
           videoId,
-          client: playerClient,
+          client: profile.id,
         });
       }
 
+      let poToken: string | undefined;
+      if (profile.poTokenMode !== 'none') {
+        poToken = await getPOToken(videoId, profile.id).catch(() => undefined);
+      }
+
       let streamError: string | undefined;
+      const remainingTime = Math.max(1000, deadline - Date.now());
+      const timeoutMs = Math.min(CLIENT_REQUEST_TIMEOUT_MS, remainingTime);
+
       const stream = await withTimeout(
-        client.getStreamingData(videoId, { client: playerClient, quality: 'best', type: 'audio' }),
-        `${playerClient} stream resolution`
-      ).catch((err: unknown) => { streamError = errorMsg(err); return null; });
+        client.getStreamingData(videoId, {
+          client: profile.innertubeClient,
+          quality: 'best',
+          type: 'audio',
+          ...(poToken ? { po_token: poToken } : {}),
+        }),
+        `${profile.id} stream resolution`,
+        timeoutMs
+      ).catch((err: unknown) => {
+        streamError = errorMsg(err);
+        return null;
+      });
 
       if (!stream?.url || !/^https:\/\//i.test(stream.url)) {
         if (spotifyId) {
           recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_failed', {
             videoId,
-            client: playerClient,
+            client: profile.id,
             stage: 'streaming_data',
             reason: 'missing_stream_url',
             error: streamError,
           });
         }
-        await recordFailure(playerClient);
-        console.warn(`[StreamResolver] ${playerClient} no URL for ${videoId}: ${streamError ?? 'empty'}`);
+        await recordFailure(profile.id);
+        console.warn(`[StreamResolver] ${profile.id} no URL for ${videoId}: ${streamError ?? 'empty'}`);
         continue;
       }
 
@@ -431,7 +532,7 @@ const doResolve = async (
         if (spotifyId) {
           recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_failed', {
             videoId,
-            client: playerClient,
+            client: profile.id,
             stage: `probe.${probe.stage}`,
             reason: probe.reason,
             status: probe.status,
@@ -440,17 +541,17 @@ const doResolve = async (
             gvsEnforcement: isGvsEnforcement,
           });
         }
-        await recordFailure(playerClient);
+        await recordFailure(profile.id);
         if (isGvsEnforcement) {
-          // The signed URL is valid but GVS requires a PO Token. No point trying
-          // other transports with the same credential — break and report.
-          innertubeClient = null;  // Force fresh session on next call
-          const result: StreamResolveResult = { status: 'attestation_required', videoId, client: playerClient };
+          // Evict cached PO token and session
+          invalidatePOToken(videoId, profile.id);
+          innertubeClient = null;
+          const result: StreamResolveResult = { status: 'attestation_required', videoId, client: profile.id };
           verdictCache.set(videoId, { result, expiresAt: Date.now() + ATTESTATION_VERDICT_TTL_MS });
-          console.warn(`[StreamResolver] GVS attestation required for ${videoId} (${playerClient})`);
+          console.warn(`[StreamResolver] GVS attestation required for ${videoId} (${profile.id})`);
           return result;
         }
-        console.warn(`[StreamResolver] ${playerClient} probe.${probe.stage} failed (${probe.reason} ${probe.status ?? ''}) for ${videoId}`);
+        console.warn(`[StreamResolver] ${profile.id} probe.${probe.stage} failed (${probe.reason} ${probe.status ?? ''}) for ${videoId}`);
         continue;
       }
 
@@ -460,22 +561,22 @@ const doResolve = async (
         url: stream.url,
         headers: getMediaHeaders(stream.url) ?? {},
         format: formatFromMime(stream.mime_type),
-        client: playerClient,
+        client: profile.id,
         expiresAt: Date.now() + STREAM_CACHE_TTL_MS,
-        sessionKey: `${playerClient}:session`,
+        sessionKey: `${profile.id}:session`,
       };
       streamCache.set(videoId, { value: descriptor, expiresAt: descriptor.expiresAt });
-      urlToClient.set(stream.url, playerClient);
-      verdictCache.delete(videoId);  // Clear any prior negative verdict
-      await recordSuccess(playerClient, Date.now() - startedAt);
+      urlToClient.set(stream.url, profile.id);
+      verdictCache.delete(videoId);
+      await recordSuccess(profile.id, Date.now() - startedAt);
       if (spotifyId) {
         recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_probe_passed', {
           videoId,
-          client: playerClient,
+          client: profile.id,
           format: descriptor.format,
         });
       }
-      console.log(`[StreamResolver] ${playerClient} probe passed for ${videoId}`);
+      console.log(`[StreamResolver] ${profile.id} probe passed for ${videoId}`);
       return { status: 'resolved', stream: descriptor };
     }
   } catch (error) {
@@ -486,7 +587,7 @@ const doResolve = async (
     return result;
   }
 
-  // All clients failed without GVS enforcement
+  // All clients failed
   const result: StreamResolveResult = {
     status: 'unplayable',
     videoId,
@@ -502,12 +603,6 @@ const doResolve = async (
 
 /**
  * Resolve a YouTube videoId to a playable StreamDescriptor.
- *
- * Returns a typed StreamResolveResult — never null. Callers pattern-match
- * on `.status` to decide how to handle each outcome.
- *
- * Concurrent calls for the same videoId share one in-flight Promise.
- * `fresh: true` bypasses both stream cache and in-flight dedup.
  */
 export const resolveYouTubeStream = async (
   videoId: string,
@@ -530,8 +625,6 @@ export const resolveYouTubeStream = async (
 
 /**
  * Called by the player/downloader when GVS refuses a real transfer.
- * Evicts the stream cache, records a client failure, and invalidates the
- * Innertube session so the next resolve gets a fresh visitor identity.
  */
 export const reportStreamRefusal = async (url: string, status: number): Promise<void> => {
   if (![403, 404, 410].includes(status)) return;
@@ -543,6 +636,7 @@ export const reportStreamRefusal = async (url: string, status: number): Promise<
     if (cached.value.url === url) {
       streamCache.delete(vid);
       verdictCache.delete(vid);
+      invalidatePOToken(vid, client);
     }
   }
   innertubeClient = null;
