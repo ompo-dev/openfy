@@ -160,25 +160,15 @@ export const extractArtistTokens = (artist: string): string[] => {
 };
 
 export const splitCanonicalArtists = (
-  artistStringOrList: string | string[]
+  input: string | string[]
 ): string[] => {
-  const list = Array.isArray(artistStringOrList)
-    ? artistStringOrList
-    : [artistStringOrList];
-  const result = new Set<string>();
-
-  for (const item of list) {
-    if (!item) continue;
-    const parts = item
-      .split(/\s*(?:,|&|\/|\bfeat\.?|\bft\.?|\bwith\b|\be\b|\bx\b)\s*/i)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    for (const p of parts) {
-      result.add(p);
-    }
-  }
-
-  return Array.from(result);
+  const list = Array.isArray(input) ? input : [input];
+  return list
+    .flatMap((item) =>
+      item ? item.split(/\s*(?:,|\bfeat\.?|\bft\.?|\bwith\b)\s*/i) : []
+    )
+    .map((a) => a.trim())
+    .filter(Boolean);
 };
 
 export const hasCanonicalArtistMatch = (
@@ -201,7 +191,8 @@ export const hasCanonicalArtistMatch = (
     const canonTokens = extractArtistTokens(rawCanon);
 
     if (hasSourceArtist) {
-      // 1. Direct equality or inclusion (e.g. "The Weeknd" in "The Weeknd - Topic")
+      // 1. Direct equality or candidate is canonical with channel decoration
+      // (e.g. candidate: "The Weeknd - Topic" or "The Weeknd VEVO" contains canon: "the weeknd")
       if (
         candidateNorm === canonNorm ||
         candidateNorm.includes(canonNorm) ||
@@ -210,33 +201,13 @@ export const hasCanonicalArtistMatch = (
         return true;
       }
 
-      // 2. Canonical includes candidate when candidate is distinctive (>= 3 chars)
-      // e.g. Canonical: "Micael Rapper", Candidate author: "Micael"
-      if (
-        candidateNorm.length >= 3 &&
-        (canonNorm.includes(candidateNorm) ||
-          canonNorm.replace(/\s/g, '').includes(candidateNorm.replace(/\s/g, '')))
-      ) {
-        return true;
-      }
-
-      // 3. Meaningful token stem match (e.g. "Micael Rapper" vs "Micael" -> stem "micael")
+      // 2. Exact role-stripped stem match (e.g. "Micael Rapper" stem "micael" === "Micael" stem "micael")
       if (candidateTokens.length > 0 && canonTokens.length > 0) {
         const candidateStem = candidateTokens.join(' ');
         const canonStem = canonTokens.join(' ');
-        if (
-          candidateStem === canonStem ||
-          candidateStem.includes(canonStem) ||
-          canonStem.includes(candidateStem)
-        ) {
+        if (candidateStem === canonStem) {
           return true;
         }
-
-        // Shared significant token of length >= 4 (e.g. distinctive artist names)
-        const hasSharedToken = candidateTokens.some(
-          (t) => t.length >= 4 && canonTokens.includes(t)
-        );
-        if (hasSharedToken) return true;
       }
     } else {
       // No source artist exposed — check in candidate title context

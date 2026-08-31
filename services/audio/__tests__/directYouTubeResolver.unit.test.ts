@@ -14,6 +14,11 @@ import {
   resolveDirectYouTubeAudio,
   resolveDirectYouTubeTrack,
 } from '../directYouTubeResolver';
+import {
+  startDownloadDiagnostics,
+  getDownloadDiagnostics,
+  _resetDownloadDiagnosticsForTests,
+} from '../../download/downloadDiagnostics';
 
 describe('resolveDirectYouTubeAudio', () => {
   beforeEach(async () => {
@@ -346,6 +351,46 @@ describe('resolveDirectYouTubeAudio', () => {
       videoId: 'aj5_Cvp9je0',
       imageURL: 'https://image.youtube.test/minhagang.jpg',
       url: 'https://media.youtube.test/minhagang.m4a',
+    });
+  });
+
+  it('records structured diagnostic failure when probe returns HTTP 403', async () => {
+    _resetDownloadDiagnosticsForTests();
+    await startDownloadDiagnostics({
+      spotifyId: 'track_probe_403',
+      title: 'Minha Gang',
+      artistName: 'Micael Rapper, ÉoDan',
+    });
+
+    const getStreamingData = jest.fn().mockResolvedValue({
+      url: 'https://media.youtube.test/refused.m4a',
+      mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+    });
+    mockCreate.mockResolvedValue({ getStreamingData });
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 403,
+      headers: { get: () => 'text/html' },
+      arrayBuffer: async () => new ArrayBuffer(0),
+    });
+
+    const result = await resolveDirectYouTubeAudio({
+      videoId: 'aj5_Cvp9je0',
+      spotifyId: 'track_probe_403',
+    });
+    expect(result).toBeNull();
+
+    const diagnostics = await getDownloadDiagnostics('track_probe_403');
+    const failedEvent = diagnostics?.events.find(
+      (e) => e.phase === 'audio.youtube.stream.client_failed'
+    );
+    expect(failedEvent).toBeDefined();
+    expect(failedEvent?.details).toMatchObject({
+      videoId: 'aj5_Cvp9je0',
+      client: 'IOS',
+      stage: 'probe',
+      reason: 'http_status',
+      status: 403,
     });
   });
 

@@ -2,6 +2,8 @@ import {
   evaluateCandidateMatch,
   hasConflictingNumberedTitleInLyrics,
   hasCanonicalTitleMatch,
+  hasCanonicalArtistMatch,
+  splitCanonicalArtists,
 } from '../canonicalMatcher';
 
 describe('evaluateCandidateMatch', () => {
@@ -211,5 +213,16 @@ describe('evaluateCandidateMatch', () => {
 
     expect(result.isVerified).toBe(false);
     expect(result.status).toBe('unavailable');
+  });
+
+  it('preserves intact band names when canonical artists is an array', () => {
+    expect(splitCanonicalArtists(['X Ambassadors'])).toEqual(['X Ambassadors']);
+    expect(splitCanonicalArtists(['AC/DC'])).toEqual(['AC/DC']);
+    expect(splitCanonicalArtists(['Simon & Garfunkel'])).toEqual(['Simon & Garfunkel']);
+  });
+
+  it('rejects partial artist name false positives (e.g. Drake vs Drake Bell, John Williams vs John Legend)', () => {
+    expect(hasCanonicalArtistMatch('Some Song', 'Drake', ['Drake Bell'])).toBe(false);
+    expect(hasCanonicalArtistMatch('Some Song', 'John Williams', ['John Legend'])).toBe(false);
   });
 });

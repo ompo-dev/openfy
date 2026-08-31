@@ -78,6 +78,9 @@ const STREAM_CACHE_TTL_MS = 10 * 60_000;
 const CLIENT_FAILURE_COOLDOWN_MS = 30_000;
 const CLIENT_MAX_COOLDOWN_MS = 5 * 60_000;
 const CLIENT_HEALTH_STORAGE_KEY = '@openfy/youtube-player-client-health-v1';
+
+const errorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
 const CLIENT_HEALTH_MAX_AGE_MS = 24 * 60 * 60_000;
 const CLIENT_HEALTH_MAX_SUCCESSES = 10_000;
 const CLIENT_HEALTH_MAX_FAILURES = 20;
@@ -389,13 +392,33 @@ const withTimeout = async <T>(request: Promise<T>, label: string): Promise<T> =>
   }
 };
 
+type StreamProbeResult =
+  | {
+      ok: true;
+      status: number;
+      byteLength: number;
+      contentType: string;
+    }
+  | {
+      ok: false;
+      reason:
+        | 'http_status'
+        | 'invalid_content_type'
+        | 'empty_body'
+        | 'timeout'
+        | 'network_error';
+      status?: number;
+      contentType?: string;
+      error?: string;
+    };
+
 const isPlayableAudioResponse = (response: Response) => {
   if (!response.ok && response.status !== 206) return false;
   const mimeType = response.headers.get('content-type') || '';
   return mimeType.startsWith('audio/') || mimeType.startsWith('video/mp4');
 };
 
-const probeStream = async (url: string): Promise<boolean> => {
+const probeStream = async (url: string): Promise<StreamProbeResult> => {
   try {
     const headers = {
       ...getDirectYouTubeMediaHeaders(url),
@@ -405,10 +428,47 @@ const probeStream = async (url: string): Promise<boolean> => {
       fetch(url, { headers }),
       'YouTube audio probe'
     );
-    if (!isPlayableAudioResponse(response)) return false;
-    return (await response.arrayBuffer()).byteLength > 0;
-  } catch {
-    return false;
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.ok && response.status !== 206) {
+      return {
+        ok: false,
+        reason: 'http_status',
+        status: response.status,
+        contentType,
+      };
+    }
+    if (!isPlayableAudioResponse(response)) {
+      return {
+        ok: false,
+        reason: 'invalid_content_type',
+        status: response.status,
+        contentType,
+      };
+    }
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength === 0) {
+      return {
+        ok: false,
+        reason: 'empty_body',
+        status: response.status,
+        contentType,
+      };
+    }
+    return {
+      ok: true,
+      status: response.status,
+      byteLength: buffer.byteLength,
+      contentType,
+    };
+  } catch (error) {
+    const isTimeout =
+      error instanceof Error &&
+      error.message.toLowerCase().includes('timed out');
+    return {
+      ok: false,
+      reason: isTimeout ? 'timeout' : 'network_error',
+      error: errorMessage(error),
+    };
   }
 };
 
@@ -442,6 +502,7 @@ const resolveVideoAudio = async (
             client: playerClient,
           });
         }
+        let streamError: string | undefined;
         const stream = await withTimeout(
           client.getStreamingData(videoId, {
             client: playerClient,
@@ -449,24 +510,36 @@ const resolveVideoAudio = async (
             type: 'audio',
           }),
           `YouTube ${playerClient} audio resolution`
-        ).catch(() => null);
+        ).catch((err: unknown) => {
+          streamError = errorMessage(err);
+          return null;
+        });
+
         if (!stream?.url || !/^https:\/\//i.test(stream.url)) {
           if (spotifyId) {
             recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_failed', {
               videoId,
               client: playerClient,
+              stage: 'streaming_data',
               reason: 'missing_stream_url',
+              error: streamError,
             });
           }
           await recordPlayerClientFailure(playerClient);
           continue;
         }
-        if (!(await probeStream(stream.url))) {
+
+        const probeResult = await probeStream(stream.url);
+        if (!probeResult.ok) {
           if (spotifyId) {
             recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_failed', {
               videoId,
               client: playerClient,
-              reason: 'probe_failed',
+              stage: 'probe',
+              reason: probeResult.reason,
+              status: probeResult.status,
+              contentType: probeResult.contentType,
+              error: probeResult.error,
             });
           }
           await recordPlayerClientFailure(playerClient);
