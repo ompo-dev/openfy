@@ -54,6 +54,7 @@ export type PlayerTrack = {
   streamExpiresAt?: number;
   duration_ms: number;
   youtubeUrl?: string;
+  videoId?: string;
   artists?: { id: string; name: string }[];
 };
 

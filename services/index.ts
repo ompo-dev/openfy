@@ -23,6 +23,30 @@ export type {
   DirectYouTubeTrack,
 } from './audio/directYouTubeResolver';
 
+export type {
+  MediaReference,
+  YouTubeStreamDescriptor,
+  StreamResolveResult,
+} from './audio/mediaReference';
+export {
+  resolveYouTubeStream,
+  reportStreamRefusal,
+  getMediaHeaders,
+} from './audio/youtubeStreamResolver';
+export {
+  parseYouTubeVideoId,
+  resolveSpotifyTrackVideoId,
+} from './audio/catalogResolver';
+export type { CatalogResolveResult } from './audio/catalogResolver';
+export {
+  getCatalogMapping,
+  setCatalogMapping,
+  invalidateCatalogMapping,
+} from './audio/catalogMappingCache';
+export type { CatalogMapping } from './audio/catalogMappingCache';
+export { getPOToken, invalidatePOToken } from './audio/poTokenProvider';
+export type { POTokenContext } from './audio/poTokenProvider';
+
 export { refreshHomeTracks } from './home/homeTrackRefresh';
 export type { HomeTrackSeed, RefreshedHomeTrack } from './home/homeTrackRefresh';
 

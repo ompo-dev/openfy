@@ -1,20 +1,39 @@
-import {
-  evaluateCandidateMatch,
-  hasCanonicalTitleMatch,
-  hasUnwantedForbiddenWords,
-  splitCanonicalArtists,
-} from '../canonical/canonicalMatcher';
-import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+/**
+ * directYouTubeResolver.ts — Thin adapter (backward-compatible public API)
+ *
+ * This module preserves the public API used by audioResolver, downloadManager,
+ * playerService and the player store while delegating all real work to the
+ * new separated layers:
+ *
+ *   Catalog:  catalogResolver.ts  (search + canonical match → videoId)
+ *   Cache:    catalogMappingCache.ts (spotifyId → videoId, persisted 30 days)
+ *   Stream:   youtubeStreamResolver.ts (videoId → StreamResolveResult)
+ *
+ * Architecture note: once a spotifyId→videoId mapping is cached, a GVS 403
+ * will NEVER trigger a new YouTube search — the videoId is already known;
+ * only the stream authorization has failed.
+ */
 
-type DirectYouTubeRequest = {
-  title?: string;
-  artist?: string;
-  durationMs?: number;
-  videoId?: string;
-  fresh?: boolean;
-  spotifyId?: string;
-};
+import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
+import {
+  resolveYouTubeStream,
+  reportStreamRefusal,
+  getMediaHeaders,
+  _resetYouTubeStreamResolverForTests,
+} from './youtubeStreamResolver';
+import {
+  resolveSpotifyTrackVideoId,
+  parseYouTubeVideoId,
+  _resetCatalogResolverForTests,
+} from './catalogResolver';
+import {
+  getCatalogMapping,
+  _resetCatalogMappingCacheForTests,
+} from './catalogMappingCache';
+
+// ---------------------------------------------------------------------------
+// Re-exported public types (unchanged for callers)
+// ---------------------------------------------------------------------------
 
 export type DirectYouTubeAudio = {
   videoId: string;
@@ -29,605 +48,145 @@ export type DirectYouTubeTrack = DirectYouTubeAudio & {
   durationMs: number;
 };
 
-type DirectPlayerClient = 'IOS' | 'YTMUSIC_ANDROID' | 'ANDROID_VR' | 'TV';
+// ---------------------------------------------------------------------------
+// Re-exported header helpers (unchanged API)
+// ---------------------------------------------------------------------------
 
-type PlayerClientHealth = {
-  successes: number;
-  consecutiveFailures: number;
-  averageLatencyMs: number;
-  cooldownUntil: number;
-};
-
-type PersistedPlayerClientHealth = {
-  savedAt: number;
-  clients: Record<string, PlayerClientHealth>;
-};
-
-type SearchVideo = {
-  video_id: string;
-  title: { toString(): string };
-  author: { name: string };
-  duration: { seconds: number };
-  best_thumbnail?: { url: string };
-};
-
-type DirectInnertubeClient = {
-  getStreamingData(
-    videoId: string,
-    options: {
-      client: DirectPlayerClient;
-      quality: 'best';
-      type: 'audio';
-      /** Phase 2: PO Token for GVS Proof-of-Origin enforcement. */
-      po_token?: string;
-    }
-  ): Promise<{ url?: string; mime_type?: string }>;
-  getBasicInfo(videoId: string): Promise<{
-    basic_info: {
-      title?: string;
-      author?: string;
-      duration?: number;
-      thumbnail?: { url: string }[];
-    };
-  }>;
-  search(
-    query: string,
-    options: { type: 'video' }
-  ): Promise<{ videos?: unknown[] }>;
-};
-
-const SEARCH_LIMIT = 8;
-const REQUEST_TIMEOUT_MS = 8_000;
-// Two-point probe: GVS often serves the first MiB without a PO Token, then
-// enforces it on subsequent ranges. Both checkpoints must pass before we treat
-// the URL as usable.
-const PROBE_FIRST_BYTES = 1024 * 1024;         // bytes=0–1 MiB
-const PROBE_SECOND_OFFSET = 1024 * 1024;        // second probe starts at 1 MiB
-const PROBE_SECOND_BYTES = 1024 * 1024;         // bytes=1 MiB–2 MiB
-const STREAM_CACHE_TTL_MS = 10 * 60_000;
-const CLIENT_FAILURE_COOLDOWN_MS = 30_000;
-const CLIENT_MAX_COOLDOWN_MS = 5 * 60_000;
-const CLIENT_HEALTH_STORAGE_KEY = '@openfy/youtube-player-client-health-v1';
-
-const errorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error);
-const CLIENT_HEALTH_MAX_AGE_MS = 24 * 60 * 60_000;
-const CLIENT_HEALTH_MAX_SUCCESSES = 10_000;
-const CLIENT_HEALTH_MAX_FAILURES = 20;
-const CLIENT_HEALTH_MAX_LATENCY_MS = 60_000;
-const PLAYER_CLIENTS: readonly DirectPlayerClient[] = [
-  'IOS',
-  'YTMUSIC_ANDROID',
-  'ANDROID_VR',
-  'TV',
-];
-const IOS_MEDIA_USER_AGENT =
-  'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)';
-const ANDROID_MEDIA_USER_AGENT =
-  'com.google.android.youtube/21.03.36(Linux; U; Android 16; en_US; SM-S908E Build/TP1A.220624.014) gzip';
-const ANDROID_VR_MEDIA_USER_AGENT =
-  'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip';
-const TV_MEDIA_USER_AGENT = 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version';
-let innertubeClient: Promise<DirectInnertubeClient> | null = null;
-const streamCache = new Map<
-  string,
-  { value: DirectYouTubeAudio; expiresAt: number }
->();
-const pendingStreams = new Map<string, Promise<DirectYouTubeAudio | null>>();
-const streamClientByUrl = new Map<string, DirectPlayerClient>();
-const playerClientHealth = new Map<DirectPlayerClient, PlayerClientHealth>();
-let playerClientHealthHydration: Promise<void> | null = null;
-let playerClientHealthWrite: Promise<void> = Promise.resolve();
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  !!value && typeof value === 'object';
-
-const isPlayerClient = (value: string): value is DirectPlayerClient =>
-  PLAYER_CLIENTS.includes(value as DirectPlayerClient);
-
-const playerClientFromStreamUrl = (
-  clientName: string | null
-): DirectPlayerClient => {
-  switch (clientName?.toUpperCase()) {
-    case 'ANDROID_VR':
-      return 'ANDROID_VR';
-    case 'ANDROID':
-    case 'ANDROID_MUSIC':
-      return 'YTMUSIC_ANDROID';
-    case 'TVHTML5':
-      return 'TV';
-    default:
-      return 'IOS';
-  }
-};
-
-/** googlevideo checks that media fetch uses identity which minted its URL. */
 export const getDirectYouTubeMediaHeaders = (
   value: string
-): Record<string, string> | undefined => {
-  try {
-    const url = new URL(value);
-    if (url.hostname !== 'googlevideo.com' && !url.hostname.endsWith('.googlevideo.com')) {
-      return undefined;
-    }
-    // Prefer the actual client that received this URL from the player API.
-    // `c` is a useful fallback, but Google does not guarantee it matches the
-    // request identity for every returned stream.
-    switch (
-      streamClientByUrl.get(value) ??
-      playerClientFromStreamUrl(url.searchParams.get('c'))
-    ) {
-      case 'ANDROID_VR':
-        return { 'User-Agent': ANDROID_VR_MEDIA_USER_AGENT };
-      case 'YTMUSIC_ANDROID':
-        return { 'User-Agent': ANDROID_MEDIA_USER_AGENT };
-      case 'TV':
-        return {
-          'User-Agent': TV_MEDIA_USER_AGENT,
-          Origin: 'https://www.youtube.com',
-          Referer: 'https://www.youtube.com/',
-        };
-      default:
-        return { 'User-Agent': IOS_MEDIA_USER_AGENT };
-    }
-  } catch {
-    return undefined;
-  }
-};
+): Record<string, string> | undefined => getMediaHeaders(value);
 
-/** Get AudioSource object with headers for expo-audio. */
 export const getAudioSourceWithHeaders = (
   value: string
 ): { uri: string; headers?: Record<string, string> } => {
-  const headers = getDirectYouTubeMediaHeaders(value);
+  const headers = getMediaHeaders(value);
   return headers ? { uri: value, headers } : { uri: value };
 };
 
+// ---------------------------------------------------------------------------
+// reportDirectYouTubeStreamRefusal (unchanged API)
+// ---------------------------------------------------------------------------
 
-const isNonNegativeFiniteNumber = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isFinite(value) && value >= 0;
-
-const isValidPlayerClientHealth = (
-  value: unknown
-): value is PlayerClientHealth => {
-  if (!isRecord(value)) return false;
-  const {
-    successes,
-    consecutiveFailures,
-    averageLatencyMs,
-    cooldownUntil,
-  } = value;
-  if (
-    !isNonNegativeFiniteNumber(successes) ||
-    !isNonNegativeFiniteNumber(consecutiveFailures) ||
-    !isNonNegativeFiniteNumber(averageLatencyMs) ||
-    !isNonNegativeFiniteNumber(cooldownUntil)
-  ) {
-    return false;
-  }
-  return (
-    Number.isInteger(successes) &&
-    Number.isInteger(consecutiveFailures) &&
-    successes <= CLIENT_HEALTH_MAX_SUCCESSES &&
-    consecutiveFailures <= CLIENT_HEALTH_MAX_FAILURES &&
-    averageLatencyMs <= CLIENT_HEALTH_MAX_LATENCY_MS &&
-    cooldownUntil <= Date.now() + CLIENT_MAX_COOLDOWN_MS
-  );
-};
-
-const persistPlayerClientHealth = (): Promise<void> => {
-  const value: PersistedPlayerClientHealth = {
-    savedAt: Date.now(),
-    clients: Object.fromEntries(playerClientHealth),
-  };
-  const serialized = JSON.stringify(value);
-  playerClientHealthWrite = playerClientHealthWrite
-    .catch(() => undefined)
-    .then(async () => {
-      try {
-        await AsyncStorage.setItem(CLIENT_HEALTH_STORAGE_KEY, serialized);
-      } catch {
-        // Local resolution must continue if the device storage is unavailable.
-      }
-    });
-  return playerClientHealthWrite;
-};
-
-const hydratePlayerClientHealth = (): Promise<void> => {
-  if (!playerClientHealthHydration) {
-    playerClientHealthHydration = (async () => {
-      try {
-        const serialized = await AsyncStorage.getItem(CLIENT_HEALTH_STORAGE_KEY);
-        if (!serialized) return;
-        const value: unknown = JSON.parse(serialized);
-        if (
-          !isRecord(value) ||
-          typeof value.savedAt !== 'number' ||
-          !Number.isFinite(value.savedAt) ||
-          Date.now() - value.savedAt > CLIENT_HEALTH_MAX_AGE_MS ||
-          !isRecord(value.clients)
-        ) {
-          return;
-        }
-        for (const [playerClient, health] of Object.entries(value.clients)) {
-          if (isPlayerClient(playerClient) && isValidPlayerClientHealth(health)) {
-            playerClientHealth.set(playerClient, { ...health });
-          }
-        }
-      } catch {
-        // Ignore malformed or unavailable device storage.
-      }
-    })();
-  }
-  return playerClientHealthHydration;
-};
-
-const healthFor = (playerClient: DirectPlayerClient): PlayerClientHealth =>
-  playerClientHealth.get(playerClient) || {
-    successes: 0,
-    consecutiveFailures: 0,
-    averageLatencyMs: 0,
-    cooldownUntil: 0,
-  };
-
-const orderedPlayerClients = (): DirectPlayerClient[] => {
-  const now = Date.now();
-  const available = PLAYER_CLIENTS.filter(
-    (playerClient) => healthFor(playerClient).cooldownUntil <= now
-  );
-  const candidates = available.length > 0 ? available : [...PLAYER_CLIENTS];
-
-  return [...candidates].sort((left, right) => {
-    const leftHealth = healthFor(left);
-    const rightHealth = healthFor(right);
-    const leftScore = leftHealth.successes * 2 - leftHealth.consecutiveFailures * 3;
-    const rightScore =
-      rightHealth.successes * 2 - rightHealth.consecutiveFailures * 3;
-    if (rightScore !== leftScore) return rightScore - leftScore;
-    if (leftHealth.averageLatencyMs !== rightHealth.averageLatencyMs) {
-      return leftHealth.averageLatencyMs - rightHealth.averageLatencyMs;
-    }
-    return PLAYER_CLIENTS.indexOf(left) - PLAYER_CLIENTS.indexOf(right);
-  });
-};
-
-const recordPlayerClientSuccess = async (
-  playerClient: DirectPlayerClient,
-  latencyMs: number
-) => {
-  const previous = healthFor(playerClient);
-  const successes = previous.successes + 1;
-  playerClientHealth.set(playerClient, {
-    successes,
-    consecutiveFailures: 0,
-    averageLatencyMs:
-      (previous.averageLatencyMs * previous.successes + latencyMs) / successes,
-    cooldownUntil: 0,
-  });
-  await persistPlayerClientHealth();
-};
-
-const recordPlayerClientFailure = async (playerClient: DirectPlayerClient) => {
-  const previous = healthFor(playerClient);
-  const consecutiveFailures = previous.consecutiveFailures + 1;
-  const cooldownMs = Math.min(
-    CLIENT_FAILURE_COOLDOWN_MS * 2 ** (consecutiveFailures - 1),
-    CLIENT_MAX_COOLDOWN_MS
-  );
-  playerClientHealth.set(playerClient, {
-    ...previous,
-    consecutiveFailures,
-    cooldownUntil: Date.now() + cooldownMs,
-  });
-  await persistPlayerClientHealth();
-};
-
-/** Learns from the real transfer, not only the small resolver probe. */
-export const reportDirectYouTubeStreamRefusal = async (
+export const reportDirectYouTubeStreamRefusal = (
   url: string,
   status: number
-) => {
-  if (![403, 404, 410].includes(status)) return;
-  const playerClient = streamClientByUrl.get(url);
-  if (!playerClient) return;
+): Promise<void> => reportStreamRefusal(url, status);
 
-  streamClientByUrl.delete(url);
-  for (const [videoId, cached] of streamCache) {
-    if (cached.value.url === url) streamCache.delete(videoId);
-  }
-  // A googlevideo refusal is tied to the session which minted the URL. Do not
-  // reuse that session when the caller asks the resolver for a fresh stream.
-  innertubeClient = null;
-  await recordPlayerClientFailure(playerClient);
-  console.warn(
-    `[DirectYouTube] ${playerClient} stream refused with HTTP ${status}; client cooled down.`
-  );
-};
+// ---------------------------------------------------------------------------
+// resolveDirectYouTubeAudio — main adapter
+// ---------------------------------------------------------------------------
 
-const isSearchVideo = (value: unknown): value is SearchVideo => {
-  if (!value || typeof value !== 'object') return false;
-  const video = value as Partial<SearchVideo>;
-  return (
-    typeof video.video_id === 'string' &&
-    typeof video.title?.toString === 'function' &&
-    typeof video.author?.name === 'string' &&
-    typeof video.duration?.seconds === 'number'
-  );
-};
-
-const getClient = (): Promise<DirectInnertubeClient> => {
-  if (!innertubeClient) {
-    // Delay Metro's ESM module until native audio is needed. Jest never
-    // evaluates this branch in unrelated tests, while direct tests mock it.
-    innertubeClient = Promise.resolve().then(() => {
-      const { Innertube } = require('youtubei.js') as {
-        Innertube: {
-          create(options: {
-            generate_session_locally: boolean;
-            retrieve_innertube_config: boolean;
-            retrieve_player: boolean;
-          }): Promise<DirectInnertubeClient>;
-        };
-      };
-      return Innertube.create({
-        // Fetch YouTube's current visitor/session data instead of inventing a
-        // local visitor id. Locally generated ids often pass the first byte
-        // probe, then Google rejects later media ranges with HTTP 403.
-        generate_session_locally: false,
-        retrieve_innertube_config: true,
-        retrieve_player: true,
-      });
-    });
-  }
-  return innertubeClient;
-};
-
-const formatFromMimeType = (mimeType?: string) =>
-  mimeType?.includes('audio/webm') ? 'webm' : 'm4a';
-
-const withTimeout = async <T>(request: Promise<T>, label: string): Promise<T> => {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      request,
-      new Promise<T>((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error(`${label} timed out`)),
-          REQUEST_TIMEOUT_MS
-        );
-      }),
-    ]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
-};
-
-type StreamProbeResult =
-  | {
-      ok: true;
-      /** Which probe checkpoint passed last (always 'second' on full success). */
-      stage: 'first' | 'second';
-      status: number;
-      byteLength: number;
-      contentType: string;
-    }
-  | {
-      ok: false;
-      /** 'first': bytes 0–1 MiB failed; 'second': GVS enforcement (1 MiB–2 MiB). */
-      stage: 'first' | 'second';
-      reason:
-        | 'http_status'
-        | 'invalid_content_type'
-        | 'empty_body'
-        | 'timeout'
-        | 'network_error';
-      status?: number;
-      contentType?: string;
-      error?: string;
-    };
-
-const isPlayableAudioResponse = (response: Response) => {
-  if (!response.ok && response.status !== 206) return false;
-  const mimeType = response.headers.get('content-type') || '';
-  return mimeType.startsWith('audio/') || mimeType.startsWith('video/mp4');
-};
-
-/** Fetch a single byte range; returns a typed result without throwing. */
-const fetchRange = async (
-  url: string,
-  start: number,
-  end: number,
-  stage: 'first' | 'second'
-): Promise<StreamProbeResult> => {
-  try {
-    const headers = {
-      ...getDirectYouTubeMediaHeaders(url),
-      Range: `bytes=${start}-${end}`,
-    };
-    const response = await withTimeout(
-      fetch(url, { headers }),
-      `YouTube audio probe (${stage})`
-    );
-    const contentType = response.headers.get('content-type') || '';
-    if (!response.ok && response.status !== 206) {
-      return { ok: false, stage, reason: 'http_status', status: response.status, contentType };
-    }
-    if (!isPlayableAudioResponse(response)) {
-      return { ok: false, stage, reason: 'invalid_content_type', status: response.status, contentType };
-    }
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength === 0) {
-      return { ok: false, stage, reason: 'empty_body', status: response.status, contentType };
-    }
-    return { ok: true, stage, status: response.status, byteLength: buffer.byteLength, contentType };
-  } catch (error) {
-    const isTimeout =
-      error instanceof Error && error.message.toLowerCase().includes('timed out');
-    return { ok: false, stage, reason: isTimeout ? 'timeout' : 'network_error', error: errorMessage(error) };
-  }
+type DirectYouTubeRequest = {
+  title?: string;
+  artist?: string;
+  durationMs?: number;
+  videoId?: string;
+  fresh?: boolean;
+  spotifyId?: string;
 };
 
 /**
- * Two-point probe:
- *   First  — bytes=0–1 MiB  (catches missing URL / total auth failures)
- *   Second — bytes=1 MiB–2 MiB (catches GVS PO Token enforcement on subsequent ranges)
+ * Resolves a YouTube audio stream for the given request.
  *
- * A 403 on the second probe while the first succeeded is the fingerprint of
- * GVS Proof-of-Origin enforcement. The caller can detect this with:
- *   !result.ok && result.stage === 'second' && result.status === 403
+ * Resolution order:
+ *   1. Direct videoId provided → StreamResolver (no catalog step)
+ *   2. spotifyId in catalogMappingCache → StreamResolver (no search)
+ *   3. title + artist → CatalogResolver (search + match) → StreamResolver
+ *
+ * Returns null only when neither catalog nor stream resolution succeeded.
+ * Does NOT re-run search on GVS 403 — the videoId is preserved separately.
  */
-const probeStream = async (url: string): Promise<StreamProbeResult> => {
-  const first = await fetchRange(url, 0, PROBE_FIRST_BYTES - 1, 'first');
-  if (!first.ok) return first;
-  return fetchRange(url, PROBE_SECOND_OFFSET, PROBE_SECOND_OFFSET + PROBE_SECOND_BYTES - 1, 'second');
-};
-
-const resolveVideoAudio = async (
-  videoId: string,
-  imageURL?: string,
-  fresh = false,
-  spotifyId?: string
+export const resolveDirectYouTubeAudio = async (
+  request: DirectYouTubeRequest
 ): Promise<DirectYouTubeAudio | null> => {
-  const cached = streamCache.get(videoId);
-  if (!fresh && cached && cached.expiresAt > Date.now()) {
-    return imageURL && !cached.value.imageURL
-      ? { ...cached.value, imageURL }
-      : cached.value;
+  const { fresh = false, spotifyId } = request;
+
+  // ── Path 1: direct videoId ────────────────────────────────────────────────
+  if (request.videoId) {
+    return resolveStream(request.videoId, undefined, fresh, spotifyId);
   }
 
-  const active = fresh ? null : pendingStreams.get(videoId);
-  if (active) return active;
-
-  const request = (async (): Promise<DirectYouTubeAudio | null> => {
-    try {
-      const [client] = await Promise.all([
-        withTimeout(getClient(), 'YouTube client initialization'),
-        hydratePlayerClientHealth(),
-      ]);
-      for (const playerClient of orderedPlayerClients()) {
-        const startedAt = Date.now();
-        if (spotifyId) {
-          recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_attempt', {
-            videoId,
-            client: playerClient,
-          });
-        }
-        let streamError: string | undefined;
-        const stream = await withTimeout(
-          client.getStreamingData(videoId, {
-            client: playerClient,
-            quality: 'best',
-            type: 'audio',
-          }),
-          `YouTube ${playerClient} audio resolution`
-        ).catch((err: unknown) => {
-          streamError = errorMessage(err);
-          return null;
+  // ── Path 2: spotifyId → cached videoId ───────────────────────────────────
+  if (spotifyId && !fresh) {
+    const cached = await getCatalogMapping(spotifyId);
+    if (cached) {
+      if (spotifyId) {
+        recordDownloadDiagnostic(spotifyId, 'audio.youtube.catalog_cache_hit', {
+          videoId: cached.videoId,
+          confidence: cached.confidence,
         });
-
-        if (!stream?.url || !/^https:\/\//i.test(stream.url)) {
-          if (spotifyId) {
-            recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_failed', {
-              videoId,
-              client: playerClient,
-              stage: 'streaming_data',
-              reason: 'missing_stream_url',
-              error: streamError,
-            });
-          }
-          await recordPlayerClientFailure(playerClient);
-          continue;
-        }
-
-        const probeResult = await probeStream(stream.url);
-        if (!probeResult.ok) {
-          // A 403 on the second probe (bytes 1–2 MiB) while the first passed is
-          // the fingerprint of GVS PO Token enforcement. Swapping transports
-          // won't help — the credential is bound to this signed URL. Invalidate
-          // the Innertube session so the next resolve starts fresh, then stop.
-          const isGvsEnforcement =
-            probeResult.stage === 'second' && probeResult.status === 403;
-          if (spotifyId) {
-            recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_failed', {
-              videoId,
-              client: playerClient,
-              stage: `probe.${probeResult.stage}`,
-              reason: probeResult.reason,
-              status: probeResult.status,
-              contentType: probeResult.contentType,
-              error: probeResult.error,
-              gvsEnforcement: isGvsEnforcement,
-            });
-          }
-          await recordPlayerClientFailure(playerClient);
-          if (isGvsEnforcement) {
-            // Invalidate client so the next caller gets a fresh visitor session.
-            innertubeClient = null;
-            break; // No point trying other transports — same signed URL, same GVS rejection.
-          }
-          continue;
-        }
-
-        const resolved = {
-          videoId,
-          url: stream.url,
-          format: formatFromMimeType(stream.mime_type),
-          ...(imageURL ? { imageURL } : {}),
-        };
-        streamCache.set(videoId, {
-          value: resolved,
-          expiresAt: Date.now() + STREAM_CACHE_TTL_MS,
-        });
-        streamClientByUrl.set(resolved.url, playerClient);
-        await recordPlayerClientSuccess(playerClient, Date.now() - startedAt);
-        if (spotifyId) {
-          recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_probe_passed', {
-            videoId,
-            client: playerClient,
-            format: resolved.format,
-          });
-        }
-        console.log(`[DirectYouTube] ${playerClient} stream probe passed for ${videoId}`);
-        return resolved;
       }
-    } catch (error) {
-      console.warn(
-        `[DirectYouTube] local stream failed for ${videoId}: ${error instanceof Error ? error.message : String(error)}`
-      );
+      return resolveStream(cached.videoId, undefined, false, spotifyId);
     }
-    return null;
-  })().finally(() => {
-    if (!fresh) pendingStreams.delete(videoId);
-  });
+  }
 
-  if (!fresh) pendingStreams.set(videoId, request);
-  return request;
+  // ── Path 3: title/artist → catalog search ────────────────────────────────
+  if (!request.title) return null;
+
+  const artists = request.artist ? [request.artist] : [];
+  const catalogResult = await resolveSpotifyTrackVideoId(
+    spotifyId ?? `anon:${request.title}:${request.artist ?? ''}`,
+    request.title,
+    artists,
+    request.durationMs ?? 0
+  );
+
+  if (catalogResult.status !== 'resolved') return null;
+
+  return resolveStream(
+    catalogResult.videoId,
+    catalogResult.imageURL,
+    fresh,
+    spotifyId
+  );
 };
 
-/** Resolves metadata and audio for an exact pasted YouTube video on-device. */
+// ---------------------------------------------------------------------------
+// resolveDirectYouTubeTrack — for direct YouTube link paste
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves metadata + audio for an exact pasted YouTube video URL or videoId.
+ * The videoId is treated as an authoritative source — no search is performed.
+ */
 export const resolveDirectYouTubeTrack = async (
-  videoId: string
+  videoIdOrUrl: string
 ): Promise<DirectYouTubeTrack | null> => {
+  const videoId = parseYouTubeVideoId(videoIdOrUrl) ?? videoIdOrUrl;
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
 
   try {
-    const client = await withTimeout(getClient(), 'YouTube client initialization');
-    const info = await withTimeout(
-      client.getBasicInfo(videoId),
-      'YouTube video metadata'
-    );
+    // getBasicInfo from Innertube (lazy-loaded)
+    const { Innertube } = require('youtubei.js') as {
+      Innertube: {
+        create(opts: object): Promise<{
+          getBasicInfo(id: string): Promise<{
+            basic_info: {
+              title?: string; author?: string; duration?: number;
+              thumbnail?: { url: string }[];
+            };
+          }>;
+        }>;
+      };
+    };
+    const client = await Innertube.create({
+      generate_session_locally: false,
+      retrieve_innertube_config: true,
+      retrieve_player: true,
+    });
+    const info = await client.getBasicInfo(videoId);
     const title = info.basic_info.title?.trim();
     if (!title) return null;
 
     const imageURL = info.basic_info.thumbnail?.at(-1)?.url;
-    const audio = await resolveVideoAudio(videoId, imageURL);
+    const audio = await resolveStream(videoId, imageURL, false, undefined);
     if (!audio) return null;
 
     return {
       ...audio,
       title,
-      artistName: info.basic_info.author?.trim() || 'YouTube Music',
-      durationMs: Math.max(0, info.basic_info.duration || 0) * 1000,
+      artistName: info.basic_info.author?.trim() ?? 'YouTube Music',
+      durationMs: Math.max(0, info.basic_info.duration ?? 0) * 1000,
     };
   } catch (error) {
     console.warn(
@@ -637,148 +196,36 @@ export const resolveDirectYouTubeTrack = async (
   }
 };
 
-export const resolveDirectYouTubeAudio = async (
-  request: DirectYouTubeRequest
+// ---------------------------------------------------------------------------
+// Internal stream resolution with diagnostic events
+// ---------------------------------------------------------------------------
+
+const resolveStream = async (
+  videoId: string,
+  imageURL: string | undefined,
+  fresh: boolean,
+  spotifyId: string | undefined
 ): Promise<DirectYouTubeAudio | null> => {
-  if (request.videoId) {
-    return resolveVideoAudio(
-      request.videoId,
-      undefined,
-      request.fresh,
-      request.spotifyId
-    );
-  }
-  if (!request.title) return null;
+  const result = await resolveYouTubeStream(videoId, { fresh, spotifyId });
 
-  const canonicalArtists = splitCanonicalArtists(request.artist || '');
-  const primaryArtist = canonicalArtists[0] || '';
-  const queries = Array.from(
-    new Set([
-      ...(request.artist ? [`${request.artist} - ${request.title} Official Audio`] : []),
-      ...(primaryArtist
-        ? [`${primaryArtist} - ${request.title} Official Audio`, `${primaryArtist} ${request.title}`]
-        : []),
-      `${request.title} Official Audio`,
-    ])
-  );
-
-  try {
-    const client = await withTimeout(getClient(), 'YouTube client initialization');
-    for (const query of queries) {
-      if (request.spotifyId) {
-        recordDownloadDiagnostic(request.spotifyId, 'audio.youtube.search', {
-          query,
-        });
-      }
-      const search = await withTimeout(
-        client.search(query, { type: 'video' }),
-        'YouTube search'
-      );
-      const videos = Array.from(search.videos || []).reduce<SearchVideo[]>(
-        (items, value) => {
-          if (isSearchVideo(value)) items.push(value);
-          return items;
-        },
-        []
-      );
-
-      if (request.spotifyId) {
-        recordDownloadDiagnostic(request.spotifyId, 'audio.youtube.search_results', {
-          query,
-          count: videos.length,
-        });
-      }
-
-      const evaluated = videos.slice(0, SEARCH_LIMIT).map((video) => {
-        const title = video.title.toString();
-        const artist = video.author.name;
-        const durationMs = video.duration.seconds * 1000;
-        const match = evaluateCandidateMatch(
-          {
-            title,
-            artist,
-            durationMs,
-            provider: 'youtube',
-            url: `https://www.youtube.com/watch?v=${video.video_id}`,
-          },
-          {
-            title: request.title || '',
-            artists: canonicalArtists,
-            durationMs: request.durationMs || 0,
-            spotifyId: request.spotifyId || '',
-          }
-        );
-        return { video, title, artist, durationMs, match };
-      });
-
-      for (const item of evaluated) {
-        if (!item.match.isVerified) {
-          if (request.spotifyId) {
-            recordDownloadDiagnostic(
-              request.spotifyId,
-              'audio.youtube.candidate.rejected',
-              {
-                videoId: item.video.video_id,
-                title: item.title,
-                author: item.artist,
-                reason: item.match.reasons[0] || 'rejected',
-                titleMatch: hasCanonicalTitleMatch(item.title, request.title || ''),
-                durationDiffMs: item.match.durationDifferenceMs,
-              }
-            );
-          }
-        } else {
-          if (request.spotifyId) {
-            recordDownloadDiagnostic(
-              request.spotifyId,
-              'audio.youtube.candidate.matched',
-              {
-                videoId: item.video.video_id,
-                title: item.title,
-                author: item.artist,
-                confidence: item.match.sourceConfidence,
-              }
-            );
-          }
-        }
-      }
-
-      const candidates = evaluated
-        .filter(
-          ({ title, match }) =>
-            match.isVerified && !hasUnwantedForbiddenWords(title, request.title || '')
-        )
-        .sort(
-          (left, right) =>
-            right.match.sourceConfidence - left.match.sourceConfidence
-        );
-
-      for (const candidate of candidates) {
-        const imageURL = candidate.video.best_thumbnail?.url;
-        const resolved = await resolveVideoAudio(
-          candidate.video.video_id,
-          imageURL,
-          request.fresh,
-          request.spotifyId
-        );
-        if (resolved) return resolved;
-      }
-    }
-  } catch (error) {
-    console.warn(
-      `[DirectYouTube] search failed for "${primaryArtist} - ${request.title}": ${error instanceof Error ? error.message : String(error)}`
-    );
+  if (result.status === 'resolved') {
+    return {
+      videoId,
+      url: result.stream.url,
+      format: result.stream.format === 'webm' ? 'webm' : 'm4a',
+      ...(imageURL ? { imageURL } : {}),
+    };
   }
 
   return null;
 };
 
-export const resetDirectYouTubeResolverForTests = () => {
-  innertubeClient = null;
-  streamCache.clear();
-  pendingStreams.clear();
-  streamClientByUrl.clear();
-  playerClientHealth.clear();
-  playerClientHealthHydration = null;
-  playerClientHealthWrite = Promise.resolve();
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+export const resetDirectYouTubeResolverForTests = (): void => {
+  _resetYouTubeStreamResolverForTests();
+  _resetCatalogResolverForTests();
+  _resetCatalogMappingCacheForTests();
 };
