@@ -104,6 +104,13 @@ describe('resolveDirectYouTubeAudio', () => {
         headers: { get: () => 'text/html' },
         arrayBuffer: async () => new ArrayBuffer(0),
       })
+      // second client — first probe passes, second probe passes
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 206,
+        headers: { get: () => 'audio/mp4' },
+        arrayBuffer: async () => new ArrayBuffer(16_384),
+      })
       .mockResolvedValueOnce({
         ok: true,
         status: 206,
@@ -388,10 +395,135 @@ describe('resolveDirectYouTubeAudio', () => {
     expect(failedEvent?.details).toMatchObject({
       videoId: 'aj5_Cvp9je0',
       client: 'IOS',
-      stage: 'probe',
+      stage: 'probe.first',
       reason: 'http_status',
       status: 403,
     });
+  });
+
+  it('detects GVS enforcement: first probe passes, second probe returns 403 → stops without trying next client', async () => {
+    _resetDownloadDiagnosticsForTests();
+    await startDownloadDiagnostics({
+      spotifyId: 'track_gvs_enforcement',
+      title: 'Minha Gang',
+      artistName: 'Micael Rapper, ÉoDan',
+    });
+
+    const getStreamingData = jest.fn().mockResolvedValue({
+      url: 'https://media.youtube.test/gvs.m4a',
+      mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+    });
+    mockCreate.mockResolvedValue({ getStreamingData });
+    (global.fetch as jest.Mock)
+      // first probe (bytes 0–1 MiB) → passes
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 206,
+        headers: { get: () => 'audio/mp4' },
+        arrayBuffer: async () => new ArrayBuffer(1_048_576),
+      })
+      // second probe (bytes 1 MiB–2 MiB) → GVS 403
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: { get: () => 'text/plain' },
+        arrayBuffer: async () => new ArrayBuffer(0),
+      });
+
+    const result = await resolveDirectYouTubeAudio({
+      videoId: 'aj5_Cvp9je0',
+      spotifyId: 'track_gvs_enforcement',
+    });
+    expect(result).toBeNull();
+
+    // GVS enforcement: only ONE player client tried (no cascade to YTMUSIC_ANDROID)
+    expect(getStreamingData).toHaveBeenCalledTimes(1);
+    expect(getStreamingData).toHaveBeenCalledWith('aj5_Cvp9je0', {
+      client: 'IOS',
+      quality: 'best',
+      type: 'audio',
+    });
+
+    const diagnostics = await getDownloadDiagnostics('track_gvs_enforcement');
+    const failedEvent = diagnostics?.events.find(
+      (e) => e.phase === 'audio.youtube.stream.client_failed'
+    );
+    expect(failedEvent).toBeDefined();
+    expect(failedEvent?.details).toMatchObject({
+      videoId: 'aj5_Cvp9je0',
+      client: 'IOS',
+      stage: 'probe.second',
+      reason: 'http_status',
+      status: 403,
+      gvsEnforcement: true,
+    });
+  });
+
+  it('normal first-probe failure: cascades to next client (stage probe.first, gvsEnforcement false)', async () => {
+    _resetDownloadDiagnosticsForTests();
+    await startDownloadDiagnostics({
+      spotifyId: 'track_normal_fail',
+      title: 'Mafioso',
+      artistName: 'ÉoDan',
+    });
+
+    const getStreamingData = jest
+      .fn()
+      .mockResolvedValueOnce({
+        url: 'https://media.youtube.test/ios_fail.m4a',
+        mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+      })
+      .mockResolvedValueOnce({
+        url: 'https://media.youtube.test/android_ok.m4a',
+        mime_type: 'audio/mp4; codecs="mp4a.40.2"',
+      });
+    mockCreate.mockResolvedValue({ getStreamingData });
+    (global.fetch as jest.Mock)
+      // IOS first probe → 403 on first range (stage: first, normal failure)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: { get: () => 'text/html' },
+        arrayBuffer: async () => new ArrayBuffer(0),
+      })
+      // YTMUSIC_ANDROID first probe → ok
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 206,
+        headers: { get: () => 'audio/mp4' },
+        arrayBuffer: async () => new ArrayBuffer(16_384),
+      })
+      // YTMUSIC_ANDROID second probe → ok
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 206,
+        headers: { get: () => 'audio/mp4' },
+        arrayBuffer: async () => new ArrayBuffer(16_384),
+      });
+
+    const result = await resolveDirectYouTubeAudio({
+      videoId: 'V1M1hYxmRvA',
+      spotifyId: 'track_normal_fail',
+    });
+    expect(result).toMatchObject({ url: 'https://media.youtube.test/android_ok.m4a' });
+
+    // Normal failure cascades — YTMUSIC_ANDROID was tried
+    expect(getStreamingData).toHaveBeenCalledTimes(2);
+
+    const diagnostics = await getDownloadDiagnostics('track_normal_fail');
+    const failedEvent = diagnostics?.events.find(
+      (e) => e.phase === 'audio.youtube.stream.client_failed'
+    );
+    expect(failedEvent?.details).toMatchObject({
+      stage: 'probe.first',
+      gvsEnforcement: false,
+    });
+
+    const passedEvent = diagnostics?.events.find(
+      (e) => e.phase === 'audio.youtube.stream.client_probe_passed'
+    );
+    expect(passedEvent).toBeDefined();
+    expect(passedEvent?.details).toMatchObject({ client: 'YTMUSIC_ANDROID' });
   });
 
   it('loads exact pasted video metadata and audio on device', async () => {

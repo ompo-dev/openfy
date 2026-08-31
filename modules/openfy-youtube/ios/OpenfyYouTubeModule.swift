@@ -154,10 +154,20 @@ public final class OpenfyYouTubeModule: Module {
     }
 
     guard playerStatus(from: player.payload) == "OK" else {
+      // Emit the real playabilityStatus fields instead of synthesizing 403.
+      // JS diagnostics read X-Playability-Status / X-Playability-Reason to
+      // distinguish LOGIN_REQUIRED, UNPLAYABLE, AGE_CHECK_REQUIRED, etc.
+      let playability = player.payload["playabilityStatus"] as? [String: Any]
+      let psStatus  = playability?["status"]  as? String ?? "UNKNOWN"
+      let psReason  = playability?["reason"]  as? String
+      var extra = playerHeaders
+      extra["X-Playability-Status"] = psStatus
+      if let r = psReason { extra["X-Playability-Reason"] = r }
+      NSLog("[NATIVE] playabilityStatus=%@ reason=%@", psStatus, psReason ?? "nil")
       return transferResult(
-        status: 403,
-        mimeType: "text/plain",
-        headers: playerHeaders
+        status: player.response.statusCode,
+        mimeType: "application/json",
+        headers: extra
       )
     }
     guard let streamURL = bestAudioStreamURL(from: player.payload) else {

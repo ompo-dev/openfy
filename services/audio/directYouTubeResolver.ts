@@ -54,7 +54,13 @@ type SearchVideo = {
 type DirectInnertubeClient = {
   getStreamingData(
     videoId: string,
-    options: { client: DirectPlayerClient; quality: 'best'; type: 'audio' }
+    options: {
+      client: DirectPlayerClient;
+      quality: 'best';
+      type: 'audio';
+      /** Phase 2: PO Token for GVS Proof-of-Origin enforcement. */
+      po_token?: string;
+    }
   ): Promise<{ url?: string; mime_type?: string }>;
   getBasicInfo(videoId: string): Promise<{
     basic_info: {
@@ -72,8 +78,12 @@ type DirectInnertubeClient = {
 
 const SEARCH_LIMIT = 8;
 const REQUEST_TIMEOUT_MS = 8_000;
-// Must match the real fallback chunk. Tiny probes can pass while downloads 403.
-const STREAM_PROBE_BYTES = 1024 * 1024;
+// Two-point probe: GVS often serves the first MiB without a PO Token, then
+// enforces it on subsequent ranges. Both checkpoints must pass before we treat
+// the URL as usable.
+const PROBE_FIRST_BYTES = 1024 * 1024;         // bytes=0–1 MiB
+const PROBE_SECOND_OFFSET = 1024 * 1024;        // second probe starts at 1 MiB
+const PROBE_SECOND_BYTES = 1024 * 1024;         // bytes=1 MiB–2 MiB
 const STREAM_CACHE_TTL_MS = 10 * 60_000;
 const CLIENT_FAILURE_COOLDOWN_MS = 30_000;
 const CLIENT_MAX_COOLDOWN_MS = 5 * 60_000;
@@ -395,12 +405,16 @@ const withTimeout = async <T>(request: Promise<T>, label: string): Promise<T> =>
 type StreamProbeResult =
   | {
       ok: true;
+      /** Which probe checkpoint passed last (always 'second' on full success). */
+      stage: 'first' | 'second';
       status: number;
       byteLength: number;
       contentType: string;
     }
   | {
       ok: false;
+      /** 'first': bytes 0–1 MiB failed; 'second': GVS enforcement (1 MiB–2 MiB). */
+      stage: 'first' | 'second';
       reason:
         | 'http_status'
         | 'invalid_content_type'
@@ -418,58 +432,54 @@ const isPlayableAudioResponse = (response: Response) => {
   return mimeType.startsWith('audio/') || mimeType.startsWith('video/mp4');
 };
 
-const probeStream = async (url: string): Promise<StreamProbeResult> => {
+/** Fetch a single byte range; returns a typed result without throwing. */
+const fetchRange = async (
+  url: string,
+  start: number,
+  end: number,
+  stage: 'first' | 'second'
+): Promise<StreamProbeResult> => {
   try {
     const headers = {
       ...getDirectYouTubeMediaHeaders(url),
-      Range: `bytes=0-${STREAM_PROBE_BYTES - 1}`,
+      Range: `bytes=${start}-${end}`,
     };
     const response = await withTimeout(
       fetch(url, { headers }),
-      'YouTube audio probe'
+      `YouTube audio probe (${stage})`
     );
     const contentType = response.headers.get('content-type') || '';
     if (!response.ok && response.status !== 206) {
-      return {
-        ok: false,
-        reason: 'http_status',
-        status: response.status,
-        contentType,
-      };
+      return { ok: false, stage, reason: 'http_status', status: response.status, contentType };
     }
     if (!isPlayableAudioResponse(response)) {
-      return {
-        ok: false,
-        reason: 'invalid_content_type',
-        status: response.status,
-        contentType,
-      };
+      return { ok: false, stage, reason: 'invalid_content_type', status: response.status, contentType };
     }
     const buffer = await response.arrayBuffer();
     if (buffer.byteLength === 0) {
-      return {
-        ok: false,
-        reason: 'empty_body',
-        status: response.status,
-        contentType,
-      };
+      return { ok: false, stage, reason: 'empty_body', status: response.status, contentType };
     }
-    return {
-      ok: true,
-      status: response.status,
-      byteLength: buffer.byteLength,
-      contentType,
-    };
+    return { ok: true, stage, status: response.status, byteLength: buffer.byteLength, contentType };
   } catch (error) {
     const isTimeout =
-      error instanceof Error &&
-      error.message.toLowerCase().includes('timed out');
-    return {
-      ok: false,
-      reason: isTimeout ? 'timeout' : 'network_error',
-      error: errorMessage(error),
-    };
+      error instanceof Error && error.message.toLowerCase().includes('timed out');
+    return { ok: false, stage, reason: isTimeout ? 'timeout' : 'network_error', error: errorMessage(error) };
   }
+};
+
+/**
+ * Two-point probe:
+ *   First  — bytes=0–1 MiB  (catches missing URL / total auth failures)
+ *   Second — bytes=1 MiB–2 MiB (catches GVS PO Token enforcement on subsequent ranges)
+ *
+ * A 403 on the second probe while the first succeeded is the fingerprint of
+ * GVS Proof-of-Origin enforcement. The caller can detect this with:
+ *   !result.ok && result.stage === 'second' && result.status === 403
+ */
+const probeStream = async (url: string): Promise<StreamProbeResult> => {
+  const first = await fetchRange(url, 0, PROBE_FIRST_BYTES - 1, 'first');
+  if (!first.ok) return first;
+  return fetchRange(url, PROBE_SECOND_OFFSET, PROBE_SECOND_OFFSET + PROBE_SECOND_BYTES - 1, 'second');
 };
 
 const resolveVideoAudio = async (
@@ -531,18 +541,30 @@ const resolveVideoAudio = async (
 
         const probeResult = await probeStream(stream.url);
         if (!probeResult.ok) {
+          // A 403 on the second probe (bytes 1–2 MiB) while the first passed is
+          // the fingerprint of GVS PO Token enforcement. Swapping transports
+          // won't help — the credential is bound to this signed URL. Invalidate
+          // the Innertube session so the next resolve starts fresh, then stop.
+          const isGvsEnforcement =
+            probeResult.stage === 'second' && probeResult.status === 403;
           if (spotifyId) {
             recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_failed', {
               videoId,
               client: playerClient,
-              stage: 'probe',
+              stage: `probe.${probeResult.stage}`,
               reason: probeResult.reason,
               status: probeResult.status,
               contentType: probeResult.contentType,
               error: probeResult.error,
+              gvsEnforcement: isGvsEnforcement,
             });
           }
           await recordPlayerClientFailure(playerClient);
+          if (isGvsEnforcement) {
+            // Invalidate client so the next caller gets a fresh visitor session.
+            innertubeClient = null;
+            break; // No point trying other transports — same signed URL, same GVS rejection.
+          }
           continue;
         }
 
@@ -559,13 +581,13 @@ const resolveVideoAudio = async (
         streamClientByUrl.set(resolved.url, playerClient);
         await recordPlayerClientSuccess(playerClient, Date.now() - startedAt);
         if (spotifyId) {
-          recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_verified', {
+          recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.client_probe_passed', {
             videoId,
             client: playerClient,
             format: resolved.format,
           });
         }
-        console.log(`[DirectYouTube] ${playerClient} stream verified for ${videoId}`);
+        console.log(`[DirectYouTube] ${playerClient} stream probe passed for ${videoId}`);
         return resolved;
       }
     } catch (error) {
