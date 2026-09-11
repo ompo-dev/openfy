@@ -63,7 +63,7 @@ export function LoggedPressable({
         }}
       >
         {typeof children === 'function'
-          ? children({ pressed, hovered: false })
+          ? children({ pressed })
           : children}
       </Pressable>
     );
@@ -84,7 +84,7 @@ export function LoggedPressable({
       }}
       style={[
         typeof style === 'function'
-          ? style({ pressed, hovered: false })
+          ? style({ pressed })
           : style,
         pressStyle,
       ]}
@@ -93,7 +93,7 @@ export function LoggedPressable({
       }}
     >
       {typeof children === 'function'
-        ? children({ pressed, hovered: false })
+        ? children({ pressed })
         : children}
     </AnimatedPressable>
   );

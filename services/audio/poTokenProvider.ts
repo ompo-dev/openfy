@@ -26,6 +26,37 @@ const poTokenCache = new Map<string, POTokenContext>();
 const cacheKey = (videoId: string, client: string, visitorData = '') =>
   `${client}:${videoId}:${visitorData}`;
 
+const base64UrlEncode = (value: string): string => {
+  const globalObj = globalThis as { btoa?: (s: string) => string };
+  try {
+    if (typeof globalObj.btoa === 'function') {
+      return globalObj
+        .btoa(value)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    }
+  } catch {}
+
+  const bytes = new TextEncoder().encode(value);
+  const chars =
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let base64 = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const first = bytes[i];
+    const second = i + 1 < bytes.length ? bytes[i + 1] : 0;
+    const third = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    const combined = (first << 16) | (second << 8) | third;
+
+    base64 += chars[(combined >> 18) & 63];
+    base64 += chars[(combined >> 12) & 63];
+    base64 += i + 1 < bytes.length ? chars[(combined >> 6) & 63] : '=';
+    base64 += i + 2 < bytes.length ? chars[combined & 63] : '=';
+  }
+
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
 /**
  * Fetches fresh visitor data from YouTube service worker data endpoint
  * if not already provided by the Innertube session.
@@ -69,18 +100,7 @@ const generatePOToken = (
     exp: timestamp + 21600,
   });
 
-  // Base64 encode in browser/RN environment
-  try {
-    if (typeof btoa === 'function') {
-      return btoa(rawPayload).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    }
-  } catch {}
-
-  return Buffer.from(rawPayload)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  return base64UrlEncode(rawPayload);
 };
 
 /**

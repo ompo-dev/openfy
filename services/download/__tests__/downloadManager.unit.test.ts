@@ -139,6 +139,40 @@ describe('queueDownloads', () => {
     );
   });
 
+  it('keeps the matched YouTube videoId so iPhone can bypass stale supplied URLs', async () => {
+    resolveAudioUrlMock.mockResolvedValue(null);
+    mockNativePlayerAndDownload.mockResolvedValue({
+      uri: 'file:///mock_dir/openfy_downloads/track_spotify_track_123.m4a',
+      status: 206,
+      mimeType: 'audio/mp4',
+      totalBytes: 100000,
+    });
+
+    await expect(
+      downloadTrack(
+        {
+          spotifyId: 'spotify_track_123',
+          title: 'Faixa com match',
+          artistName: 'Artista local',
+          albumName: 'Álbum local',
+          imageURL: '',
+          duration_ms: 180000,
+          youtubeVideoId: 'V1M1hYxmRvA',
+        },
+        'https://server.test/api/audio/proxy?url=stale-server-stream',
+        'm4a'
+      )
+    ).resolves.toMatchObject({
+      localAudioPath: 'file:///mock_dir/openfy_downloads/track_spotify_track_123.m4a',
+    });
+
+    expect(mockNativePlayerAndDownload).toHaveBeenCalledWith(
+      'V1M1hYxmRvA',
+      'file:///mock_dir/openfy_downloads/track_spotify_track_123.m4a',
+      2 * 1024 * 1024
+    );
+  });
+
   it('BUG-R2: iPhone retries direct download in foreground when background returns an invalid file', async () => {
     resolveAudioUrlMock.mockResolvedValue({
       url: 'https://rr1.googlevideo.com/fresh-on-device.m4a?c=IOS',

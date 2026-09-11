@@ -60,6 +60,7 @@ export type DownloadTrackInput = {
   duration_ms: number;
   audioUrl?: string;
   audioFormat?: string;
+  youtubeVideoId?: string;
 };
 
 export type PendingDownload = {
@@ -105,6 +106,11 @@ const audioRequestHeaders = (url: string): Record<string, string> | undefined =>
 
 const diagnosticsIdFromTrackId = (trackId: string) =>
   trackId.startsWith('track_') ? trackId.slice('track_'.length) : trackId;
+
+const youtubeVideoIdFromTrackId = (trackId?: string): string | undefined => {
+  const match = trackId?.match(/^yt_([A-Za-z0-9_-]{11})$/);
+  return match?.[1];
+};
 
 const selectResponseHeaders = (headers?: Record<string, string>) => {
   if (!headers) return undefined;
@@ -1019,7 +1025,8 @@ const downloadTrackInternal = async (
     let format = Platform.OS === 'web'
       ? audioFormat || track.audioFormat || 'mp3'
       : 'mp3';
-    let youtubeVideoId: string | undefined;
+    let youtubeVideoId =
+      track.youtubeVideoId || youtubeVideoIdFromTrackId(track.spotifyId);
     if (resolvedUrl) {
       resolvedUrl = getPlayableAudioUrl(resolvedUrl);
       recordDownloadDiagnostic(track.spotifyId, 'audio.source.preloaded', {

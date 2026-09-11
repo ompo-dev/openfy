@@ -2,6 +2,16 @@ const { TextDecoder, TextEncoder } = require('util');
 
 Object.assign(global, { TextDecoder, TextEncoder });
 
+const fetchMock = jest.fn();
+Object.assign(global, { fetch: fetchMock });
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'fetch', {
+    configurable: true,
+    writable: true,
+    value: fetchMock,
+  });
+}
+
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
 );

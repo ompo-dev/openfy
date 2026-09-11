@@ -133,6 +133,7 @@ export const Track = ({
           albumName: albumName || '',
           imageURL: imageURL || resolved.imageURL || '',
           duration_ms: duration_ms || 0,
+          youtubeVideoId: resolved.videoId,
         },
         resolved.url,
         resolved.format,

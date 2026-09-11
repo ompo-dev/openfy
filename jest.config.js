@@ -6,7 +6,7 @@ module.exports = {
   testPathIgnorePatterns: ['/node_modules/', '/android/', '/ios/'],
   testMatch: ['**/__tests__/**/*.unit.test.ts?(x)'],
   transformIgnorePatterns: [
-    'node_modules/(?!(jest-)?@react-native|react-native|@expo|@expo-module|expo|@react-navigation|@unimodules|@expo/vector-icons|expo-modules-core|@testing-library|@shopify/react-native-skia)',
+    'node_modules/(?!((?:\\.pnpm/[^/]+/node_modules/)?(?:jest-)?@react-native|(?:\\.pnpm/[^/]+/node_modules/)?(?:jest-)?react-native|(?:\\.pnpm/[^/]+/node_modules/)?@expo|(?:\\.pnpm/[^/]+/node_modules/)?@expo-module|(?:\\.pnpm/[^/]+/node_modules/)?expo|(?:\\.pnpm/[^/]+/node_modules/)?@react-navigation|(?:\\.pnpm/[^/]+/node_modules/)?@unimodules|(?:\\.pnpm/[^/]+/node_modules/)?expo-modules-core|(?:\\.pnpm/[^/]+/node_modules/)?@testing-library|(?:\\.pnpm/[^/]+/node_modules/)?@shopify/react-native-skia))',
   ],
   moduleNameMapper: {
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
