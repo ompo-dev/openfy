@@ -29,7 +29,6 @@ import { useDownloads } from '@context';
 import { SheetFrame } from '../native';
 
 import { getPlaylist, getPlaylistItems } from '@api';
-import { MUSIC_SERVER_URL } from '@config';
 import { fetchWithTimeout } from '@utils';
 import axios from 'axios';
 
@@ -40,6 +39,7 @@ type TrackPreview = {
   albumName: string;
   imageURL: string;
   duration_ms: number;
+  youtubeVideoId?: string;
   youtubeUrl?: string;
   audioUrl?: string;
   audioFormat?: string;
@@ -60,7 +60,7 @@ type ImportedPlaylist = {
 
 const YOUTUBE_STREAM_UNAVAILABLE_ERROR = 'YOUTUBE_STREAM_UNAVAILABLE';
 const YOUTUBE_STREAM_UNAVAILABLE_MESSAGE =
-  'YouTube bloqueou o stream de áudio desse vídeo no servidor. Metadados foram encontrados, mas o download não pode começar sem áudio.';
+  'YouTube bloqueou o stream de áudio desse vídeo. Metadados foram encontrados, mas o download não pode começar sem áudio.';
 
 type SpotifyEmbedEntity = {
   spotifyId?: string;
@@ -195,71 +195,10 @@ const fetchCollectionOnDevice = async (
   };
 };
 
-const fetchCollectionFromServer = async (
-  id: string,
-  type: 'playlist' | 'album'
-): Promise<{
-  title: string;
-  coverUrl: string;
-  tracks: TrackPreview[];
-} | null> => {
-  try {
-    const response = await fetchWithTimeout(
-      `${MUSIC_SERVER_URL}/api/spotify/${type}/${id}`,
-      {},
-      30_000
-    );
-    if (!response.ok) return null;
-    const collection = (await response.json()) as {
-      title?: string;
-      coverUrl?: string;
-      tracks?: SpotifyEmbedEntity[];
-    };
-    const tracks = (collection.tracks ?? [])
-      .map((track) => toTrackPreview(track))
-      .filter((track): track is TrackPreview => track !== null);
-    return collection.title && tracks.length
-      ? {
-          title: collection.title,
-          coverUrl: collection.coverUrl || '',
-          tracks: await withDownloadState(tracks),
-        }
-      : null;
-  } catch {
-    return null;
-  }
-};
-
 const fetchTrackById = async (
   trackId: string
 ): Promise<TrackPreview | null> => {
   const cleanTrackId = trackId.replace(/^spotify:track:/, '').split('?')[0];
-
-  // PRIMARY: same canonical backend on web and native. Native scraping alone
-  // loses per-track metadata and sends it down a different resolver path.
-  try {
-    if (!MUSIC_SERVER_URL) throw new Error('Music server unavailable');
-    const backendRes = await fetchWithTimeout(
-      `${MUSIC_SERVER_URL}/api/spotify/track/${cleanTrackId}`,
-      {},
-      3000
-    );
-    if (backendRes.ok) {
-      const data = await backendRes.json();
-      if (data && data.title) {
-        return {
-          spotifyId: cleanTrackId,
-          title: data.title,
-          artistName: Array.isArray(data.artists)
-            ? data.artists.map((a: any) => a.name).join(', ')
-            : data.artistName,
-          albumName: data.albumName || 'Spotify',
-          imageURL: data.imageURL || '',
-          duration_ms: data.duration_ms || 0,
-        };
-      }
-    }
-  } catch {}
 
   if (Platform.OS !== 'web') {
     return toTrackPreview(
@@ -359,11 +298,6 @@ const fetchPlaylistOrAlbum = async (
   id: string,
   type: 'playlist' | 'album'
 ): Promise<{ title: string; coverUrl: string; tracks: TrackPreview[] }> => {
-  const fromServer = MUSIC_SERVER_URL
-    ? await fetchCollectionFromServer(id, type)
-    : null;
-  if (fromServer) return fromServer;
-
   // Spotify embed works natively without browser CORS. Do not make the
   // following metadata fallbacks dead when it is unavailable.
   if (Platform.OS !== 'web') {
@@ -598,48 +532,15 @@ const fetchYouTubeTrack = async (
         artistName: directTrack.artistName,
         albumName: 'YouTube Track',
         imageURL:
-          directTrack.imageURL || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+          directTrack.imageURL ||
+          `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
         duration_ms: directTrack.durationMs,
+        youtubeVideoId: videoId,
         youtubeUrl,
         audioUrl: directTrack.url,
         audioFormat: directTrack.format,
         isDownloaded: already,
       };
-    }
-  }
-
-  try {
-    if (!MUSIC_SERVER_URL) return null;
-    const response = await axios.post(
-      `${MUSIC_SERVER_URL}/api/music/youtube`,
-      { url: youtubeUrl },
-      { timeout: 120000 }
-    );
-    const track = response.data?.track;
-    if (track?.videoId === videoId && track.title && track.streamUrl) {
-      const trackId = `yt_${videoId}`;
-      const already = await isTrackDownloaded(trackId);
-      return {
-        spotifyId: trackId,
-        title: track.title,
-        artistName: track.artistName || 'YouTube Music',
-        albumName: track.albumName || 'YouTube Track',
-        imageURL:
-          track.imageURL || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-        duration_ms: track.duration_ms || 0,
-        youtubeUrl: track.youtubeUrl || youtubeUrl,
-        audioUrl: track.streamUrl,
-        audioFormat: track.format || 'm4a',
-        isDownloaded: already,
-      };
-    }
-  } catch (err) {
-    console.warn('[ImportModal] Exact YouTube track fetch failed:', err);
-    const errorCode = axios.isAxiosError(err)
-      ? err.response?.data?.error?.code
-      : null;
-    if (errorCode === YOUTUBE_STREAM_UNAVAILABLE_ERROR) {
-      throw new Error(YOUTUBE_STREAM_UNAVAILABLE_ERROR);
     }
   }
 
@@ -674,6 +575,7 @@ const fetchYouTubePlaylist = async (
               v.videoThumbnails?.[0]?.url ||
               `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
             duration_ms: (v.lengthSeconds || 0) * 1000,
+            youtubeVideoId: v.videoId,
             isDownloaded: already,
           });
         }
@@ -799,8 +701,7 @@ export const ImportModal = ({
       }
     } catch (err) {
       setError(
-        err instanceof Error &&
-          err.message === YOUTUBE_STREAM_UNAVAILABLE_ERROR
+        err instanceof Error && err.message === YOUTUBE_STREAM_UNAVAILABLE_ERROR
           ? YOUTUBE_STREAM_UNAVAILABLE_MESSAGE
           : 'Erro ao buscar dados. Verifique o link e tente novamente.'
       );
@@ -818,6 +719,7 @@ export const ImportModal = ({
       albumName: track.albumName,
       imageURL: track.imageURL,
       duration_ms: track.duration_ms,
+      youtubeVideoId: track.youtubeVideoId,
       audioUrl: track.audioUrl,
       audioFormat: track.audioFormat,
     }),
@@ -847,51 +749,55 @@ export const ImportModal = ({
   }).length;
 
   return (
-    <SheetFrame visible={visible} title="Adicionar músicas" onClose={handleClose}>
+    <SheetFrame
+      visible={visible}
+      title="Adicionar músicas"
+      onClose={handleClose}
+    >
       <View style={styles.inputSection}>
-          <Text style={styles.label}>Cole um link do Spotify ou YouTube:</Text>
-          <View style={styles.inputRow}>
-            <TextInput
-              style={styles.textInput}
-              value={inputText}
-              onChangeText={(t) => {
-                setInputText(t);
-                setError('');
-              }}
-              placeholder="https://open.spotify.com/track/... ou youtube.com/watch?v=..."
-              placeholderTextColor="#666"
-              multiline={false}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <Pressable
-              onPress={handlePasteFromClipboard}
-              style={styles.pasteButton}
-            >
-              <MaterialCommunityIcons
-                name="clipboard-text-outline"
-                size={20}
-                color="#1DB954"
-              />
-            </Pressable>
-          </View>
-
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
+        <Text style={styles.label}>Cole um link do Spotify ou YouTube:</Text>
+        <View style={styles.inputRow}>
+          <TextInput
+            style={styles.textInput}
+            value={inputText}
+            onChangeText={(t) => {
+              setInputText(t);
+              setError('');
+            }}
+            placeholder="https://open.spotify.com/track/... ou youtube.com/watch?v=..."
+            placeholderTextColor="#666"
+            multiline={false}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
           <Pressable
-            onPress={handleImport}
-            style={[
-              styles.importButton,
-              isLoading && styles.importButtonDisabled,
-            ]}
-            disabled={isLoading}
+            onPress={handlePasteFromClipboard}
+            style={styles.pasteButton}
           >
-            {isLoading ? (
-              <ActivityIndicator color="#000" size="small" />
-            ) : (
-              <Text style={styles.importButtonText}>Buscar Músicas</Text>
-            )}
+            <MaterialCommunityIcons
+              name="clipboard-text-outline"
+              size={20}
+              color="#1DB954"
+            />
           </Pressable>
+        </View>
+
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+        <Pressable
+          onPress={handleImport}
+          style={[
+            styles.importButton,
+            isLoading && styles.importButtonDisabled,
+          ]}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#000" size="small" />
+          ) : (
+            <Text style={styles.importButtonText}>Buscar Músicas</Text>
+          )}
+        </Pressable>
       </View>
 
       {tracks.length > 0 ? (
@@ -915,7 +821,8 @@ export const ImportModal = ({
           <View style={styles.trackList}>
             {tracks.map((track, index) => {
               const download = downloadsById.get(track.spotifyId);
-              const isComplete = track.isDownloaded || download?.status === 'completed';
+              const isComplete =
+                track.isDownloaded || download?.status === 'completed';
               const isActive =
                 download?.status === 'queued' ||
                 download?.status === 'resolving' ||

@@ -104,18 +104,21 @@ describe('queue preload window', () => {
     await usePlayerStore.getState().playWithQueue(tracks, 1, 'library:songs');
     await flushAsync();
 
-    expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Anterior.m4a');
+    expect(preloadAudio).toHaveBeenCalledWith(
+      'https://media.test/Anterior.m4a'
+    );
     expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Próxima.m4a');
 
     await usePlayerStore.getState().playNext();
     await flushAsync();
 
-    expect(releasePreloadedAudio).toHaveBeenCalledWith('https://media.test/Anterior.m4a');
+    expect(releasePreloadedAudio).toHaveBeenCalledWith(
+      'https://media.test/Anterior.m4a'
+    );
   });
 
   it('does not start a second download for a track already saved in the web library', async () => {
-    const savedUrl =
-      'http://localhost:3001/api/audio/proxy?url=https%3A%2F%2Fmedia.test%2FAtual.m4a';
+    const savedUrl = 'https://media.test/Atual.m4a';
     (getDownloadedTrack as jest.Mock).mockResolvedValue({
       ...tracks[1],
       localAudioPath: savedUrl,
@@ -134,8 +137,7 @@ describe('queue preload window', () => {
   });
 
   it('plays the saved web audioUrl from the download registry before resolving', async () => {
-    const savedUrl =
-      'http://localhost:3001/api/audio/proxy?url=https%3A%2F%2Fmedia.test%2FRegistry.m4a';
+    const savedUrl = 'https://media.test/Registry.m4a';
     (getDownloadedTrack as jest.Mock).mockResolvedValue({
       ...tracks[1],
       audioUrl: savedUrl,
@@ -157,8 +159,7 @@ describe('queue preload window', () => {
       ...tracks[1],
       spotifyId: 'DDDDDDDDDDDDDDDDDDDDDD',
       title: 'Salva',
-      streamUrl:
-        'http://localhost:3001/api/audio/proxy?url=https%3A%2F%2Fmedia.test%2FSalva.m4a',
+      streamUrl: 'https://media.test/Salva.m4a',
     };
 
     await usePlayerStore.getState().playTrack(savedTrack);

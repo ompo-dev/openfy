@@ -1,8 +1,3 @@
-jest.mock('@config', () => ({
-  LOCAL_AUDIO_ONLY: true,
-  MUSIC_SERVER_URL: '',
-}));
-
 jest.mock('../directYouTubeResolver', () => ({
   resolveDirectYouTubeAudio: jest.fn(),
   getDirectYouTubeMediaHeaders: jest.fn().mockReturnValue(null),

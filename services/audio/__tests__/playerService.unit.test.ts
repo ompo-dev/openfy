@@ -57,16 +57,19 @@ describe('playerService fades', () => {
     await fadeOut;
     expect(current.volume).toBe(0);
 
-    await loadAndPlay('https://media.test/replacement.m4a', undefined, undefined, 2000);
+    await loadAndPlay(
+      'https://media.test/replacement.m4a',
+      undefined,
+      undefined,
+      2000
+    );
     expect(replacement.volume).toBe(0);
     jest.advanceTimersByTime(2000);
     expect(replacement.volume).toBe(1);
   });
 
   it('does not fetch remote audio into a blob on web', async () => {
-    await preloadAudio(
-      'http://localhost:3001/api/audio/proxy?url=https%3A%2F%2Fr1.googlevideo.com%2Faudio.m4a'
-    );
+    await preloadAudio('https://r1.googlevideo.com/audio.m4a');
 
     expect(preload).not.toHaveBeenCalled();
   });
@@ -82,7 +85,8 @@ describe('playerService fades', () => {
   });
 
   it('enriches googlevideo URLs with User-Agent media headers', () => {
-    const googlevideoUrl = 'https://rr1---sn-ax87en7z.googlevideo.com/videoplayback?c=ANDROID_MUSIC';
+    const googlevideoUrl =
+      'https://rr1---sn-ax87en7z.googlevideo.com/videoplayback?c=ANDROID_MUSIC';
     const source = toAudioSource(googlevideoUrl);
 
     expect(source.uri).toBe(googlevideoUrl);
@@ -91,7 +95,8 @@ describe('playerService fades', () => {
   });
 
   it('passes AudioSource object with headers to createAudioPlayer', async () => {
-    const googlevideoUrl = 'https://rr1---sn-ax87en7z.googlevideo.com/videoplayback?c=IOS';
+    const googlevideoUrl =
+      'https://rr1---sn-ax87en7z.googlevideo.com/videoplayback?c=IOS';
     await loadAndPlay(googlevideoUrl);
 
     expect(createAudioPlayer).toHaveBeenCalledWith(

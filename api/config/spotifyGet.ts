@@ -1,5 +1,6 @@
 import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios';
 
+import { getSessionToken } from './getSessionToken';
 import { getSessionlessToken } from './getSessionlessToken';
 
 const request = async <Response>(
@@ -7,10 +8,14 @@ const request = async <Response>(
   config: AxiosRequestConfig,
   forceRefresh: boolean
 ): Promise<AxiosResponse<Response>> => {
-  const { token } = await getSessionlessToken(forceRefresh);
+  const userToken = forceRefresh ? null : await getSessionToken();
+  const { token: sessionlessToken } = userToken
+    ? { token: null }
+    : await getSessionlessToken(forceRefresh);
+  const token = userToken || sessionlessToken;
 
   if (!token) {
-    throw new Error('Não foi possível autenticar com o Spotify.');
+    throw new Error('Entre no Spotify para carregar esses dados.');
   }
 
   return axios.get<Response>(url, {

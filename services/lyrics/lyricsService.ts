@@ -1,17 +1,14 @@
 /**
  * Lyrics Service
  * Multi-Engine Lyrics Provider:
- * 1. Openfy Backend Engine (/api/lyrics - LRCLIB + Letras.mus.br + Genius)
- * 2. LRCLIB (Synchronized LRC Karaokê & Timestamps)
- * 3. Letras.mus.br (Complete Brazilian & International Lyrics database)
- * 4. Offline Cache & Fallback System
+ * 1. LRCLIB (Synchronized LRC Karaokê & Timestamps)
+ * 2. Letras.mus.br (Complete Brazilian & International Lyrics database)
+ * 3. Offline Cache & Fallback System
  */
 
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { MUSIC_SERVER_URL } from '@config';
-import { fetchWithTimeout } from '@utils';
 import {
   hasCanonicalArtistMatch,
   hasConflictingNumberedTitleInLyrics,
@@ -178,9 +175,7 @@ export const isCanonicalLyricsCandidate = (
     ? Math.max(3000, durationMs * 0.02)
     : Math.max(10000, durationMs * 0.1);
 
-  return (
-    Math.abs(candidateDurationMs - durationMs) <= durationToleranceMs
-  );
+  return Math.abs(candidateDurationMs - durationMs) <= durationToleranceMs;
 };
 
 export const ensureLyricsDirectory = async (): Promise<void> => {
@@ -342,7 +337,7 @@ export const fetchLyricsFromLetras = async (
 };
 
 /**
- * Main fetch lyrics dispatcher with backend proxy + multi-provider fallback
+ * Main fetch lyrics dispatcher with multi-provider fallback
  */
 export const fetchLyrics = async (
   trackName: string,
@@ -360,76 +355,6 @@ export const fetchLyrics = async (
     ? ''
     : artistName.split(',')[0].split('&')[0].trim();
   const durationMs = durationSeconds ? Math.round(durationSeconds * 1000) : 0;
-
-  // 1. PRIMARY: Query dedicated Openfy Backend (/api/lyrics)
-  try {
-    const backendParams = new URLSearchParams({
-      title: trackName,
-      artist: primaryArtist || artistName,
-      ...(durationMs > 0 ? { durationMs: String(durationMs) } : {}),
-      ...(albumName ? { album: albumName } : {}),
-      ...(releaseDate ? { releaseDate } : {}),
-    });
-
-    if (!MUSIC_SERVER_URL) throw new Error('Music server unavailable');
-    const backendUrl = `${MUSIC_SERVER_URL}/api/lyrics?${backendParams.toString()}`;
-    const bRes = await fetchWithTimeout(backendUrl, {}, 8000);
-    if (bRes.ok) {
-      const bData = await bRes.json();
-      if (
-        bData?.valid &&
-        isCanonicalLyricsCandidate(
-          {
-            trackName: bData.trackName,
-            artistName: bData.artistName,
-            durationMs: bData.durationMs,
-          },
-          trackName,
-          primaryArtist || artistName,
-          durationMs
-        ) &&
-        !hasConflictingLyricsTitle(
-          bData.syncedLyrics || bData.plainLyrics,
-          trackName
-        )
-      ) {
-        let segments: LyricSegment[] = [];
-        if (bData.syncedLyrics) {
-          segments = parseLrcToSegments(bData.syncedLyrics, durationMs);
-        } else if (Array.isArray(bData.lines) && bData.lines.length > 0) {
-          segments = bData.lines.map((l: any, i: number) => ({
-            index: i,
-            startTimeMs: l.startMs,
-            endTimeMs: bData.lines[i + 1]?.startMs || l.startMs + 4000,
-            text: l.text,
-          }));
-        }
-
-        return {
-          id: `lyrics_${trackName}`,
-          trackName: bData.trackName || trackName,
-          artistName: bData.artistName || artistName,
-          plainLyrics: bData.plainLyrics,
-          syncedLyrics: bData.syncedLyrics,
-          segments,
-          isSynced: segments.length > 0,
-          source: 'backend',
-        };
-      }
-      console.warn(
-        `[LyricsService] Backend rejected lyrics identity for "${artistName} - ${trackName}".`
-      );
-    } else {
-      console.warn(
-        `[LyricsService] Backend returned HTTP ${bRes.status} for "${artistName} - ${trackName}".`
-      );
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(
-      `[LyricsService] Backend unavailable at ${MUSIC_SERVER_URL || 'unavailable'} for "${artistName} - ${trackName}": ${message}. Using strict provider fallback.`
-    );
-  }
 
   let exactLyrics: LyricsData | null = null;
 

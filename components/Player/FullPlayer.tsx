@@ -30,7 +30,6 @@ import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Href, useRouter, useSegments } from 'expo-router';
 import { findArtistIdByName } from '@api';
-import { MUSIC_SERVER_URL } from '@config';
 import { usePlayer } from '@context';
 import {
   getLyricGapRange,
@@ -311,33 +310,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
     let isMounted = true;
     const resolveYoutubeUrl = async () => {
-      if (MUSIC_SERVER_URL) {
-        try {
-          const response = await fetch(`${MUSIC_SERVER_URL}/api/music/resolve`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              title: currentTrack.title,
-              artist: currentTrack.artistName,
-              durationMs: currentTrack.duration_ms,
-              spotifyId: currentTrack.spotifyId,
-            }),
-          });
-          const data = await response.json();
-          if (/^[A-Za-z0-9_-]{11}$/.test(data.source?.id || '')) {
-            if (isMounted) {
-              setYoutubeUrl(`https://www.youtube.com/watch?v=${data.source.id}`);
-            }
-            return;
-          }
-          const resolvedUrl = getExactYouTubeUrl(data.playback?.url);
-          if (resolvedUrl && isMounted) {
-            setYoutubeUrl(resolvedUrl);
-            return;
-          }
-        } catch {}
-      }
-
       if (Platform.OS !== 'web') {
         const direct = await resolveDirectYouTubeAudio({
           title: currentTrack.title,
@@ -550,64 +522,23 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     setIsUpdatingAudio(true);
 
     try {
-      type YouTubeTrackResponse = {
-        track?: {
-          videoId: string;
-          youtubeUrl: string;
-          streamUrl: string;
-          title: string;
-          artistName: string;
-          albumName: string;
-          imageURL: string;
-          duration_ms: number;
-          format?: string;
-        };
+      const directTrack =
+        Platform.OS !== 'web'
+          ? await resolveDirectYouTubeTrack(parsedLink.id)
+          : null;
+      if (!directTrack) throw new Error('Could not resolve YouTube track');
+
+      const track = {
+        videoId: directTrack.videoId,
+        youtubeUrl: `https://www.youtube.com/watch?v=${directTrack.videoId}`,
+        streamUrl: directTrack.url,
+        title: directTrack.title,
+        artistName: directTrack.artistName,
+        albumName: 'YouTube Track',
+        imageURL: directTrack.imageURL || '',
+        duration_ms: directTrack.durationMs,
+        format: directTrack.format,
       };
-      let data: YouTubeTrackResponse | null = null;
-      let backendError: Error | null = null;
-
-      if (MUSIC_SERVER_URL) {
-        try {
-          const response = await fetch(`${MUSIC_SERVER_URL}/api/music/youtube`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: newUrl }),
-          });
-          if (!response.ok) {
-            const errorBody = await response.json().catch(() => null);
-            throw new Error(errorBody?.error?.code || 'Could not resolve YouTube track');
-          }
-          data = (await response.json()) as YouTubeTrackResponse;
-        } catch (error) {
-          backendError = error instanceof Error ? error : new Error(String(error));
-        }
-      } else {
-        backendError = new Error('Music server unavailable');
-      }
-
-      // Keep a device-local escape hatch when an installed native build cannot
-      // reach the deployed resolver. Browsers always require the backend proxy.
-      if (!data && Platform.OS !== 'web') {
-        const directTrack = await resolveDirectYouTubeTrack(parsedLink.id);
-        if (directTrack) {
-          data = {
-            track: {
-              videoId: directTrack.videoId,
-              youtubeUrl: `https://www.youtube.com/watch?v=${directTrack.videoId}`,
-              streamUrl: directTrack.url,
-              title: directTrack.title,
-              artistName: directTrack.artistName,
-              albumName: 'YouTube Track',
-              imageURL: directTrack.imageURL || '',
-              duration_ms: directTrack.durationMs,
-              format: directTrack.format,
-            },
-          };
-        }
-      }
-
-      if (!data) throw backendError || new Error('Could not resolve YouTube track');
-      const track = data.track;
       if (!track?.streamUrl || currentTrackRef.current !== trackBeingEdited)
         return;
 
@@ -631,7 +562,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     } catch (error) {
       Alert.alert(
         'Não foi possível atualizar',
-        error instanceof Error && error.message === YOUTUBE_STREAM_UNAVAILABLE_ERROR
+        error instanceof Error &&
+          error.message === YOUTUBE_STREAM_UNAVAILABLE_ERROR
           ? YOUTUBE_STREAM_UNAVAILABLE_MESSAGE
           : 'Verifique o link e tente novamente.'
       );
@@ -742,9 +674,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           index: -1,
           text: '♪ ♪ ♪',
           ...getLyricGapRange(
-          segments,
-          selectedLyricTarget.target,
-          Math.max(totalDurationMs, getLastSegmentEndMs(segments))
+            segments,
+            selectedLyricTarget.target,
+            Math.max(totalDurationMs, getLastSegmentEndMs(segments))
           ),
         };
   const selectedEditorRange = getEditorRange(draftLyricSegments);
@@ -753,16 +685,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     const previous = getEditorRange(draftLyricSegmentsRef.current);
     const next = updateDraftSegments((segments) =>
       selectedLyricTarget.kind === 'lyric'
-        ? moveLyricSegment(
-            segments,
-            selectedLyricTarget.index,
-            deltaMs
-          )
-        : moveLyricGap(
-            segments,
-            selectedLyricTarget.target,
-            deltaMs
-          )
+        ? moveLyricSegment(segments, selectedLyricTarget.index, deltaMs)
+        : moveLyricGap(segments, selectedLyricTarget.target, deltaMs)
     );
     const nextRange = getEditorRange(next);
     return previous && nextRange
@@ -792,16 +716,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     const previous = getEditorRange(draftLyricSegmentsRef.current);
     const next = updateDraftSegments((segments) =>
       selectedLyricTarget.kind === 'lyric'
-        ? resizeLyricSegmentEnd(
-            segments,
-            selectedLyricTarget.index,
-            deltaMs
-          )
-        : resizeLyricGapEnd(
-            segments,
-            selectedLyricTarget.target,
-            deltaMs
-          )
+        ? resizeLyricSegmentEnd(segments, selectedLyricTarget.index, deltaMs)
+        : resizeLyricGapEnd(segments, selectedLyricTarget.target, deltaMs)
     );
     const nextRange = getEditorRange(next);
     return previous && nextRange ? nextRange.endTimeMs - previous.endTimeMs : 0;

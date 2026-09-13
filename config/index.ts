@@ -19,8 +19,6 @@ export {
   TRACK_COVER_SIZE,
   RECENTLY_PLAYED_COVER_SIZE,
   BROWSE_CATEGORY_IMAGE_SIZE,
-  LOCAL_AUDIO_ONLY,
-  MUSIC_SERVER_URL,
 } from './constants';
 export { COLORS, BROWSE_CATEGORIES_COLORS } from './colors';
 export {

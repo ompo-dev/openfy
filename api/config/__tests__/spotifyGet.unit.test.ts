@@ -10,11 +10,15 @@ jest.mock('axios', () => ({
 jest.mock('expo-constants', () => ({
   __esModule: true,
   default: {
-    expoConfig: { extra: { clientID: 'client-id', clientSecret: 'client-secret' } },
+    expoConfig: {
+      extra: {
+        tokenKey: 'spotify_token',
+        refreshTokenKey: 'spotify_refresh_token',
+        expirationKey: 'spotify_expiration_key',
+      },
+    },
   },
 }));
-
-jest.mock('@config', () => ({ MUSIC_SERVER_URL: 'https://api.openfy.test' }));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
@@ -28,39 +32,27 @@ describe('spotifyGet', () => {
     jest.clearAllMocks();
   });
 
-  it('renova token uma vez ao receber 401 e repete mesma chamada', async () => {
-    await AsyncStorage.setItem('sessionless_token', 'expired-by-spotify');
+  it('usa somente o token Spotify salvo no aparelho', async () => {
+    await AsyncStorage.setItem('spotify_token', 'local-user-token');
     await AsyncStorage.setItem(
-      'sessionless_token_expiration',
-      new Date(Date.now() + 10 * 60_000).toISOString()
+      'spotify_expiration_key',
+      String(Date.now() + 10 * 60_000)
     );
-    mockedAxios.isAxiosError.mockReturnValue(true);
-    mockedAxios.get
-      .mockRejectedValueOnce({ response: { status: 401 } })
-      .mockResolvedValueOnce({ data: { accessToken: 'fresh-token' } } as any)
-      .mockResolvedValueOnce({ data: { id: 'playlist' } } as any);
+    mockedAxios.get.mockResolvedValueOnce({ data: { id: 'playlist' } } as any);
 
-    await expect(spotifyGet<{ id: string }>('https://spotify.test/playlist')).resolves.toEqual(
-      expect.objectContaining({ data: { id: 'playlist' } })
-    );
+    await expect(
+      spotifyGet<{ id: string }>('https://spotify.test/playlist')
+    ).resolves.toEqual(expect.objectContaining({ data: { id: 'playlist' } }));
 
     expect(mockedAxios.get).toHaveBeenNthCalledWith(
       1,
       'https://spotify.test/playlist',
       expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: 'Bearer expired-by-spotify' }),
+        headers: expect.objectContaining({
+          Authorization: 'Bearer local-user-token',
+        }),
       })
     );
-    expect(mockedAxios.get).toHaveBeenNthCalledWith(
-      3,
-      'https://spotify.test/playlist',
-      expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: 'Bearer fresh-token' }),
-      })
-    );
-    expect(mockedAxios.get).toHaveBeenNthCalledWith(
-      2,
-      'https://api.openfy.test/api/spotify/token'
-    );
+    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,6 +1,5 @@
 jest.mock('../../config', () => ({
   BASE_URL: 'https://api.spotify.test/v1',
-  MUSIC_SERVER_URL: 'http://localhost:3001',
   spotifyGet: jest.fn(),
 }));
 
@@ -8,34 +7,45 @@ import { spotifyGet } from '../../config';
 import { getPlaylist, getPlaylistItems } from '../playlist';
 
 const mockedSpotifyGet = spotifyGet as jest.MockedFunction<typeof spotifyGet>;
-const mockFetch = jest.fn();
 
-describe('playlist fallback', () => {
+describe('playlist Spotify API', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    global.fetch = mockFetch;
-    mockedSpotifyGet.mockRejectedValue(new Error('Spotify rejected token'));
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        id: 'playlist-1',
-        title: 'Playlist local',
-        coverUrl: 'https://image.test/cover.jpg',
-        tracks: [
-          {
-            spotifyId: 'track-1',
-            title: 'Música local',
-            artistName: 'Artista local',
-            albumName: 'Álbum local',
-            imageURL: 'https://image.test/track.jpg',
-            duration_ms: 120_000,
-          },
-        ],
-      }),
-    });
   });
 
-  it('usa playlist canônica do backend quando Spotify retorna erro', async () => {
+  it('carrega playlist e faixas pela sessão Spotify local', async () => {
+    mockedSpotifyGet
+      .mockResolvedValueOnce({
+        data: {
+          type: 'playlist',
+          id: 'playlist-1',
+          name: 'Playlist local',
+          owner: { id: 'owner-1', display_name: 'Maico' },
+          description: '',
+          followers: { total: 10 },
+          images: [{ url: 'https://image.test/cover.jpg' }],
+          tracks: { total: 1 },
+        },
+      } as any)
+      .mockResolvedValueOnce({
+        data: {
+          items: [
+            {
+              track: {
+                id: 'track-1',
+                name: 'Música local',
+                artists: [{ id: 'artist-1', name: 'Artista local' }],
+                album: {
+                  name: 'Álbum local',
+                  images: [{ url: 'https://image.test/track.jpg' }],
+                },
+                duration_ms: 120_000,
+              },
+            },
+          ],
+        },
+      } as any);
+
     await expect(getPlaylist('playlist-1')).resolves.toEqual(
       expect.objectContaining({
         id: 'playlist-1',
@@ -52,20 +62,6 @@ describe('playlist fallback', () => {
         durationMs: 120_000,
       }),
     ]);
-  });
-
-  it('prioriza backend canônico antes do token Spotify', async () => {
-    await expect(getPlaylist('playlist-1')).resolves.toEqual(
-      expect.objectContaining({
-        id: 'playlist-1',
-        title: 'Playlist local',
-      })
-    );
-
-    expect(mockedSpotifyGet).not.toHaveBeenCalled();
-    expect(mockFetch).toHaveBeenCalledWith(
-      'http://localhost:3001/api/spotify/playlist/playlist-1',
-      { signal: expect.any(AbortSignal) }
-    );
+    expect(mockedSpotifyGet).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,27 +1,5 @@
-import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-
-import { MUSIC_SERVER_URL } from '@config';
-
-const refreshAccessToken = async (refreshToken: string) => {
-  if (!Constants.expoConfig || !Constants.expoConfig.extra) {
-    return null;
-  }
-
-  if (!MUSIC_SERVER_URL) return null;
-
-  try {
-    const response = await axios.post(`${MUSIC_SERVER_URL}/api/spotify/refresh`, {
-      refreshToken,
-    });
-
-    return response.data;
-  } catch (error) {
-    console.error('Error refreshing access token:', error);
-    return null;
-  }
-};
 
 export const getSessionToken = async (): Promise<string | null> => {
   if (!Constants.expoConfig || !Constants.expoConfig.extra) {
@@ -35,35 +13,14 @@ export const getSessionToken = async (): Promise<string | null> => {
 
   const storedToken = await AsyncStorage.getItem(tokenKey);
   const expirationTime = await AsyncStorage.getItem(expirationKey);
-  const refreshToken = await AsyncStorage.getItem(refreshTokenKey);
   const currentTime = new Date().getTime();
 
   if (storedToken && expirationTime && currentTime < Number(expirationTime)) {
     return storedToken;
   }
 
-  if (!refreshToken) {
-    if (tokenKey) await AsyncStorage.removeItem(tokenKey);
-    if (expirationKey) await AsyncStorage.removeItem(expirationKey);
-    if (refreshTokenKey) await AsyncStorage.removeItem(refreshTokenKey);
-    return null;
-  }
-
-  try {
-    const data = await refreshAccessToken(refreshToken);
-    if (!data.access_token) {
-      return null;
-    }
-
-    const newAccessToken = data.access_token as string;
-    const newExpirationTime = currentTime + data.expires_in * 1000;
-
-    await AsyncStorage.setItem(tokenKey, newAccessToken);
-    await AsyncStorage.setItem(expirationKey, newExpirationTime.toString());
-
-    return newAccessToken;
-  } catch (error) {
-    console.error('Failed to refresh token', error);
-    return null;
-  }
+  if (tokenKey) await AsyncStorage.removeItem(tokenKey);
+  if (expirationKey) await AsyncStorage.removeItem(expirationKey);
+  if (refreshTokenKey) await AsyncStorage.removeItem(refreshTokenKey);
+  return null;
 };

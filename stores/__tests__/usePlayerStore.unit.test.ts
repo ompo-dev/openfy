@@ -8,7 +8,7 @@ import { getExistingLocalAudioPath } from '../usePlayerStore';
 describe('getExistingLocalAudioPath', () => {
   it('drops expired web proxy URLs so the track resolves again', async () => {
     await expect(
-      getExistingLocalAudioPath('http://localhost:3001/api/audio/proxy?url=https%3A%2F%2Fr1.googlevideo.com%2Fstale.m4a')
+      getExistingLocalAudioPath('https://r1.googlevideo.com/stale.m4a')
     ).resolves.toBeNull();
   });
 });

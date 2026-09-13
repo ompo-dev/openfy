@@ -3,9 +3,13 @@ jest.mock('expo-file-system/legacy', () => ({
   getInfoAsync: jest.fn().mockResolvedValue({ exists: true, size: 100000 }),
   makeDirectoryAsync: jest.fn().mockResolvedValue(undefined),
   createDownloadResumable: jest.fn().mockReturnValue({
-    downloadAsync: jest.fn().mockResolvedValue({ uri: 'file:///mock_dir/audio.m4a' }),
+    downloadAsync: jest
+      .fn()
+      .mockResolvedValue({ uri: 'file:///mock_dir/audio.m4a' }),
   }),
-  downloadAsync: jest.fn().mockResolvedValue({ uri: 'file:///mock_dir/cover.jpg' }),
+  downloadAsync: jest
+    .fn()
+    .mockResolvedValue({ uri: 'file:///mock_dir/cover.jpg' }),
   readAsStringAsync: jest.fn().mockResolvedValue('[]'),
   writeAsStringAsync: jest.fn().mockResolvedValue(undefined),
   deleteAsync: jest.fn().mockResolvedValue(undefined),
@@ -55,13 +59,20 @@ describe('queueDownloads', () => {
     await AsyncStorage.clear();
     resolveAudioUrlMock.mockReset();
     fileSystemMock.getInfoAsync.mockReset();
-    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 100000 });
+    fileSystemMock.getInfoAsync.mockResolvedValue({
+      exists: true,
+      size: 100000,
+    });
     fileSystemMock.createDownloadResumable.mockReset();
     fileSystemMock.createDownloadResumable.mockReturnValue({
-      downloadAsync: jest.fn().mockResolvedValue({ uri: 'file:///mock_dir/audio.m4a' }),
+      downloadAsync: jest
+        .fn()
+        .mockResolvedValue({ uri: 'file:///mock_dir/audio.m4a' }),
     } as ReturnType<typeof FileSystem.createDownloadResumable>);
     fileSystemMock.downloadAsync.mockReset();
-    fileSystemMock.downloadAsync.mockResolvedValue({ uri: 'file:///mock_dir/cover.jpg' });
+    fileSystemMock.downloadAsync.mockResolvedValue({
+      uri: 'file:///mock_dir/cover.jpg',
+    });
     mockNativeGoogleVideoDownload.mockReset();
     mockNativePlayerAndDownload.mockReset();
     fetchMock.mockReset();
@@ -111,7 +122,7 @@ describe('queueDownloads', () => {
         albumName: 'Álbum local',
         imageURL: '',
         duration_ms: 180000,
-        audioUrl: 'https://server.test/api/audio/proxy?url=stale-server-stream',
+        audioUrl: 'https://media.test/stale-stream.m4a',
         audioFormat: 'm4a',
       })
     ).resolves.toMatchObject({
@@ -159,11 +170,12 @@ describe('queueDownloads', () => {
           duration_ms: 180000,
           youtubeVideoId: 'V1M1hYxmRvA',
         },
-        'https://server.test/api/audio/proxy?url=stale-server-stream',
+        'https://media.test/stale-stream.m4a',
         'm4a'
       )
     ).resolves.toMatchObject({
-      localAudioPath: 'file:///mock_dir/openfy_downloads/track_spotify_track_123.m4a',
+      localAudioPath:
+        'file:///mock_dir/openfy_downloads/track_spotify_track_123.m4a',
     });
 
     expect(mockNativePlayerAndDownload).toHaveBeenCalledWith(
@@ -171,6 +183,39 @@ describe('queueDownloads', () => {
       'file:///mock_dir/openfy_downloads/track_spotify_track_123.m4a',
       2 * 1024 * 1024
     );
+  });
+
+  it('downloads an exact YouTube track natively even when JS cannot resolve a stream URL', async () => {
+    resolveAudioUrlMock.mockResolvedValue(null);
+    mockNativePlayerAndDownload.mockResolvedValue({
+      uri: 'file:///mock_dir/openfy_downloads/track_yt_V1M1hYxmRvA.m4a',
+      status: 206,
+      mimeType: 'audio/mp4',
+      totalBytes: 100000,
+    });
+
+    await expect(
+      downloadTrack({
+        spotifyId: 'yt_V1M1hYxmRvA',
+        title: 'Faixa exata',
+        artistName: 'YouTube Music',
+        albumName: 'YouTube Track',
+        imageURL: '',
+        duration_ms: 180000,
+        youtubeVideoId: 'V1M1hYxmRvA',
+      })
+    ).resolves.toMatchObject({
+      localAudioPath:
+        'file:///mock_dir/openfy_downloads/track_yt_V1M1hYxmRvA.m4a',
+    });
+
+    expect(mockNativePlayerAndDownload).toHaveBeenCalledWith(
+      'V1M1hYxmRvA',
+      'file:///mock_dir/openfy_downloads/track_yt_V1M1hYxmRvA.m4a',
+      2 * 1024 * 1024
+    );
+    expect(fileSystemMock.createDownloadResumable).not.toHaveBeenCalled();
+    expect(fileSystemMock.downloadAsync).toHaveBeenCalledTimes(0);
   });
 
   it('BUG-R2: iPhone retries direct download in foreground when background returns an invalid file', async () => {
@@ -196,7 +241,10 @@ describe('queueDownloads', () => {
     );
     fileSystemMock.downloadAsync
       .mockResolvedValueOnce({ uri: 'file:///mock_dir/audio.m4a', status: 200 })
-      .mockResolvedValueOnce({ uri: 'file:///mock_dir/audio.m4a', status: 200 });
+      .mockResolvedValueOnce({
+        uri: 'file:///mock_dir/audio.m4a',
+        status: 200,
+      });
 
     await expect(
       downloadTrack({
@@ -233,9 +281,13 @@ describe('queueDownloads', () => {
 
   it('BUG-R3: iPhone saves audio through fetch when URLSession rejects a signed stream', async () => {
     fileSystemMock.createDownloadResumable.mockReturnValueOnce({
-      downloadAsync: jest.fn().mockRejectedValue(new Error('URLSession failed')),
+      downloadAsync: jest
+        .fn()
+        .mockRejectedValue(new Error('URLSession failed')),
     } as ReturnType<typeof FileSystem.createDownloadResumable>);
-    fileSystemMock.downloadAsync.mockRejectedValue(new Error('URLSession failed'));
+    fileSystemMock.downloadAsync.mockRejectedValue(
+      new Error('URLSession failed')
+    );
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
@@ -247,7 +299,7 @@ describe('queueDownloads', () => {
               ? '60000'
               : name === 'content-range'
                 ? 'bytes 0-59999/60000'
-              : null,
+                : null,
       },
       arrayBuffer: async () => new Uint8Array(60000).buffer,
     });

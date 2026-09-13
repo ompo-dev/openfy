@@ -7,7 +7,6 @@
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LOCAL_AUDIO_ONLY, MUSIC_SERVER_URL } from '@config';
 import { fetchLyrics, saveLyricsOffline } from '../lyrics/lyricsService';
 import {
   getPlayableAudioUrl,
@@ -99,7 +98,9 @@ const audioUrlOrigin = (url: string) => {
 
 // Googlevideo accepts the same Range transport used to validate local streams.
 // iOS URLSession may reject the otherwise identical whole-file request with 403.
-const audioRequestHeaders = (url: string): Record<string, string> | undefined => {
+const audioRequestHeaders = (
+  url: string
+): Record<string, string> | undefined => {
   const mediaHeaders = getDirectYouTubeMediaHeaders(url);
   return mediaHeaders ? { ...mediaHeaders, Range: 'bytes=0-' } : undefined;
 };
@@ -123,7 +124,9 @@ const selectResponseHeaders = (headers?: Record<string, string>) => {
     'server',
   ];
   const selected = Object.fromEntries(
-    Object.entries(headers).filter(([name]) => wanted.includes(name.toLowerCase()))
+    Object.entries(headers).filter(([name]) =>
+      wanted.includes(name.toLowerCase())
+    )
   );
   return Object.keys(selected).length ? selected : undefined;
 };
@@ -173,7 +176,8 @@ const validateDownloadedAudio = async (
   const fileInfo = await FileSystem.getInfoAsync(result.uri);
   const bytes = fileInfo.exists ? fileInfo.size : undefined;
   const successfulStatus =
-    result.status === undefined || (result.status >= 200 && result.status < 300);
+    result.status === undefined ||
+    (result.status >= 200 && result.status < 300);
   const valid =
     successfulStatus &&
     isAudioMimeType(result.mimeType) &&
@@ -196,10 +200,16 @@ const validateDownloadedAudio = async (
         ? 'unexpected_mime_type'
         : 'file_too_small',
   });
-  if (!successfulStatus && result.sourceUrl && typeof result.status === 'number') {
+  if (
+    !successfulStatus &&
+    result.sourceUrl &&
+    typeof result.status === 'number'
+  ) {
     await reportDirectYouTubeStreamRefusal(result.sourceUrl, result.status);
   }
-  await FileSystem.deleteAsync(result.uri, { idempotent: true }).catch(() => {});
+  await FileSystem.deleteAsync(result.uri, { idempotent: true }).catch(
+    () => {}
+  );
   return null;
 };
 
@@ -232,7 +242,9 @@ export const ensureDirectories = async (): Promise<void> => {
   try {
     const downloadsInfo = await FileSystem.getInfoAsync(DOWNLOADS_DIR);
     if (!downloadsInfo.exists) {
-      await FileSystem.makeDirectoryAsync(DOWNLOADS_DIR, { intermediates: true });
+      await FileSystem.makeDirectoryAsync(DOWNLOADS_DIR, {
+        intermediates: true,
+      });
     }
 
     const coversInfo = await FileSystem.getInfoAsync(COVERS_DIR);
@@ -260,7 +272,9 @@ export const getDownloadedTracks = async (): Promise<DownloadedTrack[]> => {
 /**
  * Save downloaded tracks list to AsyncStorage
  */
-const saveDownloadedTracks = async (tracks: DownloadedTrack[]): Promise<void> => {
+const saveDownloadedTracks = async (
+  tracks: DownloadedTrack[]
+): Promise<void> => {
   await AsyncStorage.setItem(DOWNLOADS_STORAGE_KEY, JSON.stringify(tracks));
 };
 
@@ -354,7 +368,9 @@ export const cancelDownload = async (spotifyId: string): Promise<void> => {
   await removePendingDownload(spotifyId);
 };
 
-const recordPendingDownloadFailure = async (spotifyId: string): Promise<void> => {
+const recordPendingDownloadFailure = async (
+  spotifyId: string
+): Promise<void> => {
   await updatePendingDownloads((downloads) =>
     downloads.map((candidate) =>
       candidate.track.spotifyId === spotifyId
@@ -385,7 +401,9 @@ const canRetryPendingDownload = (download: PendingDownload): boolean => {
 /**
  * Check if a track is already downloaded
  */
-export const isTrackDownloaded = async (spotifyId: string): Promise<boolean> => {
+export const isTrackDownloaded = async (
+  spotifyId: string
+): Promise<boolean> => {
   const tracks = await getDownloadedTracks();
   return tracks.some((t) => t.spotifyId === spotifyId);
 };
@@ -453,7 +471,9 @@ const googleVideoContentLength = (url: string) => {
   if (!getDirectYouTubeMediaHeaders(url)) return null;
   try {
     const value = Number(new URL(url).searchParams.get('clen'));
-    return Number.isInteger(value) && value > 0 && value <= FETCH_AUDIO_FALLBACK_MAX_BYTES
+    return Number.isInteger(value) &&
+      value > 0 &&
+      value <= FETCH_AUDIO_FALLBACK_MAX_BYTES
       ? value
       : null;
   } catch {
@@ -463,12 +483,17 @@ const googleVideoContentLength = (url: string) => {
 
 const responseHeaders = (response: Response) =>
   Object.fromEntries(
-    ['content-type', 'content-length', 'content-range', 'accept-ranges', 'date', 'server'].flatMap(
-      (name) => {
-        const value = response.headers.get(name);
-        return value ? [[name, value]] : [];
-      }
-    )
+    [
+      'content-type',
+      'content-length',
+      'content-range',
+      'accept-ranges',
+      'date',
+      'server',
+    ].flatMap((name) => {
+      const value = response.headers.get(name);
+      return value ? [[name, value]] : [];
+    })
   );
 
 const downloadGoogleVideoChunks = async (
@@ -486,9 +511,12 @@ const downloadGoogleVideoChunks = async (
 
   await FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
   while (written < totalBytes) {
-    const end = Math.min(written + GOOGLEVIDEO_FETCH_CHUNK_BYTES, totalBytes) - 1;
+    const end =
+      Math.min(written + GOOGLEVIDEO_FETCH_CHUNK_BYTES, totalBytes) - 1;
     const range = `bytes=${written}-${end}`;
-    const response = await fetch(audioUrl, { headers: { ...headers, Range: range } });
+    const response = await fetch(audioUrl, {
+      headers: { ...headers, Range: range },
+    });
     const currentHeaders = responseHeaders(response);
     const mimeType = response.headers.get('content-type');
     const contentRange = response.headers.get('content-range');
@@ -503,7 +531,8 @@ const downloadGoogleVideoChunks = async (
         range,
         reason: !response.ok ? 'http_status' : 'unexpected_mime_type',
       });
-      if (!response.ok) await reportDirectYouTubeStreamRefusal(audioUrl, response.status);
+      if (!response.ok)
+        await reportDirectYouTubeStreamRefusal(audioUrl, response.status);
       return null;
     }
 
@@ -676,7 +705,9 @@ const downloadHlsAudio = async (
       throw new Error('No audio segments in m3u8 playlist');
     }
 
-    console.log(`[DownloadManager] Downloading ${segments.length} audio chunks...`);
+    console.log(
+      `[DownloadManager] Downloading ${segments.length} audio chunks...`
+    );
 
     // Ensure parent dir exists and delete previous incomplete file
     await ensureDirectories();
@@ -721,7 +752,9 @@ const downloadHlsAudio = async (
 
     const fileInfo = await FileSystem.getInfoAsync(localPath);
     if (fileInfo.exists && fileInfo.size && fileInfo.size > 50000) {
-      console.log(`[DownloadManager] HLS download success: ${(fileInfo.size / 1024 / 1024).toFixed(2)} MB`);
+      console.log(
+        `[DownloadManager] HLS download success: ${(fileInfo.size / 1024 / 1024).toFixed(2)} MB`
+      );
       return fileInfo.uri;
     }
     return null;
@@ -742,7 +775,9 @@ export const downloadAudio = async (
   onProgress?: (progress: number) => void,
   youtubeVideoId?: string
 ): Promise<string | null> => {
-  if (!audioUrl) return null;
+  const nativeExactVideoId = Platform.OS === 'ios' ? youtubeVideoId : undefined;
+  const canUseNativeExactDownload = Boolean(nativeExactVideoId);
+  if (!audioUrl && !canUseNativeExactDownload) return null;
   if (Platform.OS === 'web') {
     onProgress?.(1);
     return audioUrl;
@@ -753,27 +788,30 @@ export const downloadAudio = async (
     const cleanFormat = format === 'm3u8' ? 'mp3' : format || 'mp3';
     const localPath = `${DOWNLOADS_DIR}${trackId}.${cleanFormat}`;
     const spotifyId = diagnosticsIdFromTrackId(trackId);
-    const headers = audioRequestHeaders(audioUrl);
-    const googleVideoHeaders = getDirectYouTubeMediaHeaders(audioUrl);
+    const headers = audioUrl ? audioRequestHeaders(audioUrl) : undefined;
+    const googleVideoHeaders = audioUrl
+      ? getDirectYouTubeMediaHeaders(audioUrl)
+      : undefined;
 
     // Keep the minting `player` call and the media ranges inside one iOS
     // URLSession. A signed URL resolved by JavaScript can be refused by the
     // native transfer before its first byte when the two stacks choose
     // different network paths.
-    if (youtubeVideoId) {
+    if (nativeExactVideoId) {
       try {
         recordDownloadDiagnostic(spotifyId, 'audio.request', {
           method: 'POST + GET',
           transport: 'native_player_range',
           session: 'foreground',
-          url: `https://www.youtube.com/watch?v=${youtubeVideoId}`,
+          url: `https://www.youtube.com/watch?v=${nativeExactVideoId}`,
           format: cleanFormat,
           range: 'bytes=0-2097151',
         });
-        const nativeResolvedResult = await resolveAndDownloadYouTubeVideoNatively(
-          youtubeVideoId,
-          localPath
-        );
+        const nativeResolvedResult =
+          await resolveAndDownloadYouTubeVideoNatively(
+            nativeExactVideoId,
+            localPath
+          );
         if (nativeResolvedResult) {
           const validResult = await validateDownloadedAudio(
             nativeResolvedResult,
@@ -790,6 +828,13 @@ export const downloadAudio = async (
           error: errorMessage(error),
         });
       }
+    }
+
+    if (!audioUrl) {
+      recordDownloadDiagnostic(spotifyId, 'audio.exhausted', {
+        reason: 'native_exact_download_unavailable',
+      });
+      return null;
     }
 
     // 1. If HLS .m3u8 playlist
@@ -927,10 +972,14 @@ export const downloadAudio = async (
           format: cleanFormat,
           range: headers?.Range,
         });
-        const directResult = await FileSystem.downloadAsync(audioUrl, localPath, {
-          sessionType: FileSystem.FileSystemSessionType.FOREGROUND,
-          ...(headers ? { headers } : {}),
-        });
+        const directResult = await FileSystem.downloadAsync(
+          audioUrl,
+          localPath,
+          {
+            sessionType: FileSystem.FileSystemSessionType.FOREGROUND,
+            ...(headers ? { headers } : {}),
+          }
+        );
         const validResult = await validateDownloadedAudio(
           { ...directResult, sourceUrl: audioUrl },
           trackId,
@@ -961,9 +1010,13 @@ export const downloadAudio = async (
     recordDownloadDiagnostic(spotifyId, 'audio.exhausted', { url: audioUrl });
     return null;
   } catch (error) {
-    recordDownloadDiagnostic(diagnosticsIdFromTrackId(trackId), 'audio.failed', {
-      error: errorMessage(error),
-    });
+    recordDownloadDiagnostic(
+      diagnosticsIdFromTrackId(trackId),
+      'audio.failed',
+      {
+        error: errorMessage(error),
+      }
+    );
     console.error('[DownloadManager] Audio download failed:', error);
     return null;
   }
@@ -1021,12 +1074,13 @@ const downloadTrackInternal = async (
     // A cached signed URL may expire while a native background task waits.
     // Native asks the shared resolver for a fresh source; web can reuse its
     // already-proxied source without triggering an extra request.
-    let resolvedUrl = Platform.OS === 'web' ? suppliedAudioUrl : undefined;
-    let format = Platform.OS === 'web'
-      ? audioFormat || track.audioFormat || 'mp3'
-      : 'mp3';
     let youtubeVideoId =
       track.youtubeVideoId || youtubeVideoIdFromTrackId(track.spotifyId);
+    let resolvedUrl = Platform.OS === 'web' ? suppliedAudioUrl : undefined;
+    let format =
+      Platform.OS === 'web'
+        ? audioFormat || track.audioFormat || 'mp3'
+        : track.audioFormat || (youtubeVideoId ? 'm4a' : 'mp3');
     if (resolvedUrl) {
       resolvedUrl = getPlayableAudioUrl(resolvedUrl);
       recordDownloadDiagnostic(track.spotifyId, 'audio.source.preloaded', {
@@ -1035,14 +1089,13 @@ const downloadTrackInternal = async (
       });
     }
 
-    // Audio is resolved on the current device by default. A server is only an
-    // explicit legacy fallback when EXPO_PUBLIC_LOCAL_AUDIO_ONLY is false.
+    // Audio is resolved on the current device only.
     if (!resolvedUrl) {
       recordDownloadDiagnostic(track.spotifyId, 'audio.resolve.request', {
         platform: Platform.OS,
       });
       console.log(
-        `[DownloadManager] ${Platform.OS} resolving "${track.artistName} - ${track.title}", ${LOCAL_AUDIO_ONLY ? 'mode: local' : `backend: ${MUSIC_SERVER_URL || 'unavailable'}`}`
+        `[DownloadManager] ${Platform.OS} resolving "${track.artistName} - ${track.title}", mode: local`
       );
       const mainResult = await resolveAudioUrl(
         track.title,
@@ -1094,16 +1147,19 @@ const downloadTrackInternal = async (
 
     if (cancelledDownloads.has(track.spotifyId)) return null;
 
-    if (!resolvedUrl) {
+    const canAttemptNativeExactDownload =
+      Platform.OS === 'ios' && Boolean(youtubeVideoId);
+
+    if (!resolvedUrl && !canAttemptNativeExactDownload) {
       console.warn(
-        `[DownloadManager] No verified stream for "${track.artistName} - ${track.title}". ${LOCAL_AUDIO_ONLY ? 'Check the device connection and retry.' : `Check backend logs at ${MUSIC_SERVER_URL || 'unavailable'}.`}`
+        `[DownloadManager] No verified local stream for "${track.artistName} - ${track.title}". Check the device connection and retry.`
       );
       throw new Error('Could not resolve audio stream URL');
     }
 
     // Download audio file
     let localAudioPath = await downloadAudio(
-      resolvedUrl,
+      resolvedUrl || '',
       trackId,
       format,
       (p) => onProgress?.(p * 0.7),
@@ -1154,7 +1210,10 @@ const downloadTrackInternal = async (
     // Download cover art
     let localImagePath = effectiveTrack.imageURL;
     if (effectiveTrack.imageURL && effectiveTrack.imageURL.startsWith('http')) {
-      const downloadedCoverUri = await downloadCover(effectiveTrack.imageURL, trackId);
+      const downloadedCoverUri = await downloadCover(
+        effectiveTrack.imageURL,
+        trackId
+      );
       if (downloadedCoverUri) {
         localImagePath = downloadedCoverUri;
       }
@@ -1201,7 +1260,9 @@ const downloadTrackInternal = async (
 
     onProgress?.(1.0);
     recordDownloadDiagnostic(track.spotifyId, 'download.completed');
-    console.log(`[DownloadManager] Successfully downloaded track "${track.title}" to ${localAudioPath}`);
+    console.log(
+      `[DownloadManager] Successfully downloaded track "${track.title}" to ${localAudioPath}`
+    );
     return downloadedTrack;
   } catch (error) {
     if (cancelledDownloads.has(track.spotifyId)) return null;
@@ -1299,14 +1360,18 @@ export const deleteDownloadedTrack = async (
       if (track.localAudioPath?.startsWith('file:')) {
         const audioInfo = await FileSystem.getInfoAsync(track.localAudioPath);
         if (audioInfo.exists) {
-          await FileSystem.deleteAsync(track.localAudioPath, { idempotent: true });
+          await FileSystem.deleteAsync(track.localAudioPath, {
+            idempotent: true,
+          });
         }
       }
 
       if (track.localImagePath?.startsWith('file:')) {
         const imageInfo = await FileSystem.getInfoAsync(track.localImagePath);
         if (imageInfo.exists) {
-          await FileSystem.deleteAsync(track.localImagePath, { idempotent: true });
+          await FileSystem.deleteAsync(track.localImagePath, {
+            idempotent: true,
+          });
         }
       }
     }
@@ -1316,7 +1381,10 @@ export const deleteDownloadedTrack = async (
     );
     return true;
   } catch (error) {
-    console.error('[DownloadManager] Failed to delete downloaded track:', error);
+    console.error(
+      '[DownloadManager] Failed to delete downloaded track:',
+      error
+    );
     return false;
   }
 };

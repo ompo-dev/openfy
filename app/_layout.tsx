@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -17,7 +17,6 @@ import {
 } from '@context';
 import { MiniPlayer, FullPlayer } from '@components';
 import { registerBackgroundDownloadTask } from '@services';
-import { MUSIC_SERVER_URL } from '@config';
 
 import 'react-native-reanimated';
 
@@ -43,7 +42,7 @@ export default function RootLayout() {
     'SF-Semibold': require('@assets/fonts/Simply Rounded Bold.ttf'),
     'SF-Bold': require('@assets/fonts/Simply Rounded Bold.ttf'),
     'SF-Thin': require('@assets/fonts/Simply Rounded.ttf'),
-    'SimplyRounded': require('@assets/fonts/Simply Rounded.ttf'),
+    SimplyRounded: require('@assets/fonts/Simply Rounded.ttf'),
     'SimplyRounded-Bold': require('@assets/fonts/Simply Rounded Bold.ttf'),
     'SimplyRounded-Italic': require('@assets/fonts/Simply Rounded Italic.ttf'),
     'SimplyRounded-BoldItalic': require('@assets/fonts/Simply Rounded Bold Italic.ttf'),
@@ -57,12 +56,6 @@ export default function RootLayout() {
 
   React.useEffect(() => {
     registerBackgroundDownloadTask().catch(() => {});
-  }, []);
-
-  React.useEffect(() => {
-    console.log(
-      `[MusicBackend] ${Platform.OS} endpoint: ${MUSIC_SERVER_URL || 'unavailable'}`
-    );
   }, []);
 
   if (!fontsLoaded) {

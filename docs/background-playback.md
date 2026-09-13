@@ -17,13 +17,11 @@ Esses recursos não funcionam no Expo Go. O projeto gera o IPA pela ação
 crie em **Settings → Secrets and variables → Actions → Variables** do
 repositório:
 
-- `EXPO_PUBLIC_MUSIC_SERVER_URL`: URL HTTPS da API Vercel.
 - `EXPO_PUBLIC_SPOTIFY_CLIENT_ID`: opcional, usado somente pelo login Spotify.
 
-A ação falha cedo se a URL do servidor estiver ausente, impedindo um IPA que
-dependa de `localhost`. A ação de APK Android usa as mesmas variáveis.
-`SPOTIFY_CLIENT_SECRET` nunca vai para o GitHub Actions, Expo ou app instalado:
-ele fica apenas na Vercel.
+A ação de APK Android usa as mesmas variáveis. O app instalado não usa API
+Openfy nem recebe `SPOTIFY_CLIENT_SECRET`; tudo que baixa áudio roda localmente
+no aparelho.
 
 Valide em um iPhone físico: inicie uma faixa, bloqueie a tela, use play/pause e avanço/retrocesso na Tela Bloqueada, e confira a Ilha Dinâmica. Para downloads, inicie uma faixa para enfileirá-la, coloque o app em segundo plano e confira a Biblioteca após a próxima janela do sistema.
 
