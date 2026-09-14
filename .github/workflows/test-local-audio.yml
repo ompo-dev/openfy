@@ -1,0 +1,28 @@
+name: Validate local audio repair
+
+on:
+  push:
+    paths:
+      - 'modules/openfy-local-audio/**'
+      - 'scripts/check-local-audio.swift'
+      - 'scripts/fixtures/synthetic-dash.m4a'
+      - '.github/workflows/test-local-audio.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audio-repair:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Compile the production repairer with AVFoundation
+        run: |
+          xcrun swiftc -parse-as-library \
+            modules/openfy-local-audio/ios/MP4Container.swift \
+            modules/openfy-local-audio/ios/LocalAudioNormalizer.swift \
+            scripts/check-local-audio.swift -o "$RUNNER_TEMP/check-local-audio"
+      - name: Check duration, audio preservation and idempotence
+        run: '"$RUNNER_TEMP/check-local-audio" scripts/fixtures/synthetic-dash.m4a'

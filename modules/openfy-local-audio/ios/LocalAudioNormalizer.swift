@@ -24,6 +24,7 @@ actor LocalAudioRepairCoordinator {
 
 enum LocalAudioNormalizer {
   struct PacketSummary {
+    let start: CMTime
     let end: CMTime
     let bytes: Int
     let digest: SHA256.Digest
@@ -72,24 +73,12 @@ enum LocalAudioNormalizer {
 
     let originalDuration = try await asset.load(.duration)
     let packets = try readPackets(asset: asset, track: track)
-    guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
-      throw LocalAudioRepairError.exportUnavailable
-    }
-    let fileTypes = exporter.supportedFileTypes
-    guard let fileType = [AVFileType.mp4, .m4a].first(where: { fileTypes.contains($0) }) else {
-      throw LocalAudioRepairError.exportUnavailable
-    }
-
     let temporary = url.deletingLastPathComponent()
       .appendingPathComponent(".openfy-remux-\(UUID().uuidString).m4a")
     defer { try? FileManager.default.removeItem(at: temporary) }
-    exporter.outputURL = temporary
-    exporter.outputFileType = fileType
-    exporter.shouldOptimizeForNetworkUse = true
-    // The encoded packets, not catalog metadata or Apple's inflated container
-    // duration, determine the end. This preserves recorded silence and AAC priming.
-    exporter.timeRange = CMTimeRange(start: .zero, end: packets.end)
-    try await export(exporter)
+    // An export of the original asset can carry over its inflated DASH timeline.
+    // A fresh writer builds sample tables only from the actual compressed audio.
+    try await writePackets(asset: asset, track: track, format: formats[0], packets: packets, to: temporary)
 
     guard try !MP4Container.isFragmented(at: temporary) else {
       throw LocalAudioRepairError.validationFailed
@@ -131,6 +120,7 @@ enum LocalAudioNormalizer {
     defer { if reader.status == .reading { reader.cancelReading() } }
 
     var end = CMTime.zero
+    var start: CMTime?
     var previousEnd: CMTime?
     var byteCount = 0
     var digest = SHA256()
@@ -151,6 +141,7 @@ enum LocalAudioNormalizer {
         } else if abs(pts.seconds) > 0.1 {
           throw LocalAudioRepairError.invalidTiming
         }
+        if start == nil { start = pts }
         previousEnd = CMTimeAdd(pts, duration)
         end = CMTimeMaximum(end, previousEnd!)
         let count = CMBlockBufferGetDataLength(block)
@@ -167,16 +158,62 @@ enum LocalAudioNormalizer {
     guard reader.status == .completed, end > .zero, byteCount > 0 else {
       throw reader.error ?? LocalAudioRepairError.readerFailed
     }
-    return PacketSummary(end: end, bytes: byteCount, digest: digest.finalize())
+    return PacketSummary(start: start!, end: end, bytes: byteCount, digest: digest.finalize())
   }
 
-  private static func export(_ exporter: AVAssetExportSession) async throws {
+  private static func writePackets(
+    asset: AVAsset, track: AVAssetTrack, format: CMFormatDescription,
+    packets: PacketSummary, to url: URL
+  ) async throws {
+    let reader = try AVAssetReader(asset: asset)
+    let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+    output.alwaysCopiesSampleData = false
+    guard reader.canAdd(output) else { throw LocalAudioRepairError.readerFailed }
+    reader.add(output)
+
+    let writer = try AVAssetWriter(outputURL: url, fileType: .m4a)
+    let input = AVAssetWriterInput(mediaType: .audio, outputSettings: nil, sourceFormatHint: format)
+    input.expectsMediaDataInRealTime = false
+    guard writer.canAdd(input) else { throw LocalAudioRepairError.exportUnavailable }
+    writer.add(input)
+    writer.shouldOptimizeForNetworkUse = true
+    guard writer.startWriting() else { throw writer.error ?? LocalAudioRepairError.exportFailed }
+    guard reader.startReading() else {
+      writer.cancelWriting()
+      throw reader.error ?? LocalAudioRepairError.readerFailed
+    }
+    // Starting with the first packet preserves negative AAC priming timestamps.
+    writer.startSession(atSourceTime: packets.start)
+    let queue = DispatchQueue(label: "openfy.audio.remux")
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-      exporter.exportAsynchronously {
-        if exporter.status == .completed {
-          continuation.resume()
-        } else {
-          continuation.resume(throwing: exporter.error ?? LocalAudioRepairError.exportFailed)
+      var finished = false
+      input.requestMediaDataWhenReady(on: queue) {
+        guard !finished else { return }
+        while input.isReadyForMoreMediaData {
+          if let sample = output.copyNextSampleBuffer() {
+            if input.append(sample) { continue }
+            finished = true
+            reader.cancelReading()
+            writer.cancelWriting()
+            continuation.resume(throwing: writer.error ?? LocalAudioRepairError.exportFailed)
+            return
+          }
+          finished = true
+          guard reader.status == .completed else {
+            writer.cancelWriting()
+            continuation.resume(throwing: reader.error ?? LocalAudioRepairError.readerFailed)
+            return
+          }
+          writer.endSession(atSourceTime: packets.end)
+          input.markAsFinished()
+          writer.finishWriting {
+            if writer.status == .completed {
+              continuation.resume()
+            } else {
+              continuation.resume(throwing: writer.error ?? LocalAudioRepairError.exportFailed)
+            }
+          }
+          return
         }
       }
     }
