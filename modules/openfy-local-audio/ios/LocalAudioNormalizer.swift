@@ -130,6 +130,7 @@ enum LocalAudioNormalizer {
     var byteCount = 0
     var digest = SHA256()
     while let sample = output.copyNextSampleBuffer() {
+      if isEmptyMarker(sample) { continue }
       try autoreleasepool {
         let pts = CMSampleBufferGetPresentationTimeStamp(sample)
         let duration = CMSampleBufferGetDuration(sample)
@@ -166,6 +167,14 @@ enum LocalAudioNormalizer {
     return PacketSummary(start: start!, end: end, bytes: byteCount, digest: digest.finalize())
   }
 
+  // AVAssetReader emits zero-sample end/reset markers for fragmented AAC.
+  // They are not packets and have no audio or timeline duration to preserve.
+  private static func isEmptyMarker(_ sample: CMSampleBuffer) -> Bool {
+    guard CMSampleBufferGetNumSamples(sample) == 0,
+      CMSampleBufferGetDuration(sample) == .zero else { return false }
+    return CMSampleBufferGetDataBuffer(sample).map(CMBlockBufferGetDataLength) ?? 0 == 0
+  }
+
   private static func writePackets(
     asset: AVAsset, track: AVAssetTrack, format: CMFormatDescription,
     packets: PacketSummary, to url: URL
@@ -196,6 +205,7 @@ enum LocalAudioNormalizer {
         guard !finished else { return }
         while input.isReadyForMoreMediaData {
           if let sample = output.copyNextSampleBuffer() {
+            if isEmptyMarker(sample) { continue }
             if input.append(sample) { continue }
             finished = true
             reader.cancelReading()
