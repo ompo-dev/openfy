@@ -3,6 +3,28 @@ import Foundation
 
 // Compile together with the production normalizer on macOS, without Expo or Xcode UI.
 @main struct CheckLocalAudio {
+  static func log(_ message: String) {
+    FileHandle.standardError.write(Data((message + "\n").utf8))
+  }
+
+  static func inspect(_ asset: AVAsset, track: AVAssetTrack) throws {
+    let reader = try AVAssetReader(asset: asset)
+    let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+    reader.add(output)
+    reader.startReading()
+    var index = 0
+    while let sample = output.copyNextSampleBuffer() {
+      let time = CMSampleBufferGetPresentationTimeStamp(sample)
+      let duration = CMSampleBufferGetDuration(sample)
+      if index < 3 || !duration.isNumeric || duration <= .zero {
+        let bytes = CMSampleBufferGetDataBuffer(sample).map(CMBlockBufferGetDataLength) ?? 0
+        log("Packet \(index): pts=\(time), duration=\(duration), samples=\(CMSampleBufferGetNumSamples(sample)), bytes=\(bytes)")
+      }
+      index += 1
+    }
+    log("Read \(index) buffers, status=\(reader.status.rawValue)")
+  }
+
   static func main() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -17,8 +39,10 @@ import Foundation
     try MP4Container.makeDemuxingCopy(from: local, to: demuxingCopy)
     let prepared = AVURLAsset(url: demuxingCopy)
     let track = try await prepared.loadTracks(withMediaType: .audio)[0]
+    log("Containers: original=\(duration.seconds), prepared=\(try await prepared.load(.duration).seconds)")
+    try inspect(prepared, track: track)
     let packets = try LocalAudioNormalizer.readPackets(asset: prepared, track: track)
-    print("Before: container=\(duration.seconds), packetStart=\(packets.start.seconds), packetEnd=\(packets.end.seconds), encodedBytes=\(packets.bytes)")
+    log("Before: container=\(duration.seconds), packetStart=\(packets.start.seconds), packetEnd=\(packets.end.seconds), encodedBytes=\(packets.bytes)")
     let result = try await LocalAudioNormalizer.repair(url: local)
     guard result.repaired, let ms = result.durationMs, abs(ms - 2500) < 100 else {
       fatalError("Repair did not preserve the synthetic tone's duration: \(result)")

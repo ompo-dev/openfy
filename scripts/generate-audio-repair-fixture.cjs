@@ -1,4 +1,5 @@
 // Synthetic tone with a quiet ending, never a downloaded/copyrighted song.
+/* global __dirname */
 // Usage: node scripts/generate-audio-repair-fixture.cjs /path/to/ffmpeg
 const fs = require('node:fs');
 const path = require('node:path');

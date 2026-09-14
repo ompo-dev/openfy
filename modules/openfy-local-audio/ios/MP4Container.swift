@@ -128,12 +128,12 @@ enum MP4Container {
           size = integer(data.subdata(in: (offset + 8)..<(offset + 16)))
           header = 16
         } else if size == 0 { size = UInt64(end - offset) }
-        guard size >= header, size <= UInt64(end - offset) else {
+        guard size >= UInt64(header), size <= UInt64(end - offset) else {
           throw LocalAudioRepairError.invalidContainer
         }
         let boxEnd = offset + Int(size)
         let payload = offset + header
-        let type = String(bytes: data[(offset + 4)..<(offset + 8)], encoding: .ascii)
+        let type = String(bytes: data[(offset + 4)..<(offset + 8)], encoding: .ascii) ?? ""
         if ["moov", "trak", "mdia", "minf", "stbl"].contains(type) {
           try walk(payload, boxEnd, depth: depth + 1)
         } else if type == "mvex" {
