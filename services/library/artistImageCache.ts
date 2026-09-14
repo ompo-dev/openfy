@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const STORAGE_KEY_PREFIX = 'openfy_artist_image:';
+const STORAGE_KEY_PREFIX = 'openfy_artist_image_verified_v2:';
 const imageCache = new Map<string, string>();
-const missingImageCache = new Set<string>();
+const missingImageCache = new Map<string, number>();
 const pendingImageLoads = new Map<string, Promise<string>>();
 
 const getArtistCacheId = (artistName: string) =>
@@ -13,14 +13,14 @@ const isRemoteImage = (value: string) => /^https?:\/\//i.test(value);
 /** Keeps artist URLs across launches; Expo Image stores the image bytes on disk. */
 export const getCachedArtistImage = async (
   artistName: string,
-  loadImage: () => Promise<string>
+  loadImage: () => Promise<string | null>
 ): Promise<string> => {
   const id = getArtistCacheId(artistName);
   if (!id) return '';
 
   const cached = imageCache.get(id);
   if (cached) return cached;
-  if (missingImageCache.has(id)) return '';
+  if (Date.now() - (missingImageCache.get(id) || 0) < 60_000) return '';
 
   const pending = pendingImageLoads.get(id);
   if (pending) return pending;
@@ -36,9 +36,9 @@ export const getCachedArtistImage = async (
       }
     } catch {}
 
-    const imageURL = await loadImage().catch(() => '');
+    const imageURL = await loadImage().catch(() => '') || '';
     if (!isRemoteImage(imageURL)) {
-      missingImageCache.add(id);
+      missingImageCache.set(id, Date.now());
       return '';
     }
 

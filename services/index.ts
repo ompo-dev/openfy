@@ -53,6 +53,7 @@ export {
   downloadAudio,
   downloadCover,
   getDownloadedTracks,
+  repairDownloadedTrackMetadata,
   getDownloadedTrack,
   isTrackDownloaded,
   deleteDownloadedTrack,

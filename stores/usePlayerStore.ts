@@ -41,8 +41,9 @@ import {
   saveLyricsOffline,
 } from '../services/lyrics/lyricsService';
 import { normalizeLyricSegments } from '../services/lyrics/lyricTimeline';
+import type { TrackCatalogMetadata, DownloadedTrack } from '../services/download/downloadManager';
 
-export type PlayerTrack = {
+export type PlayerTrack = TrackCatalogMetadata & {
   spotifyId: string;
   title: string;
   artistName: string;
@@ -50,12 +51,11 @@ export type PlayerTrack = {
   imageURL: string;
   releaseDate?: string;
   localAudioPath?: string;
+  localImagePath?: string;
   streamUrl?: string;
   streamExpiresAt?: number;
   duration_ms: number;
-  youtubeUrl?: string;
   videoId?: string;
-  artists?: { id: string; name: string }[];
 };
 
 export type RepeatMode = 'off' | 'all' | 'one';
@@ -90,7 +90,7 @@ export interface PlayerStoreState {
     startIndex?: number,
     sourceId?: string
   ) => Promise<void>;
-  playDownloadedTrack: (track: any) => Promise<void>;
+  playDownloadedTrack: (track: DownloadedTrack) => Promise<void>;
   togglePlayPause: () => Promise<void>;
   seekToPosition: (ms: number) => Promise<void>;
   playNext: () => Promise<void>;
@@ -614,6 +614,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         const isMp3 = activeStreamUri.includes('.mp3') || !activeStreamUri.includes('.m4a');
         downloadTrack(
           {
+            ...track,
             spotifyId: track.spotifyId,
             title: track.title,
             artistName: track.artistName,
@@ -670,8 +671,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     await get().playTrack(tracks[safeIndex], { setQueue: false });
   },
 
-  playDownloadedTrack: async (downloaded: any) => {
+  playDownloadedTrack: async (downloaded: DownloadedTrack) => {
     const playerTrack: PlayerTrack = {
+      ...downloaded,
       spotifyId: downloaded.spotifyId,
       title: downloaded.title,
       artistName: downloaded.artistName,

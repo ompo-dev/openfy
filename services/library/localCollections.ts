@@ -10,6 +10,7 @@ export type LocalAlbumCollection = {
 
 export type LocalArtistCollection = {
   id: string;
+  spotifyArtistId?: string;
   title: string;
   subtitle: string;
   imageURL: string;
@@ -17,12 +18,19 @@ export type LocalArtistCollection = {
 };
 
 const getLocalAlbumTitle = (track: Pick<DownloadedTrack, 'albumName'>): string =>
-  track.albumName.trim() || 'Singles';
+  (track.albumName.trim().toLowerCase() === 'spotify' ? '' : track.albumName.trim()) || 'Singles';
+
+const getTrackArtists = (track: Pick<DownloadedTrack, 'artistName' | 'artists'>) =>
+  track.artists?.length ? track.artists : track.artistName
+    .split(/\s*(?:,|&| feat\.?)\s*/i)
+    .map((name) => ({ id: '', name: name.trim() }))
+    .filter((artist) => artist.name);
 
 export const getLocalAlbumId = (
-  track: Pick<DownloadedTrack, 'albumName' | 'artistName'>
+  track: Pick<DownloadedTrack, 'albumName' | 'artistName' | 'albumId' | 'albumArtists' | 'artists'>
 ): string =>
-  `${getLocalAlbumTitle(track)}\u0000${track.artistName}`.toLocaleLowerCase();
+  track.albumId ? `spotify:${track.albumId}` :
+    `${getLocalAlbumTitle(track)}\u0000${track.albumArtists?.[0]?.name || getTrackArtists(track)[0]?.name || ''}`.toLocaleLowerCase();
 
 export const groupLocalAlbums = (
   tracks: DownloadedTrack[]
@@ -39,14 +47,21 @@ export const groupLocalAlbums = (
         : {
             id,
             title: getLocalAlbumTitle(track),
-            subtitle: track.artistName,
+            subtitle: track.albumArtists?.map((artist) => artist.name).join(', ') ||
+              getTrackArtists(track)[0]?.name || track.artistName,
             imageURL: track.localImagePath || track.imageURL,
             tracks: [track],
           }
     );
   });
 
-  return [...albums.values()];
+  return [...albums.values()].map((album) => ({
+    ...album,
+    tracks: [...album.tracks].sort((first, second) =>
+      (first.discNumber || 1) - (second.discNumber || 1) ||
+      (first.trackNumber || 0) - (second.trackNumber || 0)
+    ),
+  }));
 };
 
 export const groupLocalArtists = (
@@ -55,12 +70,12 @@ export const groupLocalArtists = (
   const artists = new Map<string, LocalArtistCollection>();
 
   tracks.forEach((track) => {
-    track.artistName
-      .split(/\s*(?:,|&| feat\.?)\s*/i)
-      .filter(Boolean)
-      .forEach((artistName) => {
-        const title = artistName.trim();
-        const id = title.toLocaleLowerCase();
+    const seen = new Set<string>();
+    getTrackArtists(track).forEach((artist) => {
+        const title = artist.name.trim();
+        const id = artist.id ? `spotify:${artist.id}` : title.toLocaleLowerCase();
+        if (seen.has(id)) return;
+        seen.add(id);
         const current = artists.get(id);
         artists.set(
           id,
@@ -68,6 +83,7 @@ export const groupLocalArtists = (
             ? { ...current, tracks: [...current.tracks, track] }
             : {
                 id,
+                spotifyArtistId: artist.id || undefined,
                 title,
                 subtitle: `${track.albumName || 'Single'}`,
                 imageURL: '',

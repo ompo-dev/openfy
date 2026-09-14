@@ -32,6 +32,7 @@ import { Href, useRouter, useSegments } from 'expo-router';
 import { findArtistIdByName } from '@api';
 import { usePlayer } from '@context';
 import {
+  getCatalogMapping,
   getLyricGapRange,
   getLyricTimelineBlocks,
   LyricGapTarget,
@@ -40,8 +41,8 @@ import {
   moveLyricGap,
   moveLyricSegment,
   parseSpotifyLink,
-  resolveDirectYouTubeAudio,
   resolveDirectYouTubeTrack,
+  resolveSpotifyTrackVideoId,
   resizeLyricGapEnd,
   resizeLyricGapStart,
   resizeLyricSegmentEnd,
@@ -159,8 +160,15 @@ const getExactYouTubeUrl = (input?: string): string => {
 };
 
 const getTrackYouTubeUrl = (
-  track: { spotifyId: string; youtubeUrl?: string } | null
+  track: {
+    spotifyId: string;
+    youtubeVideoId?: string;
+    youtubeUrl?: string;
+  } | null
 ): string => {
+  if (track?.youtubeVideoId && /^[A-Za-z0-9_-]{11}$/.test(track.youtubeVideoId)) {
+    return `https://www.youtube.com/watch?v=${track.youtubeVideoId}`;
+  }
   const explicitUrl = getExactYouTubeUrl(track?.youtubeUrl);
   if (explicitUrl) return explicitUrl;
 
@@ -252,7 +260,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [isLiked, setIsLiked] = React.useState(false);
 
   // YouTube action sheet and custom link edit state
-  const [youtubeUrl, setYoutubeUrl] = React.useState<string>('');
+  const [failedArtworkUrl, setFailedArtworkUrl] = React.useState('');
   const [isActionModalVisible, setIsActionModalVisible] = React.useState(false);
   const [isEditModalVisible, setIsEditModalVisible] = React.useState(false);
   const [customLinkInput, setCustomLinkInput] = React.useState('');
@@ -262,10 +270,14 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const lyricScrollRetriedRef = React.useRef(false);
   const shouldScrollLyricsOnOpenRef = React.useRef(false);
   const currentTrackRef = React.useRef(currentTrack);
-  const youtubeTrackKeyRef = React.useRef('');
+  const youtubeLinkRef = React.useRef({ trackKey: '', url: '' });
   const draftLyricSegmentsRef = React.useRef<LyricSegment[]>([]);
   const resumeAfterLyricEditRef = React.useRef(false);
   const currentTrackKey = getTrackKey(currentTrack);
+  const artworkUrl =
+    currentTrack?.imageURL && currentTrack.imageURL !== failedArtworkUrl
+      ? currentTrack.imageURL
+      : currentTrack?.localImagePath || '';
 
   const artistLinks = React.useMemo(() => {
     if (!currentTrack) return [];
@@ -297,28 +309,48 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
   // Reset first so an old link can never open while next track resolves.
   React.useEffect(() => {
+    youtubeLinkRef.current = { trackKey: currentTrackKey, url: '' };
     if (!currentTrack) {
-      setYoutubeUrl('');
-      youtubeTrackKeyRef.current = '';
       return;
     }
 
-    youtubeTrackKeyRef.current = currentTrackKey;
     const exactTrackUrl = getTrackYouTubeUrl(currentTrack);
-    setYoutubeUrl(exactTrackUrl);
-    if (exactTrackUrl) return;
+    if (exactTrackUrl) {
+      youtubeLinkRef.current.url = exactTrackUrl;
+      return;
+    }
 
     let isMounted = true;
     const resolveYoutubeUrl = async () => {
-      if (Platform.OS !== 'web') {
-        const direct = await resolveDirectYouTubeAudio({
-          title: currentTrack.title,
-          artist: currentTrack.artistName,
-          durationMs: currentTrack.duration_ms,
+      try {
+        const cached = await getCatalogMapping(currentTrack.spotifyId).catch(
+          () => null
+        );
+        if (!isMounted) return;
+
+        let url = getTrackYouTubeUrl({
+          spotifyId: '',
+          youtubeVideoId: cached?.videoId,
         });
-        if (direct && isMounted) {
-          setYoutubeUrl(`https://www.youtube.com/watch?v=${direct.videoId}`);
+        if (!url) {
+          const result = await resolveSpotifyTrackVideoId(
+            currentTrack.spotifyId,
+            currentTrack.title,
+            artistLinks.map((artist) => artist.name),
+            currentTrack.duration_ms
+          );
+          if (result.status === 'resolved') {
+            url = getTrackYouTubeUrl({
+              spotifyId: '',
+              youtubeVideoId: result.videoId,
+            });
+          }
         }
+        if (isMounted) {
+          youtubeLinkRef.current = { trackKey: currentTrackKey, url };
+        }
+      } catch {
+        // A missing catalog match must not interrupt playback.
       }
     };
     void resolveYoutubeUrl();
@@ -326,14 +358,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     return () => {
       isMounted = false;
     };
-  }, [
-    currentTrack?.artistName,
-    currentTrack?.duration_ms,
-    currentTrack?.spotifyId,
-    currentTrack?.title,
-    currentTrack?.youtubeUrl,
-    currentTrackKey,
-  ]);
+  }, [artistLinks, currentTrack, currentTrackKey]);
 
   const lyricDurationMs =
     playerState.durationMs > 0
@@ -464,7 +489,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           ],
           cancelButtonIndex: 0,
           title: currentTrack?.title || 'YouTube',
-          message: 'Origem oficial do áudio no YouTube',
+          message: 'Fonte de áudio correspondente no YouTube',
         },
         (buttonIndex) => {
           if (buttonIndex === 1) {
@@ -482,13 +507,16 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const handleGoToYoutube = () => {
     Haptics.selectionAsync().catch(() => {});
     setIsActionModalVisible(false);
+    const activeTrack = currentTrackRef.current;
     const activeYoutubeUrl =
-      getTrackYouTubeUrl(currentTrack) ||
-      (youtubeTrackKeyRef.current === currentTrackKey ? youtubeUrl : '');
+      getTrackYouTubeUrl(activeTrack) ||
+      (youtubeLinkRef.current.trackKey === getTrackKey(activeTrack)
+        ? youtubeLinkRef.current.url
+        : '');
     if (!getExactYouTubeUrl(activeYoutubeUrl)) {
       Alert.alert(
         'Vídeo indisponível',
-        'Ainda não foi possível confirmar o vídeo oficial desta música.'
+        'Ainda não foi possível encontrar a fonte desta música no YouTube.'
       );
       return;
     }
@@ -498,9 +526,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const handleOpenEditLinkModal = () => {
     Haptics.selectionAsync().catch(() => {});
     setIsActionModalVisible(false);
+    const activeTrack = currentTrackRef.current;
     const activeYoutubeUrl =
-      getTrackYouTubeUrl(currentTrack) ||
-      (youtubeTrackKeyRef.current === currentTrackKey ? youtubeUrl : '');
+      getTrackYouTubeUrl(activeTrack) ||
+      (youtubeLinkRef.current.trackKey === getTrackKey(activeTrack)
+        ? youtubeLinkRef.current.url
+        : '');
     setCustomLinkInput(getExactYouTubeUrl(activeYoutubeUrl));
     setIsEditModalVisible(true);
   };
@@ -550,10 +581,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
         imageURL: track.imageURL || trackBeingEdited.imageURL,
         duration_ms: track.duration_ms || trackBeingEdited.duration_ms,
         streamUrl: track.streamUrl,
+        youtubeVideoId: track.videoId,
         youtubeUrl: track.youtubeUrl,
       };
-      setYoutubeUrl(track.youtubeUrl);
-      youtubeTrackKeyRef.current = getTrackKey(nextTrack);
+      youtubeLinkRef.current = {
+        trackKey: getTrackKey(nextTrack),
+        url: track.youtubeUrl,
+      };
       await playTrack(nextTrack, { setQueue: false });
       setIsEditModalVisible(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
@@ -778,9 +812,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       onRequestClose={onClose}
     >
       <View style={styles.container}>
-        {currentTrack.imageURL ? (
+        {artworkUrl ? (
           <Image
-            source={{ uri: currentTrack.imageURL }}
+            source={{ uri: artworkUrl }}
             style={styles.backgroundCover}
             blurRadius={28}
             resizeMode="cover"
@@ -971,9 +1005,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           <View style={styles.mainPlayerSection}>
             {/* Floating Cover Art */}
             <View style={styles.coverContainer}>
-              {currentTrack.imageURL ? (
+              {artworkUrl ? (
                 <Image
-                  source={{ uri: currentTrack.imageURL }}
+                  source={{ uri: artworkUrl }}
+                  onError={() => setFailedArtworkUrl(artworkUrl)}
                   style={styles.cover}
                 />
               ) : (
@@ -992,25 +1027,28 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 align="center"
                 fadeWidth={16}
               />
-              <View style={styles.trackArtistLinks}>
+              <MarqueeText
+                text={artistLinks.map((artist) => artist.name).join(' · ')}
+                style={styles.trackArtist}
+                containerStyle={styles.trackArtistMarquee}
+                align="center"
+                fadeWidth={14}
+              >
                 {artistLinks.map((artist, index) => (
-                  <LoggedPressable
-                    key={`${artist.id}-${artist.name}`}
-                    accessibilityLabel={`Abrir artista ${artist.name}`}
-                    onPress={() =>
-                      void handleArtistPress(artist.id, artist.name)
-                    }
-                  >
-                    <MarqueeText
-                      text={`${artist.name}${index < artistLinks.length - 1 ? ' · ' : ''}`}
-                      style={styles.trackArtist}
-                      containerStyle={styles.trackArtistMarquee}
-                      align="center"
-                      fadeWidth={14}
-                    />
-                  </LoggedPressable>
+                  <React.Fragment key={`${artist.id}-${artist.name}-${index}`}>
+                    {index > 0 ? ' · ' : null}
+                    <Text
+                      accessibilityRole="link"
+                      accessibilityLabel={`Abrir artista ${artist.name}`}
+                      onPress={() =>
+                        void handleArtistPress(artist.id, artist.name)
+                      }
+                    >
+                      {artist.name}
+                    </Text>
+                  </React.Fragment>
                 ))}
-              </View>
+              </MarqueeText>
             </View>
           </View>
         )}
@@ -1244,7 +1282,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                     {currentTrack.title}
                   </Text>
                   <Text style={styles.actionSheetSubtitle}>
-                    Origem do Áudio no YouTube
+                    Fonte de áudio correspondente no YouTube
                   </Text>
                 </View>
 
@@ -1470,14 +1508,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: 'center',
   },
-  trackArtistLinks: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    marginTop: 4,
-  },
-  trackArtistMarquee: { maxWidth: SCREEN_WIDTH - 64 },
+  trackArtistMarquee: { maxWidth: '100%' },
   lyricsMainContainer: {
     flex: 1,
     marginVertical: 4,

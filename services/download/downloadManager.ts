@@ -20,6 +20,8 @@ import {
   resolveDirectYouTubeAudio,
 } from '../audio/directYouTubeResolver';
 import { resolveSpotifyTrackVideoId } from '../audio/catalogResolver';
+import { getCatalogMapping } from '../audio/catalogMappingCache';
+import { fetchSpotifyTrackMetadata } from '../metadata/spotifyMetadata';
 import {
   downloadYouTubeStreamNatively,
   hasNativeYouTubeDownload,
@@ -32,7 +34,17 @@ import {
 
 export type DownloadStatus = 'idle' | 'downloading' | 'completed' | 'error';
 
-export type DownloadedTrack = {
+export type TrackCatalogMetadata = {
+  albumId?: string;
+  artists?: { id: string; name: string }[];
+  albumArtists?: { id: string; name: string }[];
+  trackNumber?: number;
+  discNumber?: number;
+  youtubeVideoId?: string;
+  youtubeUrl?: string;
+};
+
+export type DownloadedTrack = TrackCatalogMetadata & {
   id: string;
   spotifyId: string;
   title: string;
@@ -44,6 +56,7 @@ export type DownloadedTrack = {
   downloadedAt: string;
   duration_ms: number;
   audioUrl?: string;
+  metadataVersion?: number;
 };
 
 export type DownloadProgress = {
@@ -53,7 +66,7 @@ export type DownloadProgress = {
   error?: string;
 };
 
-export type DownloadTrackInput = {
+export type DownloadTrackInput = TrackCatalogMetadata & {
   spotifyId: string;
   title: string;
   artistName: string;
@@ -62,7 +75,6 @@ export type DownloadTrackInput = {
   duration_ms: number;
   audioUrl?: string;
   audioFormat?: string;
-  youtubeVideoId?: string;
 };
 
 export type PendingDownload = {
@@ -87,6 +99,9 @@ const cancelledDownloads = new Set<string>();
 const BACKGROUND_RETRY_BASE_MS = 15 * 60 * 1000;
 const BACKGROUND_RETRY_MAX_MS = 6 * 60 * 60 * 1000;
 const MAX_BACKGROUND_ATTEMPTS = 8;
+const METADATA_VERSION = 2;
+let metadataRepair: Promise<void> | null = null;
+const metadataRepairAttempts = new Map<string, number>();
 
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -269,7 +284,8 @@ export const getDownloadedTracks = async (): Promise<DownloadedTrack[]> => {
   try {
     const stored = await AsyncStorage.getItem(DOWNLOADS_STORAGE_KEY);
     if (!stored) return [];
-    return JSON.parse(stored) as DownloadedTrack[];
+    const parsed: unknown = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed as DownloadedTrack[] : [];
   } catch {
     return [];
   }
@@ -290,6 +306,56 @@ const updateDownloadedTracks = async (
   await mutateDownloadedStorage(async () => {
     await saveDownloadedTracks(update(await getDownloadedTracks()));
   });
+};
+
+/** Upgrade saved catalog data independently of the audio and pending downloads. */
+export const repairDownloadedTrackMetadata = async (
+  onUpdated?: () => void
+): Promise<void> => {
+  if (metadataRepair) return metadataRepair;
+  metadataRepair = (async () => {
+    const tracks = (await getDownloadedTracks()).filter((track) =>
+      track.metadataVersion !== METADATA_VERSION &&
+      Date.now() - (metadataRepairAttempts.get(track.spotifyId) || 0) > 5 * 60_000
+    );
+    for (let offset = 0; offset < tracks.length; offset += 2) {
+      await Promise.all(tracks.slice(offset, offset + 2).map(async (track) => {
+        metadataRepairAttempts.set(track.spotifyId, Date.now());
+        try {
+          const metadata = await fetchSpotifyTrackMetadata(track.spotifyId);
+          const mapping = !track.youtubeVideoId
+            ? await getCatalogMapping(track.spotifyId) : null;
+          const youtubeVideoId = track.youtubeVideoId || mapping?.videoId ||
+            youtubeVideoIdFromTrackId(track.spotifyId);
+          const cover = metadata?.imageURL
+            ? await downloadCover(metadata.imageURL, `${track.id}_hq_v2`) : null;
+          if (!metadata && !youtubeVideoId) return;
+          await updateDownloadedTracks((current) => current.map((saved) =>
+            saved.spotifyId === track.spotifyId && saved.localAudioPath === track.localAudioPath
+              ? {
+                  ...saved,
+                  ...metadata,
+                  localImagePath: cover || saved.localImagePath,
+                  youtubeVideoId,
+                  youtubeUrl: youtubeVideoId
+                    ? `https://www.youtube.com/watch?v=${youtubeVideoId}` : saved.youtubeUrl,
+                  metadataVersion: metadata?.albumId && metadata.artists?.length && cover
+                    ? METADATA_VERSION : saved.metadataVersion,
+                }
+              : saved
+          ));
+          onUpdated?.();
+        } catch (error) {
+          console.warn('[DownloadManager] Catalog repair deferred:', track.spotifyId, error);
+        }
+      }));
+    }
+  })();
+  try {
+    await metadataRepair;
+  } finally {
+    metadataRepair = null;
+  }
 };
 
 export const getPendingDownloads = async (): Promise<PendingDownload[]> => {
@@ -1050,6 +1116,14 @@ export const downloadCover = async (
     const result = await FileSystem.downloadAsync(imageUrl, localPath, {
       sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
     });
+    const contentType = Object.entries(result.headers || {}).find(
+      ([key]) => key.toLowerCase() === 'content-type'
+    )?.[1];
+    if (result.status < 200 || result.status >= 300 ||
+        (contentType && !contentType.startsWith('image/'))) {
+      await FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+      return null;
+    }
     return result.uri;
   } catch (error) {
     console.error('[DownloadManager] Cover download failed:', error);
@@ -1079,7 +1153,9 @@ const downloadTrackInternal = async (
       audioFormat || track.audioFormat || 'mp3'
     );
     const trackId = `track_${track.spotifyId}`;
-    let effectiveTrack = track;
+    const metadata = track.albumId && track.artists?.length
+      ? null : await fetchSpotifyTrackMetadata(track.spotifyId).catch(() => null);
+    let effectiveTrack: DownloadTrackInput = { ...track, ...metadata };
 
     const suppliedAudioUrl = audioUrl || track.audioUrl;
     // Signed URLs can expire while the OS waits. Prefer resolving and saving
@@ -1271,7 +1347,7 @@ const downloadTrackInternal = async (
     if (effectiveTrack.imageURL && effectiveTrack.imageURL.startsWith('http')) {
       const downloadedCoverUri = await downloadCover(
         effectiveTrack.imageURL,
-        trackId
+        `${trackId}_hq_v2`
       );
       if (downloadedCoverUri) {
         localImagePath = downloadedCoverUri;
@@ -1281,17 +1357,29 @@ const downloadTrackInternal = async (
     onProgress?.(0.9);
 
     const downloadedTrack: DownloadedTrack = {
+      albumId: effectiveTrack.albumId,
+      artists: effectiveTrack.artists,
+      albumArtists: effectiveTrack.albumArtists,
+      trackNumber: effectiveTrack.trackNumber,
+      discNumber: effectiveTrack.discNumber,
+      youtubeVideoId: effectiveTrack.youtubeVideoId,
+      youtubeUrl: effectiveTrack.youtubeVideoId
+        ? `https://www.youtube.com/watch?v=${effectiveTrack.youtubeVideoId}`
+        : effectiveTrack.youtubeUrl,
       id: trackId,
       spotifyId: effectiveTrack.spotifyId,
       title: effectiveTrack.title,
       artistName: effectiveTrack.artistName,
       albumName: effectiveTrack.albumName,
-      imageURL: localImagePath || effectiveTrack.imageURL,
+      imageURL: effectiveTrack.imageURL,
       localAudioPath,
       localImagePath: localImagePath || track.imageURL,
       downloadedAt: new Date().toISOString(),
       duration_ms: effectiveTrack.duration_ms,
       audioUrl: resolvedUrl,
+      metadataVersion: effectiveTrack.albumId && effectiveTrack.artists?.length &&
+        (Platform.OS === 'web' || localImagePath?.startsWith('file:'))
+        ? METADATA_VERSION : undefined,
     };
 
     // Save lyrics in background

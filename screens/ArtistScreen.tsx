@@ -2,11 +2,12 @@ import * as React from 'react';
 import { View } from 'react-native';
 import { Href, useRouter, useSegments } from 'expo-router';
 
-import { getArtist, getArtistAlbums, getArtistTopTracks, getYouTubeArtistImage } from '@api';
+import { getArtist, getArtistAlbums, getArtistTopTracks } from '@api';
 import { CollectionDetail } from '@components';
 import { ArtistModel, LibraryItemModel, TrackModel } from '@models';
 import { Shapes, Sizes } from '@config';
-import { getCachedArtistImage, getDownloadedTracks } from '@services';
+import { getCachedArtistImage, getDownloadedTracks, groupLocalArtists } from '@services';
+import { getSpotifyArtistImage } from '../services/metadata/spotifyMetadata';
 import { Slider } from '../components/Slider';
 
 export type ArtistScreenPropsType = {
@@ -30,22 +31,18 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     setAlbums([]);
 
     if (localArtistName) {
-      void Promise.all([getDownloadedTracks(), getCachedArtistImage(
-        localArtistName,
-        () => getYouTubeArtistImage(localArtistName)
-      )]).then(([
-        downloaded,
-        profileImage,
-      ]) => {
+      void getDownloadedTracks().then(async (downloaded) => {
+        const collection = groupLocalArtists(downloaded).find((candidate) =>
+          candidate.id === localArtistName ||
+          candidate.title.toLocaleLowerCase() === localArtistName.toLocaleLowerCase()
+        );
+        const profileImage = collection?.spotifyArtistId
+          ? await getCachedArtistImage(collection.id, () =>
+              getSpotifyArtistImage(collection.spotifyArtistId!)) : '';
         if (!active) return;
-        const normalize = (value: string) => value.trim().toLocaleLowerCase();
-        const tracks = downloaded
-          .filter((track) =>
-            track.artistName
-              .split(/\s*(?:,|&| feat\.?)\s*/i)
-              .some((name) => normalize(name) === normalize(localArtistName))
-          )
+        const tracks = (collection?.tracks || [])
           .map((track) => ({
+            ...track,
             id: track.spotifyId,
             title: track.title,
             subtitle: track.artistName,
@@ -56,7 +53,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         setArtist({
           id: artistId,
           type: 'artist',
-          name: localArtistName,
+          name: collection?.title || localArtistName,
           imageURL: profileImage,
         });
         setTopTracks(tracks);

@@ -24,7 +24,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import MaskedView from '@react-native-masked-view/masked-view';
 
 interface MarqueeTextProps {
+  // Plain text measures width; optional inline children retain links and styling.
   text: string;
+  children?: React.ReactNode;
   style?: StyleProp<TextStyle>;
   containerStyle?: StyleProp<ViewStyle>;
   speed?: number; // pixels per second
@@ -36,6 +38,7 @@ interface MarqueeTextProps {
 
 export const MarqueeText: React.FC<MarqueeTextProps> = ({
   text,
+  children,
   style,
   containerStyle,
   speed = 22,
@@ -52,8 +55,8 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
   const isOverflowing = measuredTextWidth > containerWidth + 2 && containerWidth > 0;
 
   React.useEffect(() => {
+    scrollAnim.setValue(0);
     if (!isOverflowing) {
-      scrollAnim.setValue(0);
       return;
     }
 
@@ -84,7 +87,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
     return () => {
       animation.stop();
     };
-  }, [isOverflowing, measuredTextWidth, containerWidth, speed, delay, fadeWidth, scrollAnim]);
+  }, [text, isOverflowing, measuredTextWidth, containerWidth, speed, delay, fadeWidth, scrollAnim]);
 
   const onContainerLayout = (e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
@@ -109,7 +112,8 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
         flexDirection: 'row',
         justifyContent: isOverflowing ? 'flex-start' : isCenter ? 'center' : 'flex-start',
         alignItems: 'center',
-        width: isOverflowing ? undefined : '100%',
+        alignSelf: 'flex-start',
+        width: isOverflowing ? measuredTextWidth : '100%',
       }}
     >
       <Text
@@ -120,7 +124,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
           !isOverflowing && { textAlign: isCenter ? 'center' : 'left' },
         ]}
       >
-        {text}
+        {children ?? text}
       </Text>
     </Animated.View>
   );
@@ -144,7 +148,12 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
       ]}
     >
       {/* Hidden full text measurement layer without width restrictions */}
-      <View style={[styles.measureContainer, { pointerEvents: 'none' }]}>
+      <View
+        accessible={false}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        style={[styles.measureContainer, { pointerEvents: 'none' }]}
+      >
         <Text
           onLayout={onMeasureLayout}
           numberOfLines={1}

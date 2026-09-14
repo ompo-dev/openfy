@@ -24,7 +24,6 @@ export const Header = () => {
   const { top: statusBarOffset } = useSafeAreaInsets();
   const [importModalVisible, setImportModalVisible] = React.useState(false);
   const [downloadsModalVisible, setDownloadsModalVisible] = React.useState(false);
-  const [searchVisible, setSearchVisible] = React.useState(false);
   const { activeDownloadsCount } = useDownloads();
   const {
     librarySearchQuery,
@@ -35,59 +34,55 @@ export const Header = () => {
     setLibraryView,
     refreshLibrary,
   } = useLibrarySelectedCategory();
+  const [searchVisible, setSearchVisible] = React.useState(
+    Boolean(librarySearchQuery)
+  );
   const searchCopy = libraryCopy[libraryView];
 
   return (
     <View style={[styles.container, { paddingTop: statusBarOffset + 8 }]}>
       <View style={styles.topRow}>
-        <NativeIconButton
-          systemImage="plus"
-          iconName="add"
-          label="Adicionar música"
-          size={38}
-          onPress={() => setImportModalVisible(true)}
-        />
-        <View style={styles.centerPicker}>
-          <LibraryControlsPicker
-            kind="view"
-            sort={librarySort}
-            view={libraryView}
-            onSortChange={setLibrarySort}
-            onViewChange={setLibraryView}
+        <View style={styles.leadingControls}>
+          <NativeIconButton
+            systemImage="plus"
+            iconName="add"
+            label="Adicionar música"
+            size={44}
+            onPress={() => setImportModalVisible(true)}
           />
-        </View>
-        <View style={styles.trailingControls}>
-          <View style={styles.downloadControl}>
-            <NativeIconButton
-              systemImage="arrow.down.circle"
-              iconName="download"
-              label="Ver downloads"
-              size={38}
-              tint="#B8B8B8"
-              onPress={() => setDownloadsModalVisible(true)}
+          <View style={styles.filterControl}>
+            <LibraryControlsPicker
+              kind="filter"
+              sort={librarySort}
+              onSortChange={setLibrarySort}
+              searchLabel={`Pesquisar ${searchCopy}`}
+              searchVisible={searchVisible}
+              onSearchToggle={() => setSearchVisible((visible) => !visible)}
+              activeDownloadsCount={activeDownloadsCount}
+              onDownloadsPress={() => setDownloadsModalVisible(true)}
             />
             {activeDownloadsCount > 0 ? (
-              <View style={styles.downloadBadge}>
-                <Text style={styles.downloadBadgeText}>{activeDownloadsCount}</Text>
+              <View
+                style={styles.downloadBadge}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                aria-hidden
+              >
+                <Text style={styles.downloadBadgeText}>
+                  {activeDownloadsCount > 99 ? '99+' : activeDownloadsCount}
+                </Text>
               </View>
             ) : null}
           </View>
+        </View>
+        <View style={styles.centerPicker}>
           <LibraryControlsPicker
-            kind="sort"
-            sort={librarySort}
+            kind="view"
             view={libraryView}
-            onSortChange={setLibrarySort}
             onViewChange={setLibraryView}
           />
-          <NativeIconButton
-            systemImage="magnifyingglass"
-            iconName="search"
-            label={`Pesquisar ${searchCopy}`}
-            size={38}
-            tint="#B8B8B8"
-            onPress={() => setSearchVisible((visible) => !visible)}
-          />
         </View>
+        <View style={styles.trailingSpace} pointerEvents="none" />
       </View>
 
       {searchVisible ? (
@@ -95,6 +90,8 @@ export const Header = () => {
           autoFocus
           value={librarySearchQuery}
           onChangeText={setLibrarySearchQuery}
+          accessibilityLabel={`Pesquisar ${searchCopy}`}
+          returnKeyType="search"
           placeholder={`Pesquisar ${searchCopy}`}
           placeholderTextColor="#777"
           style={styles.searchInput}
@@ -124,21 +121,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 12,
     height: 52,
-    gap: 10,
-    position: 'relative',
   },
   centerPicker: {
     alignItems: 'center',
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    pointerEvents: 'box-none',
+    flex: 1,
+    minWidth: 0,
   },
-  trailingControls: { flexDirection: 'row', gap: 8, marginLeft: 'auto' },
-  downloadControl: {
-    height: 38,
+  leadingControls: { flexDirection: 'row', gap: 4, width: 92 },
+  trailingSpace: { width: 92 },
+  filterControl: {
+    height: 44,
     position: 'relative',
-    width: 38,
+    width: 44,
   },
   downloadBadge: {
     alignItems: 'center',

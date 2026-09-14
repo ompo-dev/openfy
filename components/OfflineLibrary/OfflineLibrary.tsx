@@ -11,12 +11,13 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { Href, useFocusEffect, useRouter } from 'expo-router';
 import { Swipeable } from 'react-native-gesture-handler';
-import { getYouTubeArtistImage } from '@api';
+import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
 
 import {
   deleteDownloadedTrack,
   getCachedArtistImage,
   getDownloadedTracks,
+  repairDownloadedTrackMetadata,
   groupLocalAlbums,
   groupLocalArtists,
   getLocalPlaylists,
@@ -31,6 +32,7 @@ import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
 
 const toPlayerTrack = (track: DownloadedTrack) => ({
+  ...track,
   spotifyId: track.spotifyId,
   title: track.title,
   artistName: track.artistName,
@@ -47,7 +49,6 @@ export const OfflineLibrary = () => {
   const [playlists, setPlaylists] = React.useState<LocalPlaylist[]>([]);
   const [artistImageURLs, setArtistImageURLs] = React.useState<Record<string, string>>({});
   const requestedArtistImages = React.useRef(new Set<string>());
-  const loadingArtistImages = React.useRef(new Set<string>());
   const { playWithQueue, currentTrack, playerState } = usePlayer();
   const {
     libraryRevision,
@@ -77,6 +78,14 @@ export const OfflineLibrary = () => {
 
   React.useEffect(() => {
     loadLibrary();
+  }, [libraryRevision, loadLibrary]);
+
+  React.useEffect(() => {
+    let active = true;
+    void repairDownloadedTrackMetadata(() => {
+      if (active) void loadLibrary();
+    });
+    return () => { active = false; };
   }, [libraryRevision, loadLibrary]);
 
   const handleDelete = async (spotifyId: string) => {
@@ -126,22 +135,20 @@ export const OfflineLibrary = () => {
   React.useEffect(() => {
     const artistsToLoad = localArtists.filter(
       (artist) =>
-        !requestedArtistImages.current.has(artist.id) &&
-        !loadingArtistImages.current.has(artist.id)
+        Boolean(artist.spotifyArtistId) &&
+        !requestedArtistImages.current.has(artist.id)
     );
     if (artistsToLoad.length === 0) return;
 
-    artistsToLoad.forEach((artist) => loadingArtistImages.current.add(artist.id));
     let active = true;
     void Promise.all(
       artistsToLoad.map(async (artist) => ({
         id: artist.id,
-        imageURL: await getCachedArtistImage(artist.title, () =>
-          getYouTubeArtistImage(artist.title)
+        imageURL: await getCachedArtistImage(artist.id, () =>
+          getSpotifyArtistImage(artist.spotifyArtistId!)
         ),
       }))
     ).then((images) => {
-      images.forEach((image) => loadingArtistImages.current.delete(image.id));
       if (!active) return;
       const resolvedImages = images.filter(
         (image): image is { id: string; imageURL: string } => Boolean(image.imageURL)
@@ -275,7 +282,7 @@ export const OfflineLibrary = () => {
         accessibilityLabel={`${isArtist ? 'Abrir artista' : 'Abrir álbum'} ${item.title}`}
         onPress={() => {
           if (isArtist) {
-            router.push(`/library/artist/local_artist_${encodeURIComponent(item.title)}` as Href);
+            router.push(`/library/artist/local_artist_${encodeURIComponent(item.id)}` as Href);
             return;
           }
           router.push(
@@ -301,7 +308,7 @@ export const OfflineLibrary = () => {
             {isArtist ? `${item.tracks.length} músicas` : item.subtitle}
           </Text>
         </View>
-        <Ionicons name={isArtist ? 'chevron-forward' : 'play'} size={18} color={isArtist ? '#8B8B8B' : '#1DB954'} />
+        <Ionicons name="chevron-forward" size={18} color="#8B8B8B" />
       </LoggedPressable>
     );
   };

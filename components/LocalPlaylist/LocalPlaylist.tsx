@@ -105,6 +105,11 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
     albumName: track.albumName,
     imageURL: track.localImagePath || track.imageURL,
     durationMs: track.duration_ms,
+    artists: track.artists,
+    albumId: track.albumId,
+    albumArtists: track.albumArtists,
+    youtubeVideoId: track.youtubeVideoId,
+    youtubeUrl: track.youtubeUrl,
     isDownloaded: true,
     localAudioPath: track.localAudioPath,
   }));

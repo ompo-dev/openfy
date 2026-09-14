@@ -55,6 +55,10 @@ const toPlayerTrack = (track: CollectionTrack, collectionName: string) => ({
   localAudioPath: track.localAudioPath,
   duration_ms: track.durationMs || 0,
   artists: track.artists,
+  albumId: track.albumId,
+  albumArtists: track.albumArtists,
+  youtubeVideoId: track.youtubeVideoId,
+  youtubeUrl: track.youtubeUrl,
 });
 
 export const CollectionDetail = ({

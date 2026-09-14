@@ -28,8 +28,11 @@ import {
 import { useDownloads } from '@context';
 import { SheetFrame } from '../native';
 
-import { getPlaylist, getPlaylistItems } from '@api';
-import { fetchWithTimeout } from '@utils';
+import {
+  fetchSpotifyCollectionMetadata,
+  fetchSpotifyTrackMetadata,
+  type SpotifyArtist,
+} from '../../services/metadata/spotifyMetadata';
 import axios from 'axios';
 
 type TrackPreview = {
@@ -37,6 +40,11 @@ type TrackPreview = {
   title: string;
   artistName: string;
   albumName: string;
+  artists?: SpotifyArtist[];
+  albumId?: string;
+  albumArtists?: SpotifyArtist[];
+  trackNumber?: number;
+  discNumber?: number;
   imageURL: string;
   duration_ms: number;
   youtubeVideoId?: string;
@@ -62,456 +70,22 @@ const YOUTUBE_STREAM_UNAVAILABLE_ERROR = 'YOUTUBE_STREAM_UNAVAILABLE';
 const YOUTUBE_STREAM_UNAVAILABLE_MESSAGE =
   'YouTube bloqueou o stream de áudio desse vídeo. Metadados foram encontrados, mas o download não pode começar sem áudio.';
 
-type SpotifyEmbedEntity = {
-  spotifyId?: string;
-  name?: string;
-  title?: string;
-  subtitle?: string;
-  uri?: string;
-  duration?: number;
-  duration_ms?: number;
-  artistName?: string;
-  imageURL?: string;
-  albumName?: string;
-  artists?: { name?: string }[];
-  album?: { name?: string; coverArt?: { sources?: { url?: string }[] } };
-  coverArt?: { sources?: { url?: string }[] };
-  visualIdentity?: { image?: { url?: string }[] };
-  trackList?: SpotifyEmbedEntity[];
-};
-
-const NEXT_DATA_PATTERN =
-  /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/;
-
-const getCoverUrl = (entity: SpotifyEmbedEntity): string =>
-  entity.imageURL ||
-  entity.visualIdentity?.image?.[0]?.url ||
-  entity.album?.coverArt?.sources?.[0]?.url ||
-  entity.coverArt?.sources?.[0]?.url ||
-  '';
-
-const toTrackPreview = (
-  entity: SpotifyEmbedEntity,
-  fallback: Partial<TrackPreview> = {}
-): TrackPreview | null => {
-  const spotifyId =
-    entity.spotifyId ||
-    entity.uri?.replace(/^spotify:track:/, '') ||
-    fallback.spotifyId;
-  const title = entity.name || entity.title || fallback.title;
-  if (!spotifyId || !title) return null;
-
-  return {
-    spotifyId,
-    title,
-    artistName:
-      entity.artists
-        ?.map((artist) => artist.name)
-        .filter(Boolean)
-        .join(', ') ||
-      entity.artistName ||
-      entity.subtitle ||
-      fallback.artistName ||
-      'Artista',
-    albumName:
-      entity.albumName || entity.album?.name || fallback.albumName || 'Spotify',
-    imageURL: getCoverUrl(entity) || fallback.imageURL || '',
-    duration_ms:
-      entity.duration_ms || entity.duration || fallback.duration_ms || 0,
-  };
-};
-
-const withDownloadState = async (
-  tracks: TrackPreview[]
-): Promise<TrackPreview[]> => {
-  const downloadedIds = new Set(
-    (await getDownloadedTracks()).map((track) => track.spotifyId)
-  );
-  return tracks.map((track) => ({
-    ...track,
-    isDownloaded: downloadedIds.has(track.spotifyId),
-  }));
-};
-
-const fetchSpotifyEmbedEntity = async (
-  type: 'track' | 'playlist' | 'album',
-  id: string
-): Promise<SpotifyEmbedEntity | null> => {
-  try {
-    const response = await fetchWithTimeout(
-      `https://open.spotify.com/embed/${type}/${id}`,
-      {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-      },
-      12_000
-    );
-    if (!response.ok) return null;
-    const match = (await response.text()).match(NEXT_DATA_PATTERN);
-    return match?.[1]
-      ? (JSON.parse(match[1]).props?.pageProps?.state?.data?.entity ?? null)
-      : null;
-  } catch {
-    return null;
-  }
-};
-
-const fetchCollectionOnDevice = async (
-  id: string,
-  type: 'playlist' | 'album'
-): Promise<{
-  title: string;
-  coverUrl: string;
-  tracks: TrackPreview[];
-} | null> => {
-  const collection = await fetchSpotifyEmbedEntity(type, id);
-  const entries = collection?.trackList ?? [];
-  if (!collection?.name || entries.length === 0) return null;
-
-  const tracks: (TrackPreview | null)[] = [];
-  for (let index = 0; index < entries.length; index += 4) {
-    tracks.push(
-      ...(await Promise.all(
-        entries.slice(index, index + 4).map(async (entry) => {
-          const fallback = toTrackPreview(entry, {
-            albumName: collection.name,
-          });
-          if (!fallback) return null;
-          const canonical = await fetchSpotifyEmbedEntity(
-            'track',
-            fallback.spotifyId
-          );
-          return toTrackPreview(canonical ?? {}, fallback);
-        })
-      ))
-    );
-  }
-
-  return {
-    title: collection.name,
-    coverUrl: getCoverUrl(collection),
-    tracks: await withDownloadState(
-      tracks.filter((track): track is TrackPreview => track !== null)
-    ),
-  };
-};
-
-const fetchTrackById = async (
-  trackId: string
-): Promise<TrackPreview | null> => {
-  const cleanTrackId = trackId.replace(/^spotify:track:/, '').split('?')[0];
-
-  if (Platform.OS !== 'web') {
-    return toTrackPreview(
-      (await fetchSpotifyEmbedEntity('track', cleanTrackId)) ?? {},
-      { spotifyId: cleanTrackId }
-    );
-  }
-
-  const spotifyUrl = `https://open.spotify.com/track/${cleanTrackId}`;
-
-  // 1. SECONDARY: Official Spotify Embed (__NEXT_DATA__) scraper
-  try {
-    const embedUrls = [
-      `https://open.spotify.com/embed/track/${cleanTrackId}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://open.spotify.com/embed/track/${cleanTrackId}`)}`,
-    ];
-
-    for (const embedUrl of embedUrls) {
-      try {
-        const res = await axios.get(embedUrl, {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          },
-          timeout: 4000,
-        });
-
-        const html = res.data;
-        if (typeof html === 'string') {
-          const nextDataMatch = html.match(
-            /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/
-          );
-          if (nextDataMatch) {
-            const parsed = JSON.parse(nextDataMatch[1]);
-            const entity = parsed.props?.pageProps?.state?.data?.entity;
-            if (entity && entity.name) {
-              const artists =
-                entity.artists
-                  ?.map((a: { name: string }) => a.name)
-                  .join(', ') || '';
-              const cover =
-                entity.visualIdentity?.image?.[0]?.url ||
-                entity.album?.coverArt?.sources?.[0]?.url ||
-                entity.coverArt?.sources?.[0]?.url ||
-                '';
-
-              if (artists) {
-                return {
-                  spotifyId: cleanTrackId,
-                  title: entity.name,
-                  artistName: artists,
-                  albumName: entity.album?.name || 'Spotify',
-                  imageURL: cover,
-                  duration_ms: entity.duration || 0,
-                };
-              }
-            }
-          }
-        }
-      } catch {}
-    }
-  } catch (embedErr) {
-    console.warn('[ImportModal] Spotify embed lookup failed:', embedErr);
-  }
-
-  // 2. TERTIARY: Public Spotify oEmbed
-  try {
-    const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
-    const response = await axios.get(oembedUrl, { timeout: 4000 });
-    const data = response.data as {
-      title?: string;
-      thumbnail_url?: string;
-      author_name?: string;
-    };
-
-    let title = (data.title || 'Unknown Track')
-      .replace(/^[\s\-–—]+/, '')
-      .trim();
-    let artistName = (data.author_name || '').trim();
-
-    return {
-      spotifyId: cleanTrackId,
-      title,
-      artistName: artistName || 'Artista',
-      albumName: 'Spotify',
-      imageURL: data.thumbnail_url || '',
-      duration_ms: 0,
-    };
-  } catch (oembedError) {
-    console.error('[ImportModal] oEmbed fallback failed:', oembedError);
-  }
-
-  return null;
-};
-
 const fetchPlaylistOrAlbum = async (
   id: string,
   type: 'playlist' | 'album'
 ): Promise<{ title: string; coverUrl: string; tracks: TrackPreview[] }> => {
-  // Spotify embed works natively without browser CORS. Do not make the
-  // following metadata fallbacks dead when it is unavailable.
-  if (Platform.OS !== 'web') {
-    const onDevice = await fetchCollectionOnDevice(id, type);
-    if (onDevice) return onDevice;
-  }
-
-  const spotifyUrl = `https://open.spotify.com/${type}/${id}`;
-
-  // Spotify's own playlist endpoint exposes each track's album art. This must
-  // run before fallbacks, which only know the playlist container cover.
-  if (type === 'playlist') {
-    try {
-      const playlist = await getPlaylist(id);
-      const spotifyTracks = [];
-      const limit = 100;
-
-      for (let offset = 0; ; offset += limit) {
-        const page = await getPlaylistItems({ playlistId: id, limit, offset });
-        spotifyTracks.push(...page);
-        if (page.length < limit) break;
-      }
-
-      if (spotifyTracks.length > 0) {
-        const downloadedIds = new Set(
-          (await getDownloadedTracks()).map((track) => track.spotifyId)
-        );
-        const tracks = spotifyTracks.map((track) => ({
-          spotifyId: track.id,
-          title: track.title,
-          artistName: track.subtitle,
-          albumName: track.albumName || playlist.title,
-          imageURL: track.imageURL || '',
-          duration_ms: track.durationMs || 0,
-          isDownloaded: downloadedIds.has(track.id),
-        }));
-
-        return {
-          title: playlist.title,
-          coverUrl: playlist.imageURL,
-          tracks,
-        };
-      }
-    } catch (error) {
-      console.warn(
-        '[ImportModal] Spotify playlist metadata lookup failed:',
-        error
-      );
-    }
-  }
-
-  // 1. Try Spotyloader info API with required headers
-  try {
-    const res = await axios.get(
-      `https://spotyloader.com/api/spotify/info?url=${encodeURIComponent(spotifyUrl)}`,
-      {
-        headers: {
-          Origin: 'https://spotyloader.com',
-          Referer: 'https://spotyloader.com/',
-          'User-Agent': 'Mozilla/5.0',
-        },
-        timeout: 7000,
-      }
-    );
-    const post = res.data?.post;
-    if (
-      post &&
-      post.tracks &&
-      Array.isArray(post.tracks) &&
-      post.tracks.length > 0
-    ) {
-      const albumTitle = post.name || (type === 'album' ? 'Álbum' : 'Playlist');
-      const coverUrl = post.image || '';
-      const list: TrackPreview[] = [];
-
-      for (const t of post.tracks) {
-        const trackId =
-          t.id || t.url?.split('/').pop() || Math.random().toString();
-        const already = await isTrackDownloaded(trackId);
-        const artist = Array.isArray(t.artists)
-          ? t.artists.join(', ')
-          : t.artist || 'Unknown Artist';
-        list.push({
-          spotifyId: trackId,
-          title: t.name || t.title || 'Música',
-          artistName: artist,
-          albumName: albumTitle,
-          imageURL:
-            type === 'playlist'
-              ? t.image && t.image !== coverUrl
-                ? t.image
-                : ''
-              : t.image || coverUrl,
-          duration_ms: t.duration_ms || 0,
-          isDownloaded: already,
-        });
-      }
-
-      if (list.length > 0) {
-        return { title: albumTitle, coverUrl, tracks: list };
-      }
-    }
-  } catch (err) {
-    console.warn(
-      '[ImportModal] Spotyloader playlist/album lookup failed:',
-      err
-    );
-  }
-
-  // 2. Try Spotify Embed HTML scraper (__NEXT_DATA__)
-  try {
-    const embedRes = await axios.get(
-      `https://open.spotify.com/embed/${type}/${id}`,
-      {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-        timeout: 7000,
-      }
-    );
-    const html = embedRes.data as string;
-    const match = html.match(
-      /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/
-    );
-    const nextDataPayload = match?.[1];
-    if (nextDataPayload) {
-      const nextData = JSON.parse(nextDataPayload!);
-      const entity = nextData.props?.pageProps?.state?.data?.entity;
-      if (entity && entity.trackList && entity.trackList.length > 0) {
-        const albumTitle =
-          entity.name || (type === 'album' ? 'Álbum' : 'Playlist');
-        const coverUrl = entity.coverArt?.sources?.[0]?.url || '';
-        const list: TrackPreview[] = [];
-
-        for (const t of entity.trackList) {
-          const trackId =
-            t.uri?.replace('spotify:track:', '') ||
-            t.id ||
-            Math.random().toString();
-          const already = await isTrackDownloaded(trackId);
-          list.push({
-            spotifyId: trackId,
-            title: t.title || 'Música',
-            artistName: t.subtitle || 'Unknown Artist',
-            albumName: albumTitle,
-            imageURL: type === 'album' ? coverUrl : '',
-            duration_ms: t.duration || 0,
-            isDownloaded: already,
-          });
-        }
-
-        if (list.length > 0) {
-          return { title: albumTitle, coverUrl, tracks: list };
-        }
-      }
-    }
-  } catch (embedErr) {
-    console.warn(
-      '[ImportModal] Spotify Embed playlist/album lookup failed:',
-      embedErr
-    );
-  }
-
-  // 3. Fallback: Songlink + Deezer for albums
-  if (type === 'album') {
-    try {
-      const songlinkRes = await axios.get(
-        `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(spotifyUrl)}&userCountry=BR`,
-        { timeout: 7000 }
-      );
-      const deezerAlbumUrl = songlinkRes.data?.linksByPlatform?.deezer?.url;
-      if (deezerAlbumUrl) {
-        const deezerAlbumId = deezerAlbumUrl.split('/').pop();
-        const dRes = await axios.get(
-          `https://api.deezer.com/album/${deezerAlbumId}`,
-          { timeout: 5000 }
-        );
-        const albumData = dRes.data;
-        if (albumData && albumData.tracks?.data) {
-          const list: TrackPreview[] = [];
-          for (const t of albumData.tracks.data) {
-            const trackSpotifyId = `dz_${t.id}`;
-            const already = await isTrackDownloaded(trackSpotifyId);
-            list.push({
-              spotifyId: trackSpotifyId,
-              title: t.title,
-              artistName:
-                t.artist?.name || albumData.artist?.name || 'Unknown Artist',
-              albumName: albumData.title || 'Álbum',
-              imageURL: albumData.cover_big || albumData.cover_medium || '',
-              duration_ms: (t.duration || 0) * 1000,
-              isDownloaded: already,
-            });
-          }
-          if (list.length > 0) {
-            return {
-              title: albumData.title,
-              coverUrl: albumData.cover_big || '',
-              tracks: list,
-            };
-          }
-        }
-      }
-    } catch {}
-  }
-
-  return (
-    (await fetchCollectionOnDevice(id, type)) ?? {
-      title: '',
-      coverUrl: '',
-      tracks: [],
-    }
+  const collection = await fetchSpotifyCollectionMetadata(id, type);
+  if (!collection) return { title: '', coverUrl: '', tracks: [] };
+  const downloadedIds = new Set(
+    (await getDownloadedTracks()).map((track) => track.spotifyId)
   );
+  return {
+    ...collection,
+    tracks: collection.tracks.map((track) => ({
+      ...track,
+      isDownloaded: downloadedIds.has(track.spotifyId),
+    })),
+  };
 };
 
 const fetchYouTubeTrack = async (
@@ -662,7 +236,7 @@ export const ImportModal = ({
       } else {
         // Spotify
         if (parsed.type === 'track') {
-          const track = await fetchTrackById(parsed.id);
+          const track = await fetchSpotifyTrackMetadata(parsed.id);
           if (track) {
             const alreadyDownloaded = await isTrackDownloaded(track.spotifyId);
             tracksToShow = [{ ...track, isDownloaded: alreadyDownloaded }];
@@ -717,9 +291,15 @@ export const ImportModal = ({
       title: track.title,
       artistName: track.artistName,
       albumName: track.albumName,
+      artists: track.artists,
+      albumId: track.albumId,
+      albumArtists: track.albumArtists,
+      trackNumber: track.trackNumber,
+      discNumber: track.discNumber,
       imageURL: track.imageURL,
       duration_ms: track.duration_ms,
       youtubeVideoId: track.youtubeVideoId,
+      youtubeUrl: track.youtubeUrl,
       audioUrl: track.audioUrl,
       audioFormat: track.audioFormat,
     }),

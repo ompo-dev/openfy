@@ -36,6 +36,7 @@ export const LocalAlbum = ({ albumId }: { albumId: string }) => {
       }`}
       trackCount={album.tracks.length}
       tracks={album.tracks.map((track) => ({
+        ...track,
         id: track.spotifyId,
         title: track.title,
         subtitle: track.artistName,

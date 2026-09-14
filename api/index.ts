@@ -11,7 +11,6 @@ export {
 export {
   findArtistIdByName,
   getArtist,
-  getYouTubeArtistImage,
   getArtistTopTracks,
   getUserTopArtists,
   getUserFollowedArtists,

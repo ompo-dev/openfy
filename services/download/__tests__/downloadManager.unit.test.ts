@@ -34,12 +34,24 @@ import { resolveAudioUrl } from '../../audio/audioResolver';
 import { resolveDirectYouTubeAudio } from '../../audio/directYouTubeResolver';
 import { resolveSpotifyTrackVideoId } from '../../audio/catalogResolver';
 import { getDownloadDiagnostics } from '../downloadDiagnostics';
+import { fetchSpotifyTrackMetadata } from '../../metadata/spotifyMetadata';
+import { getCatalogMapping } from '../../audio/catalogMappingCache';
 import {
   downloadAudio,
   downloadTrack,
   getPendingDownloads,
   queueDownloads,
+  getDownloadedTracks,
+  repairDownloadedTrackMetadata,
+  downloadCover,
 } from '../downloadManager';
+
+jest.mock('../../metadata/spotifyMetadata', () => ({
+  fetchSpotifyTrackMetadata: jest.fn().mockResolvedValue(null),
+}));
+jest.mock('../../audio/catalogMappingCache', () => ({
+  getCatalogMapping: jest.fn().mockResolvedValue(null),
+}));
 
 jest.mock('../../audio/audioResolver', () => ({
   getPlayableAudioUrl: jest.fn((url: string) => url),
@@ -72,6 +84,8 @@ const fetchMock = jest.fn();
 describe('queueDownloads', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
+    (fetchSpotifyTrackMetadata as jest.Mock).mockReset().mockResolvedValue(null);
+    (getCatalogMapping as jest.Mock).mockReset().mockResolvedValue(null);
     resolveAudioUrlMock.mockReset();
     directAudioMock.mockReset();
     catalogMock.mockReset();
@@ -193,6 +207,8 @@ describe('queueDownloads', () => {
         'm4a'
       )
     ).resolves.toMatchObject({
+      youtubeVideoId: 'V1M1hYxmRvA',
+      youtubeUrl: 'https://www.youtube.com/watch?v=V1M1hYxmRvA',
       localAudioPath:
         'file:///mock_dir/openfy_downloads/track_spotify_track_123.m4a',
     });
@@ -202,6 +218,48 @@ describe('queueDownloads', () => {
       'file:///mock_dir/openfy_downloads/track_spotify_track_123.m4a',
       1024 * 1024
     );
+  });
+
+  it('repairs existing metadata, high-resolution artwork and video links without replacing audio', async () => {
+    const saved = { id: 'track_repair', spotifyId: 'repair-metadata', title: 'Song',
+      artistName: 'Artist, Guest', albumName: 'Spotify', imageURL: 'file:///old.jpg',
+      localImagePath: 'file:///old.jpg', localAudioPath: 'file:///kept.m4a',
+      downloadedAt: '2026-09-01', duration_ms: 0 };
+    await AsyncStorage.setItem('openfy_downloads', JSON.stringify([saved]));
+    (fetchSpotifyTrackMetadata as jest.Mock).mockResolvedValue({
+      albumId: 'album', albumName: 'Real album', artists: [{ id: 'artist', name: 'Artist' }],
+      imageURL: 'https://images.test/640.jpg', duration_ms: 158250,
+    });
+    (getCatalogMapping as jest.Mock).mockResolvedValue({ videoId: '_MyOuFWnPPY' });
+    fileSystemMock.downloadAsync.mockResolvedValue({ uri: 'file:///hq.jpg', status: 200 });
+    await repairDownloadedTrackMetadata();
+    expect(await getDownloadedTracks()).toEqual([expect.objectContaining({
+      albumId: 'album', albumName: 'Real album', duration_ms: 158250,
+      localAudioPath: saved.localAudioPath, downloadedAt: saved.downloadedAt,
+      imageURL: 'https://images.test/640.jpg', localImagePath: 'file:///hq.jpg',
+      youtubeVideoId: '_MyOuFWnPPY', metadataVersion: 2,
+    })]);
+    expect(fileSystemMock.createDownloadResumable).not.toHaveBeenCalled();
+    expect(mockNativePlayerAndDownload).not.toHaveBeenCalled();
+  });
+
+  it('does not resurrect a song deleted while metadata is loading', async () => {
+    await AsyncStorage.setItem('openfy_downloads', JSON.stringify([{
+      id: 'track_deleted', spotifyId: 'deleted-during-repair', localAudioPath: 'file:///deleted.m4a',
+    }]));
+    (fetchSpotifyTrackMetadata as jest.Mock).mockImplementation(async () => {
+      await AsyncStorage.setItem('openfy_downloads', '[]');
+      return { albumId: 'album', imageURL: '' };
+    });
+    await repairDownloadedTrackMetadata();
+    expect(await getDownloadedTracks()).toEqual([]);
+  });
+
+  it('rejects an HTML error response as cover art', async () => {
+    fileSystemMock.downloadAsync.mockResolvedValue({
+      uri: 'file:///bad.jpg', status: 200, headers: { 'Content-Type': 'text/html' },
+    });
+    await expect(downloadCover('https://images.test/bad.jpg', 'bad')).resolves.toBeNull();
   });
 
   it('downloads an exact YouTube track natively even when JS cannot resolve a stream URL', async () => {
