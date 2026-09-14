@@ -31,6 +31,9 @@ jest.mock('../../../modules/openfy-youtube', () => ({
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { resolveAudioUrl } from '../../audio/audioResolver';
+import { resolveDirectYouTubeAudio } from '../../audio/directYouTubeResolver';
+import { resolveSpotifyTrackVideoId } from '../../audio/catalogResolver';
+import { getDownloadDiagnostics } from '../downloadDiagnostics';
 import {
   downloadAudio,
   downloadTrack,
@@ -45,12 +48,24 @@ jest.mock('../../audio/audioResolver', () => ({
   resolveViaYouTubeTopic: jest.fn(),
 }));
 
+jest.mock('../../audio/directYouTubeResolver', () => ({
+  ...jest.requireActual('../../audio/directYouTubeResolver'),
+  resolveDirectYouTubeAudio: jest.fn(),
+}));
+
+jest.mock('../../audio/catalogResolver', () => ({
+  ...jest.requireActual('../../audio/catalogResolver'),
+  resolveSpotifyTrackVideoId: jest.fn(),
+}));
+
 jest.mock('../../lyrics/lyricsService', () => ({
   fetchLyrics: jest.fn().mockResolvedValue(null),
   saveLyricsOffline: jest.fn(),
 }));
 
 const resolveAudioUrlMock = resolveAudioUrl as jest.Mock;
+const directAudioMock = resolveDirectYouTubeAudio as jest.Mock;
+const catalogMock = resolveSpotifyTrackVideoId as jest.Mock;
 const fileSystemMock = FileSystem as jest.Mocked<typeof FileSystem>;
 const fetchMock = jest.fn();
 
@@ -58,6 +73,11 @@ describe('queueDownloads', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
     resolveAudioUrlMock.mockReset();
+    directAudioMock.mockReset();
+    catalogMock.mockReset();
+    catalogMock.mockResolvedValue({ status: 'not_found', reason: 'no_canonical_match' });
+    jest.requireMock('../../../modules/openfy-youtube').default
+      .resolveAndDownloadGoogleVideoAsync = mockNativePlayerAndDownload;
     fileSystemMock.getInfoAsync.mockReset();
     fileSystemMock.getInfoAsync.mockResolvedValue({
       exists: true,
@@ -106,8 +126,8 @@ describe('queueDownloads', () => {
     ]);
   });
 
-  it('BUG-R1: iPhone resolves a fresh on-device stream before a server-provided URL', async () => {
-    resolveAudioUrlMock.mockResolvedValue({
+  it('BUG-R1: iPhone resolves an on-device stream before a stale supplied URL', async () => {
+    directAudioMock.mockResolvedValue({
       url: 'https://rr1.googlevideo.com/fresh-on-device.m4a?c=IOS',
       format: 'm4a',
       quality: 'high',
@@ -129,12 +149,11 @@ describe('queueDownloads', () => {
       localAudioPath: 'file:///mock_dir/audio.m4a',
     });
 
-    expect(resolveAudioUrlMock).toHaveBeenCalledWith(
-      'Faixa local',
-      'Artista local',
-      'yt_12345678901',
-      180000
-    );
+    expect(directAudioMock).toHaveBeenCalledWith({
+      videoId: '12345678901',
+      spotifyId: 'yt_12345678901',
+      fresh: false,
+    });
     expect(fileSystemMock.createDownloadResumable).toHaveBeenCalledWith(
       'https://rr1.googlevideo.com/fresh-on-device.m4a?c=IOS',
       expect.any(String),
@@ -181,7 +200,7 @@ describe('queueDownloads', () => {
     expect(mockNativePlayerAndDownload).toHaveBeenCalledWith(
       'V1M1hYxmRvA',
       'file:///mock_dir/openfy_downloads/track_spotify_track_123.m4a',
-      2 * 1024 * 1024
+      1024 * 1024
     );
   });
 
@@ -212,14 +231,144 @@ describe('queueDownloads', () => {
     expect(mockNativePlayerAndDownload).toHaveBeenCalledWith(
       'V1M1hYxmRvA',
       'file:///mock_dir/openfy_downloads/track_yt_V1M1hYxmRvA.m4a',
-      2 * 1024 * 1024
+      1024 * 1024
     );
     expect(fileSystemMock.createDownloadResumable).not.toHaveBeenCalled();
     expect(fileSystemMock.downloadAsync).toHaveBeenCalledTimes(0);
   });
 
-  it('BUG-R2: iPhone retries direct download in foreground when background returns an invalid file', async () => {
+  it('downloads a Spotify catalog match on iPhone without requiring a JS stream URL', async () => {
+    const track = {
+      spotifyId: '5MzjslXCcY4XQtCmgk3eum',
+      title: 'Indecisão',
+      artistName: 'Sotam, Rob, Felipe Phyre, Matheus Muniz',
+      albumName: 'Spotify',
+      imageURL: '',
+      duration_ms: 0,
+    };
+    catalogMock.mockResolvedValue({
+      status: 'resolved', videoId: '_MyOuFWnPPY', confidence: 100,
+    });
+    resolveAudioUrlMock.mockResolvedValue(null);
+    directAudioMock.mockResolvedValue(null);
+    mockNativePlayerAndDownload.mockImplementation(async () => {
+      expect(await getPendingDownloads()).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          track: expect.objectContaining({ youtubeVideoId: '_MyOuFWnPPY' }),
+          audioFormat: 'm4a',
+        }),
+      ]));
+      return {
+        uri: 'file:///mock_dir/openfy_downloads/track_5MzjslXCcY4XQtCmgk3eum.m4a',
+        status: 206, mimeType: 'audio/mp4', totalBytes: 100000,
+      };
+    });
+
+    await expect(downloadTrack(track)).resolves.toMatchObject({
+      spotifyId: track.spotifyId,
+      localAudioPath: 'file:///mock_dir/openfy_downloads/track_5MzjslXCcY4XQtCmgk3eum.m4a',
+    });
+
+    expect(catalogMock).toHaveBeenCalledWith(
+      track.spotifyId, track.title, [track.artistName], 0
+    );
+    expect(mockNativePlayerAndDownload).toHaveBeenCalledWith(
+      '_MyOuFWnPPY',
+      'file:///mock_dir/openfy_downloads/track_5MzjslXCcY4XQtCmgk3eum.m4a',
+      1024 * 1024
+    );
+    expect(resolveAudioUrlMock).not.toHaveBeenCalled();
+    expect(directAudioMock).not.toHaveBeenCalled();
+    expect(fileSystemMock.createDownloadResumable).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps the matched video on native failure and records the provider refusal', async () => {
+    catalogMock.mockResolvedValue({
+      status: 'resolved', videoId: '_MyOuFWnPPY', confidence: 100,
+    });
+    mockNativePlayerAndDownload.mockResolvedValue({
+      status: 200,
+      mimeType: 'application/json',
+      headers: {
+        'X-Playability-Status': 'LOGIN_REQUIRED',
+        'X-Playability-Reason': 'Sign in to confirm your age',
+      },
+    });
+    directAudioMock.mockResolvedValue(null);
+
+    await expect(downloadTrack({
+      spotifyId: 'spotify_native_refusal', title: 'Indecisão',
+      artistName: 'Sotam', albumName: 'Spotify', imageURL: '', duration_ms: 0,
+    })).resolves.toBeNull();
+
+    expect(mockNativePlayerAndDownload).toHaveBeenCalledTimes(1);
+    expect(catalogMock).toHaveBeenCalledTimes(1);
+    expect(directAudioMock).toHaveBeenCalledWith({
+      videoId: '_MyOuFWnPPY', spotifyId: 'spotify_native_refusal', fresh: false,
+    });
+    expect(resolveAudioUrlMock).not.toHaveBeenCalled();
+    const diagnostic = await getDownloadDiagnostics('spotify_native_refusal');
+    expect(diagnostic?.events).toContainEqual(expect.objectContaining({
+      phase: 'audio.response',
+      details: expect.objectContaining({
+        headers: {
+          'X-Playability-Status': 'LOGIN_REQUIRED',
+          'X-Playability-Reason': 'Sign in to confirm your age',
+        },
+      }),
+    }));
+    expect(await getPendingDownloads()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        track: expect.objectContaining({ youtubeVideoId: '_MyOuFWnPPY' }),
+      }),
+    ]));
+  });
+
+  it('falls back to a stream for the same video when native resolution fails', async () => {
+    catalogMock.mockResolvedValue({
+      status: 'resolved', videoId: '_MyOuFWnPPY', confidence: 100,
+    });
+    mockNativePlayerAndDownload.mockRejectedValue(new Error('native player timeout'));
+    directAudioMock.mockResolvedValue({
+      videoId: '_MyOuFWnPPY',
+      url: 'https://rr1.googlevideo.com/local.m4a?c=IOS', format: 'm4a',
+    });
+
+    await expect(downloadTrack({
+      spotifyId: 'spotify_native_fallback', title: 'Indecisão',
+      artistName: 'Sotam', albumName: 'Spotify', imageURL: '', duration_ms: 0,
+    })).resolves.toMatchObject({ localAudioPath: 'file:///mock_dir/audio.m4a' });
+
+    expect(mockNativePlayerAndDownload).toHaveBeenCalledTimes(1);
+    expect(resolveAudioUrlMock).not.toHaveBeenCalled();
+    expect(directAudioMock).toHaveBeenCalledWith({
+      videoId: '_MyOuFWnPPY', spotifyId: 'spotify_native_fallback', fresh: false,
+    });
+  });
+
+  it('uses the JS fallback and reports when the installed binary lacks native downloads', async () => {
+    jest.requireMock('../../../modules/openfy-youtube').default
+      .resolveAndDownloadGoogleVideoAsync = undefined;
     resolveAudioUrlMock.mockResolvedValue({
+      url: 'https://media.test/local.mp3', format: 'mp3', source: 'soundcloud',
+    });
+
+    await expect(downloadTrack({
+      spotifyId: 'spotify_older_binary', title: 'Track',
+      artistName: 'Artist', albumName: 'Spotify', imageURL: '', duration_ms: 0,
+    })).resolves.toMatchObject({ localAudioPath: 'file:///mock_dir/audio.m4a' });
+
+    expect(catalogMock).not.toHaveBeenCalled();
+    expect(mockNativePlayerAndDownload).not.toHaveBeenCalled();
+    const diagnostic = await getDownloadDiagnostics('spotify_older_binary');
+    expect(diagnostic?.events).toContainEqual(expect.objectContaining({
+      phase: 'audio.native.capability', details: { available: false },
+    }));
+  });
+
+  it('BUG-R2: iPhone retries direct download in foreground when background returns an invalid file', async () => {
+    directAudioMock.mockResolvedValue({
       url: 'https://rr1.googlevideo.com/fresh-on-device.m4a?c=IOS',
       format: 'm4a',
       quality: 'high',
@@ -353,7 +502,7 @@ describe('queueDownloads', () => {
         'User-Agent':
           'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)',
       },
-      2 * 1024 * 1024
+      1024 * 1024
     );
     expect(fileSystemMock.createDownloadResumable).not.toHaveBeenCalled();
   });
@@ -379,7 +528,7 @@ describe('queueDownloads', () => {
     expect(mockNativePlayerAndDownload).toHaveBeenCalledWith(
       'V1M1hYxmRvA',
       'file:///mock_dir/openfy_downloads/track_player.m4a',
-      2 * 1024 * 1024
+      1024 * 1024
     );
     expect(mockNativeGoogleVideoDownload).not.toHaveBeenCalled();
     expect(fileSystemMock.createDownloadResumable).not.toHaveBeenCalled();

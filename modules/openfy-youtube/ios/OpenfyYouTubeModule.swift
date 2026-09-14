@@ -15,12 +15,17 @@ private struct ContentRange {
   let total: Int
 }
 
-private struct AndroidMusicPlayerClient {
-  static let name = "ANDROID_MUSIC"
-  static let id = "21"
-  static let version = "8.39.42"
+private struct GuestPlayerClient {
+  static let name = "VISIONOS"
+  static let id = "101"
+  static let version = "1.02"
   static let userAgent =
-    "com.google.android.apps.youtube.music/8.39.42 (Linux; U; Android 15; en_US; Pixel 9 Pro; Build/AP4A.250205.002) gzip"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+  static let mediaHeaders = [
+    "User-Agent": userAgent,
+    "Origin": "https://www.youtube.com",
+    "Referer": "https://www.youtube.com/",
+  ]
 }
 
 /**
@@ -79,8 +84,7 @@ public final class OpenfyYouTubeModule: Module {
       }
 
       NSLog("[NATIVE] Resolving videoId: %@", videoId)
-      let visitorData = try? await Self.freshVisitorData()
-      let playerRes = try await Self.playerResponse(videoId: videoId, visitorData: visitorData)
+      let playerRes = try await Self.guestPlayerResponse(videoId: videoId)
 
       guard (200...299).contains(playerRes.response.statusCode) else {
         NSLog("[NATIVE] Player HTTP error: %ld", playerRes.response.statusCode)
@@ -92,7 +96,7 @@ public final class OpenfyYouTubeModule: Module {
         throw StreamTransportError.audioTrackUnavailable
       }
 
-      let headers = ["User-Agent": AndroidMusicPlayerClient.userAgent]
+      let headers = GuestPlayerClient.mediaHeaders
       let descriptor = try await Self.bestAudioStreamDescriptor(
         videoId: videoId,
         payload: playerRes.payload,
@@ -142,9 +146,9 @@ public final class OpenfyYouTubeModule: Module {
       throw transferError("invalid_chunk_size")
     }
 
-    let visitorData = try? await freshVisitorData()
-    let player = try await playerResponse(videoId: videoId, visitorData: visitorData)
-    let playerHeaders = headersFrom(player.response)
+    let player = try await guestPlayerResponse(videoId: videoId)
+    var playerHeaders = headersFrom(player.response)
+    playerHeaders["X-Openfy-Player-Client"] = GuestPlayerClient.name
     guard (200...299).contains(player.response.statusCode) else {
       return transferResult(
         status: player.response.statusCode,
@@ -178,12 +182,16 @@ public final class OpenfyYouTubeModule: Module {
       )
     }
 
-    return try await download(
+    var transferred = try await download(
       url: streamURL.absoluteString,
       destination: destination,
-      headers: ["User-Agent": AndroidMusicPlayerClient.userAgent],
+      headers: GuestPlayerClient.mediaHeaders,
       chunkBytes: chunkBytes
     )
+    var headers = transferred.headers ?? [:]
+    headers["X-Openfy-Player-Client"] = GuestPlayerClient.name
+    transferred.headers = headers
+    return transferred
   }
 
   private static func download(
@@ -335,6 +343,22 @@ public final class OpenfyYouTubeModule: Module {
     return String(body[matchRange])
   }
 
+  // Match Sonora's guest flow: retain a server-issued visitor and retry it once
+  // when the initial visitor is refused. No local token fabrication is involved.
+  private static func guestPlayerResponse(
+    videoId: String
+  ) async throws -> (payload: [String: Any], response: HTTPURLResponse) {
+    let visitorData = try? await freshVisitorData()
+    let initial = try await playerResponse(videoId: videoId, visitorData: visitorData)
+    guard playerStatus(from: initial.payload) == "LOGIN_REQUIRED",
+      let responseContext = initial.payload["responseContext"] as? [String: Any],
+      let issuedVisitor = responseContext["visitorData"] as? String,
+      !issuedVisitor.isEmpty else {
+      return initial
+    }
+    return try await playerResponse(videoId: videoId, visitorData: issuedVisitor)
+  }
+
   private static func playerResponse(
     videoId: String,
     visitorData: String?
@@ -344,13 +368,14 @@ public final class OpenfyYouTubeModule: Module {
     }
 
     var client: [String: Any] = [
-      "clientName": AndroidMusicPlayerClient.name,
-      "clientVersion": AndroidMusicPlayerClient.version,
-      "osName": "Android",
-      "osVersion": "15",
-      "deviceMake": "Google",
-      "deviceModel": "Pixel 9 Pro",
-      "androidSdkVersion": 35,
+      "clientName": GuestPlayerClient.name,
+      "clientVersion": GuestPlayerClient.version,
+      "userAgent": GuestPlayerClient.userAgent,
+      "utcOffsetMinutes": 0,
+      "osName": "visionOS",
+      "osVersion": "26.5.23O471",
+      "deviceMake": "Apple",
+      "deviceModel": "RealityDevice17,1",
       "hl": "en",
       "gl": "US",
     ]
@@ -358,10 +383,18 @@ public final class OpenfyYouTubeModule: Module {
       client["visitorData"] = visitorData
     }
     let body: [String: Any] = [
-      "context": ["client": client],
+      "context": [
+        "client": client,
+        "user": ["enableSafetyMode": false, "lockedSafetyMode": false],
+        "request": ["useSsl": true, "internalExperimentFlags": []],
+      ],
       "videoId": videoId,
       "contentCheckOk": true,
       "racyCheckOk": true,
+      "cpn": String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16)),
+      "playbackContext": [
+        "contentPlaybackContext": ["html5Preference": "HTML5_PREF_WANTS"],
+      ],
     ]
 
     var request = URLRequest(url: url)
@@ -369,10 +402,11 @@ public final class OpenfyYouTubeModule: Module {
     request.timeoutInterval = 15
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.setValue("*/*", forHTTPHeaderField: "Accept")
-    request.setValue(AndroidMusicPlayerClient.userAgent, forHTTPHeaderField: "User-Agent")
-    request.setValue(AndroidMusicPlayerClient.id, forHTTPHeaderField: "X-YouTube-Client-Name")
-    request.setValue(AndroidMusicPlayerClient.version, forHTTPHeaderField: "X-YouTube-Client-Version")
-    request.setValue("2", forHTTPHeaderField: "X-GOOG-API-FORMAT-VERSION")
+    for (name, value) in GuestPlayerClient.mediaHeaders {
+      request.setValue(value, forHTTPHeaderField: name)
+    }
+    request.setValue(GuestPlayerClient.id, forHTTPHeaderField: "X-YouTube-Client-Name")
+    request.setValue(GuestPlayerClient.version, forHTTPHeaderField: "X-YouTube-Client-Version")
     if let visitorData, !visitorData.isEmpty {
       request.setValue(visitorData, forHTTPHeaderField: "X-Goog-Visitor-Id")
     }
@@ -460,40 +494,14 @@ public final class OpenfyYouTubeModule: Module {
     }
 
     let candidates = formats.compactMap { format -> (url: URL, score: Int)? in
-      let rawURLString: String? = {
-        if let url = format["url"] as? String, !url.isEmpty {
-          return url
-        }
-        // Partial signatureCipher fallback: extract the raw `url` field only.
-        // NOTE: signatureCipher streams require deciphering the `s` parameter
-        // (using the player JS signature function) before the URL is valid.
-        // Full decipher is NOT performed here — that is intentionally handled
-        // by youtubei.js on the JS resolver side. This branch exists only to
-        // surface the URL for inspection / logging when the direct `url` field
-        // is missing from the response, e.g. on older Innertube responses.
-        // A URL extracted here without deciphering will likely return 403.
-        let cipher = (format["signatureCipher"] as? String) ?? (format["cipher"] as? String)
-        if let cipher, !cipher.isEmpty {
-          let components = cipher.components(separatedBy: "&")
-          for comp in components {
-            let pair = comp.components(separatedBy: "=")
-            if pair.count == 2 && pair[0] == "url",
-              let decoded = pair[1].removingPercentEncoding,
-              !decoded.isEmpty {
-              return decoded
-            }
-          }
-        }
-        return nil
-      }()
-
-      guard let rawURL = rawURLString,
+      // The destination is M4A. Do not save WebM or an undeciphered URL as AAC.
+      guard let rawURL = format["url"] as? String,
         let url = URL(string: rawURL),
         url.scheme?.lowercased() == "https",
         let host = url.host?.lowercased(),
         host == "googlevideo.com" || host.hasSuffix(".googlevideo.com"),
         let mimeType = format["mimeType"] as? String,
-        mimeType.lowercased().hasPrefix("audio/") else {
+        mimeType.lowercased().hasPrefix("audio/mp4") else {
         return nil
       }
       let quality = (format["audioQuality"] as? String) == "AUDIO_QUALITY_HIGH" ? 1_000_000 : 0

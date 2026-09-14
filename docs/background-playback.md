@@ -23,6 +23,20 @@ A ação de APK Android usa as mesmas variáveis. O app instalado não usa API
 Openfy nem recebe `SPOTIFY_CLIENT_SECRET`; tudo que baixa áudio roda localmente
 no aparelho.
 
+O download de faixas do Spotify primeiro identifica o vídeo correspondente e
+persiste seu ID na fila. No iPhone, o módulo nativo resolve esse vídeo e salva
+áudio AAC/M4A em blocos de 1 MiB na mesma sessão de rede. O fluxo de visitante
+usa o perfil `VISIONOS` e a renovação de visitante da biblioteca `ytmusic-rs`
+usada pelo Sonora. Não depende de uma URL de áudio gerada pelo JavaScript.
+
+Mudanças nesse módulo exigem gerar e reinstalar o IPA; recarregar o JavaScript
+ou usar um IPA anterior não atualiza o código Swift. Nos logs de download,
+`audio.native.capability` informa se a instalação tem o método nativo, e
+`X-Openfy-Player-Client: VISIONOS` identifica o novo fluxo nas respostas.
+`audio.youtube.stream.result` preserva falhas de inicialização e bloqueios do
+resolvedor alternativo. Uma resposta `LOGIN_REQUIRED` ou HTTP 403 não é
+tratada como arquivo baixado, e o app não fabrica tokens de autorização.
+
 Valide em um iPhone físico: inicie uma faixa, bloqueie a tela, use play/pause e avanço/retrocesso na Tela Bloqueada, e confira a Ilha Dinâmica. Para downloads, inicie uma faixa para enfileirá-la, coloque o app em segundo plano e confira a Biblioteca após a próxima janela do sistema.
 
 `expo-apple-targets` continua sendo apropriado para uma Live Activity proprietária. Ele não é necessário para a experiência de mídia “Now Playing” do iOS e criaria uma superfície duplicada de controles.

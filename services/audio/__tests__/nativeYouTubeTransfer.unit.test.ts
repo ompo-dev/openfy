@@ -42,7 +42,7 @@ describe('downloadYouTubeStreamNatively', () => {
     expect(mockNativeResolveAndDownload).toHaveBeenCalledWith(
       'V1M1hYxmRvA',
       'file:///mock_dir/openfy_downloads/track.m4a',
-      2 * 1024 * 1024
+      1024 * 1024
     );
   });
 
@@ -74,7 +74,7 @@ describe('downloadYouTubeStreamNatively', () => {
       'https://rr1.googlevideo.com/videoplayback?c=IOS',
       'file:///mock_dir/openfy_downloads/track.m4a',
       { 'User-Agent': 'com.google.ios.youtube/test' },
-      2 * 1024 * 1024
+      1024 * 1024
     );
   });
 

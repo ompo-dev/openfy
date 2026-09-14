@@ -17,9 +17,12 @@ import {
 import {
   getDirectYouTubeMediaHeaders,
   reportDirectYouTubeStreamRefusal,
+  resolveDirectYouTubeAudio,
 } from '../audio/directYouTubeResolver';
+import { resolveSpotifyTrackVideoId } from '../audio/catalogResolver';
 import {
   downloadYouTubeStreamNatively,
+  hasNativeYouTubeDownload,
   resolveAndDownloadYouTubeVideoNatively,
 } from '../audio/nativeYouTubeTransfer';
 import {
@@ -122,6 +125,9 @@ const selectResponseHeaders = (headers?: Record<string, string>) => {
     'accept-ranges',
     'date',
     'server',
+    'x-playability-status',
+    'x-playability-reason',
+    'x-openfy-player-client',
   ];
   const selected = Object.fromEntries(
     Object.entries(headers).filter(([name]) =>
@@ -805,7 +811,7 @@ export const downloadAudio = async (
           session: 'foreground',
           url: `https://www.youtube.com/watch?v=${nativeExactVideoId}`,
           format: cleanFormat,
-          range: 'bytes=0-2097151',
+          range: 'bytes=0-1048575',
         });
         const nativeResolvedResult =
           await resolveAndDownloadYouTubeVideoNatively(
@@ -820,6 +826,11 @@ export const downloadAudio = async (
             'foreground'
           );
           if (validResult) return validResult;
+        } else {
+          recordDownloadDiagnostic(spotifyId, 'audio.failed', {
+            transport: 'native_player_range',
+            reason: 'native_download_unavailable_or_empty_result',
+          });
         }
       } catch (error) {
         recordDownloadDiagnostic(spotifyId, 'audio.failed', {
@@ -855,7 +866,7 @@ export const downloadAudio = async (
           session: 'foreground',
           url: audioUrl,
           format: cleanFormat,
-          range: 'bytes=0-2097151',
+          range: 'bytes=0-1048575',
         });
         const nativeResult = await downloadYouTubeStreamNatively(
           audioUrl,
@@ -1071,9 +1082,8 @@ const downloadTrackInternal = async (
     let effectiveTrack = track;
 
     const suppliedAudioUrl = audioUrl || track.audioUrl;
-    // A cached signed URL may expire while a native background task waits.
-    // Native asks the shared resolver for a fresh source; web can reuse its
-    // already-proxied source without triggering an extra request.
+    // Signed URLs can expire while the OS waits. Prefer resolving and saving
+    // the matched video in the native session before requesting a JS URL.
     let youtubeVideoId =
       track.youtubeVideoId || youtubeVideoIdFromTrackId(track.spotifyId);
     let resolvedUrl = Platform.OS === 'web' ? suppliedAudioUrl : undefined;
@@ -1081,6 +1091,71 @@ const downloadTrackInternal = async (
       Platform.OS === 'web'
         ? audioFormat || track.audioFormat || 'mp3'
         : track.audioFormat || (youtubeVideoId ? 'm4a' : 'mp3');
+    let localAudioPath: string | null = null;
+    let nativeDownloadAttempted = false;
+    const nativeDownloadAvailable = hasNativeYouTubeDownload();
+    recordDownloadDiagnostic(track.spotifyId, 'audio.native.capability', {
+      available: nativeDownloadAvailable,
+    });
+
+    if (nativeDownloadAvailable) {
+      if (!youtubeVideoId) {
+        const catalog = await resolveSpotifyTrackVideoId(
+          track.spotifyId,
+          track.title,
+          [track.artistName],
+          track.duration_ms
+        );
+        recordDownloadDiagnostic(track.spotifyId, 'audio.catalog.result', catalog);
+        if (catalog.status === 'resolved') {
+          youtubeVideoId = catalog.videoId;
+          effectiveTrack = {
+            ...effectiveTrack,
+            imageURL: effectiveTrack.imageURL || catalog.imageURL || '',
+          };
+        }
+      }
+
+      if (cancelledDownloads.has(track.spotifyId)) return null;
+      if (youtubeVideoId) {
+        format = 'm4a';
+        effectiveTrack = { ...effectiveTrack, youtubeVideoId, audioFormat: format };
+        await upsertPendingDownload(effectiveTrack, undefined, format);
+        nativeDownloadAttempted = true;
+        localAudioPath = await downloadAudio(
+          '',
+          trackId,
+          format,
+          (p) => onProgress?.(p * 0.7),
+          youtubeVideoId
+        );
+      }
+    }
+
+    // Once identified, every retry uses that video, even if stream resolution
+    // fails. A transport failure must not turn into a new title search.
+    const resolveCurrentAudio = async (fresh = false) => {
+      if (youtubeVideoId) {
+        const direct = await resolveDirectYouTubeAudio({
+          videoId: youtubeVideoId,
+          spotifyId: track.spotifyId,
+          fresh,
+        });
+        return direct
+          ? { ...direct, source: 'youtube' as const }
+          : null;
+      }
+      return resolveAudioUrl(
+        track.title,
+        track.artistName,
+        track.spotifyId,
+        track.duration_ms,
+        undefined,
+        fresh
+      );
+    };
+
+    if (cancelledDownloads.has(track.spotifyId)) return null;
     if (resolvedUrl) {
       resolvedUrl = getPlayableAudioUrl(resolvedUrl);
       recordDownloadDiagnostic(track.spotifyId, 'audio.source.preloaded', {
@@ -1090,35 +1165,19 @@ const downloadTrackInternal = async (
     }
 
     // Audio is resolved on the current device only.
-    if (!resolvedUrl) {
+    if (!localAudioPath && !resolvedUrl) {
       recordDownloadDiagnostic(track.spotifyId, 'audio.resolve.request', {
         platform: Platform.OS,
       });
       console.log(
         `[DownloadManager] ${Platform.OS} resolving "${track.artistName} - ${track.title}", mode: local`
       );
-      const mainResult = await resolveAudioUrl(
-        track.title,
-        track.artistName,
-        track.spotifyId,
-        track.duration_ms
-      );
-      // Imported metadata can retain an obsolete or provider-specific id.
-      // The second pass deliberately resolves only the canonical title/artist
-      // so downloads never fail solely because that id no longer has a stream.
-      const fallbackResult =
-        mainResult?.url || !track.spotifyId
-          ? mainResult
-          : await resolveAudioUrl(
-              track.title,
-              track.artistName,
-              undefined,
-              track.duration_ms
-            );
+      const fallbackResult = await resolveCurrentAudio();
       if (fallbackResult?.url) {
         resolvedUrl = fallbackResult.url;
         format = fallbackResult.format || 'mp3';
-        youtubeVideoId = fallbackResult.videoId;
+        youtubeVideoId = fallbackResult.videoId || youtubeVideoId;
+        effectiveTrack = { ...effectiveTrack, youtubeVideoId, audioFormat: format };
         recordDownloadDiagnostic(track.spotifyId, 'audio.source.resolved', {
           url: resolvedUrl,
           format,
@@ -1136,7 +1195,7 @@ const downloadTrackInternal = async (
       }
     }
 
-    if (!resolvedUrl && suppliedAudioUrl) {
+    if (!localAudioPath && !resolvedUrl && suppliedAudioUrl) {
       resolvedUrl = getPlayableAudioUrl(suppliedAudioUrl);
       format = audioFormat || track.audioFormat || 'mp3';
       recordDownloadDiagnostic(track.spotifyId, 'audio.source.fallback', {
@@ -1148,23 +1207,29 @@ const downloadTrackInternal = async (
     if (cancelledDownloads.has(track.spotifyId)) return null;
 
     const canAttemptNativeExactDownload =
-      Platform.OS === 'ios' && Boolean(youtubeVideoId);
+      nativeDownloadAvailable && Boolean(youtubeVideoId) && !nativeDownloadAttempted;
 
-    if (!resolvedUrl && !canAttemptNativeExactDownload) {
+    if (!localAudioPath && !resolvedUrl && !canAttemptNativeExactDownload) {
       console.warn(
         `[DownloadManager] No verified local stream for "${track.artistName} - ${track.title}". Check the device connection and retry.`
       );
-      throw new Error('Could not resolve audio stream URL');
+      throw new Error(
+        nativeDownloadAttempted
+          ? 'Native YouTube download failed and no fallback stream was available'
+          : 'Could not resolve audio stream URL'
+      );
     }
 
     // Download audio file
-    let localAudioPath = await downloadAudio(
-      resolvedUrl || '',
-      trackId,
-      format,
-      (p) => onProgress?.(p * 0.7),
-      youtubeVideoId
-    );
+    if (!localAudioPath) {
+      localAudioPath = await downloadAudio(
+        resolvedUrl || '',
+        trackId,
+        format,
+        (p) => onProgress?.(p * 0.7),
+        nativeDownloadAttempted ? undefined : youtubeVideoId
+      );
+    }
 
     if (cancelledDownloads.has(track.spotifyId)) return null;
 
@@ -1172,31 +1237,25 @@ const downloadTrackInternal = async (
     // Resolve once more before marking the queued item as failed.
     if (!localAudioPath) {
       recordDownloadDiagnostic(track.spotifyId, 'audio.resolve.refresh');
-      const refreshed = await resolveAudioUrl(
-        track.title,
-        track.artistName,
-        track.spotifyId,
-        track.duration_ms,
-        undefined,
-        true
-      );
+      const refreshed = await resolveCurrentAudio(true);
       if (refreshed?.url && refreshed.url !== resolvedUrl) {
         resolvedUrl = refreshed.url;
         format = refreshed.format || format;
-        youtubeVideoId = refreshed.videoId;
+        youtubeVideoId = refreshed.videoId || youtubeVideoId;
+        effectiveTrack = { ...effectiveTrack, youtubeVideoId, audioFormat: format };
         recordDownloadDiagnostic(track.spotifyId, 'audio.source.refreshed', {
           url: resolvedUrl,
           format,
           source: refreshed.source,
           videoId: youtubeVideoId,
         });
-        await upsertPendingDownload(track, resolvedUrl, format);
+        await upsertPendingDownload(effectiveTrack, resolvedUrl, format);
         localAudioPath = await downloadAudio(
           resolvedUrl,
           trackId,
           format,
           (p) => onProgress?.(p * 0.7),
-          youtubeVideoId
+          nativeDownloadAttempted ? undefined : youtubeVideoId
         );
       }
     }

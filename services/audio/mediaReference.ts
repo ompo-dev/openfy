@@ -34,7 +34,7 @@ export type StreamClientId =
   | 'tv';
 
 export type InnertubeClientName =
-  | 'ANDROID_MUSIC'
+  | 'YTMUSIC_ANDROID'
   | 'IOS'
   | 'ANDROID_VR'
   | 'MWEB'
@@ -47,7 +47,6 @@ export type StreamClientProfile = {
   userAgent: string;
   origin?: string;
   referer?: string;
-  poTokenMode: 'none' | 'gvs' | 'player_and_gvs';
 };
 
 /**

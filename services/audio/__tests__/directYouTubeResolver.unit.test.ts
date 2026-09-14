@@ -48,7 +48,7 @@ describe('resolveDirectYouTubeAudio', () => {
       format: 'm4a',
     });
     expect(getStreamingData).toHaveBeenCalledWith('V1M1hYxmRvA', expect.objectContaining({
-      client: 'ANDROID_MUSIC',
+      client: 'YTMUSIC_ANDROID',
       quality: 'best',
       type: 'audio',
     }));
@@ -61,7 +61,7 @@ describe('resolveDirectYouTubeAudio', () => {
       'https://rr1.googlevideo.com/mafinoso.m4a?c=ANDROID_MUSIC',
       expect.objectContaining({
         headers: expect.objectContaining({
-          'User-Agent': expect.stringContaining('com.google.android.apps.youtube.music'),
+          'User-Agent': expect.stringContaining('com.google.android.youtube'),
         }),
       })
     );
@@ -79,7 +79,7 @@ describe('resolveDirectYouTubeAudio', () => {
     });
 
     expect(getDirectYouTubeMediaHeaders(resolved!.url)).toEqual({
-      'User-Agent': expect.stringContaining('com.google.android.apps.youtube.music'),
+      'User-Agent': expect.stringContaining('com.google.android.youtube'),
     });
   });
 
@@ -124,7 +124,7 @@ describe('resolveDirectYouTubeAudio', () => {
     });
 
     expect(getStreamingData).toHaveBeenNthCalledWith(1, 'V1M1hYxmRvA', expect.objectContaining({
-      client: 'ANDROID_MUSIC',
+      client: 'YTMUSIC_ANDROID',
       quality: 'best',
       type: 'audio',
     }));
@@ -406,7 +406,7 @@ describe('resolveDirectYouTubeAudio', () => {
 
     expect(getStreamingData).toHaveBeenCalledTimes(1);
     expect(getStreamingData).toHaveBeenCalledWith('aj5_Cvp9je0', expect.objectContaining({
-      client: 'ANDROID_MUSIC',
+      client: 'YTMUSIC_ANDROID',
       quality: 'best',
       type: 'audio',
     }));

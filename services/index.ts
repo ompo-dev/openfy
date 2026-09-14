@@ -44,8 +44,6 @@ export {
   invalidateCatalogMapping,
 } from './audio/catalogMappingCache';
 export type { CatalogMapping } from './audio/catalogMappingCache';
-export { getPOToken, invalidatePOToken } from './audio/poTokenProvider';
-export type { POTokenContext } from './audio/poTokenProvider';
 
 export { refreshHomeTracks } from './home/homeTrackRefresh';
 export type { HomeTrackSeed, RefreshedHomeTrack } from './home/homeTrackRefresh';

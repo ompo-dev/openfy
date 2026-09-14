@@ -6,7 +6,6 @@ import type {
   YouTubeStreamDescriptor,
 } from './mediaReference';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
-import { getPOToken, invalidatePOToken } from './poTokenProvider';
 
 /**
  * YouTubeStreamResolver — videoId → StreamResolveResult
@@ -17,7 +16,7 @@ import { getPOToken, invalidatePOToken } from './poTokenProvider';
  *
  * Key behaviours:
  *   - ANDROID_MUSIC, MWEB, IOS, ANDROID_VR, WEB_EMBEDDED, TV client profiles
- *   - Client name, version, User-Agent, Origin, Referer, and PO Token stay unified
+ *   - Client identity and media headers stay consistent across requests
  *   - Two-point GVS probe (bytes 0-1 MiB + 1-2 MiB) before marking a URL usable
  *   - Real HTTP AbortController cancellation on timeout
  *   - Global resolution budget (14s) so resolution never hangs indefinitely
@@ -33,10 +32,9 @@ import { getPOToken, invalidatePOToken } from './poTokenProvider';
 export const CLIENT_PROFILES: readonly StreamClientProfile[] = [
   {
     id: 'android_music',
-    innertubeClient: 'ANDROID_MUSIC',
+    innertubeClient: 'YTMUSIC_ANDROID',
     userAgent:
-      'com.google.android.apps.youtube.music/8.39.42 (Linux; U; Android 15; en_US; Pixel 9 Pro; Build/AP4A.250205.002) gzip',
-    poTokenMode: 'gvs',
+      'com.google.android.youtube/21.03.36(Linux; U; Android 16; en_US; SM-S908E Build/TP1A.220624.014) gzip',
   },
   {
     id: 'mweb',
@@ -45,21 +43,18 @@ export const CLIENT_PROFILES: readonly StreamClientProfile[] = [
       'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
     origin: 'https://m.youtube.com',
     referer: 'https://m.youtube.com/',
-    poTokenMode: 'player_and_gvs',
   },
   {
     id: 'ios',
     innertubeClient: 'IOS',
     userAgent:
       'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)',
-    poTokenMode: 'gvs',
   },
   {
     id: 'android_vr',
     innertubeClient: 'ANDROID_VR',
     userAgent:
       'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
-    poTokenMode: 'gvs',
   },
   {
     id: 'web_embedded',
@@ -68,7 +63,6 @@ export const CLIENT_PROFILES: readonly StreamClientProfile[] = [
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     origin: 'https://www.youtube.com',
     referer: 'https://www.youtube.com/',
-    poTokenMode: 'player_and_gvs',
   },
   {
     id: 'tv',
@@ -76,7 +70,6 @@ export const CLIENT_PROFILES: readonly StreamClientProfile[] = [
     userAgent: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
     origin: 'https://www.youtube.com',
     referer: 'https://www.youtube.com/',
-    poTokenMode: 'none',
   },
 ];
 
@@ -103,7 +96,6 @@ type InnertubeClient = {
       client: string;
       quality: 'best';
       type: 'audio';
-      po_token?: string;
     }
   ): Promise<{ url?: string; mime_type?: string }>;
   getBasicInfo(videoId: string): Promise<{
@@ -487,11 +479,6 @@ const doResolve = async (
         });
       }
 
-      let poToken: string | undefined;
-      if (profile.poTokenMode !== 'none') {
-        poToken = await getPOToken(videoId, profile.id).catch(() => undefined);
-      }
-
       let streamError: string | undefined;
       const remainingTime = Math.max(1000, deadline - Date.now());
       const timeoutMs = Math.min(CLIENT_REQUEST_TIMEOUT_MS, remainingTime);
@@ -501,7 +488,6 @@ const doResolve = async (
           client: profile.innertubeClient,
           quality: 'best',
           type: 'audio',
-          ...(poToken ? { po_token: poToken } : {}),
         }),
         `${profile.id} stream resolution`,
         timeoutMs
@@ -543,8 +529,7 @@ const doResolve = async (
         }
         await recordFailure(profile.id);
         if (isGvsEnforcement) {
-          // Evict cached PO token and session
-          invalidatePOToken(videoId, profile.id);
+          // An attestation must come from the provider, never encoded local JSON.
           innertubeClient = null;
           const result: StreamResolveResult = { status: 'attestation_required', videoId, client: profile.id };
           verdictCache.set(videoId, { result, expiresAt: Date.now() + ATTESTATION_VERDICT_TTL_MS });
@@ -581,6 +566,7 @@ const doResolve = async (
     }
   } catch (error) {
     const msg = errorMsg(error);
+    innertubeClient = null;
     console.warn(`[StreamResolver] transport error for ${videoId}: ${msg}`);
     const result: StreamResolveResult = { status: 'transport_error', videoId, error: msg };
     verdictCache.set(videoId, { result, expiresAt: Date.now() + BLOCKED_VERDICT_TTL_MS });
@@ -611,16 +597,30 @@ export const resolveYouTubeStream = async (
   const fresh = options?.fresh ?? false;
   const spotifyId = options?.spotifyId;
 
-  if (fresh) return doResolve(videoId, true, spotifyId);
+  if (spotifyId) {
+    recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.started', { videoId, fresh });
+  }
 
-  const pending = inFlight.get(videoId);
-  if (pending) return pending;
+  let promise = fresh ? undefined : inFlight.get(videoId);
+  if (!promise) {
+    promise = doResolve(videoId, fresh, spotifyId);
+    if (!fresh) {
+      promise = promise.finally(() => { inFlight.delete(videoId); });
+      inFlight.set(videoId, promise);
+    }
+  }
 
-  const promise = doResolve(videoId, false, spotifyId).finally(() => {
-    inFlight.delete(videoId);
-  });
-  inFlight.set(videoId, promise);
-  return promise;
+  const result = await promise;
+  if (spotifyId) {
+    // Include terminal outcomes even for initialization failures, cached verdicts
+    // and callers sharing an in-flight request. Never log signed stream URLs.
+    recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.result',
+      result.status === 'resolved'
+        ? { videoId, status: result.status, client: result.stream.client }
+        : { ...result }
+    );
+  }
+  return result;
 };
 
 /**
@@ -636,7 +636,6 @@ export const reportStreamRefusal = async (url: string, status: number): Promise<
     if (cached.value.url === url) {
       streamCache.delete(vid);
       verdictCache.delete(vid);
-      invalidatePOToken(vid, client);
     }
   }
   innertubeClient = null;

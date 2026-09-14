@@ -4,6 +4,10 @@ jest.mock('youtubei.js', () => ({ Innertube: { create: mockCreate } }));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  getDownloadDiagnostics,
+  startDownloadDiagnostics,
+} from '../../download/downloadDiagnostics';
+import {
   resolveYouTubeStream,
   reportStreamRefusal,
   CLIENT_PROFILES,
@@ -50,13 +54,13 @@ describe('resolveYouTubeStream', () => {
     expect(result.stream.client).toBe('android_music');
     expect(result.stream.expiresAt).toBeGreaterThan(Date.now());
     expect(result.stream.headers).toHaveProperty('User-Agent');
-    expect(result.stream.headers['User-Agent']).toContain('com.google.android.apps.youtube.music');
+    expect(result.stream.headers['User-Agent']).toContain('com.google.android.youtube');
 
-    expect(getStreamingData).toHaveBeenCalledWith('V1M1hYxmRvA', expect.objectContaining({
-      client: 'ANDROID_MUSIC',
+    expect(getStreamingData).toHaveBeenCalledWith('V1M1hYxmRvA', {
+      client: 'YTMUSIC_ANDROID',
       quality: 'best',
       type: 'audio',
-    }));
+    });
   });
 
   it('deduplicates concurrent in-flight requests for the same videoId', async () => {
@@ -195,6 +199,48 @@ describe('resolveYouTubeStream', () => {
     expect(result.status).toBe('transport_error');
     if (result.status !== 'transport_error') return;
     expect(result.error).toContain('network down');
+  });
+
+  it('records initialization failures and cached verdicts in the download log', async () => {
+    mockCreate.mockRejectedValue(new Error('player initialization failed'));
+    const spotifyId = 'spotify_init_failure';
+    await startDownloadDiagnostics({
+      spotifyId, title: 'Track', artistName: 'Artist', albumName: '',
+      imageURL: '', duration_ms: 0,
+    });
+
+    await resolveYouTubeStream('_MyOuFWnPPY', { spotifyId });
+    await resolveYouTubeStream('_MyOuFWnPPY', { spotifyId });
+
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    const diagnostic = await getDownloadDiagnostics(spotifyId);
+    const results = diagnostic?.events.filter(event =>
+      event.phase === 'audio.youtube.stream.result'
+    );
+    expect(results).toHaveLength(2);
+    expect(results?.[0].details).toMatchObject({
+      videoId: '_MyOuFWnPPY', status: 'transport_error',
+      error: 'player initialization failed',
+    });
+    expect(results?.[1].details).toEqual(results?.[0].details);
+  });
+
+  it('reinitializes the client on a fresh retry after initialization failed', async () => {
+    mockCreate
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce({
+        getStreamingData: jest.fn().mockResolvedValue({
+          url: 'https://rr1.googlevideo.com/retry.m4a?c=ANDROID_MUSIC',
+          mime_type: 'audio/mp4',
+        }),
+      });
+
+    await expect(resolveYouTubeStream('_MyOuFWnPPY')).resolves.toMatchObject({
+      status: 'transport_error',
+    });
+    await expect(resolveYouTubeStream('_MyOuFWnPPY', { fresh: true }))
+      .resolves.toMatchObject({ status: 'resolved' });
+    expect(mockCreate).toHaveBeenCalledTimes(2);
   });
 
   it('reportStreamRefusal evicts cache and records failure', async () => {

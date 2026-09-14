@@ -23,7 +23,7 @@ type OpenfyYouTubeNativeModule = {
   ): Promise<unknown>;
 };
 
-const NATIVE_TRANSFER_CHUNK_BYTES = 2 * 1024 * 1024;
+const NATIVE_TRANSFER_CHUNK_BYTES = 1024 * 1024;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object';
@@ -56,6 +56,10 @@ const getNativeModule = (): OpenfyYouTubeNativeModule | null => {
 };
 
 export const hasNativeYouTubeTransfer = () => Boolean(getNativeModule());
+
+export const hasNativeYouTubeDownload = () =>
+  Platform.OS === 'ios' &&
+  typeof getNativeModule()?.resolveAndDownloadGoogleVideoAsync === 'function';
 
 /**
  * Native iOS/Android range transfer used only for direct googlevideo sources.
