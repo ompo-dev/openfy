@@ -82,7 +82,7 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
         accessibilityLabel="Abrir Player de Música"
       >
         <MiniPlayerSurface style={styles.glassContainer}>
-          <View style={styles.contentRow}>
+          <View testID="mini-player-content" style={styles.contentRow}>
             <View style={styles.coverWrapper}>
               {currentTrack.imageURL ? (
                 <Image
@@ -157,7 +157,7 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
             </View>
           </View>
 
-          <View style={styles.progressBarBackground}>
+          <View testID="mini-player-progress" style={styles.progressBarBackground}>
             <View
               style={[styles.progressBarFill, { width: `${progress * 100}%` }]}
             />
@@ -187,20 +187,20 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   glassContainer: {
-    borderRadius: 36,
-    minHeight: 64,
+    borderRadius: 30,
+    height: 60,
   },
   contentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 12,
+    height: 56,
+    gap: 10,
   },
   coverWrapper: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
@@ -258,10 +258,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   progressBarBackground: {
-    height: 2.5,
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    bottom: 4,
+    height: 2,
     backgroundColor: 'rgba(255, 255, 255, 0.14)',
-    marginHorizontal: 26,
-    marginBottom: 6,
     overflow: 'hidden',
   },
   progressBarFill: {

@@ -43,4 +43,12 @@ describe('MiniPlayer', () => {
     await fireEvent.press(screen.getByLabelText('Abrir Player de Música'));
     expect(onPress).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps the progress inside the compact player instead of adding height', async () => {
+    const screen = await render(<MiniPlayer />);
+    expect(StyleSheet.flatten(screen.getByTestId('mini-player-content').props.style).height).toBe(56);
+    expect(StyleSheet.flatten(screen.getByTestId('mini-player-progress').props.style)).toMatchObject({
+      position: 'absolute', bottom: 4, height: 2,
+    });
+  });
 });

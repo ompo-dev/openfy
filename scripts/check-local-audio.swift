@@ -57,5 +57,16 @@ import Foundation
     let second = try await LocalAudioNormalizer.repair(url: local)
     guard !second.repaired else { fatalError("Repair must be idempotent") }
     print("PASS: \(duration.seconds)s -> \(ms / 1000)s, identical compressed audio, flat M4A, repeat is a no-op")
+
+    let broken = directory.appendingPathComponent("truncated.m4a")
+    let truncated = Data(try Data(contentsOf: source).dropLast(200))
+    try truncated.write(to: broken)
+    do {
+      _ = try await LocalAudioNormalizer.repair(url: broken)
+      fatalError("A truncated container must be rejected")
+    } catch {
+      guard try Data(contentsOf: broken) == truncated else { fatalError("Failed repair changed original") }
+    }
+    print("PASS: damaged input rejected without modifying the original")
   }
 }

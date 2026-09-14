@@ -23,8 +23,6 @@ import {
   Dimensions,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { LinearGradient } from 'expo-linear-gradient';
-import MaskedView from '@react-native-masked-view/masked-view';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -80,21 +78,12 @@ const LyricsViewport = ({ children }: React.PropsWithChildren) => {
     );
   }
 
+  // A composited native mask can disappear when Fabric updates the scrolling
+  // lyrics. Keep the list on a normal, bounded native surface instead.
   return (
-    <MaskedView
-      style={styles.lyricsMainContainer}
-      maskElement={
-        <View style={styles.lyricsMask}>
-          <LinearGradient
-            colors={['transparent', '#000000', '#000000', 'transparent']}
-            locations={[0, 0.14, 0.86, 1]}
-            style={StyleSheet.absoluteFill}
-          />
-        </View>
-      }
-    >
-      <View style={styles.lyricsMaskContent}>{children}</View>
-    </MaskedView>
+    <View testID="player-lyrics-viewport" style={styles.lyricsMainContainer}>
+      {children}
+    </View>
   );
 };
 
@@ -374,7 +363,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   );
   const lyricTimeline = React.useMemo(
     () =>
-      getLyricTimelineBlocks(displayedLyricSegments, lyricTimelineDurationMs),
+      displayedLyricSegments.length > 0
+        ? getLyricTimelineBlocks(displayedLyricSegments, lyricTimelineDurationMs)
+        : [],
     [displayedLyricSegments, lyricTimelineDurationMs]
   );
 
@@ -895,6 +886,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           <LyricsViewport>
             {lyricTimeline.length > 0 ? (
               <FlatList
+                testID="player-synced-lyrics"
+                style={styles.lyricsList}
+                removeClippedSubviews={false}
                 ref={lyricsListRef}
                 data={lyricTimeline}
                 extraData={`${activeLineIndex}:${isLyricsEditing}:${JSON.stringify(selectedLyricTarget)}`}
@@ -903,7 +897,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                     ? item.id
                     : `lyric_${item.startTimeMs}_${item.index}`
                 }
-                initialScrollIndex={Math.max(0, activeLineIndex)}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.lyricsScrollContent}
                 onLayout={() => scrollLyricsToActive(false)}
@@ -972,6 +965,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               />
             ) : lyricsData && lyricsData.plainLyrics ? (
               <FlatList
+                testID="player-plain-lyrics"
+                style={styles.lyricsList}
+                removeClippedSubviews={false}
                 data={lyricsData.plainLyrics
                   .split('\n')
                   .filter((l) => l.trim().length > 0)}
@@ -1514,11 +1510,13 @@ const styles = StyleSheet.create({
   trackArtistMarquee: { maxWidth: '100%' },
   lyricsMainContainer: {
     flex: 1,
+    minHeight: 0,
+    width: '100%',
     marginVertical: 4,
     position: 'relative',
+    overflow: 'hidden',
   },
-  lyricsMask: { flex: 1 },
-  lyricsMaskContent: { flex: 1 },
+  lyricsList: { flex: 1, width: '100%' },
   lyricsScrollContent: {
     paddingTop: 48,
     paddingBottom: 72,
@@ -1614,6 +1612,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   lyricsTrackPill: {
+    flex: 1,
+    minWidth: 0,
     height: 44,
     paddingHorizontal: 20,
     borderRadius: 22,
@@ -1627,7 +1627,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  lyricsTrackPillMarquee: { flex: 1 },
+  lyricsTrackPillMarquee: { width: '100%' },
   progressContainer: {
     width: '100%',
     marginVertical: 8,

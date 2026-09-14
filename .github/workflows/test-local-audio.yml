@@ -5,7 +5,7 @@ on:
     paths:
       - 'modules/openfy-local-audio/**'
       - 'scripts/check-local-audio.swift'
-      - 'scripts/fixtures/synthetic-dash.m4a'
+      - 'scripts/fixtures/synthetic-dash*.m4a'
       - '.github/workflows/test-local-audio.yml'
   workflow_dispatch:
 
@@ -25,4 +25,6 @@ jobs:
             modules/openfy-local-audio/ios/LocalAudioNormalizer.swift \
             scripts/check-local-audio.swift -o "$RUNNER_TEMP/check-local-audio"
       - name: Check duration, audio preservation and idempotence
-        run: '"$RUNNER_TEMP/check-local-audio" scripts/fixtures/synthetic-dash.m4a'
+        run: |
+          "$RUNNER_TEMP/check-local-audio" scripts/fixtures/synthetic-dash.m4a
+          "$RUNNER_TEMP/check-local-audio" scripts/fixtures/synthetic-dash-edits.m4a

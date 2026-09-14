@@ -40,3 +40,23 @@ tratada como arquivo baixado, e o app não fabrica tokens de autorização.
 Valide em um iPhone físico: inicie uma faixa, bloqueie a tela, use play/pause e avanço/retrocesso na Tela Bloqueada, e confira a Ilha Dinâmica. Para downloads, inicie uma faixa para enfileirá-la, coloque o app em segundo plano e confira a Biblioteca após a próxima janela do sistema.
 
 `expo-apple-targets` continua sendo apropriado para uma Live Activity proprietária. Ele não é necessário para a experiência de mídia “Now Playing” do iOS e criaria uma superfície duplicada de controles.
+
+## Duração dos arquivos locais
+
+O módulo `openfy-local-audio` normaliza AAC/M4A fragmentado após o download e
+antes de abrir arquivos já baixados. O reparo continua inteiramente no aparelho.
+Ele não divide a duração por dois nem corta a música pelo tempo do catálogo.
+Uma cópia temporária corrige os cabeçalhos vazios de inicialização DASH; um
+gravador AVFoundation novo reconstrói o M4A com os pacotes AAC originais.
+O arquivo só é substituído depois de validar a duração e o hash de todo o áudio
+comprimido. Falhas mantêm o original e permitem uma nova tentativa.
+
+A ação **Validate local audio repair** compila o mesmo código Swift em macOS e
+usa um tom sintético de 2 segundos seguido de meio segundo de silêncio. Ela
+verifica duração, preservação dos pacotes e repetição sem reprocessar o arquivo.
+O teste não baixa músicas nem precisa de credenciais de provedores.
+
+Após instalar o IPA atualizado, reabra uma faixa já baixada e confira o tempo,
+o avanço até perto do final e a passagem à próxima faixa. Confira também a
+letra sincronizada, a letra simples e o estado sem letra. A validação automatizada
+em macOS não substitui essa conferência visual e de reprodução no iPhone.
