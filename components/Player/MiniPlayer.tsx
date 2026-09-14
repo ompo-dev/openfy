@@ -9,8 +9,9 @@ import { Animated, Image, Platform, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
-import { GlassSurface, LoggedPressable } from '../native';
+import { LoggedPressable } from '../native';
 import { MarqueeText } from '../common/MarqueeText';
+import { MiniPlayerSurface } from './MiniPlayerSurface';
 
 export type MiniPlayerProps = {
   onPress?: () => void;
@@ -56,7 +57,8 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
         styles.container,
         style,
         {
-          opacity: fadeAnim,
+          // Starting a native glass ancestor at opacity zero disables its material.
+          opacity: Platform.OS === 'ios' ? 1 : fadeAnim,
           transform: [
             {
               translateY: fadeAnim.interpolate({
@@ -79,11 +81,7 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
         style={styles.pressableWrapper}
         accessibilityLabel="Abrir Player de Música"
       >
-        <GlassSurface
-          glass="regular"
-          isInteractive={!!onPress}
-          style={styles.glassContainer}
-        >
+        <MiniPlayerSurface style={styles.glassContainer}>
           <View style={styles.contentRow}>
             <View style={styles.coverWrapper}>
               {currentTrack.imageURL ? (
@@ -124,12 +122,7 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
                 accessibilityRole="button"
                 accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'}
               >
-                <GlassSurface
-                  glass="clear"
-                  tintColor="rgba(255,255,255,0.16)"
-                  isInteractive
-                  style={styles.controlSurface}
-                >
+                <View style={styles.controlSurface}>
                   <Ionicons
                     name={playerState.isPlaying ? 'pause' : 'play'}
                     size={19}
@@ -138,7 +131,7 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
                       !playerState.isPlaying ? { marginLeft: 2 } : undefined
                     }
                   />
-                </GlassSurface>
+                </View>
               </LoggedPressable>
 
               {onConfirm && (
@@ -156,14 +149,9 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
                   accessibilityRole="button"
                   accessibilityLabel="Confirmar música"
                 >
-                  <GlassSurface
-                    glass="regular"
-                    tintColor="rgba(30,215,96,0.34)"
-                    isInteractive
-                    style={styles.controlSurface}
-                  >
+                  <View style={styles.controlSurface}>
                     <Ionicons name="arrow-forward" size={17} color="#FFFFFF" />
-                  </GlassSurface>
+                  </View>
                 </LoggedPressable>
               )}
             </View>
@@ -174,7 +162,7 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
               style={[styles.progressBarFill, { width: `${progress * 100}%` }]}
             />
           </View>
-        </GlassSurface>
+        </MiniPlayerSurface>
       </LoggedPressable>
     </Animated.View>
   );
@@ -200,7 +188,6 @@ const styles = StyleSheet.create({
   },
   glassContainer: {
     borderRadius: 36,
-    overflow: 'hidden',
     minHeight: 64,
   },
   contentRow: {
@@ -236,6 +223,7 @@ const styles = StyleSheet.create({
   },
   infoContainer: {
     flex: 1,
+    minWidth: 0,
     gap: 2,
     justifyContent: 'center',
   },
@@ -244,13 +232,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: 'SF-Bold',
     fontWeight: '700',
-    letterSpacing: 0.1,
+    letterSpacing: 0,
   },
   artistText: {
     color: 'rgba(255, 255, 255, 0.68)',
     fontSize: 13,
     fontFamily: 'SF-Regular',
-    letterSpacing: 0.1,
+    letterSpacing: 0,
   },
   controlsContainer: {
     flexDirection: 'row',
@@ -272,7 +260,8 @@ const styles = StyleSheet.create({
   progressBarBackground: {
     height: 2.5,
     backgroundColor: 'rgba(255, 255, 255, 0.14)',
-    width: '100%',
+    marginHorizontal: 26,
+    marginBottom: 6,
     overflow: 'hidden',
   },
   progressBarFill: {

@@ -292,7 +292,7 @@ describe('resolveDirectYouTubeAudio', () => {
       imageURL: 'https://image.youtube.test/mafinoso.jpg',
       url: 'https://media.youtube.test/mafinoso.m4a',
     });
-    expect(search).toHaveBeenCalledWith('ÉoDan - Mafioso Official Audio', {
+    expect(search).toHaveBeenCalledWith('ÉoDan Mafioso Official Audio', {
       type: 'video',
     });
   });

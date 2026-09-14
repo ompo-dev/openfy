@@ -291,7 +291,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const handleArtistPress = React.useCallback(
     async (artistId: string, artistName: string) => {
       const targetArtistId =
-        artistId ||
+        (currentTrack?.localAudioPath
+          ? `local_artist_${encodeURIComponent(artistId ? `spotify:${artistId}` : artistName)}` : artistId) ||
         (await findArtistIdByName(artistName)) ||
         `local_artist_${encodeURIComponent(artistName)}`;
       const section = segments.join('/').includes('library')
@@ -300,7 +301,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       router.push(`/(tabs)/${section}/artist/${targetArtistId}` as Href);
       requestAnimationFrame(onClose);
     },
-    [onClose, router, segments]
+    [currentTrack?.localAudioPath, onClose, router, segments]
   );
 
   React.useEffect(() => {
@@ -1007,6 +1008,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             <View style={styles.coverContainer}>
               {artworkUrl ? (
                 <Image
+                  testID="player-artwork"
                   source={{ uri: artworkUrl }}
                   onError={() => setFailedArtworkUrl(artworkUrl)}
                   style={styles.cover}
@@ -1028,6 +1030,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 fadeWidth={16}
               />
               <MarqueeText
+                testID="player-artists"
                 text={artistLinks.map((artist) => artist.name).join(' · ')}
                 style={styles.trackArtist}
                 containerStyle={styles.trackArtistMarquee}

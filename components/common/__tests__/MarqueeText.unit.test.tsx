@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
-import { Animated, Platform, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, StyleSheet, Text } from 'react-native';
 import { MarqueeText } from '../MarqueeText';
 
 jest.mock('@react-native-masked-view/masked-view', () => {
@@ -22,22 +22,17 @@ describe('MarqueeText', () => {
   it('renders inline clickable children while measuring only the plain text', async () => {
     const onPress = jest.fn();
     const screen = await render(
-      <MarqueeText text="First Artist, Second Artist">
+      <MarqueeText testID="marquee" text="First Artist, Second Artist">
         <Text onPress={onPress} accessibilityRole="link">First Artist</Text>
         {', '}
         <Text>Second Artist</Text>
       </MarqueeText>
     );
-    const textNodes = screen.UNSAFE_getAllByType(Text);
-    const measurement = textNodes.find((item) => item.props.onLayout)!;
+    const measurement = screen.getByTestId('marquee-measure-text', { includeHiddenElements: true });
     expect(measurement.props.children).toBe('First Artist, Second Artist');
     expect(measurement.parent?.props.accessibilityElementsHidden).toBe(true);
-    const visibleText = textNodes.find(
-      (item) => item.props.numberOfLines === 1 && !item.props.onLayout
-    )!;
-    expect(visibleText.findAllByType(Text).map((item) => item.props.children)).toEqual([
-      'First Artist', 'Second Artist',
-    ]);
+    expect(screen.getByTestId('marquee-text').props.numberOfLines).toBe(1);
+    expect(screen.getByText('Second Artist')).toBeTruthy();
     await fireEvent.press(screen.getByText('First Artist'));
     expect(onPress).toHaveBeenCalledTimes(1);
   });
@@ -53,15 +48,15 @@ describe('MarqueeText', () => {
     const stop = jest.fn();
     jest.spyOn(Animated, 'loop').mockReturnValue({ start, stop, reset: jest.fn() });
     const screen = await render(
-      <MarqueeText text="First Artist, Second Artist" align="center">
+      <MarqueeText testID="marquee" text="First Artist, Second Artist" align="center">
         <Text>First Artist, Second Artist</Text>
       </MarqueeText>
     );
-    const container = screen.UNSAFE_getAllByType(View).find((item) => item.props.onLayout)!;
-    const measurement = screen.UNSAFE_getAllByType(Text).find((item) => item.props.onLayout)!;
+    const container = screen.getByTestId('marquee');
+    const measurement = screen.getByTestId('marquee-measure-text', { includeHiddenElements: true });
     await fireEvent(container, 'layout', layout(160));
     await fireEvent(measurement, 'layout', layout(360));
-    const animated = screen.UNSAFE_getByType(Animated.View);
+    const animated = screen.getByTestId('marquee-content');
     expect(StyleSheet.flatten(animated.props.style)).toMatchObject({
       width: 360,
       alignSelf: 'flex-start',

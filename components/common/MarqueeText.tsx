@@ -26,6 +26,7 @@ import MaskedView from '@react-native-masked-view/masked-view';
 interface MarqueeTextProps {
   // Plain text measures width; optional inline children retain links and styling.
   text: string;
+  testID?: string;
   children?: React.ReactNode;
   style?: StyleProp<TextStyle>;
   containerStyle?: StyleProp<ViewStyle>;
@@ -38,6 +39,7 @@ interface MarqueeTextProps {
 
 export const MarqueeText: React.FC<MarqueeTextProps> = ({
   text,
+  testID,
   children,
   style,
   containerStyle,
@@ -107,6 +109,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
 
   const animatedText = (
     <Animated.View
+      testID={testID ? `${testID}-content` : undefined}
       style={{
         transform: [{ translateX: scrollAnim }],
         flexDirection: 'row',
@@ -117,6 +120,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
       }}
     >
       <Text
+        testID={testID ? `${testID}-text` : undefined}
         numberOfLines={1}
         style={[
           styles.text,
@@ -131,6 +135,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
 
   return (
     <View
+      testID={testID}
       onLayout={onContainerLayout}
       style={[
         styles.container,
@@ -155,6 +160,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
         style={[styles.measureContainer, { pointerEvents: 'none' }]}
       >
         <Text
+          testID={testID ? `${testID}-measure-text` : undefined}
           onLayout={onMeasureLayout}
           numberOfLines={1}
           style={[styles.text, style, styles.measureText]}

@@ -277,7 +277,7 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
                     <LoggedPressable
                       key={option.value}
                       accessibilityLabel={option.label}
-                      role="menuitemradio"
+                      accessibilityRole="radio"
                       accessibilityState={{ checked: selected }}
                       onPress={() => selectAction(() => {
                         if (props.kind === 'filter') props.onSortChange(option.value as LibrarySort);

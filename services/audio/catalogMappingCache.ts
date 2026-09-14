@@ -17,7 +17,12 @@ export type CatalogMapping = {
   confirmedAt: number;
   confidence: number;
   source: 'youtube_search' | 'ytmusic' | 'user_direct';
+  policyVersion?: number;
 };
+
+export const CATALOG_MATCH_POLICY_VERSION = 2;
+export const isCurrentCatalogMapping = (mapping: CatalogMapping): boolean =>
+  mapping.source === 'user_direct' || mapping.policyVersion === CATALOG_MATCH_POLICY_VERSION;
 
 const STORAGE_KEY = '@openfy/catalog-mapping-v1';
 const MAPPING_MAX_AGE_MS = 30 * 24 * 60 * 60_000;  // 30 days

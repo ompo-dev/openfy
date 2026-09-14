@@ -8,6 +8,8 @@ jest.mock('expo-audio', () => ({
 jest.mock('react-native', () => ({
   Platform: { OS: 'web' },
 }));
+jest.mock('../localAudioRepair', () => ({ prepareLocalAudioForPlayback: jest.fn().mockResolvedValue(undefined) }));
+import { prepareLocalAudioForPlayback } from '../localAudioRepair';
 
 import { clearPreloadedSource, createAudioPlayer, preload } from 'expo-audio';
 import { Platform } from 'react-native';
@@ -30,6 +32,25 @@ const createPlayer = () => ({
 });
 
 describe('playerService fades', () => {
+  it('waits for local container repair before creating or preloading a player', async () => {
+    (Platform as { OS: string }).OS = 'ios';
+    const uri = 'file:///downloaded.m4a';
+    let complete!: () => void;
+    let started!: () => void;
+    const repairStarted = new Promise<void>((resolve) => { started = resolve; });
+    jest.mocked(prepareLocalAudioForPlayback).mockImplementationOnce(() => new Promise<void>((resolve) => {
+      complete = resolve;
+      started();
+    }));
+    const loading = loadAndPlay(uri);
+    await repairStarted;
+    expect(createAudioPlayer).not.toHaveBeenCalled();
+    complete();
+    await loading;
+    expect(createAudioPlayer).toHaveBeenCalledWith(uri, { updateInterval: 100 });
+    await preloadAudio('file:///next.m4a');
+    expect(prepareLocalAudioForPlayback).toHaveBeenCalledWith('file:///next.m4a');
+  });
   beforeEach(() => {
     jest.useFakeTimers();
     (createAudioPlayer as jest.Mock).mockReturnValue(createPlayer());

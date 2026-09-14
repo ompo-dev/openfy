@@ -51,6 +51,8 @@ jest.mock('../../metadata/spotifyMetadata', () => ({
 }));
 jest.mock('../../audio/catalogMappingCache', () => ({
   getCatalogMapping: jest.fn().mockResolvedValue(null),
+  isCurrentCatalogMapping: (mapping: { policyVersion?: number; source?: string }) =>
+    mapping.policyVersion === 2 || mapping.source === 'user_direct',
 }));
 
 jest.mock('../../audio/audioResolver', () => ({
@@ -253,6 +255,20 @@ describe('queueDownloads', () => {
     });
     await repairDownloadedTrackMetadata();
     expect(await getDownloadedTracks()).toEqual([]);
+  });
+
+  it('keeps existing credits, cover and duration when a metadata response is partial', async () => {
+    const saved = { id: 'track_partial', spotifyId: 'partial-repair', title: 'Song',
+      artistName: 'Artist', artists: [{ id: 'artist', name: 'Artist' }],
+      albumName: 'Album', imageURL: 'https://images.test/hq.jpg', localImagePath: 'file:///hq.jpg',
+      localAudioPath: 'file:///keep.m4a', duration_ms: 158250 };
+    await AsyncStorage.setItem('openfy_downloads', JSON.stringify([saved]));
+    jest.mocked(fetchSpotifyTrackMetadata).mockResolvedValue({
+      title: 'Song', albumName: '', albumId: '', artistName: '', artists: [],
+      albumArtists: [], imageURL: '', duration_ms: 0, spotifyId: 'partial-repair',
+    });
+    await repairDownloadedTrackMetadata();
+    expect(await getDownloadedTracks()).toEqual([expect.objectContaining(saved)]);
   });
 
   it('rejects an HTML error response as cover art', async () => {

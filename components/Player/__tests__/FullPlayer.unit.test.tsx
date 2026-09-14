@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
-import { ActionSheetIOS, Alert, Image, Linking, Platform } from 'react-native';
+import { ActionSheetIOS, Alert, Linking, Platform } from 'react-native';
 import { usePlayer } from '@context';
 import {
   getCatalogMapping,
@@ -8,7 +8,6 @@ import {
   resolveSpotifyTrackVideoId,
 } from '@services';
 import { FullPlayer } from '../FullPlayer';
-import { MarqueeText } from '../../common/MarqueeText';
 
 const mockPush = jest.fn();
 jest.mock('expo-router', () => ({
@@ -104,12 +103,9 @@ describe('FullPlayer artist row and YouTube source', () => {
 
   it('keeps all artist links in one marquee and opens each artist', async () => {
     const screen = await mountPlayer({ youtubeVideoId: 'aaaaaaaaaaa' });
-    const marquees = screen.UNSAFE_getAllByType(MarqueeText);
-    const artists = marquees.filter((item) => item.props.text.includes('Artist'));
-    expect(artists).toHaveLength(1);
-    expect(artists[0].props.text).toBe(
-      'First Artist · Second Artist · Third Artist'
-    );
+    expect(screen.getAllByTestId('player-artists')).toHaveLength(1);
+    expect(screen.getByTestId('player-artists-text').props.numberOfLines).toBe(1);
+    expect(screen.getByText('First Artist · Second Artist · Third Artist')).toBeTruthy();
     for (const artist of sampleTrack.artists) {
       await fireEvent.press(screen.getByLabelText(`Abrir artista ${artist.name}`));
       expect(mockPush).toHaveBeenLastCalledWith(
@@ -248,17 +244,15 @@ describe('FullPlayer artist row and YouTube source', () => {
 
   it('prefers the high-quality artwork and falls back to the local cover on failure', async () => {
     const screen = await mountPlayer();
-    const cover = screen.UNSAFE_getAllByType(Image).find((item) => item.props.onError)!;
+    const cover = screen.getByTestId('player-artwork');
     expect(cover.props.source.uri).toBe(sampleTrack.imageURL);
     await fireEvent(cover, 'error', { nativeEvent: { error: 'Offline' } });
-    expect(screen.UNSAFE_getAllByType(Image).every(
-      (item) => item.props.source.uri === sampleTrack.localImagePath
-    )).toBe(true);
+    expect(screen.getByTestId('player-artwork').props.source.uri).toBe(sampleTrack.localImagePath);
   });
 
   it.each(['file:///covers/migrated-hq.jpg', ''])('uses migrated or fallback local artwork: %s', async (imageURL) => {
     const screen = await mountPlayer({ imageURL });
-    const cover = screen.UNSAFE_getAllByType(Image).find((item) => item.props.onError)!;
+    const cover = screen.getByTestId('player-artwork');
     expect(cover.props.source.uri).toBe(imageURL || sampleTrack.localImagePath);
   });
 });

@@ -29,6 +29,8 @@ const HARD_REJECT_WORDS = [
   'podcast',
   'snippet',
   'preview',
+  'reaction',
+  'reacting',
 ];
 
 const SOFT_PENALTY_WORDS = [
@@ -268,6 +270,8 @@ export const evaluateCandidateMatch = (
     url: string;
     viewCount?: number;
     playbackCount?: number;
+    isVerifiedChannel?: boolean;
+    isOfficialArtistChannel?: boolean;
     releaseDate?: string;
   },
   canonical: {
@@ -281,7 +285,6 @@ export const evaluateCandidateMatch = (
   const reasons: string[] = [];
   const lowerCandTitle = (candidate.title || '').toLowerCase();
   const lowerCanonTitle = (canonical.title || '').toLowerCase();
-  const candAuthor = normalizeString(candidate.artist || '');
 
   // 1. Hard Rejection (slowed, loops, compilations, snippets)
   if (hasHardForbiddenWords(candidate.title, canonical.title)) {
@@ -299,7 +302,6 @@ export const evaluateCandidateMatch = (
   }
 
   const allCanonicalArtists = splitCanonicalArtists(canonical.artists);
-  const normPrimaryArtist = normalizeString(allCanonicalArtists[0] || '');
 
   if (!hasCanonicalTitleMatch(candidate.title, canonical.title)) {
     return {
@@ -315,13 +317,17 @@ export const evaluateCandidateMatch = (
     };
   }
 
-  if (
-    !hasCanonicalArtistMatch(
+  const artistNameMatches = hasCanonicalArtistMatch(
       candidate.title,
       candidate.artist || '',
       allCanonicalArtists
-    )
-  ) {
+    );
+  // A verified group/label may publish a member's solo work. Require the
+  // credited artist in the video title as well as YouTube's actual badge.
+  const trustedPublisherCredits = candidate.provider === 'youtube' &&
+    (candidate.isOfficialArtistChannel || candidate.isVerifiedChannel) &&
+    hasCanonicalArtistMatch(candidate.title, '', allCanonicalArtists);
+  if (!artistNameMatches && !trustedPublisherCredits) {
     return {
       spotifyId: canonical.spotifyId,
       canonicalTitle: canonical.title,
@@ -356,7 +362,7 @@ export const evaluateCandidateMatch = (
 
   if (allCanonicalArtists.some(isKnownArtist)) {
     confidence += 25;
-    reasons.push('Artist verified');
+    reasons.push(artistNameMatches ? 'Artist name matched' : 'Artist credited by verified publisher');
   }
 
   confidence += durationEval.score * 0.25;
@@ -370,30 +376,13 @@ export const evaluateCandidateMatch = (
     reasons.push(`Release date matched: ${yearDiff} year difference`);
   }
 
-  // 3. Official Artist Channel / Uploader Matching (+30 points)
-  const isOfficialChannel =
-    allCanonicalArtists.some((a) => {
-      const norm = normalizeString(a);
-      return (
-        norm.length >= 3 &&
-        (candAuthor.includes(norm) || norm.includes(candAuthor))
-      );
-    }) ||
-    candAuthor.includes('vevo') ||
-    candAuthor.includes('topic') ||
-    candAuthor.includes('records') ||
-    candAuthor.includes('official');
-
-  if (isOfficialChannel) {
-    confidence += 30;
-    reasons.push('Official channel/uploader verified');
-  }
-
-  // 5. Popularity / View Count Bonus (+5 points)
-  const popularity = candidate.viewCount || candidate.playbackCount || 0;
-  if (popularity > 50000) {
+  // Display names and popularity are not proof of an official channel.
+  if (candidate.isOfficialArtistChannel) {
     confidence += 5;
-    reasons.push(`High playcount verified (${popularity.toLocaleString()})`);
+    reasons.push('YouTube Official Artist Channel badge');
+  } else if (candidate.isVerifiedChannel) {
+    confidence += 3;
+    reasons.push('YouTube verified channel badge');
   }
 
   // 6. Soft Penalty for Remix/Cover/Edits

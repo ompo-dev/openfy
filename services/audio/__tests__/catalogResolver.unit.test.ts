@@ -67,6 +67,7 @@ describe('resolveSpotifyTrackVideoId', () => {
       confirmedAt: Date.now(),
       confidence: 100,
       source: 'youtube_search',
+      policyVersion: 2,
     });
 
     const result = await resolveSpotifyTrackVideoId(
@@ -134,5 +135,44 @@ describe('resolveSpotifyTrackVideoId', () => {
     );
 
     expect(result.status).toBe('not_found');
+  });
+
+  it('compares later results and channel subscribers before selecting the publisher', async () => {
+    const makeVideo = (id: string, artist: string, official: boolean, channelId: string) => ({
+      video_id: id, title: { toString: () => 'Pedro Qualy & Sotam - Taros' },
+      author: { name: artist, is_verified_artist: official, id: channelId },
+      duration: { seconds: 270 }, view_count: { toString: () => official ? '486,390 views' : '120 views' },
+    });
+    const channelId = 'UCqhmlFknRAuBvT1grx1jZPw';
+    const search = jest.fn().mockResolvedValueOnce({ videos: [makeVideo('aaaaaaaaaaa', 'Pedro Qualy', false, 'UCaaaaaaaaaaaaaaaaaaaaaa')] })
+      .mockResolvedValue({ videos: [makeVideo('LIXckjwbPdY', 'HAIKAISS OFICIAL', true, channelId)] });
+    const getChannel = jest.fn(async (id: string) => ({ metadata: { external_id: id },
+      header: { content: { metadata: { metadata_rows: [{ metadata_parts: [{ text: {
+        toString: () => id === channelId ? '3.43M subscribers' : '40 subscribers',
+      } }] }] } } } }));
+    mockCreate.mockResolvedValue({ search, getChannel });
+    await setCatalogMapping('taros', { videoId: 'aaaaaaaaaaa', confirmedAt: Date.now(), confidence: 100, source: 'youtube_search' });
+    expect(await resolveSpotifyTrackVideoId('taros', 'Taros', ['Pedro Qualy', 'Sotam'], 269785))
+      .toMatchObject({ status: 'resolved', videoId: 'LIXckjwbPdY' });
+    expect(search.mock.calls.length).toBeGreaterThan(1);
+    expect(getChannel).toHaveBeenCalledWith(channelId);
+    expect(await getCatalogMapping('taros')).toMatchObject({ videoId: 'LIXckjwbPdY', policyVersion: 2 });
+  });
+
+  it('keeps explicit user choices even when automatic matching policy changes', async () => {
+    await setCatalogMapping('manual', { videoId: 'aaaaaaaaaaa', confirmedAt: Date.now(), confidence: 100, source: 'user_direct' });
+    expect(await resolveSpotifyTrackVideoId('manual', 'Taros', ['Pedro Qualy'], 269785))
+      .toMatchObject({ videoId: 'aaaaaaaaaaa' });
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('still selects a matching source when channel counts are unavailable', async () => {
+    mockCreate.mockResolvedValue({ search: jest.fn().mockResolvedValue({ videos: [{
+      video_id: 'LIXckjwbPdY', title: { toString: () => 'Pedro Qualy & Sotam - Taros' },
+      author: { name: 'HAIKAISS OFICIAL', is_verified_artist: true, id: 'UCqhmlFknRAuBvT1grx1jZPw' },
+      duration: { seconds: 270 },
+    }] }), getChannel: jest.fn().mockRejectedValue(new Error('unavailable')) });
+    expect(await resolveSpotifyTrackVideoId('taros-offline-channel', 'Taros', ['Pedro Qualy', 'Sotam'], 269785))
+      .toMatchObject({ status: 'resolved', videoId: 'LIXckjwbPdY' });
   });
 });

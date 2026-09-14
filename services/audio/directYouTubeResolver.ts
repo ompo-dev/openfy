@@ -28,6 +28,7 @@ import {
 } from './catalogResolver';
 import {
   getCatalogMapping,
+  isCurrentCatalogMapping,
   _resetCatalogMappingCacheForTests,
 } from './catalogMappingCache';
 
@@ -109,7 +110,7 @@ export const resolveDirectYouTubeAudio = async (
   // ── Path 2: spotifyId → cached videoId ───────────────────────────────────
   if (spotifyId && !fresh) {
     const cached = await getCatalogMapping(spotifyId);
-    if (cached) {
+    if (cached && isCurrentCatalogMapping(cached)) {
       if (spotifyId) {
         recordDownloadDiagnostic(spotifyId, 'audio.youtube.catalog_cache_hit', {
           videoId: cached.videoId,

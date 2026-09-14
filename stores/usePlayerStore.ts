@@ -466,6 +466,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const MAX_CONSECUTIVE_RECOVERIES = 3;
     const RECOVERY_STABLE_MS = 10_000;
     let initialLoadInProgress = true;
+    let handledTrackFinish = false;
 
     console.log(`[PlayerStore #${requestId}] Playing stream:`, activeStreamUri);
     await fadeOutPromise;
@@ -487,6 +488,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       if (get().activeRequestId !== requestId) return;
 
       const currentDuration = state.durationMs || track.duration_ms || 0;
+      if (state.isPlaying && !state.didJustFinish) handledTrackFinish = false;
       set({
         isLoadingAudio: false,
         playerState: {
@@ -573,15 +575,15 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       // Auto-advance detection on track finish
       if (
         state.isLoaded &&
-        !state.isPlaying &&
-        state.positionMs > 0 &&
-        currentDuration > 0 &&
-        state.positionMs >= currentDuration - 500
+        !handledTrackFinish &&
+        (state.didJustFinish || (state.didJustFinish === undefined &&
+          !state.isPlaying && state.positionMs > 0 && currentDuration > 0 &&
+          state.positionMs >= currentDuration - 500))
       ) {
+        handledTrackFinish = true;
         const repeat = get().repeatMode;
         if (repeat === 'one') {
-          seekTo(0);
-          play();
+          void seekTo(0).then(() => play());
         } else {
           get().playNext();
         }

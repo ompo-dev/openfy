@@ -20,8 +20,9 @@ import {
   resolveDirectYouTubeAudio,
 } from '../audio/directYouTubeResolver';
 import { resolveSpotifyTrackVideoId } from '../audio/catalogResolver';
-import { getCatalogMapping } from '../audio/catalogMappingCache';
-import { fetchSpotifyTrackMetadata } from '../metadata/spotifyMetadata';
+import { getCatalogMapping, isCurrentCatalogMapping } from '../audio/catalogMappingCache';
+import { repairLocalAudioFile } from '../audio/localAudioRepair';
+import { fetchSpotifyTrackMetadata, type SpotifyTrackMetadata } from '../metadata/spotifyMetadata';
 import {
   downloadYouTubeStreamNatively,
   hasNativeYouTubeDownload,
@@ -102,6 +103,19 @@ const MAX_BACKGROUND_ATTEMPTS = 8;
 const METADATA_VERSION = 2;
 let metadataRepair: Promise<void> | null = null;
 const metadataRepairAttempts = new Map<string, number>();
+
+const mergeCatalogMetadata = <T extends DownloadTrackInput>(
+  track: T, metadata: SpotifyTrackMetadata | null
+): T => ({
+  ...track,
+  // Partial public responses must not erase already-known credits or duration.
+  ...Object.fromEntries(Object.entries(metadata || {}).filter(([key, value]) =>
+    key !== 'spotifyId' && value != null &&
+    (typeof value !== 'string' || value.trim().length > 0) &&
+    (typeof value !== 'number' || value > 0) &&
+    (!Array.isArray(value) || value.length > 0)
+  )),
+});
 
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -333,8 +347,7 @@ export const repairDownloadedTrackMetadata = async (
           await updateDownloadedTracks((current) => current.map((saved) =>
             saved.spotifyId === track.spotifyId && saved.localAudioPath === track.localAudioPath
               ? {
-                  ...saved,
-                  ...metadata,
+                  ...mergeCatalogMetadata(saved, metadata),
                   localImagePath: cover || saved.localImagePath,
                   youtubeVideoId,
                   youtubeUrl: youtubeVideoId
@@ -1155,13 +1168,21 @@ const downloadTrackInternal = async (
     const trackId = `track_${track.spotifyId}`;
     const metadata = track.albumId && track.artists?.length
       ? null : await fetchSpotifyTrackMetadata(track.spotifyId).catch(() => null);
-    let effectiveTrack: DownloadTrackInput = { ...track, ...metadata };
+    let effectiveTrack = mergeCatalogMetadata(track, metadata);
+    track = effectiveTrack;
 
     const suppliedAudioUrl = audioUrl || track.audioUrl;
     // Signed URLs can expire while the OS waits. Prefer resolving and saving
     // the matched video in the native session before requesting a JS URL.
     let youtubeVideoId =
       track.youtubeVideoId || youtubeVideoIdFromTrackId(track.spotifyId);
+    if (youtubeVideoId && /^[A-Za-z0-9]{22}$/.test(track.spotifyId)) {
+      const mapping = await getCatalogMapping(track.spotifyId);
+      if (!mapping || !isCurrentCatalogMapping(mapping)) {
+        youtubeVideoId = undefined;
+        effectiveTrack = { ...effectiveTrack, youtubeVideoId: undefined, youtubeUrl: undefined };
+      }
+    }
     let resolvedUrl = Platform.OS === 'web' ? suppliedAudioUrl : undefined;
     let format =
       Platform.OS === 'web'
@@ -1338,6 +1359,13 @@ const downloadTrackInternal = async (
 
     if (!localAudioPath) {
       throw new Error('Audio file download failed to produce valid local file');
+    }
+
+    try {
+      const repair = await repairLocalAudioFile(localAudioPath);
+      recordDownloadDiagnostic(track.spotifyId, 'audio.container.normalized', repair || { available: false });
+    } catch (error) {
+      recordDownloadDiagnostic(track.spotifyId, 'audio.container.repair_deferred', { error: String(error) });
     }
 
     onProgress?.(0.75);

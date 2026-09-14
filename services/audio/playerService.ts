@@ -13,6 +13,7 @@ import {
 import type { AudioPlayer } from 'expo-audio/build/AudioModule.types';
 import { Platform } from 'react-native';
 import { getDirectYouTubeMediaHeaders } from './directYouTubeResolver';
+import { prepareLocalAudioForPlayback } from './localAudioRepair';
 
 export type AudioSourceInput =
   | string
@@ -31,6 +32,7 @@ export type PlayerState = {
   isLoaded: boolean;
   positionMs: number;
   durationMs: number;
+  didJustFinish?: boolean;
   error?: string;
 };
 
@@ -60,6 +62,7 @@ export const getAudioSourceUri = (input: AudioSourceInput): string =>
   typeof input === 'string' ? input : input.uri;
 
 let playerInstance: AudioPlayer | null = null;
+let loadGeneration = 0;
 let isSeeking = false;
 let volumeRamp: {
   timer: ReturnType<typeof setInterval>;
@@ -111,6 +114,7 @@ const toState = (status: AudioStatus): PlayerState => ({
   isLoaded: status.isLoaded ?? false,
   positionMs: (status.currentTime ?? 0) * 1000,
   durationMs: (status.duration ?? 0) * 1000,
+  didJustFinish: status.didJustFinish ?? false,
   // Propagate SDK error so the store can trigger transparent stream recovery.
   error: status.error ?? undefined,
 });
@@ -160,6 +164,7 @@ export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void>
   if (Platform.OS === 'web' && /^https?:\/\//i.test(uri)) return;
   preloadedSources.set(uri, source.headers ? source : uri);
   try {
+    await prepareLocalAudioForPlayback(uri);
     const payload = source.headers ? source : uri;
     await Promise.resolve(preload(payload as any, { preferredForwardBufferDuration: 5 }));
   } catch {
@@ -190,6 +195,7 @@ export const loadAndPlay = async (
 ): Promise<boolean> => {
   const source = toAudioSource(sourceInput);
   const uri = source.uri;
+  const generation = ++loadGeneration;
   try {
     stopVolumeRamp();
     // Unload existing player
@@ -205,6 +211,8 @@ export const loadAndPlay = async (
 
     const callbackForThisPlayer = onStatusUpdate || null;
     await configureAudioSession();
+    await prepareLocalAudioForPlayback(uri);
+    if (generation !== loadGeneration) return false;
 
     console.log(
       '[PlayerService] Loading audio source:',
@@ -295,6 +303,7 @@ export const seekTo = async (positionMs: number): Promise<void> => {
  * Stop and unload the current player.
  */
 export const unload = async (): Promise<void> => {
+  loadGeneration++;
   if (!playerInstance) return;
   try {
     stopVolumeRamp();
