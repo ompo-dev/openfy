@@ -81,9 +81,9 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
         style={styles.pressableWrapper}
         accessibilityLabel="Abrir Player de Música"
       >
-        <MiniPlayerSurface style={styles.glassContainer}>
+        <MiniPlayerSurface style={styles.glassContainer} testID="mini-player-surface">
           <View testID="mini-player-content" style={styles.contentRow}>
-            <View style={styles.coverWrapper}>
+            <View testID="mini-player-cover" style={styles.coverWrapper}>
               {currentTrack.imageURL ? (
                 <Image
                   source={{ uri: currentTrack.imageURL }}
@@ -114,7 +114,6 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
             <View style={styles.controlsContainer}>
               <LoggedPressable
                 style={styles.controlPressable}
-                hitSlop={12}
                 onPress={(e) => {
                   e.stopPropagation();
                   handlePlayPause();
@@ -157,10 +156,23 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
             </View>
           </View>
 
-          <View testID="mini-player-progress" style={styles.progressBarBackground}>
+          <View
+            testID="mini-player-progress-clip"
+            pointerEvents="none"
+            style={styles.progressClip}
+          >
             <View
-              style={[styles.progressBarFill, { width: `${progress * 100}%` }]}
-            />
+              testID="mini-player-progress"
+              style={styles.progressBarBackground}
+            >
+              <View
+                testID="mini-player-progress-fill"
+                style={[
+                  styles.progressBarFill,
+                  { width: `${progress * 100}%` },
+                ]}
+              />
+            </View>
           </View>
         </MiniPlayerSurface>
       </LoggedPressable>
@@ -187,20 +199,20 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   glassContainer: {
-    borderRadius: 30,
-    height: 60,
+    borderRadius: 26,
+    height: 52,
   },
   contentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    height: 56,
-    gap: 10,
+    paddingHorizontal: 10,
+    height: 49,
+    gap: 9,
   },
   coverWrapper: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
@@ -213,7 +225,7 @@ const styles = StyleSheet.create({
   coverImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 22,
+    borderRadius: 18,
     backgroundColor: '#1C1C1E',
   },
   coverFallback: {
@@ -243,12 +255,13 @@ const styles = StyleSheet.create({
   controlsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingRight: 2,
+    gap: 0,
   },
   controlPressable: {
-    width: 32,
-    height: 32,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   controlSurface: {
     width: 32,
@@ -257,12 +270,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  progressClip: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 26,
+    overflow: 'hidden',
+  },
   progressBarBackground: {
     position: 'absolute',
-    left: 24,
-    right: 24,
-    bottom: 4,
-    height: 2,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 3,
     backgroundColor: 'rgba(255, 255, 255, 0.14)',
     overflow: 'hidden',
   },

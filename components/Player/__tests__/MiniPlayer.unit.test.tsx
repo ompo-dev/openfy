@@ -12,7 +12,12 @@ jest.mock('../../common/MarqueeText', () => ({ MarqueeText: ({ text }: { text: s
   return <Text>{text}</Text>;
 } }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
-jest.mock('expo-haptics', () => ({ impactAsync: jest.fn().mockResolvedValue(undefined), ImpactFeedbackStyle: {} }));
+jest.mock('expo-haptics', () => ({
+  impactAsync: jest.fn().mockResolvedValue(undefined),
+  notificationAsync: jest.fn().mockResolvedValue(undefined),
+  ImpactFeedbackStyle: {},
+  NotificationFeedbackType: {},
+}));
 
 describe('MiniPlayer', () => {
   const originalPlatform = Platform.OS;
@@ -22,7 +27,7 @@ describe('MiniPlayer', () => {
     jest.spyOn(Animated, 'spring').mockReturnValue({ start: jest.fn(), stop: jest.fn(), reset: jest.fn() });
     jest.mocked(usePlayer).mockReturnValue({
       currentTrack: { spotifyId: 'track', title: 'Taros', artistName: 'Pedro Qualy, Sotam', imageURL: '' },
-      isPlayerVisible: true, playerState: { isPlaying: false, positionMs: 0, durationMs: 269785 },
+      isPlayerVisible: true, playerState: { isPlaying: false, positionMs: 134892.5, durationMs: 269785 },
       togglePlayPause,
     } as any);
   });
@@ -44,11 +49,54 @@ describe('MiniPlayer', () => {
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the progress inside the compact player instead of adding height', async () => {
+  it('keeps the player materially more compact', async () => {
     const screen = await render(<MiniPlayer />);
-    expect(StyleSheet.flatten(screen.getByTestId('mini-player-content').props.style).height).toBe(56);
-    expect(StyleSheet.flatten(screen.getByTestId('mini-player-progress').props.style)).toMatchObject({
-      position: 'absolute', bottom: 4, height: 2,
+    expect(StyleSheet.flatten(screen.getByTestId('mini-player-surface').props.style)).toMatchObject({
+      borderRadius: 26,
+      height: 52,
     });
+    expect(StyleSheet.flatten(screen.getByTestId('mini-player-content').props.style)).toMatchObject({
+      height: 49,
+      paddingHorizontal: 10,
+    });
+    expect(StyleSheet.flatten(screen.getByTestId('mini-player-cover').props.style)).toMatchObject({
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+    });
+  });
+
+  it('keeps touch targets at 44pt without inflating the visual controls', async () => {
+    const screen = await render(<MiniPlayer onConfirm={jest.fn()} />);
+    expect(StyleSheet.flatten(screen.getByLabelText('Tocar').props.style)).toMatchObject({
+      width: 44,
+      height: 44,
+    });
+    expect(StyleSheet.flatten(screen.getByLabelText('Confirmar música').props.style)).toMatchObject({
+      width: 44,
+      height: 44,
+    });
+  });
+
+  it('clips progress with a full capsule layer pinned to the bottom edge', async () => {
+    const screen = await render(<MiniPlayer />);
+    expect(StyleSheet.flatten(screen.getByTestId('mini-player-progress-clip').props.style)).toMatchObject({
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 0,
+      borderRadius: 26,
+      overflow: 'hidden',
+    });
+    expect(screen.getByTestId('mini-player-progress-clip').props.pointerEvents).toBe('none');
+    expect(StyleSheet.flatten(screen.getByTestId('mini-player-progress').props.style)).toMatchObject({
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: 3,
+    });
+    expect(StyleSheet.flatten(screen.getByTestId('mini-player-progress-fill').props.style).width).toBe('50%');
   });
 });

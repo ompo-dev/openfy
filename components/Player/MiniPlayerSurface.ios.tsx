@@ -5,13 +5,13 @@ import { StyleSheet, View } from 'react-native';
 import { GlassSurfaceFallback } from '../native/GlassSurfaceFallback';
 import type { MiniPlayerSurfaceProps } from './MiniPlayerSurface';
 
-export const MiniPlayerSurface = ({ children, style }: MiniPlayerSurfaceProps) => {
+export const MiniPlayerSurface = ({ children, style, ...rest }: MiniPlayerSurfaceProps) => {
   if (!isLiquidGlassAvailable()) {
-    return <GlassSurfaceFallback glass="regular" style={style}>{children}</GlassSurfaceFallback>;
+    return <GlassSurfaceFallback glass="regular" style={style} {...rest}>{children}</GlassSurfaceFallback>;
   }
 
   return (
-    <View style={style}>
+    <View style={style} {...rest}>
       {/* The SwiftUI material owns the backing. RN content retains its touch
           targets and marquee masks without clipping/rasterizing the glass. */}
       <Host pointerEvents="none" colorScheme="dark" ignoreSafeArea="all" style={StyleSheet.absoluteFill}>
