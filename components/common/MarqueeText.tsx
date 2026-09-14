@@ -10,6 +10,8 @@
 import * as React from 'react';
 import {
   Animated,
+  AppState,
+  AppStateStatus,
   Easing,
   LayoutChangeEvent,
   Platform,
@@ -35,6 +37,8 @@ interface MarqueeTextProps {
   fadeWidth?: number;
   fadeColor?: string; // Kept for callers; native fade is now an alpha mask.
   align?: 'left' | 'center';
+  scrollMode?: 'alternate' | 'left';
+  active?: boolean;
 }
 
 export const MarqueeText: React.FC<MarqueeTextProps> = ({
@@ -48,48 +52,91 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
   fadeWidth = 10,
   fadeColor: _fadeColor,
   align = 'left',
+  scrollMode = 'alternate',
+  active = true,
 }) => {
   void _fadeColor;
   const [containerWidth, setContainerWidth] = React.useState(0);
   const [measuredTextWidth, setMeasuredTextWidth] = React.useState(0);
+  const [isAppActive, setIsAppActive] = React.useState(
+    () => !['background', 'inactive'].includes(AppState.currentState)
+  );
   const scrollAnim = React.useRef(new Animated.Value(0)).current;
 
   const isOverflowing = measuredTextWidth > containerWidth + 2 && containerWidth > 0;
+  const shouldAnimate = active && isAppActive && isOverflowing;
+
+  React.useEffect(() => {
+    const subscription = AppState.addEventListener(
+      'change',
+      (nextState: AppStateStatus) => {
+        setIsAppActive(nextState === 'active');
+      }
+    );
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   React.useEffect(() => {
     scrollAnim.setValue(0);
-    if (!isOverflowing) {
+    if (!shouldAnimate) {
       return;
     }
 
     const distance = measuredTextWidth - containerWidth + fadeWidth * 1.5;
     const duration = Math.max(1800, (distance / speed) * 1000);
 
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.delay(delay),
-        Animated.timing(scrollAnim, {
-          toValue: -distance,
-          duration,
-          easing: Easing.linear,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.delay(delay),
-        Animated.timing(scrollAnim, {
-          toValue: 0,
-          duration: duration * 0.75,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-      ])
-    );
+    const animation =
+      scrollMode === 'left'
+        ? Animated.loop(
+            Animated.sequence([
+              Animated.delay(delay),
+              Animated.timing(scrollAnim, {
+                toValue: -distance,
+                duration,
+                easing: Easing.linear,
+                isInteraction: false,
+                useNativeDriver: Platform.OS !== 'web',
+              }),
+              Animated.delay(400),
+              Animated.timing(scrollAnim, {
+                toValue: 0,
+                duration: 0,
+                easing: Easing.linear,
+                isInteraction: false,
+                useNativeDriver: Platform.OS !== 'web',
+              }),
+            ])
+          )
+        : Animated.loop(
+            Animated.sequence([
+              Animated.delay(delay),
+              Animated.timing(scrollAnim, {
+                toValue: -distance,
+                duration,
+                easing: Easing.linear,
+                isInteraction: false,
+                useNativeDriver: Platform.OS !== 'web',
+              }),
+              Animated.delay(delay),
+              Animated.timing(scrollAnim, {
+                toValue: 0,
+                duration: duration * 0.75,
+                easing: Easing.inOut(Easing.quad),
+                isInteraction: false,
+                useNativeDriver: Platform.OS !== 'web',
+              }),
+            ])
+          );
 
     animation.start();
 
     return () => {
       animation.stop();
     };
-  }, [text, isOverflowing, measuredTextWidth, containerWidth, speed, delay, fadeWidth, scrollAnim]);
+  }, [text, shouldAnimate, measuredTextWidth, containerWidth, speed, delay, fadeWidth, scrollAnim, scrollMode]);
 
   const onContainerLayout = (e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;

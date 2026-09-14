@@ -105,6 +105,11 @@ describe('FullPlayer artist row and YouTube source', () => {
     const screen = await mountPlayer({ youtubeVideoId: 'aaaaaaaaaaa' });
     expect(screen.getAllByTestId('player-artists')).toHaveLength(1);
     expect(screen.getByTestId('player-artists-text').props.numberOfLines).toBe(1);
+    expect(
+      screen.getByTestId('player-artists-measure-text', {
+        includeHiddenElements: true,
+      }).props.children
+    ).toBe('First Artist · Second Artist · Third Artist');
     expect(screen.getByText('First Artist · Second Artist · Third Artist')).toBeTruthy();
     for (const artist of sampleTrack.artists) {
       await fireEvent.press(screen.getByLabelText(`Abrir artista ${artist.name}`));
@@ -112,6 +117,17 @@ describe('FullPlayer artist row and YouTube source', () => {
         `/(tabs)/library/artist/${artist.id}`
       );
     }
+  });
+
+  it('keeps the artist-only pill when lyrics are open', async () => {
+    const screen = await mountPlayer({ youtubeVideoId: 'aaaaaaaaaaa' });
+    await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
+    expect(screen.getAllByTestId('player-artists')).toHaveLength(1);
+    expect(
+      screen.getByTestId('player-artists-measure-text', {
+        includeHiddenElements: true,
+      }).props.children
+    ).toBe('First Artist · Second Artist · Third Artist');
   });
 
   it('keeps synced lyrics visible across playback updates on a bounded native list', async () => {
@@ -122,7 +138,7 @@ describe('FullPlayer artist row and YouTube source', () => {
     ] } };
     jest.mocked(usePlayer).mockReturnValue(state as any);
     const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
-    await fireEvent.press(screen.getByLabelText('Abrir letras'));
+    await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
     expect(screen.getByTestId('player-lyrics-viewport')).toBeTruthy();
     expect(screen.getByTestId('player-synced-lyrics').props.removeClippedSubviews).toBe(false);
     expect(screen.getByText('First lyric line')).toBeTruthy();
@@ -139,7 +155,7 @@ describe('FullPlayer artist row and YouTube source', () => {
       ...makePlayer(), lyricsData: { segments: [], plainLyrics: 'Plain first line\nPlain second line' },
     } as any);
     const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
-    await fireEvent.press(screen.getByLabelText('Abrir letras'));
+    await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
     expect(screen.getByTestId('player-plain-lyrics')).toBeTruthy();
     expect(screen.getByText('Plain first line')).toBeTruthy();
     expect(screen.queryByTestId('player-synced-lyrics')).toBeNull();
@@ -148,7 +164,7 @@ describe('FullPlayer artist row and YouTube source', () => {
   it('replaces the loading state when lyrics arrive without closing the lyrics view', async () => {
     jest.mocked(usePlayer).mockReturnValue({ ...makePlayer(), isLoadingLyrics: true } as any);
     const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
-    await fireEvent.press(screen.getByLabelText('Abrir letras'));
+    await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
     expect(screen.queryByTestId('player-synced-lyrics')).toBeNull();
     jest.mocked(usePlayer).mockReturnValue({
       ...makePlayer(), lyricsData: { segments: [], plainLyrics: 'Newly loaded lyrics' },

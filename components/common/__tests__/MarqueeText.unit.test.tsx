@@ -1,6 +1,6 @@
 import * as React from 'react';
-import { fireEvent, render } from '@testing-library/react-native';
-import { Animated, Platform, StyleSheet, Text } from 'react-native';
+import { act, fireEvent, render } from '@testing-library/react-native';
+import { Animated, AppState, Platform, StyleSheet, Text } from 'react-native';
 import { MarqueeText } from '../MarqueeText';
 
 jest.mock('@react-native-masked-view/masked-view', () => {
@@ -65,5 +65,100 @@ describe('MarqueeText', () => {
     expect(start).toHaveBeenCalled();
     await screen.rerender(<MarqueeText text="Another equally long artist" align="center" />);
     expect(stop).toHaveBeenCalled();
+  });
+
+  it('marks marquee timings as non-interactions', async () => {
+    jest.spyOn(Animated, 'loop').mockReturnValue({
+      start: jest.fn(),
+      stop: jest.fn(),
+      reset: jest.fn(),
+    });
+    const timing = jest.spyOn(Animated, 'timing');
+    const screen = await render(
+      <MarqueeText
+        testID="marquee"
+        text="First Artist, Second Artist"
+        scrollMode="left"
+      />
+    );
+    await fireEvent(screen.getByTestId('marquee'), 'layout', layout(160));
+    await fireEvent(
+      screen.getByTestId('marquee-measure-text', {
+        includeHiddenElements: true,
+      }),
+      'layout',
+      layout(360)
+    );
+    expect(timing).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ isInteraction: false, toValue: -215 })
+    );
+    expect(timing).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ isInteraction: false, toValue: 0, duration: 0 })
+    );
+  });
+
+  it('pauses in background and restarts when active again', async () => {
+    let appStateListener: ((state: string) => void) | undefined;
+    const remove = jest.fn();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_, listener) => {
+      appStateListener = listener as (state: string) => void;
+      return { remove } as any;
+    });
+    const start = jest.fn();
+    const stop = jest.fn();
+    jest.spyOn(Animated, 'loop').mockReturnValue({ start, stop, reset: jest.fn() });
+    const screen = await render(
+      <MarqueeText testID="marquee" text="First Artist, Second Artist" />
+    );
+    await fireEvent(screen.getByTestId('marquee'), 'layout', layout(160));
+    await fireEvent(
+      screen.getByTestId('marquee-measure-text', {
+        includeHiddenElements: true,
+      }),
+      'layout',
+      layout(360)
+    );
+    expect(start).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      appStateListener?.('background');
+    });
+    expect(stop).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      appStateListener?.('active');
+    });
+    expect(start).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      screen.unmount();
+    });
+    expect(remove).toHaveBeenCalled();
+  });
+
+  it('does not animate while inactive', async () => {
+    const start = jest.fn();
+    const stop = jest.fn();
+    jest.spyOn(Animated, 'loop').mockReturnValue({ start, stop, reset: jest.fn() });
+    const screen = await render(
+      <MarqueeText
+        active={false}
+        testID="marquee"
+        text="First Artist, Second Artist"
+      />
+    );
+    await fireEvent(screen.getByTestId('marquee'), 'layout', layout(160));
+    await fireEvent(
+      screen.getByTestId('marquee-measure-text', {
+        includeHiddenElements: true,
+      }),
+      'layout',
+      layout(360)
+    );
+    expect(start).not.toHaveBeenCalled();
+    await screen.rerender(
+      <MarqueeText testID="marquee" text="First Artist, Second Artist" />
+    );
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(stop).not.toHaveBeenCalled();
   });
 });

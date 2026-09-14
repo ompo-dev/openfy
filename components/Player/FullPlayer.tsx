@@ -48,7 +48,6 @@ import {
 } from '@services';
 import { GlassSurface, LoggedPressable } from '../native';
 import { LyricSyncEditor } from './LyricSyncEditor';
-import { PlayerActionPill } from './PlayerActionPill';
 import { MarqueeText } from '../common/MarqueeText';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -181,6 +180,7 @@ type PlayerGlassButtonProps = {
   onPress?: () => void;
   style?: any;
   surfaceStyle?: any;
+  testID?: string;
   tintColor?: string;
 };
 
@@ -192,6 +192,7 @@ function PlayerGlassButton({
   onPress,
   style,
   surfaceStyle,
+  testID,
   tintColor,
 }: PlayerGlassButtonProps) {
   return (
@@ -202,6 +203,7 @@ function PlayerGlassButton({
       disabled={disabled}
       onPress={onPress}
       style={[style, disabled && styles.glassButtonDisabled]}
+      testID={testID}
     >
       <GlassSurface
         glass={glass}
@@ -246,7 +248,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   >([]);
   const [selectedLyricTarget, setSelectedLyricTarget] =
     React.useState<LyricEditorTarget>({ kind: 'lyric', index: 0 });
-  const [isLiked, setIsLiked] = React.useState(false);
 
   // YouTube action sheet and custom link edit state
   const [failedArtworkUrl, setFailedArtworkUrl] = React.useState('');
@@ -291,6 +292,34 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       requestAnimationFrame(onClose);
     },
     [currentTrack?.localAudioPath, onClose, router, segments]
+  );
+
+  const renderArtistPill = () => (
+    <GlassSurface glass="regular" isInteractive style={styles.lyricsTrackPill}>
+      <MarqueeText
+        testID="player-artists"
+        text={artistLinks.map((artist) => artist.name).join(' · ')}
+        style={styles.lyricsTrackPillText}
+        containerStyle={styles.lyricsTrackPillMarquee}
+        align="center"
+        fadeWidth={14}
+        scrollMode="left"
+        active={visible}
+      >
+        {artistLinks.map((artist, index) => (
+          <React.Fragment key={`${artist.id}-${artist.name}-${index}`}>
+            {index > 0 ? ' · ' : null}
+            <Text
+              accessibilityRole="link"
+              accessibilityLabel={`Abrir artista ${artist.name}`}
+              onPress={() => void handleArtistPress(artist.id, artist.name)}
+            >
+              {artist.name}
+            </Text>
+          </React.Fragment>
+        ))}
+      </MarqueeText>
+    </GlassSurface>
   );
 
   React.useEffect(() => {
@@ -1024,30 +1053,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 containerStyle={styles.trackTitleMarquee}
                 align="center"
                 fadeWidth={16}
+                active={visible}
               />
-              <MarqueeText
-                testID="player-artists"
-                text={artistLinks.map((artist) => artist.name).join(' · ')}
-                style={styles.trackArtist}
-                containerStyle={styles.trackArtistMarquee}
-                align="center"
-                fadeWidth={14}
-              >
-                {artistLinks.map((artist, index) => (
-                  <React.Fragment key={`${artist.id}-${artist.name}-${index}`}>
-                    {index > 0 ? ' · ' : null}
-                    <Text
-                      accessibilityRole="link"
-                      accessibilityLabel={`Abrir artista ${artist.name}`}
-                      onPress={() =>
-                        void handleArtistPress(artist.id, artist.name)
-                      }
-                    >
-                      {artist.name}
-                    </Text>
-                  </React.Fragment>
-                ))}
-              </MarqueeText>
             </View>
           </View>
         )}
@@ -1081,6 +1088,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 }
                 onPress={toggleLyricsView}
                 style={styles.circleActionBtn}
+                testID="player-lyrics-toggle"
                 tintColor={
                   showLyricsFull ? 'rgba(255,255,255,0.28)' : undefined
                 }
@@ -1092,29 +1100,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 />
               </PlayerGlassButton>
 
-              {/* Center Pill: Quick Controls or Track Info */}
-              {showLyricsFull ? (
-                <GlassSurface
-                  glass="regular"
-                  isInteractive
-                  style={styles.lyricsTrackPill}
-                >
-                  <MarqueeText
-                    text={`${currentTrack.title} • ${artistLinks.map((artist) => artist.name).join(' · ')}`}
-                    style={styles.lyricsTrackPillText}
-                    containerStyle={styles.lyricsTrackPillMarquee}
-                    align="center"
-                    fadeWidth={14}
-                  />
-                </GlassSurface>
-              ) : (
-                <PlayerActionPill
-                  isLiked={isLiked}
-                  onToggleLike={() => setIsLiked(!isLiked)}
-                  onOpenLyrics={openLyricsView}
-                  onOpenOptions={handleOpenYoutubeMenu}
-                />
-              )}
+              {/* Center Pill: Artists */}
+              {renderArtistPill()}
 
               {/* Right Pill: YouTube Button with Clean Glass Theme */}
               <PlayerGlassButton
@@ -1500,14 +1487,6 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
   trackTitleMarquee: { maxWidth: '100%' },
-  trackArtist: {
-    color: 'rgba(255,255,255,0.65)',
-    fontSize: 17,
-    fontWeight: '500',
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  trackArtistMarquee: { maxWidth: '100%' },
   lyricsMainContainer: {
     flex: 1,
     minHeight: 0,
