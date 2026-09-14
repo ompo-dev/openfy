@@ -60,7 +60,13 @@ enum LocalAudioNormalizer {
       return LocalAudioRepairResult(uri: url.absoluteString, repaired: false)
     }
 
-    let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+    let original = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+    let originalDuration = try await original.load(.duration)
+    let demuxingCopy = url.deletingLastPathComponent()
+      .appendingPathComponent(".openfy-demux-\(UUID().uuidString).m4a")
+    defer { try? FileManager.default.removeItem(at: demuxingCopy) }
+    try MP4Container.makeDemuxingCopy(from: url, to: demuxingCopy)
+    let asset = AVURLAsset(url: demuxingCopy, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
     let tracks = try await asset.load(.tracks)
     guard tracks.count == 1, tracks[0].mediaType == .audio else {
       throw LocalAudioRepairError.unsupportedAudio
@@ -71,7 +77,6 @@ enum LocalAudioNormalizer {
       CMFormatDescriptionGetMediaSubType($0) == kAudioFormatMPEG4AAC
     }) else { throw LocalAudioRepairError.unsupportedAudio }
 
-    let originalDuration = try await asset.load(.duration)
     let packets = try readPackets(asset: asset, track: track)
     let temporary = url.deletingLastPathComponent()
       .appendingPathComponent(".openfy-remux-\(UUID().uuidString).m4a")

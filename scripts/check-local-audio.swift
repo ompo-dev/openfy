@@ -13,8 +13,11 @@ import Foundation
 
     let original = AVURLAsset(url: local)
     let duration = try await original.load(.duration)
-    let track = try await original.loadTracks(withMediaType: .audio)[0]
-    let packets = try LocalAudioNormalizer.readPackets(asset: original, track: track)
+    let demuxingCopy = directory.appendingPathComponent("demux.m4a")
+    try MP4Container.makeDemuxingCopy(from: local, to: demuxingCopy)
+    let prepared = AVURLAsset(url: demuxingCopy)
+    let track = try await prepared.loadTracks(withMediaType: .audio)[0]
+    let packets = try LocalAudioNormalizer.readPackets(asset: prepared, track: track)
     print("Before: container=\(duration.seconds), packetStart=\(packets.start.seconds), packetEnd=\(packets.end.seconds), encodedBytes=\(packets.bytes)")
     let result = try await LocalAudioNormalizer.repair(url: local)
     guard result.repaired, let ms = result.durationMs, abs(ms - 2500) < 100 else {
