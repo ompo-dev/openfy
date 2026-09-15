@@ -5,8 +5,13 @@
  */
 
 import * as React from 'react';
+import { AppState } from 'react-native';
 import { usePlayerStore, PlayerTrack } from '../stores/usePlayerStore';
-import { PlayerState } from '@services';
+import {
+  getAudioDiagnosticsSnapshot,
+  recordAudioDiagnostic,
+  PlayerState,
+} from '@services';
 
 export { PlayerTrack } from '../stores/usePlayerStore';
 
@@ -68,5 +73,34 @@ export const usePlayer = () => {
 };
 
 export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
+  React.useEffect(() => {
+    const appStateSubscription = AppState.addEventListener(
+      'change',
+      (state) => {
+        recordAudioDiagnostic('app-state', state);
+        if (state !== 'active') {
+          console.log('[PlayerDiagnostics] App state changed:', {
+            state,
+            recentAudio: getAudioDiagnosticsSnapshot(),
+          });
+        }
+      }
+    );
+    const memorySubscription = AppState.addEventListener(
+      'memoryWarning',
+      () => {
+        recordAudioDiagnostic('memory-warning');
+        console.warn('[PlayerDiagnostics] Memory warning during playback:', {
+          recentAudio: getAudioDiagnosticsSnapshot(),
+        });
+      }
+    );
+
+    return () => {
+      appStateSubscription.remove();
+      memorySubscription.remove();
+    };
+  }, []);
+
   return <>{children}</>;
 };

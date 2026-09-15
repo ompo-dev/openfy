@@ -24,6 +24,13 @@ jobs:
             modules/openfy-local-audio/ios/MP4Container.swift \
             modules/openfy-local-audio/ios/LocalAudioNormalizer.swift \
             scripts/check-local-audio.swift -o "$RUNNER_TEMP/check-local-audio"
+      - name: Typecheck iOS-only file protection path
+        run: |
+          xcrun swiftc -typecheck -parse-as-library \
+            -target arm64-apple-ios16.4 \
+            -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            modules/openfy-local-audio/ios/MP4Container.swift \
+            modules/openfy-local-audio/ios/LocalAudioNormalizer.swift
       - name: Check duration, audio preservation and idempotence
         run: |
           "$RUNNER_TEMP/check-local-audio" scripts/fixtures/synthetic-dash.m4a

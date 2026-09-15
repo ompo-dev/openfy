@@ -22,6 +22,7 @@ jest.mock('@services', () => ({
   resolveAudioUrl: jest.fn(),
   getPlayableAudioUrl: jest.fn((url: string) => url),
   downloadTrack: jest.fn().mockResolvedValue(null),
+  ensurePlaybackDiagnostics: jest.fn().mockResolvedValue(undefined),
   getDownloadedTrack: jest.fn().mockResolvedValue(null),
   fadeOutCurrent: jest.fn().mockResolvedValue(undefined),
   restoreCurrentVolume: jest.fn().mockResolvedValue(undefined),
@@ -67,6 +68,7 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     usePlayerStore.setState({
+      activeRequestId: 0,
       queue: [],
       queueIndex: 0,
       currentTrack: null,
@@ -150,7 +152,8 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
         title: sampleTrack.title,
         artist: sampleTrack.artistName,
       }),
-      500
+      500,
+      sampleTrack
     );
 
     // 6. Verify seekTo was called with the exact last position
@@ -327,7 +330,41 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       }),
       expect.any(Function),
       expect.any(Object),
-      expect.any(Number)
+      expect.any(Number),
+      cachedTrack
+    );
+  });
+
+  it('keeps request ids monotonic when playback diagnostics hydrate slowly', async () => {
+    const firstTrack = { ...sampleTrack, spotifyId: 'track_slow', title: 'Lenta' };
+    const secondTrack = { ...sampleTrack, spotifyId: 'track_fast', title: 'Nova' };
+    let finishDiagnostics!: () => void;
+    const { ensurePlaybackDiagnostics } = jest.requireMock('@services');
+    (ensurePlaybackDiagnostics as jest.Mock)
+      .mockReturnValueOnce(new Promise<void>((resolve) => {
+        finishDiagnostics = resolve;
+      }))
+      .mockResolvedValueOnce(undefined);
+    (resolveAudioUrl as jest.Mock)
+      .mockResolvedValueOnce({ url: 'https://media.test/slow.m4a' })
+      .mockResolvedValueOnce({ url: 'https://media.test/new.m4a' });
+    (loadAndPlay as jest.Mock).mockResolvedValue(true);
+
+    const first = usePlayerStore.getState().playTrack(firstTrack);
+    const second = usePlayerStore.getState().playTrack(secondTrack);
+    await second;
+    finishDiagnostics();
+    await first;
+
+    expect(usePlayerStore.getState().activeRequestId).toBe(2);
+    expect(usePlayerStore.getState().currentTrack?.spotifyId).toBe('track_fast');
+    expect(loadAndPlay).toHaveBeenCalledTimes(1);
+    expect(loadAndPlay).toHaveBeenCalledWith(
+      'https://media.test/new.m4a',
+      expect.any(Function),
+      expect.objectContaining({ title: 'Nova' }),
+      2000,
+      secondTrack
     );
   });
 });

@@ -64,6 +64,7 @@ export {
   queueDownloads,
 } from './download/downloadManager';
 export {
+  ensurePlaybackDiagnostics,
   formatDownloadDiagnostics,
   getDownloadDiagnostics,
 } from './download/downloadDiagnostics';
@@ -124,9 +125,15 @@ export {
   preloadAudio,
   releasePreloadedAudio,
   configureAudioSession,
+  getAudioDiagnosticsSnapshot,
+  recordAudioDiagnostic,
   DEFAULT_STATE,
 } from './audio/playerService';
-export type { PlayerState, AudioSourceInput } from './audio/playerService';
+export type {
+  AudioDiagnosticEvent,
+  PlayerState,
+  AudioSourceInput,
+} from './audio/playerService';
 
 export {
   fetchLyrics,

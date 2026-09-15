@@ -32,8 +32,28 @@ describe('local audio repair bridge', () => {
   it('preserves playback and permits retry after failed export validation', async () => {
     jest.spyOn(console, 'warn').mockImplementation(() => {});
     mockRepair.mockRejectedValueOnce(new Error('validation failed')).mockResolvedValue({ repaired: false });
-    await expect(prepareLocalAudioForPlayback('file:///keep.m4a')).resolves.toBeUndefined();
+    await expect(prepareLocalAudioForPlayback('file:///keep.m4a')).resolves.toBeNull();
     await expect(repairLocalAudioFile('file:///keep.m4a')).resolves.toMatchObject({ repaired: false });
     expect(mockRepair).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports when the native module relaxes iOS file protection before playback', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    mockRepair.mockResolvedValue({
+      repaired: false,
+      protectionRelaxed: true,
+      protectionBefore: 'complete',
+      protectionAfter: 'completeUntilFirstUserAuthentication',
+    });
+
+    await prepareLocalAudioForPlayback('file:///locked-screen.m4a');
+
+    expect(log).toHaveBeenCalledWith(
+      '[LocalAudioRepair] Adjusted iOS file protection for playback:',
+      {
+        before: 'complete',
+        after: 'completeUntilFirstUserAuthentication',
+      }
+    );
   });
 });

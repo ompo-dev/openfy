@@ -12,6 +12,7 @@ import {
 } from 'expo-audio';
 import type { AudioPlayer } from 'expo-audio/build/AudioModule.types';
 import { Platform } from 'react-native';
+import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
 import { getDirectYouTubeMediaHeaders } from './directYouTubeResolver';
 import { prepareLocalAudioForPlayback } from './localAudioRepair';
 
@@ -33,7 +34,27 @@ export type PlayerState = {
   positionMs: number;
   durationMs: number;
   didJustFinish?: boolean;
+  mediaServicesDidReset?: boolean;
+  playbackState?: string;
+  reasonForWaitingToPlay?: string;
+  timeControlStatus?: string;
   error?: string;
+};
+
+export type PlaybackDiagnosticTrack = {
+  spotifyId: string;
+  title: string;
+  artistName: string;
+  albumName: string;
+};
+
+export type AudioDiagnosticEvent = {
+  at: string;
+  event: string;
+  state: PlayerState;
+  sourceKind: 'local' | 'remote' | 'web' | 'none';
+  sourceHost?: string;
+  note?: string;
 };
 
 export const DEFAULT_STATE: PlayerState = {
@@ -64,11 +85,25 @@ export const getAudioSourceUri = (input: AudioSourceInput): string =>
 let playerInstance: AudioPlayer | null = null;
 let loadGeneration = 0;
 let isSeeking = false;
+let currentSourceKind: AudioDiagnosticEvent['sourceKind'] = 'none';
+let currentSourceHost: string | undefined;
+let currentDiagnosticSpotifyId: string | null = null;
+let lastDiagnosticSignature = '';
 let volumeRamp: {
   timer: ReturnType<typeof setInterval>;
   resolve: () => void;
 } | null = null;
+const diagnostics: AudioDiagnosticEvent[] = [];
+const MAX_DIAGNOSTICS = 30;
 
+const getPlayerOptions = () =>
+  Platform.OS === 'web'
+    ? { updateInterval: 100 }
+    : {
+        updateInterval: 500,
+        keepAudioSessionActive: true,
+        preferredForwardBufferDuration: Platform.OS === 'ios' ? 30 : 10,
+      };
 
 const stopVolumeRamp = () => {
   if (!volumeRamp) return;
@@ -115,14 +150,115 @@ const toState = (status: AudioStatus): PlayerState => ({
   positionMs: (status.currentTime ?? 0) * 1000,
   durationMs: (status.duration ?? 0) * 1000,
   didJustFinish: status.didJustFinish ?? false,
+  mediaServicesDidReset: status.mediaServicesDidReset ?? false,
+  playbackState: status.playbackState,
+  reasonForWaitingToPlay: status.reasonForWaitingToPlay,
+  timeControlStatus: status.timeControlStatus,
   // Propagate SDK error so the store can trigger transparent stream recovery.
   error: status.error ?? undefined,
 });
 
+const describeSource = (uri?: string): Pick<AudioDiagnosticEvent, 'sourceKind' | 'sourceHost'> => {
+  if (!uri) return { sourceKind: 'none' };
+  if (/^file:\/\//i.test(uri)) return { sourceKind: 'local' };
+  if (Platform.OS === 'web') return { sourceKind: 'web' };
+  try {
+    return { sourceKind: 'remote', sourceHost: new URL(uri).hostname };
+  } catch {
+    return { sourceKind: 'remote' };
+  }
+};
+
+export const recordAudioDiagnostic = (event: string, note?: string): void => {
+  const state = getPlayerState();
+  diagnostics.push({
+    at: new Date().toISOString(),
+    event,
+    state,
+    sourceKind: currentSourceKind,
+    sourceHost: currentSourceHost,
+    note,
+  });
+  if (diagnostics.length > MAX_DIAGNOSTICS) diagnostics.shift();
+  if (currentDiagnosticSpotifyId) {
+    recordDownloadDiagnostic(currentDiagnosticSpotifyId, `player.${event}`, {
+      note,
+      state,
+      sourceKind: currentSourceKind,
+      sourceHost: currentSourceHost,
+    });
+  }
+};
+
+export const getAudioDiagnosticsSnapshot = (): AudioDiagnosticEvent[] =>
+  diagnostics.slice();
+
+const recordStatusDiagnostic = (state: PlayerState) => {
+  if (!state.error && !state.mediaServicesDidReset && !state.isBuffering) {
+    const transitionSignature = [
+      state.isPlaying ? 'playing' : 'paused',
+      state.isLoaded ? 'loaded' : 'unloaded',
+      state.timeControlStatus || '',
+      state.playbackState || '',
+    ].join(':');
+    if (transitionSignature === lastDiagnosticSignature) return;
+    lastDiagnosticSignature = transitionSignature;
+    const transition = {
+      at: new Date().toISOString(),
+      event: 'status-transition',
+      state,
+      sourceKind: currentSourceKind,
+      sourceHost: currentSourceHost,
+    };
+    diagnostics.push(transition);
+    if (diagnostics.length > MAX_DIAGNOSTICS) diagnostics.shift();
+    if (currentDiagnosticSpotifyId) {
+      recordDownloadDiagnostic(currentDiagnosticSpotifyId, 'player.status-transition', {
+        state,
+        sourceKind: currentSourceKind,
+        sourceHost: currentSourceHost,
+      });
+    }
+    return;
+  }
+  const signature = [
+    state.error || '',
+    state.mediaServicesDidReset ? 'media-reset' : '',
+    state.isBuffering ? 'buffering' : '',
+    state.timeControlStatus || '',
+    state.playbackState || '',
+  ].join(':');
+  if (signature === lastDiagnosticSignature) return;
+  lastDiagnosticSignature = signature;
+  const event = state.error
+    ? 'playback-error'
+    : state.mediaServicesDidReset
+      ? 'media-services-reset'
+      : 'buffering';
+  const diagnostic = {
+    at: new Date().toISOString(),
+    event,
+    state,
+    sourceKind: currentSourceKind,
+    sourceHost: currentSourceHost,
+  };
+  diagnostics.push(diagnostic);
+  if (diagnostics.length > MAX_DIAGNOSTICS) diagnostics.shift();
+  if (currentDiagnosticSpotifyId) {
+    recordDownloadDiagnostic(currentDiagnosticSpotifyId, `player.${event}`, {
+      state,
+      sourceKind: currentSourceKind,
+      sourceHost: currentSourceHost,
+    });
+  }
+};
+
 /**
  * Configure audio session for background music playback.
  */
-export const configureAudioSession = async (): Promise<void> => {
+export const configureAudioSession = async (
+  diagnosticSpotifyId = currentDiagnosticSpotifyId
+): Promise<void> => {
   try {
     await setAudioModeAsync({
       allowsRecording: false,
@@ -130,8 +266,12 @@ export const configureAudioSession = async (): Promise<void> => {
       shouldPlayInBackground: true,
       interruptionMode: 'doNotMix',
     });
-  } catch {
-    // ignore config errors
+  } catch (error) {
+    if (diagnosticSpotifyId) {
+      recordDownloadDiagnostic(diagnosticSpotifyId, 'player.audio-session-config-failed', {
+        error,
+      });
+    }
   }
 };
 
@@ -152,7 +292,49 @@ export const restoreCurrentVolume = (): Promise<void> => {
  * Storing the full AudioSourceInput ensures clearPreloadedSource receives
  * the same object that was passed to preload() (Expo SDK 57 requirement).
  */
-const preloadedSources = new Map<string, AudioSourceInput>();
+type PreloadEntry = {
+  source: AudioSourceInput;
+  token: symbol;
+  nativeReady: boolean;
+  cancelled: boolean;
+  operation: Promise<void>;
+};
+
+const preloadedSources = new Map<string, PreloadEntry>();
+const preloadChains = new Map<string, Promise<void>>();
+const MAX_PRELOADED_SOURCES = 3;
+
+const clearPreloadedPayload = async (sourceInput: AudioSourceInput): Promise<void> => {
+  try {
+    const payload = typeof sourceInput === 'string' ? sourceInput : toAudioSource(sourceInput);
+    await Promise.resolve(clearPreloadedSource(payload as any));
+  } catch {}
+};
+
+const enqueuePreloadCleanup = (uri: string, sourceInput: AudioSourceInput): Promise<void> => {
+  const previousForUri = preloadChains.get(uri) || Promise.resolve();
+  const cleanup = previousForUri
+    .catch(() => undefined)
+    .then(() => clearPreloadedPayload(sourceInput))
+    .finally(() => {
+      if (preloadChains.get(uri) === cleanup) preloadChains.delete(uri);
+    });
+  preloadChains.set(uri, cleanup);
+  return cleanup;
+};
+
+const trimPreloadedSources = () => {
+  while (preloadedSources.size > MAX_PRELOADED_SOURCES) {
+    const oldest = preloadedSources.entries().next().value as
+      | [string, PreloadEntry]
+      | undefined;
+    if (!oldest) return;
+    const [uri, sourceInput] = oldest;
+    preloadedSources.delete(uri);
+    sourceInput.cancelled = true;
+    if (sourceInput.nativeReady) void enqueuePreloadCleanup(uri, sourceInput.source);
+  }
+};
 
 /** Buffer a short lead-in; Expo reuses it when this URI starts playing. */
 export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void> => {
@@ -162,14 +344,39 @@ export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void>
   // expo-audio preloads web URLs through fetch() and then plays the blob.
   // That bypasses the browser media element's Range handling for proxied audio.
   if (Platform.OS === 'web' && /^https?:\/\//i.test(uri)) return;
-  preloadedSources.set(uri, source.headers ? source : uri);
-  try {
-    await prepareLocalAudioForPlayback(uri);
-    const payload = source.headers ? source : uri;
-    await Promise.resolve(preload(payload as any, { preferredForwardBufferDuration: 5 }));
-  } catch {
-    preloadedSources.delete(uri);
-  }
+
+  const payload = source.headers ? source : uri;
+  const entry: PreloadEntry = {
+    source: payload,
+    token: Symbol(uri),
+    nativeReady: false,
+    cancelled: false,
+    operation: Promise.resolve(),
+  };
+  const previousForUri = preloadChains.get(uri) || Promise.resolve();
+  const operation = previousForUri
+    .catch(() => undefined)
+    .then(async () => {
+      if (preloadedSources.get(uri)?.token !== entry.token || entry.cancelled) return;
+      await prepareLocalAudioForPlayback(uri);
+      if (preloadedSources.get(uri)?.token !== entry.token || entry.cancelled) return;
+      await Promise.resolve(preload(payload as any, { preferredForwardBufferDuration: 5 }));
+      entry.nativeReady = true;
+      if (preloadedSources.get(uri)?.token !== entry.token || entry.cancelled) {
+        await clearPreloadedPayload(payload);
+      }
+    })
+    .catch(() => {
+      if (preloadedSources.get(uri)?.token === entry.token) preloadedSources.delete(uri);
+    })
+    .finally(() => {
+      if (preloadChains.get(uri) === operation) preloadChains.delete(uri);
+    });
+  entry.operation = operation;
+  preloadedSources.set(uri, entry);
+  preloadChains.set(uri, operation);
+  trimPreloadedSources();
+  await operation;
 };
 
 /** Release a queued neighbor once it is no longer adjacent to the current track. */
@@ -178,10 +385,8 @@ export const releasePreloadedAudio = (sourceInput: AudioSourceInput): void => {
   const stored = preloadedSources.get(uri);
   if (!stored) return;
   preloadedSources.delete(uri);
-  try {
-    const payload = typeof stored === 'string' ? stored : toAudioSource(stored);
-    void Promise.resolve(clearPreloadedSource(payload as any)).catch(() => {});
-  } catch {}
+  stored.cancelled = true;
+  if (stored.nativeReady) void enqueuePreloadCleanup(uri, stored.source);
 };
 
 /**
@@ -191,7 +396,8 @@ export const loadAndPlay = async (
   sourceInput: AudioSourceInput,
   onStatusUpdate?: (state: PlayerState) => void,
   lockScreenMetadata?: LockScreenMetadata,
-  fadeInDurationMs = 0
+  fadeInDurationMs = 0,
+  diagnosticTrack?: PlaybackDiagnosticTrack
 ): Promise<boolean> => {
   const source = toAudioSource(sourceInput);
   const uri = source.uri;
@@ -210,9 +416,21 @@ export const loadAndPlay = async (
     }
 
     const callbackForThisPlayer = onStatusUpdate || null;
-    await configureAudioSession();
-    await prepareLocalAudioForPlayback(uri);
+    await configureAudioSession(diagnosticTrack?.spotifyId);
+    const repair = await prepareLocalAudioForPlayback(uri);
     if (generation !== loadGeneration) return false;
+    const sourceDescription = describeSource(uri);
+    currentSourceKind = sourceDescription.sourceKind;
+    currentSourceHost = sourceDescription.sourceHost;
+    currentDiagnosticSpotifyId = diagnosticTrack?.spotifyId || null;
+    lastDiagnosticSignature = '';
+    if (repair?.protectionBefore || repair?.protectionAfter) {
+      recordAudioDiagnostic('file-protection', [
+        repair.protectionBefore || 'unknown',
+        repair.protectionAfter || 'unknown',
+      ].join(' -> '));
+    }
+    recordAudioDiagnostic('load-start');
 
     console.log(
       '[PlayerService] Loading audio source:',
@@ -221,7 +439,12 @@ export const loadAndPlay = async (
     );
 
     const playerSource = source.headers ? source : uri;
-    const player = createAudioPlayer(playerSource as any, { updateInterval: 100 });
+    const consumedPreload = preloadedSources.get(uri);
+    if (consumedPreload) {
+      consumedPreload.cancelled = true;
+      preloadedSources.delete(uri);
+    }
+    const player = createAudioPlayer(playerSource as any, getPlayerOptions());
     playerInstance = player;
     player.volume = fadeInDurationMs > 0 ? 0 : 1;
 
@@ -237,19 +460,25 @@ export const loadAndPlay = async (
     }
 
     player.addListener('playbackStatusUpdate', (status: AudioStatus) => {
+      if (generation !== loadGeneration || playerInstance !== player) return;
       const state = toState(status);
+      recordStatusDiagnostic(state);
       callbackForThisPlayer?.(state);
     });
 
     player.play();
+    recordAudioDiagnostic('play-called');
     if (fadeInDurationMs > 0) {
       void rampPlayerVolume(player, 1, fadeInDurationMs);
     }
     return true;
   } catch (error) {
+    if (generation !== loadGeneration) return false;
     console.error('[PlayerService] Failed to load audio:', error, 'URI:', uri);
     const callbackForThisPlayer = onStatusUpdate || null;
-    callbackForThisPlayer?.({ ...DEFAULT_STATE, error: String(error) });
+    const failedState = { ...DEFAULT_STATE, error: String(error) };
+    recordStatusDiagnostic(failedState);
+    callbackForThisPlayer?.(failedState);
     return false;
   }
 };
@@ -262,6 +491,7 @@ export const play = async (): Promise<void> => {
   try {
     await configureAudioSession();
     playerInstance.play();
+    recordAudioDiagnostic('resume-called');
   } catch (error) {
     console.error('[PlayerService] play error:', error);
   }
@@ -274,6 +504,7 @@ export const pause = async (): Promise<void> => {
   if (!playerInstance) return;
   try {
     playerInstance.pause();
+    recordAudioDiagnostic('pause-called');
     if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       const audioElements = document.querySelectorAll('audio');
       audioElements.forEach((el) => el.pause());
@@ -313,6 +544,10 @@ export const unload = async (): Promise<void> => {
     } catch {}
     playerInstance.remove();
     playerInstance = null;
+    recordAudioDiagnostic('unload');
+    currentSourceKind = 'none';
+    currentSourceHost = undefined;
+    currentDiagnosticSpotifyId = null;
     if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       const audioElements = document.querySelectorAll('audio');
       audioElements.forEach((el) => {

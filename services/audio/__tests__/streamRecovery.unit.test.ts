@@ -107,7 +107,11 @@ describe('Stream Recovery & Refusal Tests', () => {
           'User-Agent': expect.stringContaining('Android'),
         }),
       }),
-      { updateInterval: 100 }
+      {
+        updateInterval: 500,
+        keepAudioSessionActive: true,
+        preferredForwardBufferDuration: 30,
+      }
     );
   });
 

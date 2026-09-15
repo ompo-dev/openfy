@@ -1,7 +1,6 @@
 import { Platform } from 'react-native';
 
 import { resolveAudioUrl } from '../audio/audioResolver';
-import { preloadAudio } from '../audio/playerService';
 
 export type HomeTrackSeed = {
   key: string;
@@ -58,8 +57,8 @@ const resolveHomeTrack = (track: HomeTrackSeed) => {
 
   const request = runQueuedResolve(async (): Promise<RefreshedHomeTrack | null> => {
     try {
-      // Reuse playback's resolver: in an IPA it resolves directly on device;
-      // in Expo development it can still use the local API route.
+      // Reuse playback's fully local resolver so Home cards stay aligned with
+      // the source that will be used if the user starts playback.
       const resolved = await resolveAudioUrl(
         track.title,
         track.artistName,
@@ -75,7 +74,6 @@ const resolveHomeTrack = (track: HomeTrackSeed) => {
 
       const streamExpiresAt = Date.now() + HOME_STREAM_TTL_MS;
       const streamUrl = resolved.url;
-      void preloadAudio(streamUrl);
       return {
         spotifyId: track.spotifyId,
         title: track.title,

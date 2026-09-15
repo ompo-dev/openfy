@@ -1,9 +1,13 @@
 jest.mock('../../audio/audioResolver', () => ({
   resolveAudioUrl: jest.fn(),
 }));
+jest.mock('../../audio/playerService', () => ({
+  preloadAudio: jest.fn(),
+}));
 
 import { refreshHomeTracks } from '../homeTrackRefresh';
 import { resolveAudioUrl } from '../../audio/audioResolver';
+import { preloadAudio } from '../../audio/playerService';
 import { Platform } from 'react-native';
 
 const resolveAudioUrlMock = resolveAudioUrl as jest.Mock;
@@ -68,6 +72,7 @@ describe('refreshHomeTracks', () => {
         streamUrl: 'https://media.test/track.m4a',
       })
     );
+    expect(preloadAudio).not.toHaveBeenCalled();
   });
 
   it('does not replace the visible card when its audio source cannot be verified', async () => {

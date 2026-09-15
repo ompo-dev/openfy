@@ -51,6 +51,27 @@ gravador AVFoundation novo reconstrói o M4A com os pacotes AAC originais.
 O arquivo só é substituído depois de validar a duração e o hash de todo o áudio
 comprimido. Falhas mantêm o original e permitem uma nova tentativa.
 
+Antes de entregar um arquivo de áudio local ao `AVPlayer`, o mesmo módulo
+confere a proteção de dados do arquivo e, se necessário, ajusta somente esse
+arquivo para `completeUntilFirstUserAuthentication`. Essa classe mantém o
+arquivo protegido em repouso antes do primeiro desbloqueio após reiniciar o
+iPhone, mas permite leitura depois que a pessoa já desbloqueou o aparelho uma
+vez. O app registra a classe encontrada antes/depois para confirmar no aparelho
+se algum arquivo estava mais restritivo.
+
+O player móvel mantém a sessão de áudio ativa enquanto troca de estado e reduz
+os eventos de progresso para 500 ms. Isso evita trabalho JS desnecessário em
+segundo plano sem depender de áudio silencioso, tarefa infinita ou backend. Sem
+um crash log ou log nativo do momento da parada, essas mudanças devem ser
+tratadas como mitigação e instrumentação, não como prova de causa definitiva.
+
+Preloads são reservados para a janela curta da fila de reprodução. A Home pode
+resolver URLs para manter cards prontos para toque, mas não cria preloads nativos
+para todos os cards visíveis. `expo-audio` implementa preload nativo com players
+retidos; manter isso sem dono para a Home acumula buffers/players durante uso em
+segundo plano. O serviço do player também limita os preloads retidos e cancela
+operações pendentes antes que elas recriem uma entrada nativa já liberada.
+
 A ação **Validate local audio repair** compila o mesmo código Swift em macOS e
 usa um tom sintético de 2 segundos seguido de meio segundo de silêncio. Ela
 verifica duração, preservação dos pacotes e repetição sem reprocessar o arquivo.

@@ -21,6 +21,7 @@ jest.mock('@services', () => ({
   resolveAudioUrl: jest.fn(),
   getPlayableAudioUrl: jest.fn((url: string) => url),
   downloadTrack: jest.fn().mockResolvedValue(null),
+  ensurePlaybackDiagnostics: jest.fn().mockResolvedValue(undefined),
   getDownloadedTrack: jest.fn().mockResolvedValue(null),
   fadeOutCurrent: jest.fn().mockResolvedValue(undefined),
   restoreCurrentVolume: jest.fn().mockResolvedValue(undefined),
@@ -131,7 +132,8 @@ describe('queue preload window', () => {
       savedUrl,
       expect.any(Function),
       expect.any(Object),
-      2000
+      2000,
+      tracks[1]
     );
     expect(downloadTrack).not.toHaveBeenCalled();
   });
@@ -150,7 +152,8 @@ describe('queue preload window', () => {
       savedUrl,
       expect.any(Function),
       expect.any(Object),
-      2000
+      2000,
+      tracks[1]
     );
   });
 
@@ -169,7 +172,8 @@ describe('queue preload window', () => {
       savedTrack.streamUrl,
       expect.any(Function),
       expect.any(Object),
-      2000
+      2000,
+      savedTrack
     );
   });
 });

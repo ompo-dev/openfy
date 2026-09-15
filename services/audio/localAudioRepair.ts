@@ -35,7 +35,9 @@ export const repairLocalAudioFile = (
   return operation;
 };
 
-export const prepareLocalAudioForPlayback = async (uri: string): Promise<void> => {
+export const prepareLocalAudioForPlayback = async (
+  uri: string
+): Promise<LocalAudioRepairResult | null> => {
   try {
     const result = await repairLocalAudioFile(uri);
     if (result?.repaired) {
@@ -44,8 +46,16 @@ export const prepareLocalAudioForPlayback = async (uri: string): Promise<void> =
         durationMs: result.durationMs,
       });
     }
+    if (result?.protectionRelaxed) {
+      console.log('[LocalAudioRepair] Adjusted iOS file protection for playback:', {
+        before: result.protectionBefore,
+        after: result.protectionAfter,
+      });
+    }
+    return result;
   } catch (error) {
     // Validation/export failures preserve the original file for playback/retry.
     console.warn('[LocalAudioRepair] Could not normalize local audio:', error);
+    return null;
   }
 };

@@ -50,22 +50,37 @@ const redactUrlsInText = (value: string) =>
     redactDownloadUrl(url) || 'invalid-url'
   );
 
-const normalizeDetails = (details?: Record<string, unknown>) => {
-  if (!details) return undefined;
-  return Object.fromEntries(
-    Object.entries(details).map(([key, value]) => [
-      key,
-      typeof value === 'string' &&
-      /(url|error|message)/i.test(key)
-        ? key.toLowerCase().includes('url')
-          ? redactDownloadUrl(value)
-          : redactUrlsInText(value)
-        : value instanceof Error
-          ? redactUrlsInText(errorMessage(value))
-          : value,
-    ])
-  );
+const normalizeDiagnosticValue = (key: string, value: unknown): unknown => {
+  if (value instanceof Error) return redactUrlsInText(errorMessage(value));
+  if (typeof value === 'string') {
+    if (/url/i.test(key)) return redactDownloadUrl(value);
+    if (/https?:\/\//i.test(value)) return redactUrlsInText(value);
+    if (/(error|message)/i.test(key)) return redactUrlsInText(value);
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeDiagnosticValue(key, item));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([nestedKey, nestedValue]) => [
+        nestedKey,
+        normalizeDiagnosticValue(nestedKey, nestedValue),
+      ])
+    );
+  }
+  return value;
 };
+
+const normalizeDetails = (details?: Record<string, unknown>) =>
+  details
+    ? Object.fromEntries(
+        Object.entries(details).map(([key, value]) => [
+          key,
+          normalizeDiagnosticValue(key, value),
+        ])
+      )
+    : undefined;
 
 const serialize = () => {
   const entries = Object.entries(diagnostics)
@@ -74,7 +89,15 @@ const serialize = () => {
   return Object.fromEntries(entries);
 };
 
+const evictOverflow = () => {
+  const retained = new Set(Object.keys(serialize()));
+  Object.keys(diagnostics).forEach((key) => {
+    if (!retained.has(key)) delete diagnostics[key];
+  });
+};
+
 const persist = () => {
+  evictOverflow();
   persistQueue = persistQueue
     .catch(() => undefined)
     .then(() => AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(serialize())))
@@ -126,6 +149,31 @@ export const startDownloadDiagnostics = async (track: DownloadTrackInput) => {
   await persist();
 };
 
+export const ensurePlaybackDiagnostics = async (track: DownloadTrackInput) => {
+  await hydrate();
+  if (diagnostics[track.spotifyId]) return;
+  const now = new Date().toISOString();
+  diagnostics[track.spotifyId] = {
+    track: {
+      spotifyId: track.spotifyId,
+      title: track.title,
+      artistName: track.artistName,
+      albumName: track.albumName,
+    },
+    platform: Platform.OS,
+    attempts: 0,
+    updatedAt: now,
+    events: [
+      {
+        at: now,
+        phase: 'player.diagnostics.started',
+        details: { platform: Platform.OS },
+      },
+    ],
+  };
+  await persist();
+};
+
 export const recordDownloadDiagnostic = (
   spotifyId: string,
   phase: string,
@@ -142,6 +190,7 @@ export const recordDownloadDiagnostic = (
       { at: now, phase, details: normalizeDetails(details) },
     ].slice(-EVENT_CAPACITY),
   };
+  evictOverflow();
   void persist();
 };
 

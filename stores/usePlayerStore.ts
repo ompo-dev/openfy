@@ -14,6 +14,7 @@ import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   loadAndPlay,
+  ensurePlaybackDiagnostics,
   play,
   pause,
   seekTo,
@@ -334,6 +335,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         : {}),
     });
     warmQueueNeighbors(get().queue, get().queueIndex);
+    const playbackDiagnosticsReady = ensurePlaybackDiagnostics(track).catch(
+      () => {}
+    );
 
     // Record interaction metric
     recordInteraction(track, 'play').catch(() => {});
@@ -470,6 +474,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     console.log(`[PlayerStore #${requestId}] Playing stream:`, activeStreamUri);
     await fadeOutPromise;
+    await playbackDiagnosticsReady;
 
     if (get().activeRequestId !== requestId) return;
 
@@ -559,7 +564,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
                   albumTitle: track.albumName,
                   artworkUrl: track.imageURL,
                 },
-                500
+                500,
+                track
               );
               if (recoveredOk && lastPosMs > 1000) {
                 await seekTo(lastPosMs);
@@ -590,12 +596,18 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       }
     };
 
-    const success = await loadAndPlay(streamSource, handleStatusUpdate, {
-      title: track.title,
-      artist: track.artistName,
-      albumTitle: track.albumName,
-      artworkUrl: track.imageURL,
-    }, 2000);
+    const success = await loadAndPlay(
+      streamSource,
+      handleStatusUpdate,
+      {
+        title: track.title,
+        artist: track.artistName,
+        albumTitle: track.albumName,
+        artworkUrl: track.imageURL,
+      },
+      2000,
+      track
+    );
 
     initialLoadInProgress = false;
 
@@ -652,17 +664,27 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           ? { uri: fallbackResolved.url, headers: fallbackResolved.headers }
           : fallbackResolved.url;
         cacheAudioSource(track, newSource);
-        await loadAndPlay(newSource, handleStatusUpdate, {
-          title: track.title,
-          artist: track.artistName,
-          albumTitle: track.albumName,
-          artworkUrl: track.imageURL,
-        }, 2000);
+        await loadAndPlay(
+          newSource,
+          handleStatusUpdate,
+          {
+            title: track.title,
+            artist: track.artistName,
+            albumTitle: track.albumName,
+            artworkUrl: track.imageURL,
+          },
+          2000,
+          track
+        );
       }
     }
   },
 
-  playWithQueue: async (tracks: PlayerTrack[], startIndex = 0, sourceId?: string) => {
+  playWithQueue: async (
+    tracks: PlayerTrack[],
+    startIndex = 0,
+    sourceId?: string
+  ) => {
     if (!tracks || tracks.length === 0) return;
     const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
     set({

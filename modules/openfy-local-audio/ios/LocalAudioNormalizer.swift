@@ -5,6 +5,9 @@ import Foundation
 struct LocalAudioRepairResult: Sendable {
   let uri: String
   let repaired: Bool
+  var protectionRelaxed: Bool = false
+  var protectionBefore: String? = nil
+  var protectionAfter: String? = nil
   var durationMs: Double? = nil
   var originalDurationMs: Double? = nil
 }
@@ -56,8 +59,15 @@ enum LocalAudioNormalizer {
 
   static func repair(url: URL) async throws -> LocalAudioRepairResult {
     let identity = try FileIdentity(url)
+    var protection = try allowPlaybackWhileLocked(url: url, identity: identity)
     guard try MP4Container.isFragmented(at: url) else {
-      return LocalAudioRepairResult(uri: url.absoluteString, repaired: false)
+      return LocalAudioRepairResult(
+        uri: url.absoluteString,
+        repaired: false,
+        protectionRelaxed: protection.relaxed,
+        protectionBefore: protection.before,
+        protectionAfter: protection.after
+      )
     }
 
     let original = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
@@ -107,13 +117,81 @@ enum LocalAudioNormalizer {
 
     // Both files are on the same volume; replacement happens only after validation.
     _ = try FileManager.default.replaceItemAt(url, withItemAt: temporary)
+    let replacementProtection = try allowPlaybackWhileLocked(url: url, identity: FileIdentity(url))
+    protection = (
+      relaxed: replacementProtection.relaxed || protection.relaxed,
+      before: protection.before,
+      after: replacementProtection.after ?? protection.after
+    )
     return LocalAudioRepairResult(
       uri: url.absoluteString,
       repaired: true,
+      protectionRelaxed: protection.relaxed,
+      protectionBefore: protection.before,
+      protectionAfter: protection.after,
       durationMs: outputDuration.seconds * 1000,
       originalDurationMs: originalDuration.isNumeric ? originalDuration.seconds * 1000 : nil
     )
   }
+
+  static func allowPlaybackWhileLocked(url: URL, identity _: FileIdentity) throws -> (
+    relaxed: Bool,
+    before: String?,
+    after: String?
+  ) {
+    #if os(iOS)
+    guard isPlayableAudioFile(url) else { return (false, nil, nil) }
+    let fileManager = FileManager.default
+    let before = try protectionType(at: url)
+    if before == .completeUntilFirstUserAuthentication {
+      return (false, protectionName(before), protectionName(before))
+    }
+    try fileManager.setAttributes(
+      [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+      ofItemAtPath: url.path
+    )
+    let after = try protectionType(at: url)
+    return (after != before, protectionName(before), protectionName(after))
+    #else
+    return (false, nil, nil)
+    #endif
+  }
+
+  private static func isPlayableAudioFile(_ url: URL) -> Bool {
+    ["m4a", "mp3", "aac"].contains(url.pathExtension.lowercased())
+  }
+
+  #if os(iOS)
+  private static func protectionType(at url: URL) throws -> FileProtectionType? {
+    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    if let protection = attributes[.protectionKey] as? FileProtectionType {
+      return protection
+    }
+    if let raw = attributes[.protectionKey] as? String {
+      return FileProtectionType(rawValue: raw)
+    }
+    if let raw = attributes[.protectionKey] as? NSString {
+      return FileProtectionType(rawValue: raw as String)
+    }
+    return nil
+  }
+
+  private static func protectionName(_ protection: FileProtectionType?) -> String? {
+    guard let protection else { return nil }
+    switch protection {
+    case .complete:
+      return "complete"
+    case .completeUnlessOpen:
+      return "completeUnlessOpen"
+    case .completeUntilFirstUserAuthentication:
+      return "completeUntilFirstUserAuthentication"
+    case .none:
+      return "none"
+    default:
+      return protection.rawValue
+    }
+  }
+  #endif
 
   static func readPackets(asset: AVAsset, track: AVAssetTrack) throws -> PacketSummary {
     let reader = try AVAssetReader(asset: asset)
