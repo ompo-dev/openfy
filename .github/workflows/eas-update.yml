@@ -1,0 +1,79 @@
+name: Publicar OTA
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: eas-update-main
+  cancel-in-progress: false
+
+jobs:
+  publicar-ota:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    permissions:
+      contents: read
+
+    env:
+      CI: "1"
+      EXPO_NO_TELEMETRY: "1"
+      EXPO_PUBLIC_LOCAL_AUDIO_ONLY: "true"
+      EXPO_PUBLIC_SPOTIFY_CLIENT_ID: ${{ vars.EXPO_PUBLIC_SPOTIFY_CLIENT_ID }}
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+    steps:
+      - name: Verificar token da Expo
+        id: expo-token
+        shell: bash
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::warning::EXPO_TOKEN nao configurado; OTA nao sera publicado nesta execucao."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Baixar projeto
+        if: steps.expo-token.outputs.publish == 'true'
+        uses: actions/checkout@v6
+
+      - name: Configurar Node.js
+        if: steps.expo-token.outputs.publish == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Configurar EAS
+        if: steps.expo-token.outputs.publish == 'true'
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Instalar dependencias
+        if: steps.expo-token.outputs.publish == 'true'
+        env:
+          YOUTUBE_DL_SKIP_DOWNLOAD: "true"
+        run: npm ci --legacy-peer-deps
+
+      - name: Validar TypeScript
+        if: steps.expo-token.outputs.publish == 'true'
+        run: npm run typecheck
+
+      - name: Testar OTA
+        if: steps.expo-token.outputs.publish == 'true'
+        run: npx jest hooks/__tests__/useOTAUpdates.unit.test.tsx --runInBand --silent
+
+      - name: Publicar update no canal production
+        if: steps.expo-token.outputs.publish == 'true'
+        run: |
+          eas update \
+            --channel production \
+            --environment production \
+            --auto \
+            --non-interactive

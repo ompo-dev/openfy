@@ -18,6 +18,7 @@ jobs:
       EXPO_NO_TELEMETRY: "1"
       EXPO_PUBLIC_LOCAL_AUDIO_ONLY: "true"
       EXPO_PUBLIC_SPOTIFY_CLIENT_ID: ${{ vars.EXPO_PUBLIC_SPOTIFY_CLIENT_ID }}
+      IOS_BUILD_NUMBER: ${{ github.run_number }}
 
     steps:
       - name: Baixar projeto
@@ -71,25 +72,6 @@ jobs:
         run: |
           npx expo config --type public
           npx expo-doctor || true
-
-      - name: Definir buildNumber = run_number
-        # Each run bumps CFBundleVersion so AltStore sees every build as a new version.
-        # Patches app.config.js only — never committed.
-        shell: bash
-        env:
-          RUN: ${{ github.run_number }}
-        run: |
-          node -e '
-          const fs = require("fs");
-          // app.config.js exports a module, patch version in-place
-          let src = fs.readFileSync("app.config.js", "utf8");
-          // inject buildNumber into ios section
-          src = src.replace(
-            /(ios:\s*\{)/,
-            `$1\n      buildNumber: "${process.env.RUN}",`
-          );
-          fs.writeFileSync("app.config.js", src);
-          '
 
       - name: Gerar projeto nativo iOS
         run: |

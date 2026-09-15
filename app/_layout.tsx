@@ -17,6 +17,7 @@ import {
 } from '@context';
 import { MiniPlayer, FullPlayer } from '@components';
 import { registerBackgroundDownloadTask } from '@services';
+import { useOTAUpdates } from '@hooks';
 
 import 'react-native-reanimated';
 
@@ -47,6 +48,8 @@ export default function RootLayout() {
     'SimplyRounded-Italic': require('@assets/fonts/Simply Rounded Italic.ttf'),
     'SimplyRounded-BoldItalic': require('@assets/fonts/Simply Rounded Bold Italic.ttf'),
   });
+
+  useOTAUpdates();
 
   React.useEffect(() => {
     if (fontsLoaded) {

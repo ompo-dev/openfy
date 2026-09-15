@@ -3,12 +3,26 @@ module.exports = {
     name: 'Openfy',
     slug: 'openfy',
     version: '1.0.0',
+    runtimeVersion: {
+      policy: 'appVersion',
+    },
     orientation: 'portrait',
     icon: './assets/images/app-icon/openfy-light.png',
     scheme: 'openfy',
     userInterfaceStyle: 'automatic',
+    updates: {
+      enabled: true,
+      url: 'https://u.expo.dev/33b0281a-b127-47fe-ab16-e94caf272493',
+      checkAutomatically: 'ON_LOAD',
+      fallbackToCacheTimeout: 0,
+      useEmbeddedUpdate: true,
+      requestHeaders: {
+        'expo-channel-name': 'production',
+      },
+    },
     ios: {
       bundleIdentifier: 'com.openfy.app',
+      buildNumber: process.env.IOS_BUILD_NUMBER || '1',
       infoPlist: {
         NSAppTransportSecurity: {
           NSAllowsLocalNetworking: true,
@@ -27,6 +41,7 @@ module.exports = {
     },
     android: {
       package: 'com.openfy.app',
+      versionCode: Number(process.env.ANDROID_VERSION_CODE || 1),
       icon: './assets/images/app-icon/openfy-dark.png',
       softwareKeyboardLayoutMode: 'pan',
       adaptiveIcon: {
