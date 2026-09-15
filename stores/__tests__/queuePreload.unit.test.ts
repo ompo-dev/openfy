@@ -45,6 +45,8 @@ import {
 } from '@services';
 import { usePlayerStore, type PlayerTrack } from '../usePlayerStore';
 
+const realPlayTrack = usePlayerStore.getState().playTrack;
+
 const tracks: PlayerTrack[] = [
   {
     spotifyId: 'AAAAAAAAAAAAAAAAAAAAAA',
@@ -175,5 +177,44 @@ describe('queue preload window', () => {
       2000,
       savedTrack
     );
+  });
+
+  describe('playQueueIndex', () => {
+    afterEach(() => {
+      usePlayerStore.setState({ playTrack: realPlayTrack });
+    });
+
+    it('ignores invalid indexes without changing queue state', async () => {
+      const playTrack = jest.fn().mockResolvedValue(undefined);
+      usePlayerStore.setState({
+        playTrack,
+        queue: tracks,
+        queueIndex: 1,
+        queueSourceId: 'library:songs',
+      });
+
+      await usePlayerStore.getState().playQueueIndex(-1);
+      await usePlayerStore.getState().playQueueIndex(tracks.length);
+
+      expect(playTrack).not.toHaveBeenCalled();
+      expect(usePlayerStore.getState().queueIndex).toBe(1);
+      expect(usePlayerStore.getState().queueSourceId).toBe('library:songs');
+    });
+
+    it('plays the exact target index and preserves the queue source', async () => {
+      const playTrack = jest.fn().mockResolvedValue(undefined);
+      usePlayerStore.setState({
+        playTrack,
+        queue: tracks,
+        queueIndex: 0,
+        queueSourceId: 'playlist:daily',
+      });
+
+      await usePlayerStore.getState().playQueueIndex(2);
+
+      expect(usePlayerStore.getState().queueIndex).toBe(2);
+      expect(usePlayerStore.getState().queueSourceId).toBe('playlist:daily');
+      expect(playTrack).toHaveBeenCalledWith(tracks[2], { setQueue: false });
+    });
   });
 });

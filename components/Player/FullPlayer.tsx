@@ -22,6 +22,7 @@ import {
   View,
   Dimensions,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
@@ -49,6 +50,7 @@ import {
 import { GlassSurface, LoggedPressable } from '../native';
 import { LyricSyncEditor } from './LyricSyncEditor';
 import { MarqueeText } from '../common/MarqueeText';
+import { SwipeableArtwork } from './SwipeableArtwork';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const COVER_SIZE = Math.min(SCREEN_WIDTH - 64, 340);
@@ -113,6 +115,14 @@ const getTrackKey = (
       )
     : '';
 
+const getTrackArtworkUri = (
+  track: { imageURL?: string | null; localImagePath?: string | null } | null
+) => track?.imageURL || track?.localImagePath || '';
+
+const getTrackLocalArtworkUri = (
+  track: { localImagePath?: string | null } | null
+) => track?.localImagePath || undefined;
+
 type LyricEditorTarget =
   { kind: 'lyric'; index: number } | { kind: 'gap'; target: LyricGapTarget };
 
@@ -154,7 +164,10 @@ const getTrackYouTubeUrl = (
     youtubeUrl?: string;
   } | null
 ): string => {
-  if (track?.youtubeVideoId && /^[A-Za-z0-9_-]{11}$/.test(track.youtubeVideoId)) {
+  if (
+    track?.youtubeVideoId &&
+    /^[A-Za-z0-9_-]{11}$/.test(track.youtubeVideoId)
+  ) {
     return `https://www.youtube.com/watch?v=${track.youtubeVideoId}`;
   }
   const explicitUrl = getExactYouTubeUrl(track?.youtubeUrl);
@@ -226,6 +239,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     playTrack,
     togglePlayPause,
     seekToPosition,
+    playQueueIndex,
     playNext,
     playPrevious,
     queue,
@@ -250,11 +264,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     React.useState<LyricEditorTarget>({ kind: 'lyric', index: 0 });
 
   // YouTube action sheet and custom link edit state
-  const [failedArtworkUrl, setFailedArtworkUrl] = React.useState('');
   const [isActionModalVisible, setIsActionModalVisible] = React.useState(false);
   const [isEditModalVisible, setIsEditModalVisible] = React.useState(false);
   const [customLinkInput, setCustomLinkInput] = React.useState('');
   const [isUpdatingAudio, setIsUpdatingAudio] = React.useState(false);
+  const [isArtworkNavigationPending, setIsArtworkNavigationPending] =
+    React.useState(false);
 
   const lyricsListRef = React.useRef<FlatList>(null);
   const lyricScrollRetriedRef = React.useRef(false);
@@ -264,10 +279,40 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const draftLyricSegmentsRef = React.useRef<LyricSegment[]>([]);
   const resumeAfterLyricEditRef = React.useRef(false);
   const currentTrackKey = getTrackKey(currentTrack);
-  const artworkUrl =
-    currentTrack?.imageURL && currentTrack.imageURL !== failedArtworkUrl
-      ? currentTrack.imageURL
-      : currentTrack?.localImagePath || '';
+  const artworkUrl = getTrackArtworkUri(currentTrack);
+  const queueHasMultipleTracks = queue.length > 1;
+  const shuffleNextQueueIndex = React.useMemo(() => {
+    if (!currentTrackKey || !queueHasMultipleTracks || !isShuffle) return -1;
+
+    const candidateCount = queue.length - 1;
+    const pickedIndex = Math.floor(Math.random() * candidateCount);
+    return pickedIndex >= queueIndex ? pickedIndex + 1 : pickedIndex;
+  }, [currentTrackKey, isShuffle, queue.length, queueHasMultipleTracks, queueIndex]);
+  const previousQueueIndex =
+    queueIndex > 0
+      ? queueIndex - 1
+      : repeatMode === 'all'
+        ? queue.length - 1
+        : -1;
+  const nextQueueIndex = isShuffle
+    ? shuffleNextQueueIndex
+    : queueIndex < queue.length - 1
+      ? queueIndex + 1
+      : repeatMode === 'all'
+        ? 0
+        : -1;
+  const previousTrack =
+    queueHasMultipleTracks && previousQueueIndex >= 0
+      ? queue[previousQueueIndex]
+      : null;
+  const nextTrack =
+    queueHasMultipleTracks && nextQueueIndex >= 0
+      ? queue[nextQueueIndex]
+      : null;
+  const canGoPrevious = !!previousTrack;
+  const canGoNext = !!nextTrack;
+  const artworkIsLoading =
+    !!playerState.isBuffering || isArtworkNavigationPending;
 
   const artistLinks = React.useMemo(() => {
     if (!currentTrack) return [];
@@ -282,7 +327,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     async (artistId: string, artistName: string) => {
       const targetArtistId =
         (currentTrack?.localAudioPath
-          ? `local_artist_${encodeURIComponent(artistId ? `spotify:${artistId}` : artistName)}` : artistId) ||
+          ? `local_artist_${encodeURIComponent(artistId ? `spotify:${artistId}` : artistName)}`
+          : artistId) ||
         (await findArtistIdByName(artistName)) ||
         `local_artist_${encodeURIComponent(artistName)}`;
       const section = segments.join('/').includes('library')
@@ -393,7 +439,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const lyricTimeline = React.useMemo(
     () =>
       displayedLyricSegments.length > 0
-        ? getLyricTimelineBlocks(displayedLyricSegments, lyricTimelineDurationMs)
+        ? getLyricTimelineBlocks(
+            displayedLyricSegments,
+            lyricTimelineDurationMs
+          )
         : [],
     [displayedLyricSegments, lyricTimelineDurationMs]
   );
@@ -819,11 +868,27 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     await seekToPosition(startTimeMs);
   };
 
-  const canGoPrevious =
-    queue.length > 1 && (isShuffle || repeatMode === 'all' || queueIndex > 0);
-  const canGoNext =
-    queue.length > 1 &&
-    (isShuffle || repeatMode === 'all' || queueIndex < queue.length - 1);
+  const handleArtworkPrevious = async () => {
+    if (artworkIsLoading || !canGoPrevious) return;
+
+    setIsArtworkNavigationPending(true);
+    try {
+      await playQueueIndex(previousQueueIndex);
+    } finally {
+      setIsArtworkNavigationPending(false);
+    }
+  };
+
+  const handleArtworkNext = async () => {
+    if (artworkIsLoading || !canGoNext) return;
+
+    setIsArtworkNavigationPending(true);
+    try {
+      await playQueueIndex(nextQueueIndex);
+    } finally {
+      setIsArtworkNavigationPending(false);
+    }
+  };
 
   return (
     <Modal
@@ -832,565 +897,593 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <View style={styles.container}>
-        {artworkUrl ? (
-          <Image
-            source={{ uri: artworkUrl }}
-            style={styles.backgroundCover}
-            blurRadius={28}
-            resizeMode="cover"
-          />
-        ) : null}
-        <View style={[styles.backgroundScrim, { pointerEvents: 'none' }]} />
-        {/* Grab Handle Header */}
-        <View style={styles.topGrabRow}>
-          <View style={styles.grabBar} />
-        </View>
-
-        {/* Top Navigation Bar */}
-        <View style={styles.header}>
-          <PlayerGlassButton
-            accessibilityLabel={
-              isLyricsEditing ? 'Cancelar edição da letra' : 'Fechar player'
-            }
-            onPress={isLyricsEditing ? cancelLyricsEditing : onClose}
-            style={styles.headerIconButton}
-          >
-            <Ionicons
-              name={isLyricsEditing ? 'close' : 'chevron-down'}
-              size={26}
-              color="#FFFFFF"
+      <GestureHandlerRootView style={styles.gestureRoot}>
+        <View style={styles.container}>
+          {artworkUrl ? (
+            <Image
+              source={{ uri: artworkUrl }}
+              style={styles.backgroundCover}
+              blurRadius={28}
+              resizeMode="cover"
             />
-          </PlayerGlassButton>
-          <View style={styles.headerInfo}>
-            <Text style={styles.headerFrom}>OPENFY MUSIC</Text>
-            <Text style={styles.headerContext} numberOfLines={1}>
-              {currentTrack.albumName || 'Reproduzindo'}
-            </Text>
+          ) : null}
+          <View style={[styles.backgroundScrim, { pointerEvents: 'none' }]} />
+          {/* Grab Handle Header */}
+          <View style={styles.topGrabRow}>
+            <View style={styles.grabBar} />
           </View>
-          <PlayerGlassButton
-            accessibilityLabel={
-              isLyricsEditing
-                ? 'Confirmar sincronização da letra'
-                : showLyricsFull
-                  ? 'Editar sincronização da letra'
-                  : 'Abrir letras sincronizadas'
-            }
-            onPress={
-              isLyricsEditing
-                ? () => void confirmLyricsEditing()
-                : showLyricsFull
-                  ? beginLyricsEditing
-                  : openLyricsView
-            }
-            style={styles.headerIconButton}
-            tintColor={
-              isLyricsEditing || showLyricsFull
-                ? 'rgba(255,255,255,0.28)'
-                : undefined
-            }
-          >
-            <Ionicons
-              name={
-                isLyricsEditing
-                  ? 'checkmark'
-                  : showLyricsFull
-                    ? 'pencil-outline'
-                    : 'chatbubble-ellipses-outline'
-              }
-              size={22}
-              color={
-                isLyricsEditing || showLyricsFull
-                  ? '#FFFFFF'
-                  : 'rgba(255,255,255,0.7)'
-              }
-            />
-          </PlayerGlassButton>
-        </View>
 
-        {showLyricsFull ? (
-          /* =========================================================
-           * FULL SCREEN APPLE MUSIC SYNCED LYRICS VIEW
-           * ========================================================= */
-          <LyricsViewport>
-            {lyricTimeline.length > 0 ? (
-              <FlatList
-                testID="player-synced-lyrics"
-                style={styles.lyricsList}
-                removeClippedSubviews={false}
-                ref={lyricsListRef}
-                data={lyricTimeline}
-                extraData={`${activeLineIndex}:${isLyricsEditing}:${JSON.stringify(selectedLyricTarget)}`}
-                keyExtractor={(item) =>
-                  item.kind === 'gap'
-                    ? item.id
-                    : `lyric_${item.startTimeMs}_${item.index}`
+          {/* Top Navigation Bar */}
+          <View style={styles.header}>
+            <PlayerGlassButton
+              accessibilityLabel={
+                isLyricsEditing ? 'Cancelar edição da letra' : 'Fechar player'
+              }
+              onPress={isLyricsEditing ? cancelLyricsEditing : onClose}
+              style={styles.headerIconButton}
+            >
+              <Ionicons
+                name={isLyricsEditing ? 'close' : 'chevron-down'}
+                size={26}
+                color="#FFFFFF"
+              />
+            </PlayerGlassButton>
+            <View style={styles.headerInfo}>
+              <Text style={styles.headerFrom}>OPENFY MUSIC</Text>
+              <Text style={styles.headerContext} numberOfLines={1}>
+                {currentTrack.albumName || 'Reproduzindo'}
+              </Text>
+            </View>
+            <PlayerGlassButton
+              accessibilityLabel={
+                isLyricsEditing
+                  ? 'Confirmar sincronização da letra'
+                  : showLyricsFull
+                    ? 'Editar sincronização da letra'
+                    : 'Abrir letras sincronizadas'
+              }
+              onPress={
+                isLyricsEditing
+                  ? () => void confirmLyricsEditing()
+                  : showLyricsFull
+                    ? beginLyricsEditing
+                    : openLyricsView
+              }
+              style={styles.headerIconButton}
+              tintColor={
+                isLyricsEditing || showLyricsFull
+                  ? 'rgba(255,255,255,0.28)'
+                  : undefined
+              }
+            >
+              <Ionicons
+                name={
+                  isLyricsEditing
+                    ? 'checkmark'
+                    : showLyricsFull
+                      ? 'pencil-outline'
+                      : 'chatbubble-ellipses-outline'
                 }
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.lyricsScrollContent}
-                onLayout={() => scrollLyricsToActive(false)}
-                onContentSizeChange={() => scrollLyricsToActive(false)}
-                onScrollToIndexFailed={({ averageItemLength }) => {
-                  if (lyricScrollRetriedRef.current) return;
-                  lyricScrollRetriedRef.current = true;
-                  lyricsListRef.current?.scrollToOffset({
-                    offset: Math.max(
-                      0,
-                      (activeLineIndex - 2) * averageItemLength
-                    ),
-                    animated: false,
-                  });
-                  requestAnimationFrame(() => scrollLyricsToActive(false));
-                }}
-                renderItem={({ item, index }) => {
-                  const isActive = index === activeLineIndex;
-                  const gapTarget =
+                size={22}
+                color={
+                  isLyricsEditing || showLyricsFull
+                    ? '#FFFFFF'
+                    : 'rgba(255,255,255,0.7)'
+                }
+              />
+            </PlayerGlassButton>
+          </View>
+
+          {showLyricsFull ? (
+            /* =========================================================
+             * FULL SCREEN APPLE MUSIC SYNCED LYRICS VIEW
+             * ========================================================= */
+            <LyricsViewport>
+              {lyricTimeline.length > 0 ? (
+                <FlatList
+                  testID="player-synced-lyrics"
+                  style={styles.lyricsList}
+                  removeClippedSubviews={false}
+                  ref={lyricsListRef}
+                  data={lyricTimeline}
+                  extraData={`${activeLineIndex}:${isLyricsEditing}:${JSON.stringify(selectedLyricTarget)}`}
+                  keyExtractor={(item) =>
                     item.kind === 'gap'
-                      ? getGapTarget(lyricTimeline, index)
-                      : null;
-                  return (
-                    <Pressable
-                      onPress={() => {
-                        if (item.kind === 'lyric') {
-                          void handleLyricPress(item, item.index);
-                        } else {
-                          void handleGapPress(
-                            gapTarget || getGapTarget(lyricTimeline, index),
-                            item.startTimeMs
-                          );
-                        }
-                      }}
-                      style={[
-                        styles.lyricLineButton,
-                        isLyricsEditing && styles.lyricEditorLine,
-                        isActive &&
-                          !isLyricsEditing &&
-                          styles.lyricLineActiveButton,
-                      ]}
-                    >
-                      {isLyricsEditing ? (
-                        <Text style={styles.lyricTiming}>
-                          {formatTime(item.startTimeMs)}
-                          {'\n'}
-                          {formatTime(item.endTimeMs)}
-                        </Text>
-                      ) : null}
-                      <Text
+                      ? item.id
+                      : `lyric_${item.startTimeMs}_${item.index}`
+                  }
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={styles.lyricsScrollContent}
+                  onLayout={() => scrollLyricsToActive(false)}
+                  onContentSizeChange={() => scrollLyricsToActive(false)}
+                  onScrollToIndexFailed={({ averageItemLength }) => {
+                    if (lyricScrollRetriedRef.current) return;
+                    lyricScrollRetriedRef.current = true;
+                    lyricsListRef.current?.scrollToOffset({
+                      offset: Math.max(
+                        0,
+                        (activeLineIndex - 2) * averageItemLength
+                      ),
+                      animated: false,
+                    });
+                    requestAnimationFrame(() => scrollLyricsToActive(false));
+                  }}
+                  renderItem={({ item, index }) => {
+                    const isActive = index === activeLineIndex;
+                    const gapTarget =
+                      item.kind === 'gap'
+                        ? getGapTarget(lyricTimeline, index)
+                        : null;
+                    return (
+                      <Pressable
+                        onPress={() => {
+                          if (item.kind === 'lyric') {
+                            void handleLyricPress(item, item.index);
+                          } else {
+                            void handleGapPress(
+                              gapTarget || getGapTarget(lyricTimeline, index),
+                              item.startTimeMs
+                            );
+                          }
+                        }}
                         style={[
-                          styles.lyricText,
-                          item.kind === 'gap'
-                            ? styles.lyricGapText
-                            : isActive
-                              ? styles.lyricTextActive
-                              : styles.lyricTextInactive,
-                          isLyricsEditing && styles.lyricEditorText,
+                          styles.lyricLineButton,
+                          isLyricsEditing && styles.lyricEditorLine,
+                          isActive &&
+                            !isLyricsEditing &&
+                            styles.lyricLineActiveButton,
                         ]}
                       >
-                        {item.text}
-                      </Text>
-                    </Pressable>
-                  );
-                }}
-              />
-            ) : lyricsData && lyricsData.plainLyrics ? (
-              <FlatList
-                testID="player-plain-lyrics"
-                style={styles.lyricsList}
-                removeClippedSubviews={false}
-                data={lyricsData.plainLyrics
-                  .split('\n')
-                  .filter((l) => l.trim().length > 0)}
-                keyExtractor={(_, i) => String(i)}
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.lyricsScrollContent}
-                renderItem={({ item }) => (
-                  <View style={styles.plainLyricRow}>
-                    <Text style={styles.plainLyricText}>{item}</Text>
-                  </View>
-                )}
-              />
-            ) : (
-              <View style={styles.noLyricsContainer}>
-                <MaterialCommunityIcons
-                  name="microphone-outline"
-                  size={52}
-                  color="rgba(255,255,255,0.3)"
+                        {isLyricsEditing ? (
+                          <Text style={styles.lyricTiming}>
+                            {formatTime(item.startTimeMs)}
+                            {'\n'}
+                            {formatTime(item.endTimeMs)}
+                          </Text>
+                        ) : null}
+                        <Text
+                          style={[
+                            styles.lyricText,
+                            item.kind === 'gap'
+                              ? styles.lyricGapText
+                              : isActive
+                                ? styles.lyricTextActive
+                                : styles.lyricTextInactive,
+                            isLyricsEditing && styles.lyricEditorText,
+                          ]}
+                        >
+                          {item.text}
+                        </Text>
+                      </Pressable>
+                    );
+                  }}
                 />
-                <Text style={styles.noLyricsText}>
-                  {isLoadingLyrics
-                    ? 'Carregando letra...'
-                    : 'Letra não disponível para esta faixa.'}
-                </Text>
-              </View>
-            )}
-          </LyricsViewport>
-        ) : (
-          /* =========================================================
-           * STANDARD ALBUM ART & TRACK INFO VIEW
-           * ========================================================= */
-          <View style={styles.mainPlayerSection}>
-            {/* Floating Cover Art */}
-            <View style={styles.coverContainer}>
-              {artworkUrl ? (
-                <Image
-                  testID="player-artwork"
-                  source={{ uri: artworkUrl }}
-                  onError={() => setFailedArtworkUrl(artworkUrl)}
-                  style={styles.cover}
+              ) : lyricsData && lyricsData.plainLyrics ? (
+                <FlatList
+                  testID="player-plain-lyrics"
+                  style={styles.lyricsList}
+                  removeClippedSubviews={false}
+                  data={lyricsData.plainLyrics
+                    .split('\n')
+                    .filter((l) => l.trim().length > 0)}
+                  keyExtractor={(_, i) => String(i)}
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={styles.lyricsScrollContent}
+                  renderItem={({ item }) => (
+                    <View style={styles.plainLyricRow}>
+                      <Text style={styles.plainLyricText}>{item}</Text>
+                    </View>
+                  )}
                 />
               ) : (
-                <View style={[styles.cover, styles.coverFallback]}>
-                  <Ionicons name="musical-note" size={80} color="#888" />
+                <View style={styles.noLyricsContainer}>
+                  <MaterialCommunityIcons
+                    name="microphone-outline"
+                    size={52}
+                    color="rgba(255,255,255,0.3)"
+                  />
+                  <Text style={styles.noLyricsText}>
+                    {isLoadingLyrics
+                      ? 'Carregando letra...'
+                      : 'Letra não disponível para esta faixa.'}
+                  </Text>
                 </View>
               )}
-            </View>
-
-            {/* Track Info (Title & Artist) */}
-            <View style={styles.trackInfoSection}>
-              <MarqueeText
-                text={currentTrack.title}
-                style={styles.trackTitle}
-                containerStyle={styles.trackTitleMarquee}
-                align="center"
-                fadeWidth={16}
-                active={visible}
-              />
-            </View>
-          </View>
-        )}
-
-        {isLyricsEditing ? (
-          <LyricSyncEditor
-            currentPositionMs={playerState.positionMs}
-            selectedRange={selectedEditorRange}
-            totalDurationMs={editorDurationMs}
-            onMove={moveSelectedEditorRange}
-            onResizeStart={resizeSelectedEditorRangeStart}
-            onResizeEnd={resizeSelectedEditorRangeEnd}
-            onScrubStart={handleEditorScrubStart}
-            onScrubEnd={handleEditorScrubEnd}
-            isPlaying={playerState.isPlaying}
-            onTogglePlayPause={() => void handleEditorTogglePlayPause()}
-            waveformSeed={currentTrack.title}
-          />
-        ) : (
-          <>
-            {/* =========================================================
-             * MIDDLE GLASS ACTION PILL ROW (Apple Music Style)
-             * ========================================================= */}
-            <View style={styles.actionPillRow}>
-              {/* Left Pill: Lyrics Toggle */}
-              <PlayerGlassButton
-                accessibilityLabel={
-                  showLyricsFull
-                    ? 'Fechar letras sincronizadas'
-                    : 'Abrir letras sincronizadas'
+            </LyricsViewport>
+          ) : (
+            /* =========================================================
+             * STANDARD ALBUM ART & TRACK INFO VIEW
+             * ========================================================= */
+            <View style={styles.mainPlayerSection}>
+              {/* Floating Cover Art */}
+              <SwipeableArtwork
+                key={currentTrackKey}
+                trackKey={currentTrackKey}
+                artworkUri={artworkUrl}
+                previousArtworkUri={getTrackArtworkUri(previousTrack)}
+                nextArtworkUri={getTrackArtworkUri(nextTrack)}
+                size={COVER_SIZE}
+                canGoPrevious={canGoPrevious}
+                canGoNext={canGoNext}
+                onPrevious={handleArtworkPrevious}
+                onNext={handleArtworkNext}
+                loading={artworkIsLoading}
+                fallbackSource={
+                  currentTrack.localImagePath
+                    ? { uri: currentTrack.localImagePath }
+                    : undefined
                 }
-                onPress={toggleLyricsView}
-                style={styles.circleActionBtn}
-                testID="player-lyrics-toggle"
-                tintColor={
-                  showLyricsFull ? 'rgba(255,255,255,0.28)' : undefined
+                previousFallbackSource={
+                  getTrackLocalArtworkUri(previousTrack)
+                    ? { uri: getTrackLocalArtworkUri(previousTrack) }
+                    : undefined
                 }
-              >
-                <Ionicons
-                  name="chatbubble-ellipses-outline"
-                  size={20}
-                  color={showLyricsFull ? '#FFFFFF' : 'rgba(255,255,255,0.75)'}
-                />
-              </PlayerGlassButton>
-
-              {/* Center Pill: Artists */}
-              {renderArtistPill()}
-
-              {/* Right Pill: YouTube Button with Clean Glass Theme */}
-              <PlayerGlassButton
-                accessibilityLabel="Opções do YouTube"
-                onPress={handleOpenYoutubeMenu}
-                style={styles.circleActionBtn}
-              >
-                <Ionicons
-                  name="logo-youtube"
-                  size={20}
-                  color="rgba(255,255,255,0.85)"
-                />
-              </PlayerGlassButton>
-            </View>
-
-            {/* =========================================================
-             * SCRUBBER & DOLBY ATMOS STATUS ROW
-             * ========================================================= */}
-            <View style={styles.progressContainer}>
-              <Slider
-                style={styles.slider}
-                minimumValue={0}
-                maximumValue={1}
-                value={progress}
-                minimumTrackTintColor="#FFFFFF"
-                maximumTrackTintColor="rgba(255,255,255,0.22)"
-                thumbTintColor="#FFFFFF"
-                onSlidingStart={(v) => {
-                  setSeeking(true);
-                  setSeekValue(v);
-                }}
-                onValueChange={(v) => setSeekValue(v)}
-                onSlidingComplete={async (v) => {
-                  setSeeking(false);
-                  const targetMs = v * totalDurationMs;
-                  await seekToPosition(targetMs);
-                }}
+                nextFallbackSource={
+                  getTrackLocalArtworkUri(nextTrack)
+                    ? { uri: getTrackLocalArtworkUri(nextTrack) }
+                    : undefined
+                }
+                style={styles.coverContainer}
+                testID="player-artwork"
               />
-              <View style={styles.timeRow}>
-                <Text style={styles.timeText}>
-                  {formatTime(
-                    seeking
-                      ? seekValue * totalDurationMs
-                      : playerState.positionMs
-                  )}
-                </Text>
 
-                <Text style={styles.timeText}>
-                  {formatTime(totalDurationMs)}
-                </Text>
+              {/* Track Info (Title & Artist) */}
+              <View style={styles.trackInfoSection}>
+                <MarqueeText
+                  text={currentTrack.title}
+                  style={styles.trackTitle}
+                  containerStyle={styles.trackTitleMarquee}
+                  align="center"
+                  fadeWidth={16}
+                  active={visible}
+                />
               </View>
             </View>
-          </>
-        )}
+          )}
 
-        {!isLyricsEditing ? (
-          <>
-            {/* =========================================================
-             * BOTTOM PLAYBACK CONTROLS
-             * ========================================================= */}
-            <View style={styles.controlsRow}>
-              {/* AirPlay / Output icon */}
-              <PlayerGlassButton
-                accessibilityLabel="Dispositivo de saída"
-                style={styles.sideControlBtn}
-              >
-                <Ionicons
-                  name="radio-outline"
-                  size={24}
-                  color="rgba(255,255,255,0.75)"
-                />
-              </PlayerGlassButton>
-
-              {/* Previous Track */}
-              <PlayerGlassButton
-                accessibilityLabel="Faixa anterior"
-                disabled={!canGoPrevious}
-                onPress={playPrevious}
-                style={styles.seekControlBtn}
-              >
-                <Ionicons
-                  name="play-back"
-                  size={32}
-                  color={canGoPrevious ? '#FFFFFF' : 'rgba(255,255,255,0.42)'}
-                />
-              </PlayerGlassButton>
-
-              {/* Primary control keeps the light Liquid Glass treatment from iOS Music. */}
-              <PlayerGlassButton
-                accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'}
-                glass="thick"
-                onPress={togglePlayPause}
-                style={styles.playPauseCircle}
-                tintColor="rgba(255,255,255,0.92)"
-              >
-                {playerState.isBuffering ? (
-                  <MaterialCommunityIcons
-                    name="loading"
-                    size={34}
-                    color="#FFFFFF"
-                  />
-                ) : (
+          {isLyricsEditing ? (
+            <LyricSyncEditor
+              currentPositionMs={playerState.positionMs}
+              selectedRange={selectedEditorRange}
+              totalDurationMs={editorDurationMs}
+              onMove={moveSelectedEditorRange}
+              onResizeStart={resizeSelectedEditorRangeStart}
+              onResizeEnd={resizeSelectedEditorRangeEnd}
+              onScrubStart={handleEditorScrubStart}
+              onScrubEnd={handleEditorScrubEnd}
+              isPlaying={playerState.isPlaying}
+              onTogglePlayPause={() => void handleEditorTogglePlayPause()}
+              waveformSeed={currentTrack.title}
+            />
+          ) : (
+            <>
+              {/* =========================================================
+               * MIDDLE GLASS ACTION PILL ROW (Apple Music Style)
+               * ========================================================= */}
+              <View style={styles.actionPillRow}>
+                {/* Left Pill: Lyrics Toggle */}
+                <PlayerGlassButton
+                  accessibilityLabel={
+                    showLyricsFull
+                      ? 'Fechar letras sincronizadas'
+                      : 'Abrir letras sincronizadas'
+                  }
+                  onPress={toggleLyricsView}
+                  style={styles.circleActionBtn}
+                  testID="player-lyrics-toggle"
+                  tintColor={
+                    showLyricsFull ? 'rgba(255,255,255,0.28)' : undefined
+                  }
+                >
                   <Ionicons
-                    name={playerState.isPlaying ? 'pause' : 'play'}
-                    size={34}
-                    color="#FFFFFF"
-                    style={
-                      playerState.isPlaying ? undefined : { marginLeft: 3 }
+                    name="chatbubble-ellipses-outline"
+                    size={20}
+                    color={
+                      showLyricsFull ? '#FFFFFF' : 'rgba(255,255,255,0.75)'
                     }
                   />
-                )}
-              </PlayerGlassButton>
+                </PlayerGlassButton>
 
-              {/* Next Track */}
-              <PlayerGlassButton
-                accessibilityLabel="Próxima faixa"
-                disabled={!canGoNext}
-                onPress={playNext}
-                style={styles.seekControlBtn}
-              >
-                <Ionicons
-                  name="play-forward"
-                  size={32}
-                  color={canGoNext ? '#FFFFFF' : 'rgba(255,255,255,0.42)'}
+                {/* Center Pill: Artists */}
+                {renderArtistPill()}
+
+                {/* Right Pill: YouTube Button with Clean Glass Theme */}
+                <PlayerGlassButton
+                  accessibilityLabel="Opções do YouTube"
+                  onPress={handleOpenYoutubeMenu}
+                  style={styles.circleActionBtn}
+                >
+                  <Ionicons
+                    name="logo-youtube"
+                    size={20}
+                    color="rgba(255,255,255,0.85)"
+                  />
+                </PlayerGlassButton>
+              </View>
+
+              {/* =========================================================
+               * SCRUBBER & DOLBY ATMOS STATUS ROW
+               * ========================================================= */}
+              <View style={styles.progressContainer}>
+                <Slider
+                  style={styles.slider}
+                  minimumValue={0}
+                  maximumValue={1}
+                  value={progress}
+                  minimumTrackTintColor="#FFFFFF"
+                  maximumTrackTintColor="rgba(255,255,255,0.22)"
+                  thumbTintColor="#FFFFFF"
+                  onSlidingStart={(v) => {
+                    setSeeking(true);
+                    setSeekValue(v);
+                  }}
+                  onValueChange={(v) => setSeekValue(v)}
+                  onSlidingComplete={async (v) => {
+                    setSeeking(false);
+                    const targetMs = v * totalDurationMs;
+                    await seekToPosition(targetMs);
+                  }}
                 />
-              </PlayerGlassButton>
-
-              {/* Shuffle / Repeat toggle */}
-              <PlayerGlassButton
-                accessibilityLabel="Alternar reprodução aleatória"
-                onPress={toggleShuffle}
-                style={styles.sideControlBtn}
-              >
-                <MaterialCommunityIcons
-                  name="shuffle-variant"
-                  size={24}
-                  color={isShuffle ? '#1ED760' : 'rgba(255,255,255,0.75)'}
-                />
-              </PlayerGlassButton>
-            </View>
-          </>
-        ) : null}
-
-        {/* =========================================================
-         * YOUTUBE ACTIONS PICKER SHEET MODAL (Web & Cross-Platform)
-         * ========================================================= */}
-        <Modal
-          visible={isActionModalVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setIsActionModalVisible(false)}
-        >
-          <Pressable
-            style={styles.modalOverlay}
-            onPress={() => setIsActionModalVisible(false)}
-          >
-            <View style={styles.actionSheetWrapper}>
-              <GlassSurface glass="thick" style={styles.actionSheetContainer}>
-                <View style={styles.actionSheetHeader}>
-                  <View style={styles.youtubeCircleBadge}>
-                    <Ionicons name="logo-youtube" size={26} color="#FF0000" />
-                  </View>
-                  <Text style={styles.actionSheetTitle} numberOfLines={1}>
-                    {currentTrack.title}
+                <View style={styles.timeRow}>
+                  <Text style={styles.timeText}>
+                    {formatTime(
+                      seeking
+                        ? seekValue * totalDurationMs
+                        : playerState.positionMs
+                    )}
                   </Text>
-                  <Text style={styles.actionSheetSubtitle}>
-                    Fonte de áudio correspondente no YouTube
+
+                  <Text style={styles.timeText}>
+                    {formatTime(totalDurationMs)}
                   </Text>
                 </View>
+              </View>
+            </>
+          )}
 
-                <View style={styles.actionSheetDivider} />
-
-                <LoggedPressable
-                  style={styles.actionSheetItem}
-                  onPress={handleGoToYoutube}
+          {!isLyricsEditing ? (
+            <>
+              {/* =========================================================
+               * BOTTOM PLAYBACK CONTROLS
+               * ========================================================= */}
+              <View style={styles.controlsRow}>
+                {/* AirPlay / Output icon */}
+                <PlayerGlassButton
+                  accessibilityLabel="Dispositivo de saída"
+                  style={styles.sideControlBtn}
                 >
-                  <Ionicons name="open-outline" size={20} color="#FFFFFF" />
-                  <Text style={styles.actionSheetItemText}>
-                    Ir para o vídeo do YouTube
-                  </Text>
-                </LoggedPressable>
+                  <Ionicons
+                    name="radio-outline"
+                    size={24}
+                    color="rgba(255,255,255,0.75)"
+                  />
+                </PlayerGlassButton>
 
-                <View style={styles.actionSheetDivider} />
-
-                <LoggedPressable
-                  style={styles.actionSheetItem}
-                  onPress={handleOpenEditLinkModal}
+                {/* Previous Track */}
+                <PlayerGlassButton
+                  accessibilityLabel="Faixa anterior"
+                  disabled={!canGoPrevious}
+                  onPress={playPrevious}
+                  style={styles.seekControlBtn}
                 >
-                  <Ionicons name="create-outline" size={20} color="#FFFFFF" />
-                  <Text style={styles.actionSheetItemText}>
-                    Editar link do YouTube
-                  </Text>
-                </LoggedPressable>
+                  <Ionicons
+                    name="play-back"
+                    size={32}
+                    color={canGoPrevious ? '#FFFFFF' : 'rgba(255,255,255,0.42)'}
+                  />
+                </PlayerGlassButton>
 
-                <View style={styles.actionSheetDivider} />
-
-                <LoggedPressable
-                  style={[styles.actionSheetItem, styles.actionSheetCancelItem]}
-                  onPress={() => setIsActionModalVisible(false)}
+                {/* Primary control keeps the light Liquid Glass treatment from iOS Music. */}
+                <PlayerGlassButton
+                  accessibilityLabel={
+                    playerState.isPlaying ? 'Pausar' : 'Tocar'
+                  }
+                  glass="thick"
+                  onPress={togglePlayPause}
+                  style={styles.playPauseCircle}
+                  tintColor="rgba(255,255,255,0.92)"
                 >
-                  <Text style={styles.actionSheetCancelText}>Cancelar</Text>
-                </LoggedPressable>
-              </GlassSurface>
-            </View>
-          </Pressable>
-        </Modal>
+                  {playerState.isBuffering ? (
+                    <MaterialCommunityIcons
+                      name="loading"
+                      size={34}
+                      color="#FFFFFF"
+                    />
+                  ) : (
+                    <Ionicons
+                      name={playerState.isPlaying ? 'pause' : 'play'}
+                      size={34}
+                      color="#FFFFFF"
+                      style={
+                        playerState.isPlaying ? undefined : { marginLeft: 3 }
+                      }
+                    />
+                  )}
+                </PlayerGlassButton>
 
-        {/* =========================================================
-         * EDIT YOUTUBE LINK MODAL (SwiftUI Glass Style)
-         * ========================================================= */}
-        <Modal
-          visible={isEditModalVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setIsEditModalVisible(false)}
-        >
-          <Pressable
-            style={styles.modalOverlay}
-            onPress={() => setIsEditModalVisible(false)}
+                {/* Next Track */}
+                <PlayerGlassButton
+                  accessibilityLabel="Próxima faixa"
+                  disabled={!canGoNext}
+                  onPress={playNext}
+                  style={styles.seekControlBtn}
+                >
+                  <Ionicons
+                    name="play-forward"
+                    size={32}
+                    color={canGoNext ? '#FFFFFF' : 'rgba(255,255,255,0.42)'}
+                  />
+                </PlayerGlassButton>
+
+                {/* Shuffle / Repeat toggle */}
+                <PlayerGlassButton
+                  accessibilityLabel="Alternar reprodução aleatória"
+                  onPress={toggleShuffle}
+                  style={styles.sideControlBtn}
+                >
+                  <MaterialCommunityIcons
+                    name="shuffle-variant"
+                    size={24}
+                    color={isShuffle ? '#1ED760' : 'rgba(255,255,255,0.75)'}
+                  />
+                </PlayerGlassButton>
+              </View>
+            </>
+          ) : null}
+
+          {/* =========================================================
+           * YOUTUBE ACTIONS PICKER SHEET MODAL (Web & Cross-Platform)
+           * ========================================================= */}
+          <Modal
+            visible={isActionModalVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setIsActionModalVisible(false)}
           >
             <Pressable
-              style={styles.editModalContainer}
-              onPress={(e) => e.stopPropagation()}
+              style={styles.modalOverlay}
+              onPress={() => setIsActionModalVisible(false)}
             >
-              <GlassSurface glass="thick" style={styles.editModalCard}>
-                <View style={styles.editModalHeader}>
-                  <View style={styles.youtubeCircleBadge}>
-                    <Ionicons name="logo-youtube" size={28} color="#FF0000" />
+              <View style={styles.actionSheetWrapper}>
+                <GlassSurface glass="thick" style={styles.actionSheetContainer}>
+                  <View style={styles.actionSheetHeader}>
+                    <View style={styles.youtubeCircleBadge}>
+                      <Ionicons name="logo-youtube" size={26} color="#FF0000" />
+                    </View>
+                    <Text style={styles.actionSheetTitle} numberOfLines={1}>
+                      {currentTrack.title}
+                    </Text>
+                    <Text style={styles.actionSheetSubtitle}>
+                      Fonte de áudio correspondente no YouTube
+                    </Text>
                   </View>
-                  <Text style={styles.editModalTitle}>
-                    Editar Link do YouTube
-                  </Text>
-                  <Text style={styles.editModalSubtitle}>
-                    Altere o link do vídeo para atualizar instantaneamente o
-                    áudio e a reprodução desta música.
-                  </Text>
-                </View>
 
-                <View style={styles.inputWrapper}>
-                  <Ionicons
-                    name="link"
-                    size={18}
-                    color="rgba(255,255,255,0.6)"
-                    style={styles.inputIcon}
-                  />
-                  <TextInput
-                    value={customLinkInput}
-                    onChangeText={setCustomLinkInput}
-                    placeholder="https://www.youtube.com/watch?v=..."
-                    placeholderTextColor="rgba(255,255,255,0.4)"
-                    style={styles.textInput}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    selectTextOnFocus
-                  />
-                </View>
-
-                <View style={styles.modalButtonRow}>
-                  <LoggedPressable
-                    style={styles.modalCancelBtn}
-                    onPress={() => setIsEditModalVisible(false)}
-                  >
-                    <Text style={styles.modalCancelBtnText}>Cancelar</Text>
-                  </LoggedPressable>
+                  <View style={styles.actionSheetDivider} />
 
                   <LoggedPressable
-                    style={styles.modalConfirmBtn}
-                    onPress={handleConfirmEditLink}
-                    disabled={isUpdatingAudio}
+                    style={styles.actionSheetItem}
+                    onPress={handleGoToYoutube}
                   >
-                    {isUpdatingAudio ? (
-                      <ActivityIndicator size="small" color="#000000" />
-                    ) : (
-                      <Text style={styles.modalConfirmBtnText}>
-                        Atualizar Áudio
-                      </Text>
-                    )}
+                    <Ionicons name="open-outline" size={20} color="#FFFFFF" />
+                    <Text style={styles.actionSheetItemText}>
+                      Ir para o vídeo do YouTube
+                    </Text>
                   </LoggedPressable>
-                </View>
-              </GlassSurface>
+
+                  <View style={styles.actionSheetDivider} />
+
+                  <LoggedPressable
+                    style={styles.actionSheetItem}
+                    onPress={handleOpenEditLinkModal}
+                  >
+                    <Ionicons name="create-outline" size={20} color="#FFFFFF" />
+                    <Text style={styles.actionSheetItemText}>
+                      Editar link do YouTube
+                    </Text>
+                  </LoggedPressable>
+
+                  <View style={styles.actionSheetDivider} />
+
+                  <LoggedPressable
+                    style={[
+                      styles.actionSheetItem,
+                      styles.actionSheetCancelItem,
+                    ]}
+                    onPress={() => setIsActionModalVisible(false)}
+                  >
+                    <Text style={styles.actionSheetCancelText}>Cancelar</Text>
+                  </LoggedPressable>
+                </GlassSurface>
+              </View>
             </Pressable>
-          </Pressable>
-        </Modal>
-      </View>
+          </Modal>
+
+          {/* =========================================================
+           * EDIT YOUTUBE LINK MODAL (SwiftUI Glass Style)
+           * ========================================================= */}
+          <Modal
+            visible={isEditModalVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setIsEditModalVisible(false)}
+          >
+            <Pressable
+              style={styles.modalOverlay}
+              onPress={() => setIsEditModalVisible(false)}
+            >
+              <Pressable
+                style={styles.editModalContainer}
+                onPress={(e) => e.stopPropagation()}
+              >
+                <GlassSurface glass="thick" style={styles.editModalCard}>
+                  <View style={styles.editModalHeader}>
+                    <View style={styles.youtubeCircleBadge}>
+                      <Ionicons name="logo-youtube" size={28} color="#FF0000" />
+                    </View>
+                    <Text style={styles.editModalTitle}>
+                      Editar Link do YouTube
+                    </Text>
+                    <Text style={styles.editModalSubtitle}>
+                      Altere o link do vídeo para atualizar instantaneamente o
+                      áudio e a reprodução desta música.
+                    </Text>
+                  </View>
+
+                  <View style={styles.inputWrapper}>
+                    <Ionicons
+                      name="link"
+                      size={18}
+                      color="rgba(255,255,255,0.6)"
+                      style={styles.inputIcon}
+                    />
+                    <TextInput
+                      value={customLinkInput}
+                      onChangeText={setCustomLinkInput}
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      placeholderTextColor="rgba(255,255,255,0.4)"
+                      style={styles.textInput}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      selectTextOnFocus
+                    />
+                  </View>
+
+                  <View style={styles.modalButtonRow}>
+                    <LoggedPressable
+                      style={styles.modalCancelBtn}
+                      onPress={() => setIsEditModalVisible(false)}
+                    >
+                      <Text style={styles.modalCancelBtnText}>Cancelar</Text>
+                    </LoggedPressable>
+
+                    <LoggedPressable
+                      style={styles.modalConfirmBtn}
+                      onPress={handleConfirmEditLink}
+                      disabled={isUpdatingAudio}
+                    >
+                      {isUpdatingAudio ? (
+                        <ActivityIndicator size="small" color="#000000" />
+                      ) : (
+                        <Text style={styles.modalConfirmBtnText}>
+                          Atualizar Áudio
+                        </Text>
+                      )}
+                    </LoggedPressable>
+                  </View>
+                </GlassSurface>
+              </Pressable>
+            </Pressable>
+          </Modal>
+        </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+  },
   container: {
     backgroundColor: '#101116',
     flex: 1,

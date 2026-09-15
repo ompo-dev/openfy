@@ -33,6 +33,7 @@ export const usePlayer = () => {
   const playDownloadedTrack = usePlayerStore((s) => s.playDownloadedTrack);
   const togglePlayPause = usePlayerStore((s) => s.togglePlayPause);
   const seekToPosition = usePlayerStore((s) => s.seekToPosition);
+  const playQueueIndex = usePlayerStore((s) => s.playQueueIndex);
   const playNext = usePlayerStore((s) => s.playNext);
   const playPrevious = usePlayerStore((s) => s.playPrevious);
   const addToQueue = usePlayerStore((s) => s.addToQueue);
@@ -60,6 +61,7 @@ export const usePlayer = () => {
     playDownloadedTrack,
     togglePlayPause,
     seekToPosition,
+    playQueueIndex,
     playNext,
     playPrevious,
     addToQueue,

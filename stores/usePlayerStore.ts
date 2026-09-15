@@ -42,7 +42,10 @@ import {
   saveLyricsOffline,
 } from '../services/lyrics/lyricsService';
 import { normalizeLyricSegments } from '../services/lyrics/lyricTimeline';
-import type { TrackCatalogMetadata, DownloadedTrack } from '../services/download/downloadManager';
+import type {
+  TrackCatalogMetadata,
+  DownloadedTrack,
+} from '../services/download/downloadManager';
 
 export type PlayerTrack = TrackCatalogMetadata & {
   spotifyId: string;
@@ -94,6 +97,7 @@ export interface PlayerStoreState {
   playDownloadedTrack: (track: DownloadedTrack) => Promise<void>;
   togglePlayPause: () => Promise<void>;
   seekToPosition: (ms: number) => Promise<void>;
+  playQueueIndex: (index: number) => Promise<void>;
   playNext: () => Promise<void>;
   playPrevious: () => Promise<void>;
   addToQueue: (tracks: PlayerTrack[]) => void;
@@ -142,7 +146,9 @@ const getCacheKey = (track: PlayerTrack) => {
 const getLyricsCacheKey = (track: PlayerTrack) =>
   `${getCacheKey(track)}:${LYRICS_CACHE_VERSION}`;
 
-export const getExistingLocalAudioPath = async (path?: string): Promise<string | null> => {
+export const getExistingLocalAudioPath = async (
+  path?: string
+): Promise<string | null> => {
   if (!path || path.endsWith('.m3u8')) return null;
 
   if (Platform.OS === 'web') return null;
@@ -179,7 +185,9 @@ const getSavedAudioSource = async (
   return getPlayableAudioUrl(webSource);
 };
 
-const getFreshPreloadedSource = (track: PlayerTrack): AudioSourceInput | null => {
+const getFreshPreloadedSource = (
+  track: PlayerTrack
+): AudioSourceInput | null => {
   const now = Date.now();
   if (
     track.streamUrl &&
@@ -485,7 +493,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
      * we avoid penalising healthy player clients for non-refusal failures.
      */
     const isLikelyStreamRefusal = (error: string): boolean =>
-      /403|404|410|forbidden|expired|gone|not\s+found|unauthorized/i.test(error);
+      /403|404|410|forbidden|expired|gone|not\s+found|unauthorized/i.test(
+        error
+      );
 
     // Audio status update handler with transparent stream recovery
     const handleStatusUpdate = (state: PlayerState) => {
@@ -582,9 +592,12 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       if (
         state.isLoaded &&
         !handledTrackFinish &&
-        (state.didJustFinish || (state.didJustFinish === undefined &&
-          !state.isPlaying && state.positionMs > 0 && currentDuration > 0 &&
-          state.positionMs >= currentDuration - 500))
+        (state.didJustFinish ||
+          (state.didJustFinish === undefined &&
+            !state.isPlaying &&
+            state.positionMs > 0 &&
+            currentDuration > 0 &&
+            state.positionMs >= currentDuration - 500))
       ) {
         handledTrackFinish = true;
         const repeat = get().repeatMode;
@@ -625,7 +638,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         !activeStreamUri.startsWith('file:') &&
         !hasSavedWebDownload
       ) {
-        const isMp3 = activeStreamUri.includes('.mp3') || !activeStreamUri.includes('.m4a');
+        const isMp3 =
+          activeStreamUri.includes('.mp3') || !activeStreamUri.includes('.m4a');
         downloadTrack(
           {
             ...track,
@@ -734,6 +748,14 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
   seekToPosition: async (ms: number) => {
     await seekTo(ms);
+  },
+
+  playQueueIndex: async (index: number) => {
+    const { queue, playTrack } = get();
+    if (!Number.isInteger(index) || index < 0 || index >= queue.length) return;
+
+    set({ queueIndex: index });
+    await playTrack(queue[index], { setQueue: false });
   },
 
   playNext: async () => {
