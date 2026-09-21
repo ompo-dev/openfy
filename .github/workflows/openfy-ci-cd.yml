@@ -415,7 +415,9 @@ jobs:
           set -e
           cd android
           chmod +x gradlew
-          ./gradlew :app:assembleRelease
+          ./gradlew :app:assembleRelease --no-daemon --max-workers=2 \
+            '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError' \
+            -Pkotlin.compiler.execution.strategy=in-process
           APK="$PWD/app/build/outputs/apk/release/app-release.apk"
           if [ ! -f "$APK" ]; then
             echo "APK nao encontrado em $APK"
@@ -443,7 +445,7 @@ jobs:
             Openfy-android.apk \
             --title "Openfy ${VERSION} Android (build ${{ github.run_number }})" \
             --notes "Build Android nao-assinado." \
-            --latest
+            --latest=false
 
       - name: Enviar APK para download
         if: success()
