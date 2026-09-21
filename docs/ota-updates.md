@@ -16,8 +16,9 @@ channel and is not an Openfy API.
 
 ## GitHub automation
 
-The `Openfy CI/CD` workflow validates the app, publishes OTA on pushes to
-`main`, and can also build IPA/APK from one manual dispatch. OTA publishes with:
+The `Openfy CI/CD` workflow validates the app on every push to `main`, publishes
+OTA when `EXPO_TOKEN` is configured, and generates IPA/APK artifacts on push.
+Manual dispatch also generates IPA/APK by default. OTA publishes with:
 
 ```sh
 eas update --channel production --environment production --auto --non-interactive
