@@ -72,6 +72,19 @@ retidos; manter isso sem dono para a Home acumula buffers/players durante uso em
 segundo plano. O serviço do player também limita os preloads retidos e cancela
 operações pendentes antes que elas recriem uma entrada nativa já liberada.
 
+Ao trocar ou fechar uma faixa, o serviço remove o listener de status, pausa o
+player anterior e chama `release()` no objeto compartilhado do Expo. No SDK 57,
+`remove()` sozinho retira o player do registro, mas não executa imediatamente a
+limpeza dos observadores e buffers nativos. A instância que está tocando permanece
+retida durante todo o período em segundo plano.
+
+Na entrada em segundo plano, os preloads pendentes são cancelados e os buffers
+dos vizinhos são liberados. Eventos de progresso repetidos não atualizam as telas
+ocultas; fim da faixa, erro e mudanças de reprodução continuam chegando à fila.
+Ao voltar ao app, a posição é lida novamente do player nativo. A recuperação de
+uma faixa baixada usa o próprio arquivo e a última posição conhecida, sem buscar
+uma nova URL na rede.
+
 A ação **Validate local audio repair** compila o mesmo código Swift em macOS e
 usa um tom sintético de 2 segundos seguido de meio segundo de silêncio. Ela
 verifica duração, preservação dos pacotes e repetição sem reprocessar o arquivo.

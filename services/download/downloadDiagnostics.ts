@@ -27,6 +27,14 @@ const diagnostics: DiagnosticStore = {};
 let hydrated = false;
 let hydration: Promise<void> | null = null;
 let persistQueue = Promise.resolve();
+let isPersisting = false;
+let needsPersist = false;
+
+const storeDiagnostic = (spotifyId: string, diagnostic: DownloadDiagnostic) => {
+  // Insertion order breaks timestamp ties without discarding the newest event.
+  delete diagnostics[spotifyId];
+  diagnostics[spotifyId] = diagnostic;
+};
 
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -84,6 +92,7 @@ const normalizeDetails = (details?: Record<string, unknown>) =>
 
 const serialize = () => {
   const entries = Object.entries(diagnostics)
+    .reverse()
     .sort(([, left], [, right]) => right.updatedAt.localeCompare(left.updatedAt))
     .slice(0, TRACK_CAPACITY);
   return Object.fromEntries(entries);
@@ -98,10 +107,21 @@ const evictOverflow = () => {
 
 const persist = () => {
   evictOverflow();
-  persistQueue = persistQueue
-    .catch(() => undefined)
-    .then(() => AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(serialize())))
-    .catch(() => undefined);
+  needsPersist = true;
+  if (!isPersisting) {
+    isPersisting = true;
+    persistQueue = persistQueue.catch(() => undefined).then(async () => {
+      try {
+        // Coalesce bursts instead of queuing a full storage write for each event.
+        while (needsPersist) {
+          needsPersist = false;
+          await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(serialize())).catch(() => undefined);
+        }
+      } finally {
+        isPersisting = false;
+      }
+    });
+  }
   return persistQueue;
 };
 
@@ -113,7 +133,10 @@ const hydrate = async () => {
         if (!stored) return;
         const parsed = JSON.parse(stored) as unknown;
         if (!parsed || typeof parsed !== 'object') return;
-        Object.assign(diagnostics, parsed as DiagnosticStore);
+        for (const [key, diagnostic] of Object.entries(parsed as DiagnosticStore).reverse()) {
+          storeDiagnostic(key, diagnostic);
+        }
+        evictOverflow();
       })
       .catch(() => undefined)
       .finally(() => {
@@ -127,7 +150,7 @@ export const startDownloadDiagnostics = async (track: DownloadTrackInput) => {
   await hydrate();
   const existing = diagnostics[track.spotifyId];
   const now = new Date().toISOString();
-  diagnostics[track.spotifyId] = {
+  storeDiagnostic(track.spotifyId, {
     track: {
       spotifyId: track.spotifyId,
       title: track.title,
@@ -145,7 +168,7 @@ export const startDownloadDiagnostics = async (track: DownloadTrackInput) => {
         details: { platform: Platform.OS, attempt: (existing?.attempts || 0) + 1 },
       },
     ].slice(-EVENT_CAPACITY),
-  };
+  });
   await persist();
 };
 
@@ -153,7 +176,7 @@ export const ensurePlaybackDiagnostics = async (track: DownloadTrackInput) => {
   await hydrate();
   if (diagnostics[track.spotifyId]) return;
   const now = new Date().toISOString();
-  diagnostics[track.spotifyId] = {
+  storeDiagnostic(track.spotifyId, {
     track: {
       spotifyId: track.spotifyId,
       title: track.title,
@@ -170,7 +193,7 @@ export const ensurePlaybackDiagnostics = async (track: DownloadTrackInput) => {
         details: { platform: Platform.OS },
       },
     ],
-  };
+  });
   await persist();
 };
 
@@ -182,14 +205,14 @@ export const recordDownloadDiagnostic = (
   const existing = diagnostics[spotifyId];
   if (!existing) return;
   const now = new Date().toISOString();
-  diagnostics[spotifyId] = {
+  storeDiagnostic(spotifyId, {
     ...existing,
     updatedAt: now,
     events: [
       ...existing.events,
       { at: now, phase, details: normalizeDetails(details) },
     ].slice(-EVENT_CAPACITY),
-  };
+  });
   evictOverflow();
   void persist();
 };

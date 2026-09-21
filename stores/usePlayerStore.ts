@@ -217,7 +217,7 @@ const warmTrackAudio = (
   isStillNeeded: () => boolean = () => true
 ) => {
   if (!track) return;
-  if (!isStillNeeded()) return;
+  if (!isStillNeeded() || !isAppActiveForPreload()) return;
   const cacheKey = getCacheKey(track);
   const suppliedSource = getFreshPreloadedSource(track);
   if (suppliedSource) {
@@ -242,7 +242,7 @@ const warmTrackAudio = (
       return;
     }
 
-    if (getFreshPreloadedSource(track)) return;
+    if (!isStillNeeded() || !isAppActiveForPreload() || getFreshPreloadedSource(track)) return;
     const resolved = await resolveAudioUrl(
       track.title,
       track.artistName,
@@ -285,7 +285,7 @@ const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
   });
 
   neighbors.forEach((track) =>
-    warmTrackAudio(track, () => queuePreloadKeys.has(getCacheKey(track)))
+    warmTrackAudio(track, () => isAppActiveForPreload() && queuePreloadKeys.has(getCacheKey(track)))
   );
 };
 
@@ -477,6 +477,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const RECOVERY_STABLE_MS = 10_000;
     let initialLoadInProgress = true;
     let handledTrackFinish = false;
+    let lastPlaybackPositionMs = 0;
 
     console.log(`[PlayerStore #${requestId}] Playing stream:`, activeStreamUri);
     await playbackDiagnosticsReady;
@@ -498,6 +499,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const handleStatusUpdate = (state: PlayerState) => {
       // Only process updates if this track is still the active one
       if (get().activeRequestId !== requestId) return;
+
+      if (state.isLoaded && !state.error) lastPlaybackPositionMs = state.positionMs;
 
       const currentDuration = state.durationMs || track.duration_ms || 0;
       if (state.isPlaying && !state.didJustFinish) handledTrackFinish = false;
@@ -533,7 +536,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       ) {
         isRecoveringStream = true;
         recoveryAttempts++;
-        const lastPosMs = state.positionMs || 0;
+        const lastPosMs = state.positionMs || lastPlaybackPositionMs;
         recoveryResumePositionMs = lastPosMs;
         const errorMsg = state.error ?? '';
         const isRefusal = isLikelyStreamRefusal(errorMsg);
@@ -542,6 +545,19 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         );
         void (async () => {
           try {
+            if (activeStreamUri.startsWith('file:')) {
+              // A downloaded song must recover from its file, even offline.
+              const recoveredOk = await loadAndPlay(
+                activeStreamUri, handleStatusUpdate,
+                { title: track.title, artist: track.artistName,
+                  albumTitle: track.albumName, artworkUrl: track.imageURL },
+                0, track
+              );
+              if (get().activeRequestId === requestId && recoveredOk && lastPosMs > 1000) {
+                await seekTo(lastPosMs);
+              }
+              return;
+            }
             if (isRefusal && activeStreamUri) {
               await reportDirectYouTubeStreamRefusal(activeStreamUri, 403);
             }
@@ -578,6 +594,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
                 await seekTo(lastPosMs);
               }
             }
+          } catch (error) {
+            console.warn('[PlayerStore] Playback recovery failed:', error);
           } finally {
             isRecoveringStream = false;
           }

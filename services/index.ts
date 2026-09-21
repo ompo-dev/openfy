@@ -127,6 +127,7 @@ export {
   restoreCurrentVolume,
   preloadAudio,
   releasePreloadedAudio,
+  releaseAllPreloadedAudio,
   configureAudioSession,
   getAudioDiagnosticsSnapshot,
   recordAudioDiagnostic,

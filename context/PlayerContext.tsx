@@ -10,6 +10,7 @@ import { usePlayerStore, PlayerTrack } from '../stores/usePlayerStore';
 import {
   getAudioDiagnosticsSnapshot,
   recordAudioDiagnostic,
+  releaseAllPreloadedAudio,
   PlayerState,
 } from '@services';
 
@@ -91,6 +92,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     const memorySubscription = AppState.addEventListener(
       'memoryWarning',
       () => {
+        releaseAllPreloadedAudio();
         recordAudioDiagnostic('memory-warning');
         console.warn('[PlayerDiagnostics] Memory warning during playback:', {
           recentAudio: getAudioDiagnosticsSnapshot(),

@@ -11,7 +11,7 @@ import {
   type AudioStatus,
 } from 'expo-audio';
 import type { AudioPlayer } from 'expo-audio/build/AudioModule.types';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
 import { getDirectYouTubeMediaHeaders } from './directYouTubeResolver';
 import { prepareLocalAudioForPlayback } from './localAudioRepair';
@@ -83,6 +83,8 @@ export const getAudioSourceUri = (input: AudioSourceInput): string =>
   typeof input === 'string' ? input : input.uri;
 
 let playerInstance: AudioPlayer | null = null;
+let playerStatusSubscription: { remove(): void } | undefined;
+let playerAppStateSubscription: { remove(): void } | undefined;
 let loadGeneration = 0;
 let isSeeking = false;
 let currentSourceKind: AudioDiagnosticEvent['sourceKind'] = 'none';
@@ -168,6 +170,32 @@ const describeSource = (uri?: string): Pick<AudioDiagnosticEvent, 'sourceKind' |
     return { sourceKind: 'remote' };
   }
 };
+
+const disposeCurrentPlayer = () => {
+  stopVolumeRamp();
+  const previous = playerInstance;
+  playerInstance = null;
+  playerStatusSubscription?.remove();
+  playerStatusSubscription = undefined;
+  playerAppStateSubscription?.remove();
+  playerAppStateSubscription = undefined;
+  if (!previous) return;
+  try { previous.pause(); } catch {}
+  try { previous.clearLockScreenControls(); } catch {}
+  try { previous.remove(); } catch {}
+  // SDK 57 remove() only removes the iOS registry entry. Explicitly detach the
+  // shared object to tear down AVPlayer observers/buffers without waiting for GC.
+  try { previous.release(); } catch {}
+};
+
+const isAppActive = () =>
+  Platform.OS === 'web' || !AppState?.currentState || AppState.currentState === 'active';
+
+const playbackTransition = (state: PlayerState) => [
+  state.isPlaying, state.isLoaded, state.isBuffering, state.didJustFinish,
+  state.mediaServicesDidReset, state.error, state.playbackState,
+  state.timeControlStatus, state.reasonForWaitingToPlay,
+].join(':');
 
 export const recordAudioDiagnostic = (event: string, note?: string): void => {
   const state = getPlayerState();
@@ -340,7 +368,7 @@ const trimPreloadedSources = () => {
 export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void> => {
   const source = toAudioSource(sourceInput);
   const uri = source.uri;
-  if (!uri || preloadedSources.has(uri)) return;
+  if (!uri || !isAppActive() || preloadedSources.has(uri)) return;
   // expo-audio preloads web URLs through fetch() and then plays the blob.
   // That bypasses the browser media element's Range handling for proxied audio.
   if (Platform.OS === 'web' && /^https?:\/\//i.test(uri)) return;
@@ -357,9 +385,9 @@ export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void>
   const operation = previousForUri
     .catch(() => undefined)
     .then(async () => {
-      if (preloadedSources.get(uri)?.token !== entry.token || entry.cancelled) return;
+      if (!isAppActive() || preloadedSources.get(uri)?.token !== entry.token || entry.cancelled) return;
       await prepareLocalAudioForPlayback(uri);
-      if (preloadedSources.get(uri)?.token !== entry.token || entry.cancelled) return;
+      if (!isAppActive() || preloadedSources.get(uri)?.token !== entry.token || entry.cancelled) return;
       await Promise.resolve(preload(payload as any, { preferredForwardBufferDuration: 5 }));
       entry.nativeReady = true;
       if (preloadedSources.get(uri)?.token !== entry.token || entry.cancelled) {
@@ -370,6 +398,9 @@ export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void>
       if (preloadedSources.get(uri)?.token === entry.token) preloadedSources.delete(uri);
     })
     .finally(() => {
+      if (!entry.nativeReady && preloadedSources.get(uri)?.token === entry.token) {
+        preloadedSources.delete(uri);
+      }
       if (preloadChains.get(uri) === operation) preloadChains.delete(uri);
     });
   entry.operation = operation;
@@ -389,6 +420,11 @@ export const releasePreloadedAudio = (sourceInput: AudioSourceInput): void => {
   if (stored.nativeReady) void enqueuePreloadCleanup(uri, stored.source);
 };
 
+/** Retain only the playing AVPlayer when iOS backgrounds us or reports pressure. */
+export const releaseAllPreloadedAudio = (): void => {
+  for (const uri of preloadedSources.keys()) releasePreloadedAudio(uri);
+};
+
 /**
  * Load and play an audio URI or AudioSource (local file or remote stream).
  */
@@ -403,17 +439,7 @@ export const loadAndPlay = async (
   const uri = source.uri;
   const generation = ++loadGeneration;
   try {
-    stopVolumeRamp();
-    // Unload existing player
-    if (playerInstance) {
-      try {
-        playerInstance.clearLockScreenControls();
-      } catch {}
-      try {
-        playerInstance.remove();
-      } catch {}
-      playerInstance = null;
-    }
+    disposeCurrentPlayer();
 
     const callbackForThisPlayer = onStatusUpdate || null;
     await configureAudioSession(diagnosticTrack?.spotifyId);
@@ -459,12 +485,35 @@ export const loadAndPlay = async (
       }
     }
 
-    player.addListener('playbackStatusUpdate', (status: AudioStatus) => {
+    let lastTransition = '';
+    let lastPositionMs = 0;
+    const publishStatus = (status: AudioStatus, force = false) => {
       if (generation !== loadGeneration || playerInstance !== player) return;
       const state = toState(status);
+      if (state.error && state.positionMs === 0) {
+        state.positionMs = lastPositionMs;
+      } else if (state.isLoaded && !state.error) {
+        lastPositionMs = state.positionMs;
+      }
+      const transition = playbackTransition(state);
+      // Native audio and lock-screen controls keep running. Hidden React views
+      // only need errors, end-of-track and playback transitions, not every tick.
+      if (!force && !isAppActive() && transition === lastTransition) return;
+      lastTransition = transition;
       recordStatusDiagnostic(state);
       callbackForThisPlayer?.(state);
-    });
+    };
+    playerStatusSubscription = player.addListener('playbackStatusUpdate', publishStatus);
+    if (Platform.OS !== 'web') {
+      playerAppStateSubscription = AppState?.addEventListener('change', (state) => {
+        if (generation !== loadGeneration || playerInstance !== player) return;
+        if (state === 'active') {
+          publishStatus(player.currentStatus, true);
+        } else {
+          releaseAllPreloadedAudio();
+        }
+      });
+    }
 
     player.play();
     recordAudioDiagnostic('play-called');
@@ -474,6 +523,7 @@ export const loadAndPlay = async (
     return true;
   } catch (error) {
     if (generation !== loadGeneration) return false;
+    disposeCurrentPlayer();
     console.error('[PlayerService] Failed to load audio:', error, 'URI:', uri);
     const callbackForThisPlayer = onStatusUpdate || null;
     const failedState = { ...DEFAULT_STATE, error: String(error) };
@@ -535,15 +585,9 @@ export const seekTo = async (positionMs: number): Promise<void> => {
  */
 export const unload = async (): Promise<void> => {
   loadGeneration++;
-  if (!playerInstance) return;
   try {
-    stopVolumeRamp();
-    playerInstance.pause();
-    try {
-      playerInstance.clearLockScreenControls();
-    } catch {}
-    playerInstance.remove();
-    playerInstance = null;
+    disposeCurrentPlayer();
+    releaseAllPreloadedAudio();
     recordAudioDiagnostic('unload');
     currentSourceKind = 'none';
     currentSourceHost = undefined;

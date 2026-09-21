@@ -7,6 +7,7 @@ jest.mock('expo-audio', () => ({
 
 jest.mock('react-native', () => ({
   Platform: { OS: 'web' },
+  AppState: { currentState: 'active', addEventListener: jest.fn() },
 }));
 jest.mock('../localAudioRepair', () => ({ prepareLocalAudioForPlayback: jest.fn().mockResolvedValue(undefined) }));
 import { prepareLocalAudioForPlayback } from '../localAudioRepair';
@@ -17,7 +18,7 @@ import {
   preload,
   setAudioModeAsync,
 } from 'expo-audio';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import {
   _resetDownloadDiagnosticsForTests,
   ensurePlaybackDiagnostics,
@@ -30,6 +31,7 @@ import {
   preloadAudio,
   recordAudioDiagnostic,
   releasePreloadedAudio,
+  releaseAllPreloadedAudio,
   unload,
   toAudioSource,
 } from '../playerService';
@@ -46,6 +48,7 @@ const createPlayer = () => ({
   pause: jest.fn(),
   addListener: jest.fn(),
   remove: jest.fn(),
+  release: jest.fn(),
   clearLockScreenControls: jest.fn(),
 });
 
@@ -80,6 +83,8 @@ describe('playerService fades', () => {
   });
   beforeEach(() => {
     jest.useFakeTimers();
+    AppState.currentState = 'active';
+    jest.mocked(AppState.addEventListener).mockImplementation(() => ({ remove: jest.fn() }));
     (createAudioPlayer as jest.Mock).mockReturnValue(createPlayer());
     (preload as jest.Mock).mockResolvedValue(undefined);
     jest.mocked(prepareLocalAudioForPlayback).mockResolvedValue(undefined);
@@ -363,6 +368,70 @@ describe('playerService fades', () => {
         }),
       ])
     );
+  });
+
+  it('disconnects every retired player and releases its native object across repeated track changes', async () => {
+    (Platform as { OS: string }).OS = 'ios';
+    const players = Array.from({ length: 40 }, () => ({
+      ...createPlayer(),
+      addListener: jest.fn().mockReturnValue({ remove: jest.fn() }),
+    }));
+    for (const [index, player] of players.entries()) {
+      jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+      await loadAndPlay(`file:///track-${index}.m4a`);
+    }
+    for (const player of players.slice(0, -1)) {
+      expect(player.addListener.mock.results[0].value.remove).toHaveBeenCalledTimes(1);
+      expect(player.pause).toHaveBeenCalledTimes(1);
+      expect(player.remove).toHaveBeenCalledTimes(1);
+      expect(player.release).toHaveBeenCalledTimes(1);
+    }
+    expect(players.at(-1)!.release).not.toHaveBeenCalled();
+    await unload();
+    expect(players.at(-1)!.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps native playback alive in background without refreshing hidden UI on each tick', async () => {
+    (Platform as { OS: string }).OS = 'ios';
+    const player = createPlayer();
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+    const onStatus = jest.fn();
+    await loadAndPlay('file:///offline.m4a', onStatus);
+    const emitStatus = player.addListener.mock.calls[0][1];
+    const changeState = jest.mocked(AppState.addEventListener).mock.calls.at(-1)![1];
+    const playing = { ...player.currentStatus, playing: true, currentTime: 10, duration: 200 };
+    emitStatus(playing);
+    onStatus.mockClear();
+    AppState.currentState = 'background';
+    changeState('background');
+    for (let second = 11; second <= 150; second++) {
+      emitStatus({ ...playing, currentTime: second });
+    }
+    expect(onStatus).not.toHaveBeenCalled();
+    expect(player.pause).not.toHaveBeenCalled();
+    expect(player.release).not.toHaveBeenCalled();
+
+    emitStatus({ ...playing, currentTime: 200, playing: false, didJustFinish: true });
+    expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ didJustFinish: true }));
+    player.currentStatus = { ...playing, currentTime: 151 };
+    AppState.currentState = 'active';
+    changeState('active');
+    expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ positionMs: 151000 }));
+  });
+
+  it('does not recreate a pending preload after entering background', async () => {
+    (Platform as { OS: string }).OS = 'ios';
+    let completeRepair!: () => void;
+    jest.mocked(prepareLocalAudioForPlayback).mockImplementationOnce(() => new Promise((resolve) => {
+      completeRepair = () => resolve(null);
+    }));
+    const pending = preloadAudio('file:///pending-background.m4a');
+    await flushMicrotasks();
+    AppState.currentState = 'background';
+    releaseAllPreloadedAudio();
+    completeRepair();
+    await pending;
+    expect(preload).not.toHaveBeenCalled();
   });
 
   it('ignores delayed status updates from a player that has already been replaced', async () => {

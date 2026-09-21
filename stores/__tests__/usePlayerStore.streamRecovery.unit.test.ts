@@ -51,6 +51,7 @@ import {
   type PlayerState,
 } from '@services';
 import { usePlayerStore, type PlayerTrack } from '../usePlayerStore';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const sampleTrack: PlayerTrack = {
   spotifyId: 'track_123',
@@ -333,6 +334,27 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       expect.any(Number),
       cachedTrack
     );
+  });
+
+  it('recovers a downloaded track offline from its last known position without contacting a provider', async () => {
+    const local = { ...sampleTrack, spotifyId: 'offline-recovery', localAudioPath: 'file:///offline.m4a' };
+    jest.mocked(FileSystem.getInfoAsync).mockResolvedValue({ exists: true, size: 80000 } as any);
+    let status!: (state: PlayerState) => void;
+    jest.mocked(loadAndPlay).mockImplementation(async (_source, callback) => {
+      status = callback!;
+      return true;
+    });
+    await usePlayerStore.getState().playTrack(local);
+    status({ isPlaying: true, isLoaded: true, isBuffering: false, positionMs: 83000, durationMs: 210000 });
+    status({ isPlaying: false, isLoaded: false, isBuffering: false, positionMs: 0, durationMs: 0, error: 'decoder reset' });
+    await flushPromises();
+    expect(resolveAudioUrl).not.toHaveBeenCalled();
+    expect(reportDirectYouTubeStreamRefusal).not.toHaveBeenCalled();
+    expect(loadAndPlay).toHaveBeenLastCalledWith(
+      local.localAudioPath, expect.any(Function), expect.any(Object), 0, local
+    );
+    expect(seekTo).toHaveBeenCalledWith(83000);
+    jest.mocked(FileSystem.getInfoAsync).mockReset();
   });
 
   it('keeps request ids monotonic when playback diagnostics hydrate slowly', async () => {

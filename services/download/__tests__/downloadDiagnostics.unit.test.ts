@@ -84,18 +84,41 @@ describe('download diagnostics', () => {
   });
 
   it('keeps in-memory diagnostics bounded to the exported track capacity', async () => {
-    for (let index = 0; index < 30; index++) {
-      await ensurePlaybackDiagnostics({
-        spotifyId: `track_${index}`,
-        title: `Faixa ${index}`,
-        artistName: 'Artista',
-        albumName: 'Álbum',
-        imageURL: '',
-        duration_ms: 120000,
-      });
-    }
+    const now = jest.spyOn(Date.prototype, 'toISOString').mockReturnValue('2026-09-21T12:00:00.000Z');
+    try {
+      for (let index = 0; index < 30; index++) {
+        await ensurePlaybackDiagnostics({
+          spotifyId: `track_${index}`,
+          title: `Faixa ${index}`,
+          artistName: 'Artista',
+          albumName: 'Álbum',
+          imageURL: '',
+          duration_ms: 120000,
+        });
+      }
 
-    await expect(getDownloadDiagnostics('track_0')).resolves.toBeNull();
-    await expect(getDownloadDiagnostics('track_29')).resolves.toBeTruthy();
+      await expect(getDownloadDiagnostics('track_0')).resolves.toBeNull();
+      await expect(getDownloadDiagnostics('track_29')).resolves.toBeTruthy();
+    } finally { now.mockRestore(); }
+  });
+
+  it('coalesces a burst of events while storage is busy', async () => {
+    await ensurePlaybackDiagnostics({
+      spotifyId: 'burst', title: 'Track', artistName: 'Artist', albumName: '', imageURL: '', duration_ms: 1000,
+    });
+    let finishWrite!: () => void;
+    const storage = jest.mocked(AsyncStorage.setItem);
+    storage.mockClear();
+    storage.mockImplementationOnce(() => new Promise<void>((resolve) => { finishWrite = resolve; }));
+    recordDownloadDiagnostic('burst', 'first');
+    await Promise.resolve();
+    await Promise.resolve();
+    for (let index = 0; index < 70; index++) recordDownloadDiagnostic('burst', `event.${index}`);
+    finishWrite();
+    await startDownloadDiagnostics({
+      spotifyId: 'burst', title: 'Track', artistName: 'Artist', albumName: '', imageURL: '', duration_ms: 1000,
+    });
+    expect(storage.mock.calls.length).toBeLessThanOrEqual(3);
+    expect(storage.mock.calls.at(-1)?.[1]).toContain('event.69');
   });
 });
