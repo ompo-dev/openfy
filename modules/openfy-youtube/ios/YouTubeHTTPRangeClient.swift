@@ -83,7 +83,7 @@ public final class YouTubeHTTPRangeClient: Sendable {
       request.setValue(value, forHTTPHeaderField: name)
     }
 
-    let (data, response) = try await session.data(for: request)
+    let (data, response) = try await YouTubeRequestRetry.data(for: request, session: session)
     guard let http = response as? HTTPURLResponse else {
       throw StreamTransportError.nonHTTPResponse
     }
@@ -131,7 +131,7 @@ public final class YouTubeHTTPRangeClient: Sendable {
       request.setValue(value, forHTTPHeaderField: name)
     }
 
-    let (_, response) = try await session.data(for: request)
+    let (_, response) = try await YouTubeRequestRetry.data(for: request, session: session)
     guard let http = response as? HTTPURLResponse,
           http.statusCode == 206,
           let contentRangeHeader = http.value(forHTTPHeaderField: "Content-Range") ?? http.value(forHTTPHeaderField: "content-range"),

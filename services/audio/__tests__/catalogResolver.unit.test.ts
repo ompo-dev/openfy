@@ -137,6 +137,23 @@ describe('resolveSpotifyTrackVideoId', () => {
     expect(result.status).toBe('not_found');
   });
 
+  it('retries a dropped search connection instead of treating it as an empty catalog', async () => {
+    jest.useFakeTimers();
+    try {
+      const search = jest.fn()
+        .mockRejectedValueOnce(new Error('fetch failed: The network connection was lost.'))
+        .mockResolvedValue({ videos: [{
+          video_id: '_MyOuFWnPPY', title: { toString: () => 'Indecisao' },
+          author: { name: 'Sotam', is_verified_artist: true }, duration: { seconds: 159 },
+        }] });
+      mockCreate.mockResolvedValue({ search });
+      const pending = resolveSpotifyTrackVideoId('lost_connection', 'Indecisao', ['Sotam'], 159000);
+      await jest.runAllTimersAsync();
+      expect(await pending).toMatchObject({ status: 'resolved', videoId: '_MyOuFWnPPY' });
+      expect(search.mock.calls[0]).toEqual(search.mock.calls[1]);
+    } finally { jest.useRealTimers(); }
+  });
+
   it('compares later results and channel subscribers before selecting the publisher', async () => {
     const makeVideo = (id: string, artist: string, official: boolean, channelId: string) => ({
       video_id: id, title: { toString: () => 'Pedro Qualy & Sotam - Taros' },

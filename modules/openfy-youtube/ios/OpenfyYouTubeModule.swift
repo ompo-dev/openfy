@@ -328,7 +328,7 @@ public final class OpenfyYouTubeModule: Module {
     )
     request.setValue("en-US", forHTTPHeaderField: "Accept-Language")
     request.setValue("https://www.youtube.com/sw.js", forHTTPHeaderField: "Referer")
-    let (data, response) = try await session.data(for: request)
+    let (data, response) = try await YouTubeRequestRetry.data(for: request, session: session)
     guard let httpResponse = response as? HTTPURLResponse,
       (200...299).contains(httpResponse.statusCode),
       let body = String(data: data, encoding: .utf8) else {
@@ -412,7 +412,7 @@ public final class OpenfyYouTubeModule: Module {
     }
     request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-    let (data, response) = try await session.data(for: request)
+    let (data, response) = try await YouTubeRequestRetry.data(for: request, session: session)
     guard let httpResponse = response as? HTTPURLResponse else {
       throw transferError("player_non_http_response")
     }

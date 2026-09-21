@@ -6,6 +6,7 @@ import type {
   YouTubeStreamDescriptor,
 } from './mediaReference';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
+import { isTransientNetworkError, retryNetworkOperation } from './networkRetry';
 
 /**
  * YouTubeStreamResolver — videoId → StreamResolveResult
@@ -135,7 +136,7 @@ const BLOCKED_VERDICT_TTL_MS     = 60_000;        // 1 min
 
 const CLIENT_FAILURE_COOLDOWN_MS = 30_000;
 const CLIENT_MAX_COOLDOWN_MS     = 5 * 60_000;
-const CLIENT_HEALTH_STORAGE_KEY  = '@openfy/youtube-stream-client-health-v2';
+const CLIENT_HEALTH_STORAGE_KEY  = '@openfy/youtube-stream-client-health-v3';
 const CLIENT_HEALTH_MAX_AGE_MS   = 24 * 60 * 60_000;
 const CLIENT_HEALTH_MAX_SUCCESSES = 10_000;
 const CLIENT_HEALTH_MAX_FAILURES  = 20;
@@ -464,6 +465,7 @@ const doResolve = async (
     }
 
     const deadline = Date.now() + RESOLUTION_BUDGET_MS;
+    let transportError: string | undefined;
 
     for (const profile of clients) {
       if (Date.now() >= deadline) {
@@ -481,17 +483,15 @@ const doResolve = async (
 
       let streamError: string | undefined;
       const remainingTime = Math.max(1000, deadline - Date.now());
-      const timeoutMs = Math.min(CLIENT_REQUEST_TIMEOUT_MS, remainingTime);
-
-      const stream = await withTimeout(
+      const stream = await retryNetworkOperation(() => withTimeout(
         client.getStreamingData(videoId, {
           client: profile.innertubeClient,
           quality: 'best',
           type: 'audio',
         }),
         `${profile.id} stream resolution`,
-        timeoutMs
-      ).catch((err: unknown) => {
+        Math.min(CLIENT_REQUEST_TIMEOUT_MS, remainingTime, Math.max(1, deadline - Date.now()))
+      ), undefined, deadline).catch((err: unknown) => {
         streamError = errorMsg(err);
         return null;
       });
@@ -506,7 +506,11 @@ const doResolve = async (
             error: streamError,
           });
         }
-        await recordFailure(profile.id);
+        if (streamError && isTransientNetworkError(streamError)) {
+          transportError = streamError;
+        } else {
+          await recordFailure(profile.id);
+        }
         console.warn(`[StreamResolver] ${profile.id} no URL for ${videoId}: ${streamError ?? 'empty'}`);
         continue;
       }
@@ -526,6 +530,11 @@ const doResolve = async (
             error: probe.error,
             gvsEnforcement: isGvsEnforcement,
           });
+        }
+        if (probe.reason === 'network_error' || probe.reason === 'timeout' ||
+            (probe.status !== undefined && probe.status >= 500)) {
+          transportError = probe.error || `HTTP ${probe.status}`;
+          continue;
         }
         await recordFailure(profile.id);
         if (isGvsEnforcement) {
@@ -564,12 +573,17 @@ const doResolve = async (
       console.log(`[StreamResolver] ${profile.id} probe passed for ${videoId}`);
       return { status: 'resolved', stream: descriptor };
     }
+    if (transportError) {
+      return { status: 'transport_error', videoId, error: transportError };
+    }
   } catch (error) {
     const msg = errorMsg(error);
     innertubeClient = null;
     console.warn(`[StreamResolver] transport error for ${videoId}: ${msg}`);
     const result: StreamResolveResult = { status: 'transport_error', videoId, error: msg };
-    verdictCache.set(videoId, { result, expiresAt: Date.now() + BLOCKED_VERDICT_TTL_MS });
+    if (!isTransientNetworkError(error)) {
+      verdictCache.set(videoId, { result, expiresAt: Date.now() + BLOCKED_VERDICT_TTL_MS });
+    }
     return result;
   }
 

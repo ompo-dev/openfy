@@ -201,6 +201,46 @@ describe('resolveYouTubeStream', () => {
     expect(result.error).toContain('network down');
   });
 
+  it('recovers a lost connection using the same video and client', async () => {
+    jest.useFakeTimers();
+    try {
+      const getStreamingData = jest.fn()
+        .mockRejectedValueOnce(new Error('The network connection was lost.'))
+        .mockResolvedValue({ url: 'https://rr1.googlevideo.com/retry.m4a', mime_type: 'audio/mp4' });
+      mockCreate.mockResolvedValue({ getStreamingData });
+      const pending = resolveYouTubeStream('_MyOuFWnPPY');
+      await jest.runAllTimersAsync();
+      expect(await pending).toMatchObject({ status: 'resolved' });
+      expect(getStreamingData).toHaveBeenCalledTimes(2);
+      expect(getStreamingData.mock.calls[0]).toEqual(getStreamingData.mock.calls[1]);
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('does not poison client health or cache a connection outage as unplayable', async () => {
+    jest.useFakeTimers();
+    try {
+      const getStreamingData = jest.fn().mockRejectedValue(new Error('The network connection was lost.'));
+      mockCreate.mockResolvedValue({ getStreamingData });
+      const pending = resolveYouTubeStream('_MyOuFWnPPY');
+      await jest.runAllTimersAsync();
+      expect(await pending).toMatchObject({ status: 'transport_error' });
+      getStreamingData.mockResolvedValue({ url: 'https://rr1.googlevideo.com/retry.m4a', mime_type: 'audio/mp4' });
+      // The user can retry immediately without bypassing caches or waiting minutes.
+      expect(await resolveYouTubeStream('_MyOuFWnPPY')).toMatchObject({ status: 'resolved' });
+      expect(await AsyncStorage.getItem('@openfy/youtube-stream-client-health-v3'))
+        .not.toContain('"consecutiveFailures":1');
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('does not cache a network failure during initialization', async () => {
+    mockCreate.mockRejectedValueOnce(new Error('The network connection was lost.'));
+    expect(await resolveYouTubeStream('_MyOuFWnPPY')).toMatchObject({ status: 'transport_error' });
+    mockCreate.mockResolvedValue({ getStreamingData: jest.fn().mockResolvedValue({
+      url: 'https://rr1.googlevideo.com/retry.m4a', mime_type: 'audio/mp4',
+    }) });
+    expect(await resolveYouTubeStream('_MyOuFWnPPY')).toMatchObject({ status: 'resolved' });
+  });
+
   it('records initialization failures and cached verdicts in the download log', async () => {
     mockCreate.mockRejectedValue(new Error('player initialization failed'));
     const spotifyId = 'spotify_init_failure';

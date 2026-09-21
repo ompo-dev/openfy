@@ -5,6 +5,7 @@
 } from '../canonical/canonicalMatcher';
 import { parseYouTubeCount, rankYouTubeCandidate, type YouTubeCandidate } from './youtubeCandidateRanking';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
+import { retryNetworkOperation } from './networkRetry';
 import {
   getCatalogMapping,
   setCatalogMapping,
@@ -209,14 +210,19 @@ export const resolveSpotifyTrackVideoId = async (
   ]));
 
   try {
-    const client = await withTimeout(getSearchClient(), 'YouTube search client');
+    const client = await retryNetworkOperation(() => withTimeout(getSearchClient(), 'YouTube search client'));
     const candidates = new Map<string, YouTubeCandidate>();
     const canonical = { title, artists: canonicalArtists, durationMs, spotifyId };
 
     for (const query of queries) {
       recordDownloadDiagnostic(spotifyId, 'audio.youtube.search', { query });
 
-      const searchResult = await withTimeout(client.search(query, { type: 'video' }), 'YouTube search')
+      const searchResult = await retryNetworkOperation(
+        () => withTimeout(client.search(query, { type: 'video' }), 'YouTube search'),
+        (attempt, error) => recordDownloadDiagnostic(spotifyId, 'audio.youtube.search_retry', {
+          query, attempt, error: String(error),
+        })
+      )
         .catch((error) => {
           recordDownloadDiagnostic(spotifyId, 'audio.youtube.search_failed', { query, error: String(error) });
           return { videos: [] };

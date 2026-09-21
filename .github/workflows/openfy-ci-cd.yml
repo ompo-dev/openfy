@@ -162,6 +162,13 @@ jobs:
           "$RUNNER_TEMP/check-local-audio" scripts/fixtures/synthetic-dash.m4a
           "$RUNNER_TEMP/check-local-audio" scripts/fixtures/synthetic-dash-edits.m4a
 
+      - name: Validar recuperacao nativa de conexao
+        run: |
+          xcrun swiftc -parse-as-library \
+            modules/openfy-youtube/ios/YouTubeRequestRetry.swift \
+            scripts/check-youtube-retry.swift -o "$RUNNER_TEMP/check-youtube-retry"
+          "$RUNNER_TEMP/check-youtube-retry"
+
   gerar-ipa:
     needs: validar
     if: github.event_name == 'push' || inputs.build_ios
