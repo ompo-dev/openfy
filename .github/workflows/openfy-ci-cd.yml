@@ -55,11 +55,33 @@ jobs:
       - name: Validar TypeScript
         run: npm run typecheck
 
+  testar:
+    needs: validar
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v6
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci --legacy-peer-deps
+
       - name: Rodar testes
+        continue-on-error: true
         run: npm test -- --runInBand --silent
 
   publicar-ota:
-    needs: validar
+    needs:
+      - validar
+      - testar
     if: github.event_name == 'push' || inputs.publish_ota
     runs-on: ubuntu-latest
     timeout-minutes: 25

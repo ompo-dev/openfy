@@ -19,6 +19,7 @@ channel and is not an Openfy API.
 The `Openfy CI/CD` workflow validates the app on every push to `main`, publishes
 OTA when `EXPO_TOKEN` is configured, and generates IPA/APK artifacts on push.
 Manual dispatch also generates IPA/APK by default. OTA publishes with:
+Unit tests run in the same workflow but do not block IPA/APK artifact generation.
 
 ```sh
 eas update --channel production --environment production --auto --non-interactive
