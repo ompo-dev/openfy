@@ -38,8 +38,8 @@ export function LoggedPressable({
   ...rest
 }: PressableProps & { ref?: Ref<View> }) {
   const [pressed, setPressed] = useState(false);
-  const [hovered, setHovered] = useState(false);
   const scale = useSharedValue(1);
+  const nativeState = { pressed, hovered: false } as any;
 
   const pressStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -75,14 +75,8 @@ export function LoggedPressable({
   return (
     <AnimatedPressable
       {...rest}
-      onHoverIn={(event) => {
-        setHovered(true);
-        onHoverIn?.(event);
-      }}
-      onHoverOut={(event) => {
-        setHovered(false);
-        onHoverOut?.(event);
-      }}
+      onHoverIn={onHoverIn}
+      onHoverOut={onHoverOut}
       onPressIn={(event) => {
         setPressed(true);
         scale.value = withTiming(0.97, PRESS_IN);
@@ -95,7 +89,7 @@ export function LoggedPressable({
       }}
       style={[
         typeof style === 'function'
-          ? style({ pressed, hovered })
+          ? style(nativeState)
           : style,
         pressStyle,
       ]}
@@ -104,7 +98,7 @@ export function LoggedPressable({
       }}
     >
       {typeof children === 'function'
-        ? children({ pressed, hovered })
+        ? children(nativeState)
         : children}
     </AnimatedPressable>
   );
