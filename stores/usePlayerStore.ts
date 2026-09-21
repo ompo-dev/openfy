@@ -10,7 +10,7 @@
 
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   loadAndPlay,
@@ -26,7 +26,6 @@ import {
   getPlayableAudioUrl,
   downloadTrack,
   getDownloadedTrack,
-  fadeOutCurrent,
   restoreCurrentVolume,
   preloadAudio,
   releasePreloadedAudio,
@@ -128,6 +127,8 @@ const warmedAudioSources = new Map<
 >();
 const activeAudioWarmups = new Map<string, Promise<void>>();
 const queuePreloadKeys = new Set<string>();
+const isAppActiveForPreload = () =>
+  !AppState?.currentState || AppState.currentState === 'active';
 
 // Helper: Normalize cache key to prevent cross-song cache collisions
 const getCacheKey = (track: PlayerTrack) => {
@@ -264,6 +265,7 @@ const warmTrackAudio = (
 };
 
 const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
+  if (Platform.OS !== 'web' && !isAppActiveForPreload()) return;
   const currentTrack = queue[queueIndex];
   const neighbors = [queue[queueIndex - 1], queue[queueIndex + 1]].filter(
     (track): track is PlayerTrack => Boolean(track)
@@ -314,10 +316,6 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const requestId = get().activeRequestId + 1;
     const cacheKey = getCacheKey(track);
     const lyricsCacheKey = getLyricsCacheKey(track);
-    const fadeOutPromise = getStatus().isPlaying
-      ? fadeOutCurrent()
-      : Promise.resolve();
-
     console.log(
       `[PlayerStore #${requestId}] Requested: "${track.artistName} - ${track.title}"`
     );
@@ -481,7 +479,6 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     let handledTrackFinish = false;
 
     console.log(`[PlayerStore #${requestId}] Playing stream:`, activeStreamUri);
-    await fadeOutPromise;
     await playbackDiagnosticsReady;
 
     if (get().activeRequestId !== requestId) return;
@@ -574,7 +571,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
                   albumTitle: track.albumName,
                   artworkUrl: track.imageURL,
                 },
-                500,
+                0,
                 track
               );
               if (recoveredOk && lastPosMs > 1000) {
@@ -618,7 +615,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         albumTitle: track.albumName,
         artworkUrl: track.imageURL,
       },
-      2000,
+      0,
       track
     );
 
@@ -632,8 +629,11 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         history: [track, ...state.history.slice(0, 49)],
       }));
 
-      // Background download cache for offline listening
+      // Keep native background playback focused on the active audio session.
+      // Explicit downloads still use DownloadContext; this opportunistic cache
+      // is only safe on web where it cannot trigger iOS background termination.
       if (
+        Platform.OS === 'web' &&
         track.spotifyId &&
         !activeStreamUri.startsWith('file:') &&
         !hasSavedWebDownload
@@ -687,7 +687,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
             albumTitle: track.albumName,
             artworkUrl: track.imageURL,
           },
-          2000,
+          0,
           track
         );
       }

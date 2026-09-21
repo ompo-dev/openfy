@@ -134,7 +134,7 @@ describe('queue preload window', () => {
       savedUrl,
       expect.any(Function),
       expect.any(Object),
-      2000,
+      0,
       tracks[1]
     );
     expect(downloadTrack).not.toHaveBeenCalled();
@@ -154,7 +154,7 @@ describe('queue preload window', () => {
       savedUrl,
       expect.any(Function),
       expect.any(Object),
-      2000,
+      0,
       tracks[1]
     );
   });
@@ -174,7 +174,7 @@ describe('queue preload window', () => {
       savedTrack.streamUrl,
       expect.any(Function),
       expect.any(Object),
-      2000,
+      0,
       savedTrack
     );
   });

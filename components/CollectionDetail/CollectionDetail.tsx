@@ -22,6 +22,11 @@ import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
 
 type CollectionTrack = TrackModel & { localAudioPath?: string };
+type ExtraTrackSection = {
+  id: string;
+  title: string;
+  tracks: CollectionTrack[];
+};
 
 export type CollectionDetailProps = {
   kind: 'album' | 'artist' | 'playlist';
@@ -43,6 +48,8 @@ export type CollectionDetailProps = {
   onSharePress?: () => void | Promise<void>;
   resolveTracksForPlayback?: () => Promise<CollectionTrack[]>;
   sectionTitle?: string;
+  disableTrackArtistLinks?: boolean;
+  extraTrackSections?: ExtraTrackSection[];
   footer?: React.ReactNode;
 };
 
@@ -81,6 +88,8 @@ export const CollectionDetail = ({
   onSharePress,
   resolveTracksForPlayback,
   sectionTitle,
+  disableTrackArtistLinks = false,
+  extraTrackSections = [],
   footer,
 }: CollectionDetailProps) => {
   const router = useRouter();
@@ -116,28 +125,44 @@ export const CollectionDetail = ({
     [sortAscending, tracks]
   );
 
-  const playCollection = React.useCallback(
-    async (shuffled = false, startIndex = 0) => {
-      const playableTracks = resolveTracksForPlayback
-        ? await resolveTracksForPlayback()
-        : tracks;
+  const playTrackList = React.useCallback(
+    async (
+      sourceTracks: CollectionTrack[],
+      startIndex = 0,
+      sourceId = collectionPlaybackId,
+      shuffled = false
+    ) => {
+      const playableTracks = sourceTracks;
       const playerTracks = playableTracks.map((track) => toPlayerTrack(track, title));
       if (playerTracks.length === 0) return;
       if (isShuffle !== shuffled) toggleShuffle();
       const index = shuffled
         ? Math.floor(Math.random() * playerTracks.length)
         : startIndex;
-      await playWithQueue(playerTracks, index, collectionPlaybackId);
+      await playWithQueue(playerTracks, index, sourceId);
     },
     [
       collectionPlaybackId,
       isShuffle,
       playWithQueue,
-      resolveTracksForPlayback,
       title,
       toggleShuffle,
-      tracks,
     ]
+  );
+
+  const playCollection = React.useCallback(
+    async (shuffled = false, startIndex = 0) => {
+      const playableTracks = resolveTracksForPlayback
+        ? await resolveTracksForPlayback()
+        : tracks;
+      await playTrackList(
+        playableTracks,
+        startIndex,
+        collectionPlaybackId,
+        shuffled
+      );
+    },
+    [collectionPlaybackId, playTrackList, resolveTracksForPlayback, tracks]
   );
 
   const handleAddToQueue = React.useCallback(async () => {
@@ -178,13 +203,22 @@ export const CollectionDetail = ({
     router.replace(`/(tabs)/${section}` as Href);
   }, [router, segments]);
 
-  const renderTrack = React.useCallback(
-    ({ item, index }: { item: CollectionTrack; index: number }) => {
+  const renderTrackRow = React.useCallback(
+    (
+      item: CollectionTrack,
+      index: number,
+      sourceTracks: CollectionTrack[],
+      sourceId: string
+    ) => {
       const active = currentTrack?.spotifyId === item.id;
+      const rowArtists = item.artists ?? [];
+      const shouldLinkArtists = Boolean(
+        rowArtists.length && onArtistPress && !disableTrackArtistLinks
+      );
       return (
         <LoggedPressable
           accessibilityLabel={`Tocar ${item.title}`}
-          onPress={() => playCollection(false, index)}
+          onPress={() => void playTrackList(sourceTracks, index, sourceId)}
           style={styles.trackRow}
         >
           {kind === 'playlist' || kind === 'artist' ? (
@@ -211,17 +245,17 @@ export const CollectionDetail = ({
                 {item.title}
               </Text>
             </View>
-            {item.artists?.length && onArtistPress ? (
+            {shouldLinkArtists ? (
               <View style={styles.trackArtistLinks}>
-                {item.artists.map((artist, artistIndex) => (
+                {rowArtists.map((artist, artistIndex) => (
                   <LoggedPressable
                     key={artist.id}
                     accessibilityLabel={`Abrir artista ${artist.name}`}
-                    onPress={() => onArtistPress(artist.id)}
+                    onPress={() => onArtistPress?.(artist.id)}
                   >
                     <Text numberOfLines={1} style={styles.trackSubtitle}>
                       {artist.name}
-                      {artistIndex < item.artists!.length - 1 ? ', ' : ''}
+                      {artistIndex < rowArtists.length - 1 ? ', ' : ''}
                     </Text>
                   </LoggedPressable>
                 ))}
@@ -240,7 +274,23 @@ export const CollectionDetail = ({
         </LoggedPressable>
       );
     },
-    [currentTrack?.spotifyId, kind, playCollection, playerState.isPlaying]
+    [
+      currentTrack?.spotifyId,
+      disableTrackArtistLinks,
+      kind,
+      onArtistPress,
+      playTrackList,
+      playerState.isPlaying,
+    ]
+  );
+  const renderTrack = React.useCallback(
+    ({ item, index }: { item: CollectionTrack; index: number }) =>
+      renderTrackRow(item, index, visibleTracks, collectionPlaybackId),
+    [collectionPlaybackId, renderTrackRow, visibleTracks]
+  );
+
+  const extraSections = extraTrackSections.filter(
+    (section) => section.tracks.length > 0
   );
 
   return (
@@ -383,8 +433,31 @@ export const CollectionDetail = ({
             {sectionTitle ? <Text style={styles.sectionTitle}>{sectionTitle}</Text> : null}
           </>
         }
-        ListFooterComponent={footer ? <>{footer}</> : null}
-        ListFooterComponentStyle={footer ? styles.listFooter : undefined}
+        ListFooterComponent={
+          extraSections.length || footer ? (
+            <>
+              {extraSections.map((section) => (
+                <View key={section.id} style={styles.extraSection}>
+                  <Text style={styles.sectionTitle}>{section.title}</Text>
+                  {section.tracks.map((track, index) => (
+                    <React.Fragment key={track.id}>
+                      {renderTrackRow(
+                        track,
+                        index,
+                        section.tracks,
+                        `${collectionPlaybackId}:${section.id}`
+                      )}
+                    </React.Fragment>
+                  ))}
+                </View>
+              ))}
+              {footer}
+            </>
+          ) : null
+        }
+        ListFooterComponentStyle={
+          extraSections.length || footer ? styles.listFooter : undefined
+        }
         ListEmptyComponent={<Text style={styles.empty}>Nenhuma música nesta coleção.</Text>}
       />
     </View>
@@ -423,5 +496,6 @@ const styles = StyleSheet.create({
   trackSubtitle: { color: 'rgba(255,255,255,0.58)', fontFamily: 'SF-Regular', fontSize: 12 },
   empty: { color: 'rgba(255,255,255,0.6)', fontFamily: 'SF-Regular', padding: 32, textAlign: 'center' },
   sectionTitle: { color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 18, paddingBottom: 8, paddingHorizontal: 16 },
+  extraSection: { paddingTop: 20 },
   listFooter: { paddingTop: 18 },
 });

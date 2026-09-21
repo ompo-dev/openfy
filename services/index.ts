@@ -96,8 +96,11 @@ export { getCachedArtistImage } from './library/artistImageCache';
 
 export {
   getLocalAlbumId,
+  getPrimaryTrackArtist,
   groupLocalAlbums,
   groupLocalArtists,
+  isTrackParticipantArtist,
+  isTrackPrimaryArtist,
 } from './library/localCollections';
 export type {
   LocalAlbumCollection,

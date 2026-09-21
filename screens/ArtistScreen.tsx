@@ -1,12 +1,19 @@
 import * as React from 'react';
 import { View } from 'react-native';
-import { Href, useRouter, useSegments } from 'expo-router';
 
 import { getArtist, getArtistAlbums, getArtistTopTracks } from '@api';
 import { CollectionDetail } from '@components';
 import { ArtistModel, LibraryItemModel, TrackModel } from '@models';
 import { Shapes, Sizes } from '@config';
-import { getCachedArtistImage, getDownloadedTracks, groupLocalArtists } from '@services';
+import {
+  getCachedArtistImage,
+  getDownloadedTracks,
+  groupLocalAlbums,
+  groupLocalArtists,
+  isTrackParticipantArtist,
+  isTrackPrimaryArtist,
+  type DownloadedTrack,
+} from '@services';
 import { getSpotifyArtistImage } from '../services/metadata/spotifyMetadata';
 import { Slider } from '../components/Slider';
 
@@ -14,11 +21,47 @@ export type ArtistScreenPropsType = {
   artistId: string;
 };
 
+const toTrackModel = (track: DownloadedTrack): TrackModel => ({
+  ...track,
+  id: track.spotifyId,
+  title: track.title,
+  subtitle: track.artistName,
+  imageURL: track.localImagePath || track.imageURL,
+  albumName: track.albumName,
+  durationMs: track.duration_ms,
+});
+
+const isRemotePrimaryArtist = (
+  track: TrackModel,
+  artistId: string,
+  artistName?: string
+) => {
+  const primaryArtist = track.artists?.[0];
+  if (!primaryArtist) return true;
+  if (primaryArtist.id && primaryArtist.id === artistId) return true;
+  return Boolean(
+    artistName &&
+      primaryArtist.name.toLocaleLowerCase() === artistName.toLocaleLowerCase()
+  );
+};
+
+const artistMatchesAlbumPrimary = (
+  track: DownloadedTrack,
+  artistIdOrName: string
+) => {
+  const albumPrimary = track.albumArtists?.[0];
+  if (!albumPrimary) return isTrackPrimaryArtist(track, artistIdOrName);
+  const target = artistIdOrName.toLocaleLowerCase();
+  return (
+    `spotify:${albumPrimary.id}`.toLocaleLowerCase() === target ||
+    albumPrimary.name.toLocaleLowerCase() === target
+  );
+};
+
 export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
-  const router = useRouter();
-  const segments = useSegments();
   const [artist, setArtist] = React.useState<ArtistModel | null>(null);
   const [topTracks, setTopTracks] = React.useState<TrackModel[]>([]);
+  const [participationTracks, setParticipationTracks] = React.useState<TrackModel[]>([]);
   const [albums, setAlbums] = React.useState<LibraryItemModel[]>([]);
   const localArtistName = artistId.startsWith('local_artist_')
     ? decodeURIComponent(artistId.slice('local_artist_'.length))
@@ -28,6 +71,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     let active = true;
     setArtist(null);
     setTopTracks([]);
+    setParticipationTracks([]);
     setAlbums([]);
 
     if (localArtistName) {
@@ -40,23 +84,33 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           ? await getCachedArtistImage(collection.id, () =>
               getSpotifyArtistImage(collection.spotifyArtistId!)) : '';
         if (!active) return;
-        const tracks = (collection?.tracks || [])
-          .map((track) => ({
-            ...track,
-            id: track.spotifyId,
-            title: track.title,
-            subtitle: track.artistName,
-            imageURL: track.localImagePath || track.imageURL,
-            albumName: track.albumName,
-            durationMs: track.duration_ms,
-          }));
+        const collectionTracks = collection?.tracks || [];
+        const featuredTracks = collectionTracks.filter((track) =>
+          isTrackPrimaryArtist(track, collection?.id || localArtistName)
+        );
+        const participationOnlyTracks = collectionTracks.filter((track) =>
+          isTrackParticipantArtist(track, collection?.id || localArtistName)
+        );
+        const artistAlbums = groupLocalAlbums(
+          featuredTracks.filter((track) =>
+            artistMatchesAlbumPrimary(track, collection?.id || localArtistName)
+          )
+        ).map((album) => ({
+          id: `local_album_${encodeURIComponent(album.id)}`,
+          type: 'album' as const,
+          title: album.title,
+          subtitle: album.subtitle,
+          imageURL: album.imageURL,
+        }));
         setArtist({
           id: artistId,
           type: 'artist',
           name: collection?.title || localArtistName,
           imageURL: profileImage,
         });
-        setTopTracks(tracks);
+        setTopTracks(featuredTracks.map(toTrackModel));
+        setParticipationTracks(participationOnlyTracks.map(toTrackModel));
+        setAlbums(artistAlbums);
       });
       return () => {
         active = false;
@@ -77,11 +131,21 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
 
     void getArtistTopTracks(artistId)
       .then((trackData) => {
-        if (active) setTopTracks(trackData);
+        if (!active) return;
+        setTopTracks(
+          trackData.filter((track) =>
+            isRemotePrimaryArtist(track, artistId)
+          )
+        );
+        setParticipationTracks(
+          trackData.filter(
+            (track) => !isRemotePrimaryArtist(track, artistId)
+          )
+        );
       })
       .catch((error) => console.error('Failed to get artist top tracks:', error));
 
-    void getArtistAlbums(artistId, 'album,single,compilation', 20)
+    void getArtistAlbums(artistId, 'album,single', 20)
       .then((albumData) => {
         if (active) setAlbums(albumData);
       })
@@ -91,14 +155,6 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       active = false;
     };
   }, [artistId, localArtistName]);
-
-  const handleArtistPress = React.useCallback(
-    (targetArtistId: string) => {
-      const section = segments.join('/').includes('library') ? 'library' : 'home';
-      router.push(`/(tabs)/${section}/artist/${targetArtistId}` as Href);
-    },
-    [router, segments]
-  );
 
   if (!artist) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
 
@@ -121,8 +177,15 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       description={description}
       metadata={metadata}
       tracks={topTracks}
-      onArtistPress={handleArtistPress}
+      disableTrackArtistLinks
       sectionTitle="Músicas em destaque"
+      extraTrackSections={[
+        {
+          id: 'participations',
+          title: 'Participações',
+          tracks: participationTracks,
+        },
+      ]}
       footer={
         albums.length ? (
           <Slider

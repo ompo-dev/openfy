@@ -152,7 +152,7 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
         title: sampleTrack.title,
         artist: sampleTrack.artistName,
       }),
-      500,
+      0,
       sampleTrack
     );
 
@@ -363,7 +363,7 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       'https://media.test/new.m4a',
       expect.any(Function),
       expect.objectContaining({ title: 'Nova' }),
-      2000,
+      0,
       secondTrack
     );
   });

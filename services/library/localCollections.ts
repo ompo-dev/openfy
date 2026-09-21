@@ -26,6 +26,43 @@ const getTrackArtists = (track: Pick<DownloadedTrack, 'artistName' | 'artists'>)
     .map((name) => ({ id: '', name: name.trim() }))
     .filter((artist) => artist.name);
 
+const normalizeArtistIdentity = (artist: { id?: string; name: string }) =>
+  artist.id ? `spotify:${artist.id}` : artist.name.trim().toLocaleLowerCase();
+
+const normalizeArtistLookup = (artistIdOrName: string) =>
+  artistIdOrName.trim().toLocaleLowerCase();
+
+export const getPrimaryTrackArtist = (
+  track: Pick<DownloadedTrack, 'artistName' | 'artists'>
+) => getTrackArtists(track)[0] || null;
+
+export const isTrackPrimaryArtist = (
+  track: Pick<DownloadedTrack, 'artistName' | 'artists'>,
+  artistIdOrName: string
+): boolean => {
+  const primary = getPrimaryTrackArtist(track);
+  if (!primary) return false;
+  const target = normalizeArtistLookup(artistIdOrName);
+  return (
+    normalizeArtistIdentity(primary).toLocaleLowerCase() === target ||
+    primary.name.trim().toLocaleLowerCase() === target
+  );
+};
+
+export const isTrackParticipantArtist = (
+  track: Pick<DownloadedTrack, 'artistName' | 'artists'>,
+  artistIdOrName: string
+): boolean => {
+  const target = normalizeArtistLookup(artistIdOrName);
+  return getTrackArtists(track)
+    .slice(1)
+    .some(
+      (artist) =>
+        normalizeArtistIdentity(artist).toLocaleLowerCase() === target ||
+        artist.name.trim().toLocaleLowerCase() === target
+    );
+};
+
 export const getLocalAlbumId = (
   track: Pick<DownloadedTrack, 'albumName' | 'artistName' | 'albumId' | 'albumArtists' | 'artists'>
 ): string =>
@@ -73,7 +110,7 @@ export const groupLocalArtists = (
     const seen = new Set<string>();
     getTrackArtists(track).forEach((artist) => {
         const title = artist.name.trim();
-        const id = artist.id ? `spotify:${artist.id}` : title.toLocaleLowerCase();
+        const id = normalizeArtistIdentity(artist);
         if (seen.has(id)) return;
         seen.add(id);
         const current = artists.get(id);

@@ -24,6 +24,7 @@ module.exports = {
       bundleIdentifier: 'com.openfy.app',
       buildNumber: process.env.IOS_BUILD_NUMBER || '1',
       infoPlist: {
+        UIBackgroundModes: ['audio'],
         NSAppTransportSecurity: {
           NSAllowsLocalNetworking: true,
         },

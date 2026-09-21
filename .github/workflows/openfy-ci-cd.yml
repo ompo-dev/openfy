@@ -1,0 +1,426 @@
+name: Openfy CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      publish_ota:
+        description: Publicar OTA no canal production
+        required: true
+        default: true
+        type: boolean
+      build_ios:
+        description: Gerar IPA para iPhone
+        required: true
+        default: false
+        type: boolean
+      build_android:
+        description: Gerar APK Android
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: openfy-ci-cd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CI: "1"
+  EXPO_NO_TELEMETRY: "1"
+  EXPO_PUBLIC_LOCAL_AUDIO_ONLY: "true"
+  EXPO_PUBLIC_SPOTIFY_CLIENT_ID: ${{ vars.EXPO_PUBLIC_SPOTIFY_CLIENT_ID }}
+  YOUTUBE_DL_SKIP_DOWNLOAD: "true"
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v6
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci --legacy-peer-deps
+
+      - name: Validar TypeScript
+        run: npm run typecheck
+
+      - name: Rodar testes
+        run: npm test -- --runInBand --silent
+
+  publicar-ota:
+    needs: validar
+    if: github.event_name == 'push' || inputs.publish_ota
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - name: Verificar token da Expo
+        id: expo-token
+        shell: bash
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::warning::EXPO_TOKEN nao configurado; OTA nao sera publicado nesta execucao."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Baixar projeto
+        if: steps.expo-token.outputs.publish == 'true'
+        uses: actions/checkout@v6
+
+      - name: Configurar Node.js
+        if: steps.expo-token.outputs.publish == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Configurar EAS
+        if: steps.expo-token.outputs.publish == 'true'
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Instalar dependencias
+        if: steps.expo-token.outputs.publish == 'true'
+        run: npm ci --legacy-peer-deps
+
+      - name: Publicar update no canal production
+        if: steps.expo-token.outputs.publish == 'true'
+        run: |
+          eas update \
+            --channel production \
+            --environment production \
+            --auto \
+            --non-interactive
+
+  validar-audio-local:
+    needs: validar
+    runs-on: macos-26
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v6
+
+      - name: Compilar reparador de audio local com AVFoundation
+        run: |
+          xcrun swiftc -parse-as-library \
+            modules/openfy-local-audio/ios/MP4Container.swift \
+            modules/openfy-local-audio/ios/LocalAudioNormalizer.swift \
+            scripts/check-local-audio.swift -o "$RUNNER_TEMP/check-local-audio"
+
+      - name: Validar caminho iOS de protecao de arquivos
+        run: |
+          xcrun swiftc -typecheck -parse-as-library \
+            -target arm64-apple-ios16.4 \
+            -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            modules/openfy-local-audio/ios/MP4Container.swift \
+            modules/openfy-local-audio/ios/LocalAudioNormalizer.swift
+
+      - name: Conferir duracao, audio e idempotencia
+        run: |
+          "$RUNNER_TEMP/check-local-audio" scripts/fixtures/synthetic-dash.m4a
+          "$RUNNER_TEMP/check-local-audio" scripts/fixtures/synthetic-dash-edits.m4a
+
+  gerar-ipa:
+    needs: validar
+    if: github.event_name == 'workflow_dispatch' && inputs.build_ios
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      IOS_BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v6
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Selecionar Xcode
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.6.app/Contents/Developer
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          uname -m
+
+      - name: Restaurar cache do CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods/repos
+          key: ${{ runner.os }}-${{ runner.arch }}-pods-${{ hashFiles('package-lock.json', 'app.config.js') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-pods-
+
+      - name: Instalar dependencias
+        run: npm ci --legacy-peer-deps
+
+      - name: Verificar configuracao do Expo
+        run: |
+          npx expo config --type public
+          npx expo-doctor || true
+
+      - name: Gerar projeto nativo iOS
+        run: |
+          npx expo prebuild \
+            --platform ios \
+            --clean \
+            --no-install
+
+      - name: Instalar CocoaPods
+        run: |
+          cd ios
+          pod install
+
+      - name: Identificar workspace e scheme
+        id: ios-project
+        shell: bash
+        run: |
+          set -e
+          WORKSPACE="$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          if [ -z "$WORKSPACE" ]; then
+            echo "Nenhum workspace encontrado."
+            find ios -maxdepth 2 -type f | sort
+            exit 1
+          fi
+          SCHEME="$(basename "$WORKSPACE" .xcworkspace)"
+          echo "workspace=$WORKSPACE" >> "$GITHUB_OUTPUT"
+          echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
+          xcodebuild -workspace "$WORKSPACE" -list
+
+      - name: Compilar aplicativo para iPhone
+        timeout-minutes: 50
+        shell: bash
+        run: |
+          set -e
+          set -o pipefail
+          WORKSPACE="${{ steps.ios-project.outputs.workspace }}"
+          SCHEME="${{ steps.ios-project.outputs.scheme }}"
+          BUILD_JOBS="$(sysctl -n hw.ncpu)"
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$PWD/build" \
+            -parallelizeTargets \
+            -jobs "$BUILD_JOBS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            DEBUG_INFORMATION_FORMAT=dwarf \
+            GCC_GENERATE_DEBUGGING_SYMBOLS=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            build \
+            2>&1 | tee xcodebuild.log
+
+      - name: Mostrar erros de compilacao
+        if: failure()
+        shell: bash
+        run: |
+          grep -nE "error:|warning:" xcodebuild.log | tail -120 || true
+          grep -nE "BUILD FAILED|The following build commands failed|Compiling .*\.swift" xcodebuild.log | tail -40 || true
+
+      - name: Encontrar aplicativo compilado
+        id: compiled-app
+        shell: bash
+        run: |
+          set -e
+          APP_PATH="$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "$APP_PATH" ]; then
+            echo "O arquivo .app nao foi encontrado."
+            find build -maxdepth 8 -type d -name '*.app' -print || true
+            exit 1
+          fi
+          APP_NAME="$(basename "$APP_PATH" .app)"
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Empacotar IPA
+        shell: bash
+        run: |
+          set -e
+          APP_PATH="${{ steps.compiled-app.outputs.app_path }}"
+          APP_NAME="${{ steps.compiled-app.outputs.app_name }}"
+          rm -rf ipa-package
+          mkdir -p ipa-package/Payload
+          cp -R "$APP_PATH" ipa-package/Payload/
+          cd ipa-package
+          ditto -c -k --sequesterRsrc --keepParent Payload "../${APP_NAME}-unsigned.ipa"
+          cd ..
+          ls -lh "${APP_NAME}-unsigned.ipa"
+
+      - name: Publicar release iOS
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -e
+          IPA="$(ls *-unsigned.ipa | head -1)"
+          SIZE="$(stat -f%z "$IPA")"
+          VERSION="$(node -p "require('./app.config.js').expo.version")"
+          BUILD="${{ github.run_number }}"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          REPO="${{ github.repository }}"
+          BASE="https://github.com/${REPO}/releases/latest/download"
+          SIZE="$SIZE" VERSION="$VERSION" BUILD="$BUILD" DATE="$DATE" BASE="$BASE" node -e '
+          const { SIZE, VERSION, BUILD, DATE, BASE } = process.env;
+          const icon = BASE + "/icon.png";
+          const src = {
+            name: "Openfy",
+            subtitle: "Seu Spotify local-first. Baixe e ouca sem internet.",
+            iconURL: icon,
+            tintColor: "#1DB954",
+            apps: [{
+              name: "Openfy",
+              bundleIdentifier: "com.openfy.app",
+              developerName: "openfy",
+              subtitle: "Musica local-first.",
+              localizedDescription: "Baixe musicas, playlists e albuns do Spotify e YouTube Music. Ouca offline com letras sincronizadas.",
+              iconURL: icon,
+              permissions: [],
+              category: "entertainment",
+              tintColor: "#1DB954",
+              versions: [{
+                version: VERSION,
+                buildVersion: BUILD,
+                date: DATE,
+                localizedDescription: "Build automatico mais recente.",
+                downloadURL: BASE + "/Openfy-unsigned.ipa",
+                size: Number(SIZE),
+                minOSVersion: "16.0",
+              }],
+            }],
+            news: [],
+          };
+          require("fs").writeFileSync("apps.json", JSON.stringify(src, null, 2));
+          '
+          if [ "$IPA" != "Openfy-unsigned.ipa" ]; then cp "$IPA" Openfy-unsigned.ipa; fi
+          [ -f "assets/images/logo.png" ] && cp assets/images/logo.png icon.png || true
+          TAG="v${VERSION}-${{ github.run_number }}"
+          gh release create "$TAG" \
+            Openfy-unsigned.ipa apps.json \
+            $([ -f icon.png ] && echo "icon.png") \
+            --title "Openfy ${VERSION} (build ${{ github.run_number }})" \
+            --notes "Build nao-assinado (sideload via AltStore). Fonte AltStore: apps.json neste release." \
+            --latest
+
+      - name: Enviar IPA para download
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Openfy-iOS-unsigned
+          path: "*-unsigned.ipa"
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enviar log da compilacao
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Openfy-iOS-build-log
+          path: xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  gerar-apk:
+    needs: validar
+    if: github.event_name == 'workflow_dispatch' && inputs.build_android
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      ANDROID_VERSION_CODE: ${{ github.run_number }}
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v6
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci --legacy-peer-deps
+
+      - name: Gerar projeto nativo Android
+        run: |
+          npx expo prebuild \
+            --clean \
+            --no-install \
+            --platform android
+
+      - name: Compilar APK
+        timeout-minutes: 35
+        shell: bash
+        run: |
+          set -e
+          cd android
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease
+          APK="$PWD/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK" ]; then
+            echo "APK nao encontrado em $APK"
+            find app/build/outputs/apk/release -type f | sort
+            exit 1
+          fi
+
+      - name: Copiar APK para nome estavel
+        shell: bash
+        run: |
+          APK="$(find android/app/build/outputs/apk/release -type f -name 'app-release*.apk' | head -1)"
+          cp "$APK" Openfy-android.apk
+          ls -lh Openfy-android.apk
+
+      - name: Publicar release Android
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -e
+          VERSION="$(node -p "require('./app.config.js').expo.version")"
+          TAG="v${VERSION}-android-${{ github.run_number }}"
+          gh release create "$TAG" \
+            Openfy-android.apk \
+            --title "Openfy ${VERSION} Android (build ${{ github.run_number }})" \
+            --notes "Build Android nao-assinado." \
+            --latest
+
+      - name: Enviar APK para download
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Openfy-Android-release
+          path: Openfy-android.apk
+          if-no-files-found: error
+          retention-days: 7
