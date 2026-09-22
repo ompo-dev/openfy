@@ -14,6 +14,7 @@ import { AppState, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   loadAndPlay,
+  beginTrackChange,
   ensurePlaybackDiagnostics,
   play,
   pause,
@@ -314,6 +315,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     // 1. ATOMIC GENERATION LOCK 🔒: Increments request counter to cancel any stale in-flight fetches
     const requestId = get().activeRequestId + 1;
+    beginTrackChange();
     const cacheKey = getCacheKey(track);
     const lyricsCacheKey = getLyricsCacheKey(track);
     console.log(
@@ -590,7 +592,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
                 0,
                 track
               );
-              if (recoveredOk && lastPosMs > 1000) {
+              if (get().activeRequestId === requestId && recoveredOk && lastPosMs > 1000) {
                 await seekTo(lastPosMs);
               }
             }
@@ -743,6 +745,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   },
 
   togglePlayPause: async () => {
+    if (get().isLoadingAudio) return;
     const { currentTrack, playTrack } = get();
 
     // Always read real-time state from playerService (not Zustand state which can be stale)

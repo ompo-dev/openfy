@@ -28,6 +28,8 @@ import {
   fadeOutCurrent,
   getAudioDiagnosticsSnapshot,
   loadAndPlay,
+  beginTrackChange,
+  play,
   preloadAudio,
   recordAudioDiagnostic,
   releasePreloadedAudio,
@@ -49,6 +51,7 @@ const createPlayer = () => ({
   addListener: jest.fn(),
   remove: jest.fn(),
   release: jest.fn(),
+  replace: jest.fn(),
   clearLockScreenControls: jest.fn(),
 });
 
@@ -85,7 +88,7 @@ describe('playerService fades', () => {
     jest.useFakeTimers();
     AppState.currentState = 'active';
     jest.mocked(AppState.addEventListener).mockImplementation(() => ({ remove: jest.fn() }));
-    (createAudioPlayer as jest.Mock).mockReturnValue(createPlayer());
+    (createAudioPlayer as jest.Mock).mockReset().mockReturnValue(createPlayer());
     (preload as jest.Mock).mockResolvedValue(undefined);
     jest.mocked(prepareLocalAudioForPlayback).mockResolvedValue(undefined);
   });
@@ -100,10 +103,7 @@ describe('playerService fades', () => {
 
   it('fades out active track, then fades replacement in', async () => {
     const current = createPlayer();
-    const replacement = createPlayer();
-    (createAudioPlayer as jest.Mock)
-      .mockReturnValueOnce(current)
-      .mockReturnValueOnce(replacement);
+    (createAudioPlayer as jest.Mock).mockReturnValueOnce(current);
 
     await loadAndPlay('https://media.test/current.m4a');
     const fadeOut = fadeOutCurrent(2000);
@@ -119,9 +119,10 @@ describe('playerService fades', () => {
       undefined,
       2000
     );
-    expect(replacement.volume).toBe(0);
+    expect(current.replace).toHaveBeenCalledWith('https://media.test/replacement.m4a');
+    expect(current.volume).toBe(0);
     jest.advanceTimersByTime(2000);
-    expect(replacement.volume).toBe(1);
+    expect(current.volume).toBe(1);
   });
 
   it('does not fetch remote audio into a blob on web', async () => {
@@ -340,6 +341,7 @@ describe('playerService fades', () => {
         albumName: 'Álbum',
       }
     );
+    await flushMicrotasks();
     await loadAndPlay(
       'file:///new.m4a',
       undefined,
@@ -370,25 +372,67 @@ describe('playerService fades', () => {
     );
   });
 
-  it('disconnects every retired player and releases its native object across repeated track changes', async () => {
+  it('uses one native engine and pauses it before every source replacement', async () => {
     (Platform as { OS: string }).OS = 'ios';
-    const players = Array.from({ length: 40 }, () => ({
+    const player = {
       ...createPlayer(),
       addListener: jest.fn().mockReturnValue({ remove: jest.fn() }),
-    }));
-    for (const [index, player] of players.entries()) {
-      jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+    };
+    let audible = false;
+    player.play.mockImplementation(() => { audible = true; });
+    player.pause.mockImplementation(() => { audible = false; });
+    player.replace.mockImplementation(() => { expect(audible).toBe(false); });
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+    for (let index = 0; index < 40; index++) {
       await loadAndPlay(`file:///track-${index}.m4a`);
     }
-    for (const player of players.slice(0, -1)) {
-      expect(player.addListener.mock.results[0].value.remove).toHaveBeenCalledTimes(1);
-      expect(player.pause).toHaveBeenCalledTimes(1);
-      expect(player.remove).toHaveBeenCalledTimes(1);
-      expect(player.release).toHaveBeenCalledTimes(1);
-    }
-    expect(players.at(-1)!.release).not.toHaveBeenCalled();
+    expect(createAudioPlayer).toHaveBeenCalledTimes(1);
+    expect(player.replace).toHaveBeenCalledTimes(39);
+    expect(player.pause).toHaveBeenCalledTimes(39);
+    expect(player.release).not.toHaveBeenCalled();
+    expect(player.remove).not.toHaveBeenCalled();
     await unload();
-    expect(players.at(-1)!.release).toHaveBeenCalledTimes(1);
+    expect(audible).toBe(false);
+    expect(player.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('still pauses and reuses the engine when listener cleanup throws', async () => {
+    const player = createPlayer();
+    player.addListener.mockReturnValue({ remove: () => { throw new Error('stale subscription'); } });
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+    await loadAndPlay('file:///one.m4a');
+    expect(await loadAndPlay('file:///two.m4a')).toBe(true);
+    expect(player.pause).toHaveBeenCalledTimes(1);
+    expect(player.replace).toHaveBeenCalledWith('file:///two.m4a');
+    expect(createAudioPlayer).toHaveBeenCalledTimes(1);
+    await unload();
+    expect(player.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates a repair as soon as another track is selected, before its URL is resolved', async () => {
+    let finishRepair!: () => void;
+    jest.mocked(prepareLocalAudioForPlayback).mockImplementationOnce(() => new Promise(resolve => {
+      finishRepair = () => resolve(null);
+    }));
+    const pending = loadAndPlay('file:///old.m4a');
+    await flushMicrotasks();
+    beginTrackChange();
+    finishRepair();
+    expect(await pending).toBe(false);
+    expect(createAudioPlayer).not.toHaveBeenCalled();
+  });
+
+  it('does not let a pending resume start the replacement song', async () => {
+    const player = createPlayer();
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+    await loadAndPlay('file:///one.m4a');
+    let finishMode!: () => void;
+    jest.mocked(setAudioModeAsync).mockImplementationOnce(() => new Promise(resolve => { finishMode = resolve; }));
+    const pending = play();
+    beginTrackChange();
+    finishMode();
+    await pending;
+    expect(player.play).toHaveBeenCalledTimes(1);
   });
 
   it('keeps native playback alive in background without refreshing hidden UI on each tick', async () => {
@@ -443,15 +487,14 @@ describe('playerService fades', () => {
         oldStatus = callback;
       }),
     };
-    const newPlayer = createPlayer();
     const oldCallback = jest.fn();
     (createAudioPlayer as jest.Mock)
-      .mockReturnValueOnce(oldPlayer)
-      .mockReturnValueOnce(newPlayer);
+      .mockReturnValueOnce(oldPlayer);
 
     await loadAndPlay('file:///old-player.m4a', oldCallback);
+    const staleStatus = oldStatus;
     await loadAndPlay('file:///new-player.m4a');
-    oldStatus({
+    staleStatus({
       playing: false,
       isBuffering: false,
       isLoaded: true,

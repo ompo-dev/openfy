@@ -171,21 +171,34 @@ const describeSource = (uri?: string): Pick<AudioDiagnosticEvent, 'sourceKind' |
   }
 };
 
+const detachPlayerSubscriptions = () => {
+  const status = playerStatusSubscription;
+  const appState = playerAppStateSubscription;
+  playerStatusSubscription = undefined;
+  playerAppStateSubscription = undefined;
+  try { status?.remove(); } catch {}
+  try { appState?.remove(); } catch {}
+};
+
+/** Invalidate pending loads immediately when a different track is selected. */
+export const beginTrackChange = (): void => {
+  loadGeneration++;
+  stopVolumeRamp();
+  // Silence the engine before touching listeners: a listener cleanup failure
+  // must never orphan an audible player.
+  playerInstance?.pause();
+  detachPlayerSubscriptions();
+};
+
 const disposeCurrentPlayer = () => {
   stopVolumeRamp();
   const previous = playerInstance;
+  try { previous?.pause(); } catch {}
+  detachPlayerSubscriptions();
+  try { previous?.clearLockScreenControls(); } catch {}
+  try { previous?.remove(); } catch {}
+  try { previous?.release(); } catch {}
   playerInstance = null;
-  playerStatusSubscription?.remove();
-  playerStatusSubscription = undefined;
-  playerAppStateSubscription?.remove();
-  playerAppStateSubscription = undefined;
-  if (!previous) return;
-  try { previous.pause(); } catch {}
-  try { previous.clearLockScreenControls(); } catch {}
-  try { previous.remove(); } catch {}
-  // SDK 57 remove() only removes the iOS registry entry. Explicitly detach the
-  // shared object to tear down AVPlayer observers/buffers without waiting for GC.
-  try { previous.release(); } catch {}
 };
 
 const isAppActive = () =>
@@ -300,6 +313,7 @@ export const configureAudioSession = async (
         error,
       });
     }
+    throw error;
   }
 };
 
@@ -437,12 +451,13 @@ export const loadAndPlay = async (
 ): Promise<boolean> => {
   const source = toAudioSource(sourceInput);
   const uri = source.uri;
-  const generation = ++loadGeneration;
+  const generation = loadGeneration + 1;
   try {
-    disposeCurrentPlayer();
+    beginTrackChange();
 
     const callbackForThisPlayer = onStatusUpdate || null;
     await configureAudioSession(diagnosticTrack?.spotifyId);
+    if (generation !== loadGeneration) return false;
     const repair = await prepareLocalAudioForPlayback(uri);
     if (generation !== loadGeneration) return false;
     const sourceDescription = describeSource(uri);
@@ -465,13 +480,15 @@ export const loadAndPlay = async (
     );
 
     const playerSource = source.headers ? source : uri;
-    const consumedPreload = preloadedSources.get(uri);
-    if (consumedPreload) {
-      consumedPreload.cancelled = true;
-      preloadedSources.delete(uri);
-    }
-    const player = createAudioPlayer(playerSource as any, getPlayerOptions());
+    // Finish any pending preload before consuming it. Otherwise its late
+    // completion can leave another native AVPlayer cached for the active URI.
+    await preloadedSources.get(uri)?.operation;
+    if (generation !== loadGeneration) return false;
+    preloadedSources.delete(uri);
+    const player = playerInstance || createAudioPlayer(playerSource as any, getPlayerOptions());
+    if (playerInstance) player.replace(playerSource as any);
     playerInstance = player;
+    if (Platform.OS !== 'ios') void enqueuePreloadCleanup(uri, playerSource);
     player.volume = fadeInDurationMs > 0 ? 0 : 1;
 
     if (lockScreenMetadata) {
@@ -483,6 +500,8 @@ export const loadAndPlay = async (
       } catch (error) {
         console.warn('[PlayerService] Lock screen controls unavailable:', error);
       }
+    } else {
+      player.clearLockScreenControls();
     }
 
     let lastTransition = '';
@@ -537,10 +556,13 @@ export const loadAndPlay = async (
  * Play / resume playback.
  */
 export const play = async (): Promise<void> => {
-  if (!playerInstance) return;
+  const player = playerInstance;
+  const generation = loadGeneration;
+  if (!player) return;
   try {
     await configureAudioSession();
-    playerInstance.play();
+    if (generation !== loadGeneration || playerInstance !== player) return;
+    player.play();
     recordAudioDiagnostic('resume-called');
   } catch (error) {
     console.error('[PlayerService] play error:', error);

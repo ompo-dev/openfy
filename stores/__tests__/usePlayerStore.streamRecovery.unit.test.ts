@@ -14,6 +14,7 @@ jest.mock('@services', () => ({
     durationMs: 0,
   },
   loadAndPlay: jest.fn(),
+  beginTrackChange: jest.fn(),
   play: jest.fn().mockResolvedValue(undefined),
   pause: jest.fn().mockResolvedValue(undefined),
   seekTo: jest.fn().mockResolvedValue(undefined),
