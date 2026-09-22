@@ -315,7 +315,12 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     // 1. ATOMIC GENERATION LOCK 🔒: Increments request counter to cancel any stale in-flight fetches
     const requestId = get().activeRequestId + 1;
-    beginTrackChange();
+    try {
+      beginTrackChange();
+    } catch (error) {
+      set({ isLoadingAudio: false, playerState: { ...DEFAULT_STATE, error: String(error) } });
+      return;
+    }
     const cacheKey = getCacheKey(track);
     const lyricsCacheKey = getLyricsCacheKey(track);
     console.log(
@@ -433,7 +438,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     })();
 
     // Execute Lyrics resolution and update store if generation lock matches
-    resolveLyricsPromise.then((lyrics) => {
+    resolveLyricsPromise.catch(() => null).then((lyrics) => {
       if (get().activeRequestId === requestId) {
         set({
           lyricsData: lyrics,
@@ -443,7 +448,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     });
 
     // Execute Audio resolution
-    const streamSource = await resolveAudioPromise;
+    const streamSource = await resolveAudioPromise.catch((error) => {
+      console.warn('[PlayerStore] Source loading failed:', error);
+      return null;
+    });
 
     // RACE CONDITION CHECK: Discard if user clicked another track in the meantime
     if (get().activeRequestId !== requestId) {

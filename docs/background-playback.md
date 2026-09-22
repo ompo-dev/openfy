@@ -72,11 +72,27 @@ retidos; manter isso sem dono para a Home acumula buffers/players durante uso em
 segundo plano. O serviço do player também limita os preloads retidos e cancela
 operações pendentes antes que elas recriem uma entrada nativa já liberada.
 
-Ao trocar ou fechar uma faixa, o serviço remove o listener de status, pausa o
-player anterior e chama `release()` no objeto compartilhado do Expo. No SDK 57,
-`remove()` sozinho retira o player do registro, mas não executa imediatamente a
-limpeza dos observadores e buffers nativos. A instância que está tocando permanece
-retida durante todo o período em segundo plano.
+Ao selecionar outra faixa, o serviço invalida carregamentos anteriores e pausa
+imediatamente o áudio. A mesma instância recebe `replace()` depois que a fonte
+nova está pronta. Não são criados players audíveis independentes para cada faixa.
+Ao fechar o player, `remove()` e `release()` liberam o registro e o objeto nativo.
+Falhas na limpeza de listeners não impedem essa liberação.
+
+O patch versionado `patches/expo-audio+57.0.4.patch` é aplicado pelo `postinstall`
+e exige um novo IPA (runtime 1.0.1). Ele corrige três comportamentos do SDK instalado:
+
+- Remove comandos remotos usando os tokens retornados por `addTarget(handler:)`,
+  inclusive ao reativar o mesmo player. `removeTarget(self)` não removia esses handlers.
+- Carrega capas locais como arquivos, reduz somente a imagem da tela bloqueada
+  para até 512 pixels, cancela pedidos de capas antigas e não repete uma falha a
+  cada evento de progresso. As capas da biblioteca e do player completo não mudam.
+- Filtra progresso repetido antes da ponte nativa/JS em segundo plano. Transições,
+  erros, fim da faixa e seeks continuam emitindo eventos. O iOS calcula o progresso
+  da tela bloqueada a partir da posição e velocidade já informadas.
+
+Referências: [comandos remotos](https://developer.apple.com/documentation/mediaplayer/mpremotecommand/addtarget(handler:)),
+[tempo decorrido](https://developer.apple.com/documentation/mediaplayer/mpnowplayinginfopropertyelapsedplaybacktime),
+[trabalho em segundo plano](https://developer.apple.com/library/archive/documentation/Performance/Conceptual/EnergyGuide-iOS/WorkLessInTheBackground.html).
 
 Na entrada em segundo plano, os preloads pendentes são cancelados e os buffers
 dos vizinhos são liberados. Eventos de progresso repetidos não atualizam as telas
@@ -89,6 +105,12 @@ A ação **Validate local audio repair** compila o mesmo código Swift em macOS 
 usa um tom sintético de 2 segundos seguido de meio segundo de silêncio. Ela
 verifica duração, preservação dos pacotes e repetição sem reprocessar o arquivo.
 O teste não baixa músicas nem precisa de credenciais de provedores.
+
+O job `validar-audio-local` também executa o filtro nativo de eventos com 2.400
+ticks simulados em segundo plano, transições e retorno ao primeiro plano. Isso
+valida a lógica, mas não reproduz o encerramento no aparelho. Um relatório
+`Openfy*.ips` ou `JetsamEvent*.ips` com horário correspondente ainda é necessário
+para distinguir crash nativo, watchdog, pressão de memória e limite de CPU.
 
 Após instalar o IPA atualizado, reabra uma faixa já baixada e confira o tempo,
 o avanço até perto do final e a passagem à próxima faixa. Confira também a

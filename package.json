@@ -3,6 +3,7 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
+    "postinstall": "patch-package --error-on-fail",
     "start": "expo start",
     "dev": "expo start --port 8080",
     "dev:android": "expo start --android --port 8081",
@@ -74,6 +75,7 @@
     "eslint-plugin-import": "^2.32.0",
     "jest": "^29.7.0",
     "jest-expo": "~57.0.2",
+    "patch-package": "^8.0.1",
     "test-renderer": "^1.2.0",
     "typescript": "~6.0.3"
   },

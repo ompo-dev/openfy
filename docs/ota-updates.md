@@ -35,3 +35,6 @@ OTA cannot change native code, native modules, entitlements, permissions, bundle
 identifiers, Info.plist, AndroidManifest, or dependency changes that include native
 code. For those changes, build and install a new IPA/APK, then OTA can cover later
 JavaScript and asset fixes for that app version.
+
+The native playback fixes use `expo.version` 1.0.1. Devices on runtime 1.0.0
+must install that IPA/APK first; an OTA bundle cannot install the Swift patch.

@@ -1,0 +1,285 @@
+diff --git a/node_modules/expo-audio/ios/AudioPlayer.swift b/node_modules/expo-audio/ios/AudioPlayer.swift
+index 0742943..adc8e38 100644
+--- a/node_modules/expo-audio/ios/AudioPlayer.swift
++++ b/node_modules/expo-audio/ios/AudioPlayer.swift
+@@ -1,5 +1,8 @@
+ import ExpoModulesCore
+ import Combine
++#if os(iOS)
++import UIKit
++#endif
+ 
+ private enum AudioConstants {
+   static let playbackStatus = "playbackStatusUpdate"
+@@ -47,6 +50,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+   private var timeToken: Any?
+   private var cancellables = Set<AnyCancellable>()
+   private var endObserver: NSObjectProtocol?
++  private var backgroundPlaybackGate = BackgroundPlaybackGate()
+ 
+   private var audioProcessor: AudioTapProcessor?
+   private var tapInstalled = false
+@@ -479,11 +483,20 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+     let updateInterval = interval / 1000
+     let interval = CMTime(seconds: updateInterval, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+ 
+-    timeToken = ref.addPeriodicTimeObserver(forInterval: interval, queue: nil) { [weak self] time in
++    timeToken = ref.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+       guard let self else {
+         return
+       }
+ 
++      #if os(iOS)
++      // iOS extrapolates lock-screen elapsed time. Do not wake React or rebuild
++      // Now Playing metadata for unchanged progress while the screen is hidden.
++      let signature = "\(self.ref.timeControlStatus.rawValue):\(self.ref.status.rawValue):\(self.isLoaded):\(self.ref.rate):\(self.isBuffering)"
++      guard self.backgroundPlaybackGate.shouldPublish(
++        isBackground: UIApplication.shared.applicationState != .active, signature: signature
++      ) else { return }
++      #endif
++
+       self.updateStatus(with: [
+         "currentTime": time.seconds
+       ])
+diff --git a/node_modules/expo-audio/ios/BackgroundPlaybackGate.swift b/node_modules/expo-audio/ios/BackgroundPlaybackGate.swift
+new file mode 100644
+index 0000000..3de1e72
+--- /dev/null
++++ b/node_modules/expo-audio/ios/BackgroundPlaybackGate.swift
+@@ -0,0 +1,14 @@
++// Openfy: progress-only updates need no JS or Now Playing work while hidden.
++struct BackgroundPlaybackGate {
++  private var lastSignature: String?
++
++  mutating func shouldPublish(isBackground: Bool, signature: String) -> Bool {
++    guard isBackground else {
++      lastSignature = nil
++      return true
++    }
++    guard lastSignature != signature else { return false }
++    lastSignature = signature
++    return true
++  }
++}
+diff --git a/node_modules/expo-audio/ios/MediaController.swift b/node_modules/expo-audio/ios/MediaController.swift
+index e977f57..7f9e9e5 100644
+--- a/node_modules/expo-audio/ios/MediaController.swift
++++ b/node_modules/expo-audio/ios/MediaController.swift
+@@ -1,5 +1,6 @@
+ import MediaPlayer
+ import AVFoundation
++import ImageIO
+ import ExpoModulesCore
+ 
+ class MediaController {
+@@ -14,6 +15,9 @@ class MediaController {
+   private var artworkLoadToken: UUID?
+   private var currentArtworkItemIdentifier: ObjectIdentifier?
+   private var isLiveStream = false
++  private var remoteCommandTargets: [(MPRemoteCommand, Any)] = []
++  private var artworkTask: URLSessionDataTask?
++  private var artworkAttempted = false
+ 
+   func setActivePlayer(_ player: AudioPlayer?, options: LockScreenOptions? = nil) {
+     performOnMain {
+@@ -143,9 +147,8 @@ class MediaController {
+     }
+ 
+     if currentArtworkUrl != artworkUrl {
++      resetArtworkState()
+       currentArtworkUrl = artworkUrl
+-      cachedArtwork = nil
+-      artworkLoadToken = nil
+     }
+ 
+     if let cachedArtwork {
+@@ -153,15 +156,16 @@ class MediaController {
+       return
+     }
+ 
+-    guard artworkLoadToken == nil else {
++    guard artworkLoadToken == nil, !artworkAttempted else {
+       return
+     }
+ 
+     let loadToken = UUID()
+     artworkLoadToken = loadToken
++    artworkAttempted = true
+ 
+-    loadArtworkFromURL(url: artworkUrl) { [weak self] artwork in
+-      guard let self, self.artworkLoadToken == loadToken else {
++    loadArtworkFromURL(url: artworkUrl) { [weak self, weak player] artwork in
++      guard let self, let player, self.artworkLoadToken == loadToken else {
+         return
+       }
+ 
+@@ -202,37 +206,65 @@ class MediaController {
+   }
+ 
+   private func resetArtworkState() {
++    artworkTask?.cancel()
++    artworkTask = nil
++    artworkAttempted = false
+     currentArtworkUrl = nil
+     cachedArtwork = nil
+     artworkLoadToken = nil
+   }
+ 
+   private func loadArtworkFromURL(url: URL, completion: @escaping (MPMediaItemArtwork?) -> Void) {
+-    URLSession.shared.dataTask(with: url) { data, _, error in
+-      if error != nil {
+-        self.performOnMain {
+-          completion(nil)
+-        }
+-        return
+-      }
+-
+-      guard let data, let image = UIImage(data: data) else {
+-        self.performOnMain {
+-          completion(nil)
+-        }
+-        return
++    let finish: (CGImageSource?) -> Void = { source in
++      let options: [CFString: Any] = [
++        kCGImageSourceCreateThumbnailFromImageAlways: true,
++        kCGImageSourceCreateThumbnailWithTransform: true,
++        kCGImageSourceThumbnailMaxPixelSize: 512,
++        kCGImageSourceShouldCacheImmediately: true
++      ]
++      let thumbnail = source.flatMap { CGImageSourceCreateThumbnailAtIndex($0, 0, options as CFDictionary) }
++      let artwork = thumbnail.map { cgImage in
++        let image = UIImage(cgImage: cgImage)
++        return MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+       }
+-
+-      let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+       self.performOnMain {
+         completion(artwork)
+       }
+     }
+-    .resume()
++    if url.isFileURL {
++      DispatchQueue.global(qos: .utility).async {
++        finish(CGImageSourceCreateWithURL(url as CFURL, nil))
++      }
++      return
++    }
++    artworkTask = URLSession.shared.dataTask(with: url) { data, response, error in
++      guard error == nil, let response = response as? HTTPURLResponse,
++        (200...299).contains(response.statusCode), let data else {
++        finish(nil)
++        return
++      }
++      finish(CGImageSourceCreateWithData(data as CFData, nil))
++    }
++    artworkTask?.resume()
++  }
++
++  private func addRemoteCommandTarget(
++    _ command: MPRemoteCommand,
++    handler: @escaping (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus
++  ) {
++    remoteCommandTargets.append((command, command.addTarget(handler: handler)))
++  }
++
++  private func removeRemoteCommandTargets() {
++    for (command, target) in remoteCommandTargets {
++      command.removeTarget(target)
++    }
++    remoteCommandTargets.removeAll()
+   }
+ 
+   private func enableRemoteCommands(options: LockScreenOptions?) {
+-    remoteCommandCenter.playCommand.addTarget { [weak self] _ in
++    removeRemoteCommandTargets()
++    addRemoteCommandTarget(remoteCommandCenter.playCommand) { [weak self] _ in
+       guard let player = self?.activePlayer else {
+         return .commandFailed
+       }
+@@ -241,7 +273,7 @@ class MediaController {
+       return .success
+     }
+ 
+-    remoteCommandCenter.pauseCommand.addTarget { [weak self] _ in
++    addRemoteCommandTarget(remoteCommandCenter.pauseCommand) { [weak self] _ in
+       guard let player = self?.activePlayer else {
+         return .commandFailed
+       }
+@@ -250,7 +282,7 @@ class MediaController {
+       return .success
+     }
+ 
+-    remoteCommandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
++    addRemoteCommandTarget(remoteCommandCenter.togglePlayPauseCommand) { [weak self] _ in
+       guard let player = self?.activePlayer else {
+         return .commandFailed
+       }
+@@ -263,20 +295,22 @@ class MediaController {
+       return .success
+     }
+ 
+-    remoteCommandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
++    addRemoteCommandTarget(remoteCommandCenter.changePlaybackPositionCommand) { [weak self] event in
+       guard let player = self?.activePlayer,
+       let event = event as? MPChangePlaybackPositionCommandEvent else {
+         return .commandFailed
+       }
+ 
+       let seekTime = CMTime(seconds: event.positionTime, preferredTimescale: 1)
+-      player.ref.seek(to: seekTime)
++      player.ref.seek(to: seekTime) { [weak player] _ in
++        player?.updateStatus(with: [:])
++      }
+ 
+       return .success
+     }
+ 
+     remoteCommandCenter.skipForwardCommand.preferredIntervals = [10.0]
+-    remoteCommandCenter.skipForwardCommand.addTarget { [weak self] event in
++    addRemoteCommandTarget(remoteCommandCenter.skipForwardCommand) { [weak self] event in
+       guard let player = self?.activePlayer,
+       let event = event as? MPSkipIntervalCommandEvent else {
+         return .commandFailed
+@@ -284,13 +318,15 @@ class MediaController {
+ 
+       let currentTime = player.ref.currentTime()
+       let seekTime = currentTime + CMTime(seconds: event.interval, preferredTimescale: 1)
+-      player.ref.seek(to: seekTime, toleranceBefore: .zero, toleranceAfter: .zero)
++      player.ref.seek(to: seekTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak player] _ in
++        player?.updateStatus(with: [:])
++      }
+ 
+       return .success
+     }
+ 
+     remoteCommandCenter.skipBackwardCommand.preferredIntervals = [10.0]
+-    remoteCommandCenter.skipBackwardCommand.addTarget { [weak self] event in
++    addRemoteCommandTarget(remoteCommandCenter.skipBackwardCommand) { [weak self] event in
+       guard let player = self?.activePlayer,
+       let event = event as? MPSkipIntervalCommandEvent else {
+         return .commandFailed
+@@ -298,7 +334,9 @@ class MediaController {
+ 
+       let currentTime = player.ref.currentTime()
+       let seekTime = currentTime - CMTime(seconds: event.interval, preferredTimescale: 1)
+-      player.ref.seek(to: seekTime, toleranceBefore: .zero, toleranceAfter: .zero)
++      player.ref.seek(to: seekTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak player] _ in
++        player?.updateStatus(with: [:])
++      }
+ 
+       return .success
+     }
+@@ -319,12 +357,6 @@ class MediaController {
+     remoteCommandCenter.skipForwardCommand.isEnabled = false
+     remoteCommandCenter.skipBackwardCommand.isEnabled = false
+ 
+-    // Remove event targets
+-    remoteCommandCenter.playCommand.removeTarget(self)
+-    remoteCommandCenter.pauseCommand.removeTarget(self)
+-    remoteCommandCenter.togglePlayPauseCommand.removeTarget(self)
+-    remoteCommandCenter.changePlaybackPositionCommand.removeTarget(self)
+-    remoteCommandCenter.skipForwardCommand.removeTarget(self)
+-    remoteCommandCenter.skipBackwardCommand.removeTarget(self)
++    removeRemoteCommandTargets()
+   }
+ }
