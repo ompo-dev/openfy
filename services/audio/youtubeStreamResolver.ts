@@ -111,7 +111,7 @@ type InnertubeClient = {
 
 type StreamProbeResult =
   | { ok: true;  stage: 'first' | 'second'; status: number; byteLength: number; contentType: string }
-  | { ok: false; stage: 'first' | 'second'; reason: 'http_status' | 'invalid_content_type' | 'empty_body' | 'timeout' | 'network_error'; status?: number; contentType?: string; error?: string };
+  | { ok: false; stage: 'first' | 'second'; reason: 'http_status' | 'invalid_content_type' | 'invalid_range' | 'empty_body' | 'timeout' | 'network_error'; status?: number; contentType?: string; error?: string };
 
 type VerdictCacheEntry = {
   result: Exclude<StreamResolveResult, { status: 'resolved' }>;
@@ -136,7 +136,7 @@ const BLOCKED_VERDICT_TTL_MS     = 60_000;        // 1 min
 
 const CLIENT_FAILURE_COOLDOWN_MS = 30_000;
 const CLIENT_MAX_COOLDOWN_MS     = 5 * 60_000;
-const CLIENT_HEALTH_STORAGE_KEY  = '@openfy/youtube-stream-client-health-v3';
+const CLIENT_HEALTH_STORAGE_KEY  = '@openfy/youtube-stream-client-health-v4';
 const CLIENT_HEALTH_MAX_AGE_MS   = 24 * 60 * 60_000;
 const CLIENT_HEALTH_MAX_SUCCESSES = 10_000;
 const CLIENT_HEALTH_MAX_FAILURES  = 20;
@@ -338,6 +338,9 @@ const getClient = (): Promise<InnertubeClient> => {
         retrieve_innertube_config: true,
         retrieve_player: true,
       });
+    }).catch((error) => {
+      innertubeClient = null;
+      throw error;
     });
   }
   return innertubeClient;
@@ -361,25 +364,6 @@ const withTimeout = async <T>(p: Promise<T>, label: string, timeoutMs = CLIENT_R
 // HTTP Abortable fetch for probes
 // ---------------------------------------------------------------------------
 
-const fetchWithAbort = async (
-  url: string,
-  init: RequestInit,
-  timeoutMs: number
-): Promise<Response> => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } catch (err: any) {
-    if (err?.name === 'AbortError' || String(err).toLowerCase().includes('aborted')) {
-      throw new Error(`Probe timed out after ${timeoutMs}ms`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
 const isPlayableAudio = (r: Response) => {
   if (!r.ok && r.status !== 206) return false;
   const ct = r.headers.get('content-type') ?? '';
@@ -392,21 +376,39 @@ const fetchRange = async (
   end: number,
   stage: 'first' | 'second'
 ): Promise<StreamProbeResult> => {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, PROBE_TIMEOUT_MS);
   try {
     const headers = { ...getMediaHeaders(url), Range: `bytes=${start}-${end}` };
-    const response = await fetchWithAbort(url, { headers }, PROBE_TIMEOUT_MS);
+    const response = await fetch(url, { headers, signal: controller.signal });
     const contentType = response.headers.get('content-type') ?? '';
     if (!response.ok && response.status !== 206)
       return { ok: false, stage, reason: 'http_status', status: response.status, contentType };
     if (!isPlayableAudio(response))
       return { ok: false, stage, reason: 'invalid_content_type', status: response.status, contentType };
+    // Never read an unbounded full song into JS just to probe a byte range.
+    const expectedBytes = end - start + 1;
+    const declaredBytes = Number(response.headers.get('content-length'));
+    if (declaredBytes > expectedBytes ||
+        (response.status !== 206 && (start > 0 || !Number.isFinite(declaredBytes) || declaredBytes <= 0))) {
+      return { ok: false, stage, reason: 'invalid_range', status: response.status, contentType };
+    }
     const buf = await response.arrayBuffer();
+    if (buf.byteLength > expectedBytes)
+      return { ok: false, stage, reason: 'invalid_range', status: response.status, contentType };
     if (buf.byteLength === 0)
       return { ok: false, stage, reason: 'empty_body', status: response.status, contentType };
     return { ok: true, stage, status: response.status, byteLength: buf.byteLength, contentType };
   } catch (err) {
-    const isTimeout = err instanceof Error && err.message.toLowerCase().includes('timed out');
+    const isTimeout = timedOut || (err instanceof Error && err.message.toLowerCase().includes('timed out'));
     return { ok: false, stage, reason: isTimeout ? 'timeout' : 'network_error', error: errorMsg(err) };
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
   }
 };
 
@@ -450,7 +452,7 @@ const doResolve = async (
 
   try {
     const [client] = await Promise.all([
-      withTimeout(getClient(), 'Innertube client init', 6000),
+      retryNetworkOperation(() => withTimeout(getClient(), 'Innertube client init', 6000)),
       hydrateHealth(),
     ]);
 
@@ -508,9 +510,9 @@ const doResolve = async (
         }
         if (streamError && isTransientNetworkError(streamError)) {
           transportError = streamError;
-        } else {
-          await recordFailure(profile.id);
         }
+        // Missing streaming_data is a verdict about this video, not evidence
+        // that the client must be disabled for every other song.
         console.warn(`[StreamResolver] ${profile.id} no URL for ${videoId}: ${streamError ?? 'empty'}`);
         continue;
       }

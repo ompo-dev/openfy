@@ -227,13 +227,13 @@ describe('resolveYouTubeStream', () => {
       getStreamingData.mockResolvedValue({ url: 'https://rr1.googlevideo.com/retry.m4a', mime_type: 'audio/mp4' });
       // The user can retry immediately without bypassing caches or waiting minutes.
       expect(await resolveYouTubeStream('_MyOuFWnPPY')).toMatchObject({ status: 'resolved' });
-      expect(await AsyncStorage.getItem('@openfy/youtube-stream-client-health-v3'))
+      expect(await AsyncStorage.getItem('@openfy/youtube-stream-client-health-v4'))
         .not.toContain('"consecutiveFailures":1');
     } finally { jest.useRealTimers(); }
   });
 
-  it('does not cache a network failure during initialization', async () => {
-    mockCreate.mockRejectedValueOnce(new Error('The network connection was lost.'));
+  it('does not cache exhausted network failures during initialization', async () => {
+    mockCreate.mockRejectedValue(new Error('The network connection was lost.'));
     expect(await resolveYouTubeStream('_MyOuFWnPPY')).toMatchObject({ status: 'transport_error' });
     mockCreate.mockResolvedValue({ getStreamingData: jest.fn().mockResolvedValue({
       url: 'https://rr1.googlevideo.com/retry.m4a', mime_type: 'audio/mp4',
@@ -275,12 +275,51 @@ describe('resolveYouTubeStream', () => {
         }),
       });
 
-    await expect(resolveYouTubeStream('_MyOuFWnPPY')).resolves.toMatchObject({
-      status: 'transport_error',
-    });
-    await expect(resolveYouTubeStream('_MyOuFWnPPY', { fresh: true }))
+    await expect(resolveYouTubeStream('_MyOuFWnPPY'))
       .resolves.toMatchObject({ status: 'resolved' });
     expect(mockCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not disable all clients for the next song when one video has no streaming data', async () => {
+    const getStreamingData = jest.fn().mockRejectedValue(new Error('No streaming data available'));
+    mockCreate.mockResolvedValue({ getStreamingData });
+    expect(await resolveYouTubeStream('_MyOuFWnPPY')).toMatchObject({ status: 'unplayable' });
+    getStreamingData.mockResolvedValue({ url: 'https://rr1.googlevideo.com/next.m4a', mime_type: 'audio/mp4' });
+    expect(await resolveYouTubeStream('LIXckjwbPdY')).toMatchObject({ status: 'resolved' });
+  });
+
+  it('aborts a probe whose headers arrive but whose body stalls', async () => {
+    jest.useFakeTimers();
+    try {
+      mockCreate.mockResolvedValue({ getStreamingData: jest.fn().mockResolvedValue({
+        url: 'https://rr1.googlevideo.com/stalled.m4a', mime_type: 'audio/mp4',
+      }) });
+      const signals: AbortSignal[] = [];
+      global.fetch = jest.fn().mockImplementation(async (_url, { signal }) => {
+        signals.push(signal);
+        return { ...OK_PROBE, arrayBuffer: () => new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('aborted')));
+        }) };
+      });
+      const pending = resolveYouTubeStream('_MyOuFWnPPY');
+      await jest.runAllTimersAsync();
+      expect(await pending).toMatchObject({ status: 'transport_error' });
+      expect(signals.length).toBeGreaterThan(0);
+      expect(signals.every(signal => signal.aborted)).toBe(true);
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('does not allocate a full song when the server ignores Range', async () => {
+    mockCreate.mockResolvedValue({ getStreamingData: jest.fn().mockResolvedValue({
+      url: 'https://rr1.googlevideo.com/full.m4a', mime_type: 'audio/mp4',
+    }) });
+    const arrayBuffer = jest.fn();
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true, status: 200, arrayBuffer,
+      headers: { get: (name: string) => name === 'content-type' ? 'audio/mp4' : '32000000' },
+    });
+    expect(await resolveYouTubeStream('_MyOuFWnPPY')).toMatchObject({ status: 'unplayable' });
+    expect(arrayBuffer).not.toHaveBeenCalled();
   });
 
   it('reportStreamRefusal evicts cache and records failure', async () => {

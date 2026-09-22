@@ -357,6 +357,45 @@ describe('queueDownloads', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it('retries a transient native connection failure in the same download request', async () => {
+    jest.useFakeTimers();
+    try {
+      mockNativePlayerAndDownload
+        .mockRejectedValueOnce(new Error('The network connection was lost.'))
+        .mockResolvedValue({ uri: 'file:///mock_dir/recovered.m4a', status: 206, mimeType: 'audio/mp4' });
+      const pending = downloadTrack({
+        spotifyId: 'yt__MyOuFWnPPY', title: 'Indecisao', artistName: 'Sotam',
+        albumName: '', imageURL: '', duration_ms: 158250,
+      });
+      await jest.runAllTimersAsync();
+      expect(await pending).toMatchObject({ localAudioPath: 'file:///mock_dir/recovered.m4a' });
+      expect(mockNativePlayerAndDownload).toHaveBeenCalledTimes(2);
+      expect(mockNativePlayerAndDownload.mock.calls[1]).toEqual(mockNativePlayerAndDownload.mock.calls[0]);
+      expect(resolveAudioUrlMock).not.toHaveBeenCalled();
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('uses a match discovered by the fallback even when that fallback has no stream URL', async () => {
+    resolveAudioUrlMock.mockImplementation(async () => {
+      jest.mocked(getCatalogMapping).mockResolvedValue({
+        videoId: '_MyOuFWnPPY', policyVersion: 2, confidence: 100,
+        confirmedAt: Date.now(), source: 'youtube_search',
+      });
+      return null;
+    });
+    mockNativePlayerAndDownload.mockResolvedValue({
+      uri: 'file:///mock_dir/recovered.m4a', status: 206, mimeType: 'audio/mp4',
+    });
+    const result = await downloadTrack({
+      spotifyId: '5MzjslXCcY4XQtCmgk3eum', title: 'Indecisao', artistName: 'Sotam',
+      albumName: '', imageURL: '', duration_ms: 158250,
+    });
+    expect(result).toMatchObject({ youtubeVideoId: '_MyOuFWnPPY', localAudioPath: 'file:///mock_dir/recovered.m4a' });
+    expect(mockNativePlayerAndDownload).toHaveBeenCalledWith(
+      '_MyOuFWnPPY', expect.stringContaining('.m4a'), 1024 * 1024
+    );
+  });
+
   it('keeps the matched video on native failure and records the provider refusal', async () => {
     catalogMock.mockResolvedValue({
       status: 'resolved', videoId: '_MyOuFWnPPY', confidence: 100,
@@ -414,7 +453,7 @@ describe('queueDownloads', () => {
       artistName: 'Sotam', albumName: 'Spotify', imageURL: '', duration_ms: 0,
     })).resolves.toMatchObject({ localAudioPath: 'file:///mock_dir/audio.m4a' });
 
-    expect(mockNativePlayerAndDownload).toHaveBeenCalledTimes(1);
+    expect(mockNativePlayerAndDownload).toHaveBeenCalledTimes(3);
     expect(resolveAudioUrlMock).not.toHaveBeenCalled();
     expect(directAudioMock).toHaveBeenCalledWith({
       videoId: '_MyOuFWnPPY', spotifyId: 'spotify_native_fallback', fresh: false,

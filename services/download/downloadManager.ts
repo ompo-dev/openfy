@@ -22,6 +22,7 @@ import {
 import { resolveSpotifyTrackVideoId } from '../audio/catalogResolver';
 import { getCatalogMapping, isCurrentCatalogMapping } from '../audio/catalogMappingCache';
 import { repairLocalAudioFile } from '../audio/localAudioRepair';
+import { retryNetworkOperation } from '../audio/networkRetry';
 import { fetchSpotifyTrackMetadata, type SpotifyTrackMetadata } from '../metadata/spotifyMetadata';
 import {
   downloadYouTubeStreamNatively,
@@ -892,11 +893,12 @@ export const downloadAudio = async (
           format: cleanFormat,
           range: 'bytes=0-1048575',
         });
-        const nativeResolvedResult =
-          await resolveAndDownloadYouTubeVideoNatively(
-            nativeExactVideoId,
-            localPath
-          );
+        const nativeResolvedResult = await retryNetworkOperation(() => {
+          if (cancelledDownloads.has(spotifyId)) throw new Error('Download cancelled');
+          return resolveAndDownloadYouTubeVideoNatively(nativeExactVideoId, localPath);
+        }, (attempt, error) => recordDownloadDiagnostic(spotifyId, 'audio.native.retry', {
+          attempt, videoId: nativeExactVideoId, error: errorMessage(error),
+        }));
         if (nativeResolvedResult) {
           const validResult = await validateDownloadedAudio(
             nativeResolvedResult,
@@ -1270,6 +1272,18 @@ const downloadTrackInternal = async (
         `[DownloadManager] ${Platform.OS} resolving "${track.artistName} - ${track.title}", mode: local`
       );
       const fallbackResult = await resolveCurrentAudio();
+      // Catalog resolution can succeed even when the subsequent JS stream
+      // request fails. Reuse that match now instead of requiring another tap.
+      if (!youtubeVideoId && nativeDownloadAvailable) {
+        const mapping = await getCatalogMapping(track.spotifyId);
+        if (mapping && isCurrentCatalogMapping(mapping)) {
+          youtubeVideoId = mapping.videoId;
+          format = 'm4a';
+          effectiveTrack = { ...effectiveTrack, youtubeVideoId, audioFormat: format };
+          await upsertPendingDownload(effectiveTrack, undefined, format);
+          recordDownloadDiagnostic(track.spotifyId, 'audio.catalog.recovered', { videoId: youtubeVideoId });
+        }
+      }
       if (fallbackResult?.url) {
         resolvedUrl = fallbackResult.url;
         format = fallbackResult.format || 'mp3';
