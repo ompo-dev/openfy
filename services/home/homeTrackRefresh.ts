@@ -1,6 +1,4 @@
-import { Platform } from 'react-native';
-
-import { resolveAudioUrl } from '../audio/audioResolver';
+import { fetchSpotifyTrackMetadata } from '../metadata/spotifyMetadata';
 
 export type HomeTrackSeed = {
   key: string;
@@ -17,7 +15,7 @@ export type RefreshedHomeTrack = Omit<HomeTrackSeed, 'key'> & {
   streamExpiresAt?: number;
 };
 
-const HOME_STREAM_TTL_MS = 10 * 60_000;
+const HOME_METADATA_TTL_MS = 30 * 60_000;
 const MAX_CONCURRENT_HOME_RESOLVES = 4;
 
 const requests = new Map<string, Promise<RefreshedHomeTrack | null>>();
@@ -57,32 +55,23 @@ const resolveHomeTrack = (track: HomeTrackSeed) => {
 
   const request = runQueuedResolve(async (): Promise<RefreshedHomeTrack | null> => {
     try {
-      // Reuse playback's fully local resolver so Home cards stay aligned with
-      // the source that will be used if the user starts playback.
-      const resolved = await resolveAudioUrl(
-        track.title,
-        track.artistName,
-        track.spotifyId,
-        track.duration_ms
-      );
-      if (!resolved?.url) {
+      // Home only hydrates catalog metadata. Audio is resolved on demand by
+      // PlayerStore after a user explicitly chooses a track.
+      const metadata = await fetchSpotifyTrackMetadata(track.spotifyId);
+      if (!metadata) {
         console.warn(
-          `[HomeRefresh] No verified stream for "${track.artistName} - ${track.title}".`
+          `[HomeRefresh] No public metadata for "${track.artistName} - ${track.title}".`
         );
         return null;
       }
 
-      const streamExpiresAt = Date.now() + HOME_STREAM_TTL_MS;
-      const streamUrl = resolved.url;
       return {
         spotifyId: track.spotifyId,
-        title: track.title,
-        artistName: track.artistName,
-        albumName: track.albumName,
-        imageURL: resolved.imageURL || track.imageURL,
-        duration_ms: track.duration_ms,
-        streamUrl,
-        streamExpiresAt,
+        title: metadata.title || track.title,
+        artistName: metadata.artistName || track.artistName,
+        albumName: metadata.albumName || track.albumName,
+        imageURL: metadata.imageURL || track.imageURL,
+        duration_ms: metadata.duration_ms || track.duration_ms,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -96,10 +85,10 @@ const resolveHomeTrack = (track: HomeTrackSeed) => {
   requests.set(key, request);
   void request.then((result) => {
     requests.delete(key);
-    if (result?.streamExpiresAt) {
+    if (result) {
       cachedTracks.set(key, {
         value: result,
-        expiresAt: result.streamExpiresAt,
+        expiresAt: Date.now() + HOME_METADATA_TTL_MS,
       });
     }
   });
@@ -113,11 +102,6 @@ export const refreshHomeTracks = async (
     refreshed: RefreshedHomeTrack
   ) => void
 ): Promise<Record<string, RefreshedHomeTrack>> => {
-  // Resolving every visible card starts several yt-dlp processes. On web that
-  // starves the actual play/download request, so resolve only after a user
-  // chooses a track.
-  if (Platform.OS === 'web') return {};
-
   const unique = tracks.filter(
     (track, index) =>
       tracks.findIndex(

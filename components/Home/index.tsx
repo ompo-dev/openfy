@@ -11,6 +11,7 @@ import { FriendActivityStatus } from './FriendActivityStatus';
 import { ListeningFeed } from './ListeningFeed';
 import { CompactMusicCarousel } from './CompactMusicCarousel';
 import { HeroBanner } from './HeroBanner/HeroBanner';
+import { CatalogHome } from './CatalogHome';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 
 export { FriendActivityStatus } from './FriendActivityStatus';
@@ -25,6 +26,8 @@ export const Home = () => {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.scrollContent, { paddingTop: top + 8 }]}
       >
+        <CatalogHome />
+
         {/* 1. Friend Activity Listening Status (Stories / Speech Bubbles) */}
         <FriendActivityStatus />
 

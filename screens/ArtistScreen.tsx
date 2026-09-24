@@ -7,12 +7,12 @@ import { ArtistModel, LibraryItemModel, TrackModel } from '@models';
 import { Shapes, Sizes } from '@config';
 import {
   getCachedArtistImage,
-  getDownloadedTracks,
+  getLibraryTracks,
   groupLocalAlbums,
   groupLocalArtists,
   isTrackParticipantArtist,
   isTrackPrimaryArtist,
-  type DownloadedTrack,
+  type LibraryTrack,
 } from '@services';
 import { getSpotifyArtistImage } from '../services/metadata/spotifyMetadata';
 import { Slider } from '../components/Slider';
@@ -21,7 +21,7 @@ export type ArtistScreenPropsType = {
   artistId: string;
 };
 
-const toTrackModel = (track: DownloadedTrack): TrackModel => ({
+const toTrackModel = (track: LibraryTrack): TrackModel => ({
   ...track,
   id: track.spotifyId,
   title: track.title,
@@ -29,6 +29,7 @@ const toTrackModel = (track: DownloadedTrack): TrackModel => ({
   imageURL: track.localImagePath || track.imageURL,
   albumName: track.albumName,
   durationMs: track.duration_ms,
+  isDownloaded: track.isDownloaded,
 });
 
 const isRemotePrimaryArtist = (
@@ -46,7 +47,7 @@ const isRemotePrimaryArtist = (
 };
 
 const artistMatchesAlbumPrimary = (
-  track: DownloadedTrack,
+  track: LibraryTrack,
   artistIdOrName: string
 ) => {
   const albumPrimary = track.albumArtists?.[0];
@@ -75,7 +76,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     setAlbums([]);
 
     if (localArtistName) {
-      void getDownloadedTracks().then(async (downloaded) => {
+      void getLibraryTracks().then(async (downloaded) => {
         const collection = groupLocalArtists(downloaded).find((candidate) =>
           candidate.id === localArtistName ||
           candidate.title.toLocaleLowerCase() === localArtistName.toLocaleLowerCase()

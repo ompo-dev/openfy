@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
 import {
-  getDownloadedTracks,
+  getLibraryTracks,
   groupLocalAlbums,
   type LocalAlbumCollection,
 } from '@services';
@@ -13,7 +13,7 @@ export const LocalAlbum = ({ albumId }: { albumId: string }) => {
   const [album, setAlbum] = React.useState<LocalAlbumCollection | null>(null);
 
   const loadAlbum = React.useCallback(async () => {
-    const tracks = await getDownloadedTracks();
+    const tracks = await getLibraryTracks();
     setAlbum(groupLocalAlbums(tracks).find((candidate) => candidate.id === albumId) || null);
   }, [albumId]);
 
@@ -43,7 +43,7 @@ export const LocalAlbum = ({ albumId }: { albumId: string }) => {
         albumName: track.albumName,
         imageURL: track.localImagePath || track.imageURL,
         durationMs: track.duration_ms,
-        isDownloaded: true,
+        isDownloaded: track.isDownloaded,
         localAudioPath: track.localAudioPath,
       }))}
     />

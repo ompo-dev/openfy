@@ -1,35 +1,28 @@
-jest.mock('../../audio/audioResolver', () => ({
-  resolveAudioUrl: jest.fn(),
-}));
-jest.mock('../../audio/playerService', () => ({
-  preloadAudio: jest.fn(),
-}));
-
 import { refreshHomeTracks } from '../homeTrackRefresh';
-import { resolveAudioUrl } from '../../audio/audioResolver';
-import { preloadAudio } from '../../audio/playerService';
-import { Platform } from 'react-native';
+import { fetchSpotifyTrackMetadata } from '../../metadata/spotifyMetadata';
 
-const resolveAudioUrlMock = resolveAudioUrl as jest.Mock;
+jest.mock('../../metadata/spotifyMetadata', () => ({
+  fetchSpotifyTrackMetadata: jest.fn(),
+}));
+
+const fetchSpotifyTrackMetadataMock = fetchSpotifyTrackMetadata as jest.Mock;
 
 describe('refreshHomeTracks', () => {
-  const originalPlatform = Platform.OS;
-
   beforeEach(() => {
-    resolveAudioUrlMock.mockReset();
+    fetchSpotifyTrackMetadataMock.mockReset();
   });
 
-  afterEach(() => {
-    Object.defineProperty(Platform, 'OS', {
-      configurable: true,
-      value: originalPlatform,
-    });
-  });
-
-  it('uses canonical metadata and a playable stream for every matching Home card', async () => {
-    resolveAudioUrlMock.mockResolvedValue({
-      url: 'https://media.test/track.m4a',
+  it('refreshes public metadata without resolving an audio stream', async () => {
+    fetchSpotifyTrackMetadataMock.mockResolvedValue({
+      spotifyId: 'source-id',
+      title: 'Título canônico',
+      artistName: 'Artista canônico',
+      albumName: 'Álbum canônico',
       imageURL: 'https://images.test/cover.jpg',
+      duration_ms: 181000,
+      artists: [],
+      albumId: '',
+      albumArtists: [],
     });
 
     const onTrackResolved = jest.fn();
@@ -48,35 +41,25 @@ describe('refreshHomeTracks', () => {
       onTrackResolved
     );
 
-    expect(resolveAudioUrlMock).toHaveBeenCalledWith(
-      'Título original',
-      'Artista original',
-      'source-id',
-      180000
-    );
+    expect(fetchSpotifyTrackMetadataMock).toHaveBeenCalledWith('source-id');
     expect(refreshed).toEqual({
       'home-card': expect.objectContaining({
         spotifyId: 'source-id',
-        title: 'Título original',
-        artistName: 'Artista original',
-        albumName: 'Single',
+        title: 'Título canônico',
+        artistName: 'Artista canônico',
+        albumName: 'Álbum canônico',
         imageURL: 'https://images.test/cover.jpg',
-        duration_ms: 180000,
-        streamUrl: 'https://media.test/track.m4a',
-        streamExpiresAt: expect.any(Number),
+        duration_ms: 181000,
       }),
     });
     expect(onTrackResolved).toHaveBeenCalledWith(
       expect.objectContaining({ key: 'home-card' }),
-      expect.objectContaining({
-        streamUrl: 'https://media.test/track.m4a',
-      })
+      expect.not.objectContaining({ streamUrl: expect.anything() })
     );
-    expect(preloadAudio).not.toHaveBeenCalled();
   });
 
-  it('does not replace the visible card when its audio source cannot be verified', async () => {
-    resolveAudioUrlMock.mockResolvedValue(null);
+  it('does not replace the visible card when metadata cannot be verified', async () => {
+    fetchSpotifyTrackMetadataMock.mockResolvedValue(null);
 
     await expect(
       refreshHomeTracks([
@@ -93,26 +76,34 @@ describe('refreshHomeTracks', () => {
     ).resolves.toEqual({});
   });
 
-  it('does not resolve every Home card before a web user requests playback', async () => {
-    Object.defineProperty(Platform, 'OS', {
-      configurable: true,
-      value: 'web',
+  it('deduplicates equal catalog entries without creating stream work', async () => {
+    fetchSpotifyTrackMetadataMock.mockResolvedValue({
+      spotifyId: 'dedupe-source',
+      title: 'Título',
+      artistName: 'Artista',
+      albumName: 'Single',
+      imageURL: '',
+      duration_ms: 180000,
+      artists: [],
+      albumId: '',
+      albumArtists: [],
     });
 
     await expect(
-      refreshHomeTracks([
-        {
-          key: 'web-card',
-          spotifyId: 'source-id',
+      refreshHomeTracks(['first', 'second'].map((key) => ({
+          key,
+          spotifyId: 'dedupe-source',
           title: 'Título',
           artistName: 'Artista',
           albumName: 'Single',
           imageURL: '',
           duration_ms: 180000,
-        },
-      ])
-    ).resolves.toEqual({});
+      })))
+    ).resolves.toEqual({
+      first: expect.objectContaining({ spotifyId: 'dedupe-source' }),
+      second: expect.objectContaining({ spotifyId: 'dedupe-source' }),
+    });
 
-    expect(resolveAudioUrlMock).not.toHaveBeenCalled();
+    expect(fetchSpotifyTrackMetadataMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,11 +1,11 @@
-import type { DownloadedTrack } from '../download/downloadManager';
+import type { LibraryTrack } from './catalogLibrary';
 
 export type LocalAlbumCollection = {
   id: string;
   title: string;
   subtitle: string;
   imageURL: string;
-  tracks: DownloadedTrack[];
+  tracks: LibraryTrack[];
 };
 
 export type LocalArtistCollection = {
@@ -14,13 +14,13 @@ export type LocalArtistCollection = {
   title: string;
   subtitle: string;
   imageURL: string;
-  tracks: DownloadedTrack[];
+  tracks: LibraryTrack[];
 };
 
-const getLocalAlbumTitle = (track: Pick<DownloadedTrack, 'albumName'>): string =>
+const getLocalAlbumTitle = (track: Pick<LibraryTrack, 'albumName'>): string =>
   (track.albumName.trim().toLowerCase() === 'spotify' ? '' : track.albumName.trim()) || 'Singles';
 
-const getTrackArtists = (track: Pick<DownloadedTrack, 'artistName' | 'artists'>) =>
+const getTrackArtists = (track: Pick<LibraryTrack, 'artistName' | 'artists'>) =>
   track.artists?.length ? track.artists : track.artistName
     .split(/\s*(?:,|&| feat\.?)\s*/i)
     .map((name) => ({ id: '', name: name.trim() }))
@@ -33,11 +33,11 @@ const normalizeArtistLookup = (artistIdOrName: string) =>
   artistIdOrName.trim().toLocaleLowerCase();
 
 export const getPrimaryTrackArtist = (
-  track: Pick<DownloadedTrack, 'artistName' | 'artists'>
+  track: Pick<LibraryTrack, 'artistName' | 'artists'>
 ) => getTrackArtists(track)[0] || null;
 
 export const isTrackPrimaryArtist = (
-  track: Pick<DownloadedTrack, 'artistName' | 'artists'>,
+  track: Pick<LibraryTrack, 'artistName' | 'artists'>,
   artistIdOrName: string
 ): boolean => {
   const primary = getPrimaryTrackArtist(track);
@@ -50,7 +50,7 @@ export const isTrackPrimaryArtist = (
 };
 
 export const isTrackParticipantArtist = (
-  track: Pick<DownloadedTrack, 'artistName' | 'artists'>,
+  track: Pick<LibraryTrack, 'artistName' | 'artists'>,
   artistIdOrName: string
 ): boolean => {
   const target = normalizeArtistLookup(artistIdOrName);
@@ -64,13 +64,13 @@ export const isTrackParticipantArtist = (
 };
 
 export const getLocalAlbumId = (
-  track: Pick<DownloadedTrack, 'albumName' | 'artistName' | 'albumId' | 'albumArtists' | 'artists'>
+  track: Pick<LibraryTrack, 'albumName' | 'artistName' | 'albumId' | 'albumArtists' | 'artists'>
 ): string =>
   track.albumId ? `spotify:${track.albumId}` :
     `${getLocalAlbumTitle(track)}\u0000${track.albumArtists?.[0]?.name || getTrackArtists(track)[0]?.name || ''}`.toLocaleLowerCase();
 
 export const groupLocalAlbums = (
-  tracks: DownloadedTrack[]
+  tracks: LibraryTrack[]
 ): LocalAlbumCollection[] => {
   const albums = new Map<string, LocalAlbumCollection>();
 
@@ -102,7 +102,7 @@ export const groupLocalAlbums = (
 };
 
 export const groupLocalArtists = (
-  tracks: DownloadedTrack[]
+  tracks: LibraryTrack[]
 ): LocalArtistCollection[] => {
   const artists = new Map<string, LocalArtistCollection>();
 

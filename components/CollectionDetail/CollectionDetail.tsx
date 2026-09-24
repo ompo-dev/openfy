@@ -15,7 +15,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TrackModel } from '@models';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
-import { usePlayer } from '@context';
+import { useDownloads, usePlayer } from '@context';
+import type { DownloadTrackInput } from '@services';
 import { formatCollectionMeta } from '@utils';
 import { GlassSurface, LoggedPressable, NativeIconButton } from '../native';
 import { PlaylistMosaic } from '../PlaylistMosaic';
@@ -68,6 +69,23 @@ const toPlayerTrack = (track: CollectionTrack, collectionName: string) => ({
   youtubeUrl: track.youtubeUrl,
 });
 
+const toDownloadInput = (
+  track: CollectionTrack,
+  collectionName: string
+): DownloadTrackInput => ({
+  spotifyId: track.id,
+  title: track.title,
+  artistName: track.subtitle,
+  albumName: track.albumName || collectionName,
+  imageURL: track.imageURL || '',
+  duration_ms: track.durationMs || 0,
+  artists: track.artists,
+  albumId: track.albumId,
+  albumArtists: track.albumArtists,
+  youtubeVideoId: track.youtubeVideoId,
+  youtubeUrl: track.youtubeUrl,
+});
+
 export const CollectionDetail = ({
   kind,
   collectionId,
@@ -96,6 +114,7 @@ export const CollectionDetail = ({
   const segments = useSegments();
   const insets = useSafeAreaInsets();
   const [sortAscending, setSortAscending] = React.useState(false);
+  const { downloads, enqueueDownloads } = useDownloads();
   const {
     addToQueue,
     currentTrack,
@@ -106,8 +125,9 @@ export const CollectionDetail = ({
     togglePlayPause,
     toggleShuffle,
   } = usePlayer();
-  const hasActiveTrack = Boolean(
-    currentTrack && tracks.some((track) => track.id === currentTrack.spotifyId)
+  const downloadsById = React.useMemo(
+    () => new Map(downloads.map((download) => [download.spotifyId, download])),
+    [downloads]
   );
   const collectionPlaybackId = `${kind}:${collectionId}`;
   const isCollectionPlayback = queueSourceId === collectionPlaybackId;
@@ -180,6 +200,44 @@ export const CollectionDetail = ({
     await handleAddToQueue();
   }, [handleAddToQueue, onAddTracksPress]);
 
+  const handleDownloadTrack = React.useCallback(
+    (track: CollectionTrack) => {
+      if (track.isDownloaded) return;
+      const download = downloadsById.get(track.id);
+      if (
+        download?.status === 'queued' ||
+        download?.status === 'resolving' ||
+        download?.status === 'downloading' ||
+        download?.status === 'completed'
+      ) return;
+      enqueueDownloads([toDownloadInput(track, title)]);
+    },
+    [downloadsById, enqueueDownloads, title]
+  );
+
+  const handleDownloadCollection = React.useCallback(() => {
+    const pending = tracks.filter((track) => {
+      if (track.isDownloaded) return false;
+      const download = downloadsById.get(track.id);
+      return !download || download.status === 'error';
+    });
+    if (pending.length) {
+      enqueueDownloads(pending.map((track) => toDownloadInput(track, title)));
+    }
+  }, [downloadsById, enqueueDownloads, title, tracks]);
+
+  const collectionDownloadState = React.useMemo(() => {
+    if (!tracks.length) return 'empty' as const;
+    const statuses = tracks.map((track) =>
+      track.isDownloaded ? 'completed' : downloadsById.get(track.id)?.status
+    );
+    if (statuses.every((status) => status === 'completed')) return 'completed' as const;
+    if (statuses.some((status) =>
+      status === 'queued' || status === 'resolving' || status === 'downloading'
+    )) return 'active' as const;
+    return 'idle' as const;
+  }, [downloadsById, tracks]);
+
   const handlePrimaryPlay = React.useCallback(async () => {
     if (isCollectionPlayback) {
       await togglePlayPause();
@@ -211,6 +269,14 @@ export const CollectionDetail = ({
       sourceId: string
     ) => {
       const active = currentTrack?.spotifyId === item.id;
+      const download = downloadsById.get(item.id);
+      const downloadState = item.isDownloaded || download?.status === 'completed'
+        ? 'completed'
+        : download?.status === 'queued' ||
+            download?.status === 'resolving' ||
+            download?.status === 'downloading'
+          ? 'active'
+          : 'idle';
       const rowArtists = item.artists ?? [];
       const shouldLinkArtists = Boolean(
         rowArtists.length && onArtistPress && !disableTrackArtistLinks
@@ -266,11 +332,31 @@ export const CollectionDetail = ({
               </Text>
             )}
           </View>
-          <Ionicons
-            name="ellipsis-horizontal"
-            size={18}
-            color="#CACACA"
-          />
+          <LoggedPressable
+            accessibilityLabel={
+              downloadState === 'completed'
+                ? `${item.title} está baixada`
+                : `Baixar ${item.title}`
+            }
+            disabled={downloadState !== 'idle'}
+            onPress={(event) => {
+              event.stopPropagation();
+              handleDownloadTrack(item);
+            }}
+            style={styles.trackAction}
+          >
+            <Ionicons
+              name={
+                downloadState === 'completed'
+                  ? 'checkmark-circle'
+                  : downloadState === 'active'
+                    ? 'time-outline'
+                    : 'download-outline'
+              }
+              size={19}
+              color={downloadState === 'completed' ? '#1ED760' : '#CACACA'}
+            />
+          </LoggedPressable>
         </LoggedPressable>
       );
     },
@@ -278,6 +364,8 @@ export const CollectionDetail = ({
       currentTrack?.spotifyId,
       disableTrackArtistLinks,
       kind,
+      downloadsById,
+      handleDownloadTrack,
       onArtistPress,
       playTrackList,
       playerState.isPlaying,
@@ -395,6 +483,33 @@ export const CollectionDetail = ({
                 </LoggedPressable>
                 <View style={styles.pillDivider} />
                 <LoggedPressable
+                  accessibilityLabel={
+                    collectionDownloadState === 'completed'
+                      ? 'Coleção baixada'
+                      : 'Baixar coleção'
+                  }
+                  disabled={
+                    collectionDownloadState === 'completed' ||
+                    collectionDownloadState === 'active' ||
+                    collectionDownloadState === 'empty'
+                  }
+                  onPress={handleDownloadCollection}
+                  style={styles.pillAction}
+                >
+                  <Ionicons
+                    name={
+                      collectionDownloadState === 'completed'
+                        ? 'checkmark-circle'
+                        : collectionDownloadState === 'active'
+                          ? 'time-outline'
+                          : 'download-outline'
+                    }
+                    size={21}
+                    color={collectionDownloadState === 'completed' ? '#1ED760' : '#FFFFFF'}
+                  />
+                </LoggedPressable>
+                <View style={styles.pillDivider} />
+                <LoggedPressable
                   accessibilityLabel="Compartilhar"
                   onPress={() => void handleShare()}
                   style={styles.pillAction}
@@ -494,6 +609,7 @@ const styles = StyleSheet.create({
   trackTitle: { color: '#FFFFFF', flexShrink: 1, fontFamily: 'SF-Semibold', fontSize: 14 },
   trackTitleActive: { color: '#1ED760' },
   trackSubtitle: { color: 'rgba(255,255,255,0.58)', fontFamily: 'SF-Regular', fontSize: 12 },
+  trackAction: { alignItems: 'center', height: 42, justifyContent: 'center', width: 38 },
   empty: { color: 'rgba(255,255,255,0.6)', fontFamily: 'SF-Regular', padding: 32, textAlign: 'center' },
   sectionTitle: { color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 18, paddingBottom: 8, paddingHorizontal: 16 },
   extraSection: { paddingTop: 20 },

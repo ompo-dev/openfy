@@ -10,14 +10,14 @@ import {
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
-import { type DownloadedTrack } from '@services';
+import { type LibraryTrack } from '@services';
 import { SheetFrame } from '../native';
 
 type PlaylistTrackPickerModalProps = {
   existingTrackIds: string[];
   onClose: () => void;
   onConfirm: (trackIds: string[]) => void;
-  tracks: DownloadedTrack[];
+  tracks: LibraryTrack[];
   visible: boolean;
 };
 
@@ -79,7 +79,7 @@ export const PlaylistTrackPickerModal = ({
         autoCapitalize="none"
         autoCorrect={false}
         onChangeText={setQuery}
-        placeholder="Buscar músicas baixadas"
+        placeholder="Buscar na biblioteca"
         placeholderTextColor="#858585"
         style={styles.searchInput}
         value={query}
@@ -89,7 +89,7 @@ export const PlaylistTrackPickerModal = ({
         keyExtractor={(track) => track.spotifyId}
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
-          <Text style={styles.empty}>Nenhuma música baixada encontrada.</Text>
+          <Text style={styles.empty}>Nenhuma música encontrada na biblioteca.</Text>
         }
         renderItem={({ item }) => {
           const isExisting = existingTrackIdSet.has(item.spotifyId);

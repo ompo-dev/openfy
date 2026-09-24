@@ -16,22 +16,22 @@ import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
 import {
   deleteDownloadedTrack,
   getCachedArtistImage,
-  getDownloadedTracks,
+  getLibraryTracks,
   repairDownloadedTrackMetadata,
   groupLocalAlbums,
   groupLocalArtists,
   getLocalPlaylists,
-  removeTrackFromLocalPlaylists,
-  type DownloadedTrack,
+  toDownloadTrackInput,
+  type LibraryTrack,
   type LocalPlaylist,
 } from '@services';
-import { useLibrarySelectedCategory, usePlayer } from '@context';
+import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { LoggedPressable } from '../native';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
 
-const toPlayerTrack = (track: DownloadedTrack) => ({
+const toPlayerTrack = (track: LibraryTrack) => ({
   ...track,
   spotifyId: track.spotifyId,
   title: track.title,
@@ -45,11 +45,16 @@ const toPlayerTrack = (track: DownloadedTrack) => ({
 
 export const OfflineLibrary = () => {
   const router = useRouter();
-  const [tracks, setTracks] = React.useState<DownloadedTrack[]>([]);
+  const [tracks, setTracks] = React.useState<LibraryTrack[]>([]);
   const [playlists, setPlaylists] = React.useState<LocalPlaylist[]>([]);
   const [artistImageURLs, setArtistImageURLs] = React.useState<Record<string, string>>({});
   const requestedArtistImages = React.useRef(new Set<string>());
   const { playWithQueue, currentTrack, playerState } = usePlayer();
+  const { clearCompletedDownloads, downloads, enqueueDownloads } = useDownloads();
+  const downloadsById = React.useMemo(
+    () => new Map(downloads.map((download) => [download.spotifyId, download])),
+    [downloads]
+  );
   const {
     libraryRevision,
     librarySearchQuery,
@@ -59,7 +64,7 @@ export const OfflineLibrary = () => {
 
   const loadLibrary = React.useCallback(async () => {
     const [downloaded, localPlaylists] = await Promise.all([
-      getDownloadedTracks(),
+      getLibraryTracks(),
       getLocalPlaylists(),
     ]);
     setTracks([...downloaded].reverse());
@@ -90,9 +95,17 @@ export const OfflineLibrary = () => {
 
   const handleDelete = async (spotifyId: string) => {
     await deleteDownloadedTrack(spotifyId);
-    await removeTrackFromLocalPlaylists(spotifyId);
+    clearCompletedDownloads();
     await loadLibrary();
   };
+
+  const handleDownload = React.useCallback(
+    (track: LibraryTrack) => {
+      if (track.isDownloaded) return;
+      enqueueDownloads([toDownloadTrackInput(track)]);
+    },
+    [enqueueDownloads]
+  );
 
   const normalizedQuery = librarySearchQuery.trim().toLocaleLowerCase();
   const visibleTracks = React.useMemo(() => {
@@ -181,10 +194,81 @@ export const OfflineLibrary = () => {
       : filtered;
   }, [librarySort, libraryView, localAlbums, localArtists, normalizedQuery]);
 
-  const renderTrack = ({ item, index }: { item: DownloadedTrack; index: number }) => {
+  const renderTrack = ({ item, index }: { item: LibraryTrack; index: number }) => {
     const isCurrentTrack = currentTrack?.spotifyId === item.spotifyId;
     const isPlaying = isCurrentTrack && playerState.isPlaying;
+    const download = downloadsById.get(item.spotifyId);
+    const isDownloading =
+      download?.status === 'queued' ||
+      download?.status === 'resolving' ||
+      download?.status === 'downloading';
+    const isComplete = item.isDownloaded || download?.status === 'completed';
 
+    const row = (
+      <LoggedPressable
+        style={styles.trackItem}
+        onPress={() => void handlePlay(index)}
+        accessibilityLabel={`Tocar ${item.title}`}
+      >
+        <View style={styles.trackContent}>
+          {item.localImagePath || item.imageURL ? (
+            <Image
+              cachePolicy="memory-disk"
+              source={{ uri: item.localImagePath || item.imageURL }}
+              style={styles.cover}
+            />
+          ) : (
+            <View style={[styles.cover, styles.coverFallback]}>
+              <Ionicons name="musical-note" size={22} color="#888" />
+            </View>
+          )}
+
+          <View style={styles.info}>
+            <View style={styles.titleRow}>
+              {isPlaying ? <SoundWaveIcon color="#1DB954" size={15} /> : null}
+              <Text
+                style={[styles.title, isCurrentTrack && styles.titleActive]}
+                numberOfLines={1}
+              >
+                {item.title}
+              </Text>
+            </View>
+            <Text style={styles.artist} numberOfLines={1}>
+              {item.artistName}
+            </Text>
+          </View>
+
+          <LoggedPressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              isComplete
+                ? `${item.title} está baixada`
+                : `Baixar ${item.title}`
+            }
+            disabled={isComplete || isDownloading}
+            onPress={(event) => {
+              event.stopPropagation();
+              handleDownload(item);
+            }}
+            style={styles.actionButton}
+          >
+            <Ionicons
+              name={
+                isComplete
+                  ? 'checkmark-circle'
+                  : isDownloading
+                    ? 'time-outline'
+                    : 'download-outline'
+              }
+              size={21}
+              color={isComplete ? '#1DB954' : '#B8B8B8'}
+            />
+          </LoggedPressable>
+        </View>
+      </LoggedPressable>
+    );
+
+    if (!item.isDownloaded) return row;
     return (
       <Swipeable
         overshootRight={false}
@@ -192,53 +276,16 @@ export const OfflineLibrary = () => {
         renderRightActions={() => (
           <LoggedPressable
             accessibilityRole="button"
-            accessibilityLabel={`Excluir ${item.title}`}
+            accessibilityLabel={`Remover download de ${item.title}`}
             onPress={() => handleDelete(item.spotifyId)}
             style={styles.deleteAction}
           >
             <Ionicons name="trash-outline" size={22} color="#FFFFFF" />
-            <Text style={styles.deleteActionLabel}>Excluir</Text>
+            <Text style={styles.deleteActionLabel}>Remover download</Text>
           </LoggedPressable>
         )}
       >
-        <LoggedPressable
-          style={styles.trackItem}
-          onPress={() => void handlePlay(index)}
-          accessibilityLabel={`Tocar ${item.title}`}
-        >
-          <View style={styles.trackContent}>
-            {item.localImagePath || item.imageURL ? (
-              <Image
-                cachePolicy="memory-disk"
-                source={{ uri: item.localImagePath || item.imageURL }}
-                style={styles.cover}
-              />
-            ) : (
-              <View style={[styles.cover, styles.coverFallback]}>
-                <Ionicons name="musical-note" size={22} color="#888" />
-              </View>
-            )}
-
-            <View style={styles.info}>
-              <View style={styles.titleRow}>
-                {isPlaying ? <SoundWaveIcon color="#1DB954" size={15} /> : null}
-                <Text
-                  style={[styles.title, isCurrentTrack && styles.titleActive]}
-                  numberOfLines={1}
-                >
-                  {item.title}
-                </Text>
-              </View>
-              <Text style={styles.artist} numberOfLines={1}>
-                {item.artistName}
-              </Text>
-            </View>
-
-            <View style={styles.actionButton}>
-              <Ionicons name="ellipsis-horizontal" size={21} color="#B8B8B8" />
-            </View>
-          </View>
-        </LoggedPressable>
+        {row}
       </Swipeable>
     );
   };
@@ -246,7 +293,7 @@ export const OfflineLibrary = () => {
   const renderPlaylist = ({ item }: { item: LocalPlaylist }) => {
     const playlistTracks = item.trackIds
       .map((trackId) => tracksById.get(trackId))
-      .filter((track): track is DownloadedTrack => Boolean(track));
+      .filter((track): track is LibraryTrack => Boolean(track));
     const imageURLs = [...new Set([
       ...playlistTracks.map((track) => track.localImagePath || track.imageURL),
       ...(item.coverImageURLs || []),
@@ -265,7 +312,8 @@ export const OfflineLibrary = () => {
             {item.title}
           </Text>
           <Text style={styles.playlistMeta} numberOfLines={1}>
-            {playlistTracks.length} de {item.trackIds.length} músicas baixadas
+            {playlistTracks.length} {playlistTracks.length === 1 ? 'música' : 'músicas'} ·{' '}
+            {playlistTracks.filter((track) => track.isDownloaded).length} baixadas
           </Text>
         </View>
         <Ionicons name="chevron-forward" size={20} color="#8B8B8B" />
@@ -330,10 +378,10 @@ export const OfflineLibrary = () => {
   if (libraryView === 'songs' && tracks.length === 0) {
     return (
       <View style={styles.emptyContainer}>
-        <Ionicons name="download-outline" size={56} color="#666" />
-        <Text style={styles.emptyTitle}>Nenhuma música baixada</Text>
+        <Ionicons name="musical-notes-outline" size={56} color="#666" />
+        <Text style={styles.emptyTitle}>Sua biblioteca está vazia</Text>
         <Text style={styles.emptySubtitle}>
-          Toque no botão + para importar e baixar músicas, playlists e álbuns
+          Toque no botão + para adicionar músicas, playlists e álbuns. O download é opcional.
         </Text>
       </View>
     );
@@ -455,7 +503,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   deleteAction: {
-    width: 82,
+    width: 112,
     marginBottom: StyleSheet.hairlineWidth,
     backgroundColor: '#E5484D',
     alignItems: 'center',

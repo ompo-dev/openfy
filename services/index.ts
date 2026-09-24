@@ -92,6 +92,19 @@ export type {
   LocalPlaylistInput,
 } from './library/localPlaylistManager';
 
+export {
+  getCatalogTracks,
+  getLibraryTracks,
+  toDownloadTrackInput,
+  upsertCatalogTracks,
+} from './library/catalogLibrary';
+export type {
+  CatalogSourcePlatform,
+  CatalogTrack,
+  CatalogTrackInput,
+  LibraryTrack,
+} from './library/catalogLibrary';
+
 export { getCachedArtistImage } from './library/artistImageCache';
 
 export {

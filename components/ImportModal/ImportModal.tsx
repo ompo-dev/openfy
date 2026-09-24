@@ -6,7 +6,6 @@
 import * as React from 'react';
 import {
   ActivityIndicator,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -22,7 +21,7 @@ import {
   getDownloadedTracks,
   isTrackDownloaded,
   parseSpotifyLink,
-  resolveDirectYouTubeTrack,
+  upsertCatalogTracks,
   upsertLocalPlaylist,
 } from '@services';
 import { useDownloads } from '@context';
@@ -92,35 +91,39 @@ const fetchYouTubeTrack = async (
   videoId: string
 ): Promise<TrackPreview | null> => {
   const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
-  // A standalone iPhone has no Metro API route. Resolve the pasted video
-  // itself so this path does not silently depend on a development server.
-  if (Platform.OS !== 'web') {
-    const directTrack = await resolveDirectYouTubeTrack(videoId);
-    if (directTrack) {
-      const trackId = `yt_${videoId}`;
-      const already = await isTrackDownloaded(trackId);
-      return {
-        spotifyId: trackId,
-        title: directTrack.title,
-        artistName: directTrack.artistName,
-        albumName: 'YouTube Track',
-        imageURL:
-          directTrack.imageURL ||
-          `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-        duration_ms: directTrack.durationMs,
-        youtubeVideoId: videoId,
-        youtubeUrl,
-        audioUrl: directTrack.url,
-        audioFormat: directTrack.format,
-        isDownloaded: already,
-      };
-    }
+  const trackId = `yt_${videoId}`;
+  const controller = typeof AbortController === 'undefined' ? undefined : new AbortController();
+  const timer = setTimeout(() => controller?.abort(), 7000);
+  try {
+    const response = await fetch(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(youtubeUrl)}&format=json`,
+      { signal: controller?.signal }
+    );
+    if (!response.ok) return null;
+    const metadata = (await response.json()) as {
+      title?: string;
+      author_name?: string;
+      thumbnail_url?: string;
+    };
+    if (!metadata.title) return null;
+    return {
+      spotifyId: trackId,
+      title: metadata.title,
+      artistName: metadata.author_name || 'YouTube',
+      albumName: 'YouTube',
+      imageURL:
+        metadata.thumbnail_url ||
+        `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+      duration_ms: 0,
+      youtubeVideoId: videoId,
+      youtubeUrl,
+      isDownloaded: await isTrackDownloaded(trackId),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
-
-  // Never show metadata that cannot be downloaded from this exact video.
-  // A retry is preferable to quietly resolving a similarly named track.
-  return null;
 };
 
 const fetchYouTubePlaylist = async (
@@ -262,6 +265,7 @@ export const ImportModal = ({
         );
       } else {
         setTracks(tracksToShow);
+        await upsertCatalogTracks(tracksToShow);
         if (playlistToSave) {
           await upsertLocalPlaylist({
             ...playlistToSave,
@@ -270,8 +274,8 @@ export const ImportModal = ({
               .map((track) => track.imageURL)
               .filter(Boolean),
           });
-          onLibraryChanged?.();
         }
+        onLibraryChanged?.();
       }
     } catch (err) {
       setError(
@@ -375,7 +379,7 @@ export const ImportModal = ({
           {isLoading ? (
             <ActivityIndicator color="#000" size="small" />
           ) : (
-            <Text style={styles.importButtonText}>Buscar Músicas</Text>
+            <Text style={styles.importButtonText}>Adicionar à biblioteca</Text>
           )}
         </Pressable>
       </View>
@@ -385,7 +389,7 @@ export const ImportModal = ({
           <View style={styles.resultsHeader}>
             <Text style={styles.resultsCount}>
               {tracks.length} {tracks.length === 1 ? 'música' : 'músicas'}{' '}
-              encontrada{tracks.length !== 1 ? 's' : ''}
+              adicionada{tracks.length !== 1 ? 's' : ''}
             </Text>
             {downloadableCount > 0 ? (
               <Pressable

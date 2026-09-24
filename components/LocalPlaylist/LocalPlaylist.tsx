@@ -5,10 +5,10 @@ import { useFocusEffect, useRouter } from 'expo-router';
 
 import {
   deleteLocalPlaylist,
-  getDownloadedTracks,
+  getLibraryTracks,
   getLocalPlaylist,
   upsertLocalPlaylist,
-  type DownloadedTrack,
+  type LibraryTrack,
   type LocalPlaylist as LocalPlaylistModel,
 } from '@services';
 import { useLibrarySelectedCategory } from '@context';
@@ -19,25 +19,25 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
   const router = useRouter();
   const { refreshLibrary } = useLibrarySelectedCategory();
   const [playlist, setPlaylist] = React.useState<LocalPlaylistModel | null>(null);
-  const [downloadedTracks, setDownloadedTracks] = React.useState<DownloadedTrack[]>([]);
-  const [tracks, setTracks] = React.useState<DownloadedTrack[]>([]);
+  const [libraryTracks, setLibraryTracks] = React.useState<LibraryTrack[]>([]);
+  const [tracks, setTracks] = React.useState<LibraryTrack[]>([]);
   const [isPickerVisible, setIsPickerVisible] = React.useState(false);
 
   const loadPlaylist = React.useCallback(async () => {
     const [localPlaylist, downloaded] = await Promise.all([
       getLocalPlaylist(playlistId),
-      getDownloadedTracks(),
+      getLibraryTracks(),
     ]);
     setPlaylist(localPlaylist);
     const downloadedById = new Map(
       downloaded.map((track) => [track.spotifyId, track])
     );
-    setDownloadedTracks(downloaded);
+    setLibraryTracks(downloaded);
     setTracks(
       localPlaylist
         ? localPlaylist.trackIds
             .map((trackId) => downloadedById.get(trackId))
-            .filter((track): track is DownloadedTrack => Boolean(track))
+            .filter((track): track is LibraryTrack => Boolean(track))
         : []
     );
   }, [playlistId]);
@@ -110,7 +110,7 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
     albumArtists: track.albumArtists,
     youtubeVideoId: track.youtubeVideoId,
     youtubeUrl: track.youtubeUrl,
-    isDownloaded: true,
+    isDownloaded: track.isDownloaded,
     localAudioPath: track.localAudioPath,
   }));
   const imageURLs = [
@@ -141,7 +141,7 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
         existingTrackIds={playlist.trackIds}
         onClose={() => setIsPickerVisible(false)}
         onConfirm={(trackIds) => void addTracks(trackIds)}
-        tracks={downloadedTracks}
+        tracks={libraryTracks}
         visible={isPickerVisible}
       />
     </>
