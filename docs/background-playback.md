@@ -61,9 +61,27 @@ se algum arquivo estava mais restritivo.
 
 O player móvel mantém a sessão de áudio ativa enquanto troca de estado e reduz
 os eventos de progresso para 500 ms. Isso evita trabalho JS desnecessário em
-segundo plano sem depender de áudio silencioso, tarefa infinita ou backend. Sem
-um crash log ou log nativo do momento da parada, essas mudanças devem ser
-tratadas como mitigação e instrumentação, não como prova de causa definitiva.
+segundo plano sem depender de áudio silencioso, tarefa infinita ou backend.
+
+## Causa confirmada do encerramento no iPhone
+
+O relatório `Openfy-2026-09-24-124042.ips`, referente à versão 1.0.1 build 13,
+confirmou um encerramento por limite de CPU: 48 segundos de CPU em 53 segundos
+(média de 91%) enquanto o app não estava em primeiro plano. A pilha amostrada
+passava pelo temporizador do JavaScript, `setNativeProps`, commits da árvore de
+interface e recálculo de layout do Yoga.
+
+A origem era o equalizador animado usado nas notas e em listas de músicas. Ele
+alterava a propriedade `height` continuamente com o driver JavaScript. Uma
+segunda implementação duplicada continuava montada dentro do modal de nota.
+Como a sessão de áudio mantém o processo vivo com a tela bloqueada, esses ciclos
+visuais continuavam recalculando o layout até o watchdog do iOS encerrar o app.
+
+Na versão 1.0.2, o equalizador usa altura fixa e anima apenas `scaleY` com o
+driver nativo. Todas as animações visuais observam uma única assinatura de
+`AppState`, param ao entrar em `inactive` ou `background` e só reiniciam ao
+voltar para `active`. A implementação duplicada foi removida e modais ocultos
+não mantêm o ciclo ativo.
 
 Preloads são reservados para a janela curta da fila de reprodução. A Home pode
 resolver URLs para manter cards prontos para toque, mas não cria preloads nativos
@@ -79,7 +97,7 @@ Ao fechar o player, `remove()` e `release()` liberam o registro e o objeto nativ
 Falhas na limpeza de listeners não impedem essa liberação.
 
 O patch versionado `patches/expo-audio+57.0.4.patch` é aplicado pelo `postinstall`
-e exige um novo IPA (runtime 1.0.1). Ele corrige três comportamentos do SDK instalado:
+e exige um novo IPA (runtime 1.0.2). Ele corrige três comportamentos do SDK instalado:
 
 - Remove comandos remotos usando os tokens retornados por `addTarget(handler:)`,
   inclusive ao reativar o mesmo player. `removeTarget(self)` não removia esses handlers.
@@ -107,10 +125,10 @@ verifica duração, preservação dos pacotes e repetição sem reprocessar o ar
 O teste não baixa músicas nem precisa de credenciais de provedores.
 
 O job `validar-audio-local` também executa o filtro nativo de eventos com 2.400
-ticks simulados em segundo plano, transições e retorno ao primeiro plano. Isso
-valida a lógica, mas não reproduz o encerramento no aparelho. Um relatório
-`Openfy*.ips` ou `JetsamEvent*.ips` com horário correspondente ainda é necessário
-para distinguir crash nativo, watchdog, pressão de memória e limite de CPU.
+ticks simulados em segundo plano, transições e retorno ao primeiro plano. O
+relatório do build 13 permitiu distinguir o limite de CPU de crash nativo,
+pressão de memória ou falha do arquivo de áudio. A validação final da correção
+continua sendo feita em aparelho físico com o IPA 1.0.2 ou posterior.
 
 Após instalar o IPA atualizado, reabra uma faixa já baixada e confira o tempo,
 o avanço até perto do final e a passagem à próxima faixa. Confira também a

@@ -11,7 +11,6 @@
 
 import * as React from 'react';
 import {
-  Animated,
   Dimensions,
   FlatList,
   Image,
@@ -36,6 +35,7 @@ import { NativeIconButton } from '../../native/NativeButtons';
 import { GlassSurface } from '../../native/GlassSurface';
 import { MiniPlayer } from '../../Player/MiniPlayer';
 import { MusicSnippetEditorModal } from './MusicSnippetEditorModal';
+import { SoundWaveIcon } from './NoteBubble';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -74,52 +74,18 @@ const DEFAULT_COLOR = '#1C1E24';
 const NOTE_TEXT_LIMIT = 30;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Animated Equalizer Wave Icon
-// ──────────────────────────────────────────────────────────────────────────────
-const SoundWaveIcon = ({ size = 13, color = '#fff' }: { size?: number; color?: string }) => {
-  const a1 = React.useRef(new Animated.Value(size * 0.5)).current;
-  const a2 = React.useRef(new Animated.Value(size)).current;
-  const a3 = React.useRef(new Animated.Value(size * 0.65)).current;
-
-  React.useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(a1, { toValue: size, duration: 280, useNativeDriver: false }),
-          Animated.timing(a2, { toValue: size * 0.35, duration: 260, useNativeDriver: false }),
-          Animated.timing(a3, { toValue: size * 0.9, duration: 300, useNativeDriver: false }),
-        ]),
-        Animated.parallel([
-          Animated.timing(a1, { toValue: size * 0.5, duration: 280, useNativeDriver: false }),
-          Animated.timing(a2, { toValue: size, duration: 300, useNativeDriver: false }),
-          Animated.timing(a3, { toValue: size * 0.65, duration: 260, useNativeDriver: false }),
-        ]),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [a1, a2, a3, size]);
-
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: size + 2, flexShrink: 0 }}>
-      <Animated.View style={{ width: 2.2, borderRadius: 1.1, backgroundColor: color, height: a1 }} />
-      <Animated.View style={{ width: 2.2, borderRadius: 1.1, backgroundColor: color, height: a2 }} />
-      <Animated.View style={{ width: 2.2, borderRadius: 1.1, backgroundColor: color, height: a3 }} />
-    </View>
-  );
-};
-
-// ──────────────────────────────────────────────────────────────────────────────
 // Carousel Identical Note Bubble Visual (Published Sheet)
 // ──────────────────────────────────────────────────────────────────────────────
 const IdenticalNoteBubble = ({
   note,
   avatarUrl,
   isPlaying,
+  isVisible,
 }: {
   note: MyNote;
   avatarUrl: string;
   isPlaying: boolean;
+  isVisible: boolean;
 }) => {
   const bg = note.bubbleColor || DEFAULT_COLOR;
   const colorTheme = getNoteColorTheme(bg);
@@ -139,7 +105,13 @@ const IdenticalNoteBubble = ({
         >
           {/* Row 1: wave icon + title marquee */}
           <View style={bubbleStyles.bubbleRow}>
-            {isPlaying && <SoundWaveIcon color={colorTheme.waveColor} />}
+            {isPlaying && (
+              <SoundWaveIcon
+                active={isVisible}
+                color={colorTheme.waveColor}
+                size={13}
+              />
+            )}
             <View style={bubbleStyles.textFlex}>
               <MarqueeText
                 text={title}
@@ -440,6 +412,7 @@ export const MyNoteModal = ({
               note={currentNote}
               avatarUrl={avatarUrl}
               isPlaying={isPlayingThisNote}
+              isVisible={visible}
             />
 
             {/* Note details */}
@@ -564,7 +537,13 @@ export const MyNoteModal = ({
                 )}
 
                 <View style={S.editorBubbleInner}>
-                  {selectedSong && <SoundWaveIcon size={12} color={colorTheme.waveColor} />}
+                  {selectedSong && (
+                    <SoundWaveIcon
+                      active={visible}
+                      size={12}
+                      color={colorTheme.waveColor}
+                    />
+                  )}
                   <View style={{ flex: 1, overflow: 'hidden' }}>
                     {selectedSong ? (
                       <View>

@@ -1,9 +1,10 @@
 import * as React from 'react';
 import type { LayoutChangeEvent, StyleProp, ViewStyle } from 'react-native';
-import { Animated, StyleSheet, View } from 'react-native';
+import { Animated, Platform, StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MarqueeText } from '../../common/MarqueeText';
 import { getNoteColorTheme } from '../../../utils/colorContrast';
+import { useAppIsActive } from '../../../hooks/useAppIsActive';
 import { resolveNoteTailTuning } from './noteTailTuning';
 import type { NoteTailTuning } from './noteTailTuning';
 
@@ -179,67 +180,114 @@ const getTailGradientProgress = ({
 export const SoundWaveIcon = ({
   color,
   size = 15,
+  active = true,
 }: {
   color: string;
   size?: number;
+  active?: boolean;
 }) => {
-  const first = React.useRef(new Animated.Value(size * 0.4)).current;
-  const second = React.useRef(new Animated.Value(size * 0.8)).current;
-  const third = React.useRef(new Animated.Value(size * 0.47)).current;
+  const first = React.useRef(new Animated.Value(0.4)).current;
+  const second = React.useRef(new Animated.Value(0.8)).current;
+  const third = React.useRef(new Animated.Value(0.47)).current;
+  const isAppActive = useAppIsActive();
 
   React.useEffect(() => {
+    first.setValue(0.4);
+    second.setValue(0.8);
+    third.setValue(0.47);
+    if (!active || !isAppActive) return;
+
+    const useNativeDriver = Platform.OS !== 'web';
     const loop = Animated.loop(
       Animated.sequence([
         Animated.parallel([
           Animated.timing(first, {
-            toValue: size * 0.87,
+            toValue: 0.87,
             duration: 280,
-            useNativeDriver: false,
+            useNativeDriver,
           }),
           Animated.timing(second, {
-            toValue: size * 0.4,
+            toValue: 0.4,
             duration: 260,
-            useNativeDriver: false,
+            useNativeDriver,
           }),
           Animated.timing(third, {
-            toValue: size,
+            toValue: 1,
             duration: 300,
-            useNativeDriver: false,
+            useNativeDriver,
           }),
         ]),
         Animated.parallel([
           Animated.timing(first, {
-            toValue: size * 0.4,
+            toValue: 0.4,
             duration: 280,
-            useNativeDriver: false,
+            useNativeDriver,
           }),
           Animated.timing(second, {
-            toValue: size * 0.93,
+            toValue: 0.93,
             duration: 300,
-            useNativeDriver: false,
+            useNativeDriver,
           }),
           Animated.timing(third, {
-            toValue: size * 0.47,
+            toValue: 0.47,
             duration: 260,
-            useNativeDriver: false,
+            useNativeDriver,
           }),
         ]),
       ])
     );
     loop.start();
-    return () => loop.stop();
-  }, [first, second, size, third]);
+    return () => {
+      loop.stop();
+      first.stopAnimation();
+      second.stopAnimation();
+      third.stopAnimation();
+    };
+  }, [active, first, isAppActive, second, third]);
 
   return (
-    <View style={[styles.waveContainer, { gap: size * 0.13, height: size, width: size * 0.73 }]}>
+    <View
+      testID="sound-wave"
+      style={[
+        styles.waveContainer,
+        { gap: size * 0.13, height: size, width: size * 0.73 },
+      ]}
+    >
       <Animated.View
-        style={[styles.waveBar, { width: size * 0.147, height: first, backgroundColor: color }]}
+        testID="sound-wave-bar-1"
+        style={[
+          styles.waveBar,
+          {
+            width: size * 0.147,
+            height: size,
+            backgroundColor: color,
+            transform: [{ scaleY: first }],
+          },
+        ]}
       />
       <Animated.View
-        style={[styles.waveBar, { width: size * 0.147, height: second, backgroundColor: color }]}
+        testID="sound-wave-bar-2"
+        style={[
+          styles.waveBar,
+          {
+            width: size * 0.147,
+            height: size,
+            backgroundColor: color,
+            transform: [{ scaleY: second }],
+          },
+        ]}
       />
       <Animated.View
-        style={[styles.waveBar, { width: size * 0.147, height: third, backgroundColor: color }]}
+        testID="sound-wave-bar-3"
+        style={[
+          styles.waveBar,
+          {
+            width: size * 0.147,
+            height: size,
+            backgroundColor: color,
+            transform: [{ scaleY: third }],
+          },
+        ]}
       />
     </View>
   );

@@ -10,8 +10,6 @@
 import * as React from 'react';
 import {
   Animated,
-  AppState,
-  AppStateStatus,
   Easing,
   LayoutChangeEvent,
   Platform,
@@ -24,6 +22,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import MaskedView from '@react-native-masked-view/masked-view';
+import { useAppIsActive } from '../../hooks/useAppIsActive';
 
 interface MarqueeTextProps {
   // Plain text measures width; optional inline children retain links and styling.
@@ -58,26 +57,11 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
   void _fadeColor;
   const [containerWidth, setContainerWidth] = React.useState(0);
   const [measuredTextWidth, setMeasuredTextWidth] = React.useState(0);
-  const [isAppActive, setIsAppActive] = React.useState(
-    () => !['background', 'inactive'].includes(AppState.currentState)
-  );
+  const isAppActive = useAppIsActive();
   const scrollAnim = React.useRef(new Animated.Value(0)).current;
 
   const isOverflowing = measuredTextWidth > containerWidth + 2 && containerWidth > 0;
   const shouldAnimate = active && isAppActive && isOverflowing;
-
-  React.useEffect(() => {
-    const subscription = AppState.addEventListener(
-      'change',
-      (nextState: AppStateStatus) => {
-        setIsAppActive(nextState === 'active');
-      }
-    );
-
-    return () => {
-      subscription.remove();
-    };
-  }, []);
 
   React.useEffect(() => {
     scrollAnim.setValue(0);

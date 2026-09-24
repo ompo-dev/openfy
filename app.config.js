@@ -2,7 +2,7 @@ module.exports = {
   expo: {
     name: 'Openfy',
     slug: 'openfy',
-    version: '1.0.1',
+    version: '1.0.2',
     runtimeVersion: {
       policy: 'appVersion',
     },
