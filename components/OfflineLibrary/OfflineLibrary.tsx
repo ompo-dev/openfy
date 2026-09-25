@@ -21,6 +21,7 @@ import {
   groupLocalAlbums,
   groupLocalArtists,
   getLocalPlaylists,
+  removeCatalogTrack,
   toDownloadTrackInput,
   type LibraryTrack,
   type LocalPlaylist,
@@ -51,7 +52,12 @@ export const OfflineLibrary = () => {
   const [artistImageURLs, setArtistImageURLs] = React.useState<Record<string, string>>({});
   const requestedArtistImages = React.useRef(new Set<string>());
   const { playWithQueue, currentTrack, playerState } = usePlayer();
-  const { clearCompletedDownloads, downloads, enqueueDownloads } = useDownloads();
+  const {
+    cancelDownload,
+    clearCompletedDownloads,
+    downloads,
+    enqueueDownloads,
+  } = useDownloads();
   const downloadsById = React.useMemo(
     () => new Map(downloads.map((download) => [download.spotifyId, download])),
     [downloads]
@@ -61,6 +67,7 @@ export const OfflineLibrary = () => {
     librarySearchQuery,
     librarySort,
     libraryView,
+    refreshLibrary,
   } = useLibrarySelectedCategory();
 
   const loadLibrary = React.useCallback(async () => {
@@ -94,9 +101,15 @@ export const OfflineLibrary = () => {
     return () => { active = false; };
   }, [libraryRevision, loadLibrary]);
 
-  const handleDelete = async (spotifyId: string) => {
-    await deleteDownloadedTrack(spotifyId);
+  const handleDelete = async (track: LibraryTrack) => {
+    if (track.isDownloaded) {
+      await deleteDownloadedTrack(track.spotifyId);
+    } else {
+      await cancelDownload(track.spotifyId);
+      await removeCatalogTrack(track.spotifyId);
+    }
     clearCompletedDownloads();
+    refreshLibrary();
     await loadLibrary();
   };
 
@@ -269,7 +282,6 @@ export const OfflineLibrary = () => {
       </LoggedPressable>
     );
 
-    if (!item.isDownloaded) return row;
     return (
       <Swipeable
         overshootRight={false}
@@ -277,12 +289,18 @@ export const OfflineLibrary = () => {
         renderRightActions={() => (
           <LoggedPressable
             accessibilityRole="button"
-            accessibilityLabel={`Remover download de ${item.title}`}
-            onPress={() => handleDelete(item.spotifyId)}
+            accessibilityLabel={
+              item.isDownloaded
+                ? `Remover download de ${item.title}`
+                : `Remover ${item.title} da biblioteca`
+            }
+            onPress={() => void handleDelete(item)}
             style={styles.deleteAction}
           >
             <Ionicons name="trash-outline" size={22} color="#FFFFFF" />
-            <Text style={styles.deleteActionLabel}>Remover download</Text>
+            <Text style={styles.deleteActionLabel}>
+              {item.isDownloaded ? 'Remover download' : 'Remover da biblioteca'}
+            </Text>
           </LoggedPressable>
         )}
       >

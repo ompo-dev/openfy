@@ -164,10 +164,10 @@ export const Home = () => {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.scrollContent, { paddingTop: top + 8 }]}
       >
-        <CatalogHome home={home} />
-
         {/* 1. Friend Activity Listening Status (Stories / Speech Bubbles) */}
         {notes.length ? <FriendActivityStatus notes={notes} /> : null}
+
+        <CatalogHome home={home} />
 
         {/* 2. Music posts */}
         <ListeningFeed

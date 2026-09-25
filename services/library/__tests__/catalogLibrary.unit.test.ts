@@ -3,8 +3,13 @@ import { getDownloadedTracks } from '../../download/downloadManager';
 import {
   getCatalogTracks,
   getLibraryTracks,
+  removeCatalogTrack,
   upsertCatalogTracks,
 } from '../catalogLibrary';
+import {
+  getLocalPlaylists,
+  upsertLocalPlaylist,
+} from '../localPlaylistManager';
 
 jest.mock('../../download/downloadManager', () => ({
   getDownloadedTracks: jest.fn(),
@@ -139,6 +144,41 @@ describe('catalogLibrary', () => {
         sourcePlatform: 'youtube',
         isDownloaded: true,
       }),
+    ]);
+  });
+
+  it('removes a streaming-only track from the catalog and local playlists', async () => {
+    await upsertCatalogTracks([
+      {
+        spotifyId: 'stream-only',
+        title: 'Streaming',
+        artistName: 'Artista',
+        albumName: 'Single',
+        imageURL: '',
+        duration_ms: 180000,
+      },
+      {
+        spotifyId: 'keep-me',
+        title: 'Fica',
+        artistName: 'Artista',
+        albumName: 'Single',
+        imageURL: '',
+        duration_ms: 180000,
+      },
+    ]);
+    await upsertLocalPlaylist({
+      sourcePlatform: 'spotify',
+      sourceId: 'playlist-source',
+      title: 'Playlist',
+      trackIds: ['stream-only', 'keep-me'],
+    });
+
+    await expect(removeCatalogTrack('stream-only')).resolves.toBe(1);
+    await expect(getCatalogTracks()).resolves.toEqual([
+      expect.objectContaining({ spotifyId: 'keep-me' }),
+    ]);
+    await expect(getLocalPlaylists()).resolves.toEqual([
+      expect.objectContaining({ trackIds: ['keep-me'] }),
     ]);
   });
 });

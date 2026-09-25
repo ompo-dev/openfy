@@ -1577,3 +1577,79 @@ export const deleteDownloadedTrack = async (
     return false;
   }
 };
+
+export type DownloadStorageTrack = {
+  spotifyId: string;
+  title: string;
+  artistName: string;
+  imageURL: string;
+  localImagePath?: string;
+  bytes: number;
+};
+
+export type DownloadStorageInfo = {
+  directory: string;
+  totalBytes: number;
+  tracks: DownloadStorageTrack[];
+};
+
+const getLocalFileSize = async (path?: string): Promise<number> => {
+  if (Platform.OS === 'web' || !path?.startsWith('file:')) return 0;
+  try {
+    const info = await FileSystem.getInfoAsync(path);
+    return info.exists && typeof info.size === 'number' ? info.size : 0;
+  } catch {
+    return 0;
+  }
+};
+
+/** Return the real on-device footprint of every managed music download. */
+export const getDownloadStorageInfo = async (): Promise<DownloadStorageInfo> => {
+  const tracks = await getDownloadedTracks();
+  const entries = await Promise.all(
+    tracks.map(async (track): Promise<DownloadStorageTrack> => {
+      const [audioBytes, coverBytes] = await Promise.all([
+        getLocalFileSize(track.localAudioPath),
+        getLocalFileSize(track.localImagePath),
+      ]);
+      return {
+        spotifyId: track.spotifyId,
+        title: track.title,
+        artistName: track.artistName,
+        imageURL: track.imageURL,
+        localImagePath: track.localImagePath,
+        bytes: audioBytes + coverBytes,
+      };
+    })
+  );
+
+  return {
+    directory:
+      Platform.OS === 'web'
+        ? 'Armazenamento local do navegador'
+        : DOWNLOADS_DIR,
+    totalBytes: entries.reduce((total, entry) => total + entry.bytes, 0),
+    tracks: entries.sort((first, second) => second.bytes - first.bytes),
+  };
+};
+
+/** Delete all managed audio and cover files while retaining catalog entries. */
+export const deleteAllDownloadedTracks = async (): Promise<number> => {
+  const tracks = await getDownloadedTracks();
+  if (!tracks.length) return 0;
+
+  if (Platform.OS !== 'web') {
+    const paths = new Set(
+      tracks.flatMap((track) => [track.localAudioPath, track.localImagePath])
+        .filter((path): path is string => Boolean(path?.startsWith('file:')))
+    );
+    await Promise.all(
+      [...paths].map((path) =>
+        FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {})
+      )
+    );
+  }
+
+  await updateDownloadedTracks(() => []);
+  return tracks.length;
+};

@@ -44,6 +44,7 @@ import {
   preloadAudio,
   releasePreloadedAudio,
   resolveAudioUrl,
+  unload,
 } from '@services';
 import { usePlayerStore, type PlayerTrack } from '../usePlayerStore';
 
@@ -213,6 +214,60 @@ describe('queue preload window', () => {
       expect.any(Object),
       0,
       catalogTrack
+    );
+  });
+
+  it('never shares a warmed source between different catalog ids with matching metadata', async () => {
+    const firstTrack: PlayerTrack = {
+      ...tracks[1],
+      spotifyId: 'yt_AAAAAAAAAAA',
+      youtubeVideoId: 'AAAAAAAAAAA',
+      title: 'Mesmo título',
+      artistName: 'Mesmo artista',
+    };
+    const secondTrack: PlayerTrack = {
+      ...firstTrack,
+      spotifyId: 'yt_BBBBBBBBBBB',
+      youtubeVideoId: 'BBBBBBBBBBB',
+    };
+    (resolveAudioUrl as jest.Mock).mockImplementation(
+      (_title: string, _artist: string, trackId: string) =>
+        Promise.resolve({ url: `https://media.test/${trackId}.m4a`, format: 'm4a' })
+    );
+
+    await usePlayerStore.getState().playTrack(firstTrack);
+    await usePlayerStore.getState().playTrack(secondTrack);
+
+    expect(resolveAudioUrl).toHaveBeenCalledWith(
+      secondTrack.title,
+      secondTrack.artistName,
+      `yt_${secondTrack.youtubeVideoId}`,
+      secondTrack.duration_ms
+    );
+    expect(loadAndPlay).toHaveBeenLastCalledWith(
+      `https://media.test/yt_${secondTrack.youtubeVideoId}.m4a`,
+      expect.any(Function),
+      expect.any(Object),
+      0,
+      secondTrack
+    );
+  });
+
+  it('fully unloads the old engine when the selected track has no valid source', async () => {
+    const unresolvedTrack: PlayerTrack = {
+      ...tracks[1],
+      spotifyId: 'yt_CCCCCCCCCCC',
+      youtubeVideoId: 'CCCCCCCCCCC',
+      title: 'Sem fonte',
+    };
+    (resolveAudioUrl as jest.Mock).mockResolvedValue(null);
+
+    await usePlayerStore.getState().playTrack(unresolvedTrack);
+
+    expect(loadAndPlay).not.toHaveBeenCalled();
+    expect(unload).toHaveBeenCalledTimes(1);
+    expect(usePlayerStore.getState().playerState.error).toBe(
+      'Não foi possível carregar o áudio desta faixa.'
     );
   });
 

@@ -10,7 +10,6 @@ import {
   groupLocalAlbums,
   groupLocalArtists,
   type LocalAlbumCollection,
-  type LocalArtistCollection,
 } from '../library/localCollections';
 
 export type PersonalizedHomeTrack = {
@@ -42,9 +41,17 @@ export type RecommendationSeed = {
   score: number;
 };
 
+export type PersonalizedHomeArtist = {
+  id: string;
+  spotifyArtistId: string;
+  title: string;
+  imageURL: string;
+  appearances: number;
+};
+
 export type PersonalizedHomeSnapshot = {
   albums: LocalAlbumCollection[];
-  artists: LocalArtistCollection[];
+  artists: PersonalizedHomeArtist[];
   continueListening: PersonalizedHomeTrack[];
   discoveries: PersonalizedHomeTrack[];
   discoveryTitle: string;
@@ -319,18 +326,44 @@ export const buildPersonalizedHome = ({
       return score(second) - score(first) || second.tracks.length - first.tracks.length;
     })
     .slice(0, 10);
-  const artists = groupLocalArtists(tracks)
-    .map((artist) => ({
-      ...artist,
-      imageURL: artist.imageURL || artist.tracks[0]?.localImagePath || artist.tracks[0]?.imageURL || '',
-    }))
-    .sort((first, second) => {
-      const weight = (artist: LocalArtistCollection) =>
-        profile.artistWeights[artist.title] ||
-        Object.entries(profile.artistWeights).find(([name]) => normalize(name) === normalize(artist.title))?.[1] ||
-        0;
-      return weight(second) - weight(first) || second.tracks.length - first.tracks.length;
-    })
+  const recommendationSeeds = personalized
+    ? buildRecommendationSeeds(tracks, playlists, profile)
+    : [];
+  const knownArtistIds = new Set<string>();
+  const knownArtistNames = new Set(
+    recommendationSeeds.map((artist) => normalize(artist.name))
+  );
+  groupLocalArtists(tracks).forEach((artist) => {
+    if (artist.spotifyArtistId) knownArtistIds.add(artist.spotifyArtistId);
+    knownArtistNames.add(normalize(artist.title));
+  });
+  const artistCandidates = new Map<string, PersonalizedHomeArtist>();
+  remoteDiscoveries.forEach((track) => {
+    track.artists?.forEach((artist) => {
+      const spotifyArtistId = artist.id?.trim();
+      const title = artist.name?.trim();
+      if (
+        !spotifyArtistId ||
+        !title ||
+        knownArtistIds.has(spotifyArtistId) ||
+        knownArtistNames.has(normalize(title))
+      ) return;
+      const current = artistCandidates.get(spotifyArtistId);
+      artistCandidates.set(spotifyArtistId, {
+        id: `recommended_artist_${spotifyArtistId}`,
+        spotifyArtistId,
+        title,
+        imageURL: current?.imageURL || track.imageURL,
+        appearances: (current?.appearances || 0) + 1,
+      });
+    });
+  });
+  const artists = [...artistCandidates.values()]
+    .sort((first, second) =>
+      second.appearances - first.appearances ||
+      (stableHash(`${seed}:${first.spotifyArtistId}`) % 1000) -
+        (stableHash(`${seed}:${second.spotifyArtistId}`) % 1000)
+    )
     .slice(0, 10);
   const orderedPlaylists = [...playlists]
     .sort((first, second) => second.updatedAt.localeCompare(first.updatedAt))
@@ -348,7 +381,7 @@ export const buildPersonalizedHome = ({
     featured,
     playlists: orderedPlaylists,
     quickPicks,
-    seeds: personalized ? buildRecommendationSeeds(tracks, playlists, profile) : [],
+    seeds: recommendationSeeds,
     tracksById,
   };
 };

@@ -77,7 +77,7 @@ describe('personalizedHome', () => {
       first.quickPicks.length
     );
     expect(first.seeds[0]).toMatchObject({ id: 'artist-sotam', name: 'Sotam' });
-    expect(first.artists[0].title).toBe('Sotam');
+    expect(first.artists).toEqual([]);
     expect(first.playlists[0].id).toBe('playlist-1');
   });
 
@@ -124,6 +124,42 @@ describe('personalizedHome', () => {
 
     expect(home.discoveries.map((item) => item.spotifyId)).toEqual(['new-clean']);
     expect(home.discoveryTitle).toBe('Descobertas para você');
+  });
+
+  it('recommends discovered artists that are not already in the library', () => {
+    const discoveries: PersonalizedHomeTrack[] = [{
+      id: 'discovery-collab',
+      spotifyId: 'new-collab-track',
+      title: 'Colaboração nova',
+      artistName: 'Sotam, Artista Nova',
+      artists: [
+        { id: 'artist-sotam', name: 'Sotam' },
+        { id: 'artist-new', name: 'Artista Nova' },
+      ],
+      albumName: 'Single',
+      imageURL: 'https://images.example/new.jpg',
+      duration_ms: 180_000,
+    }];
+
+    const home = buildPersonalizedHome({
+      allowExplicitRecommendations: true,
+      discoveries,
+      personalized: true,
+      playlists,
+      profile,
+      seed: 'fixed-seed',
+      tracks: library,
+    });
+
+    expect(home.artists).toEqual([
+      expect.objectContaining({
+        spotifyArtistId: 'artist-new',
+        title: 'Artista Nova',
+      }),
+    ]);
+    expect(home.artists).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: 'Sotam' })])
+    );
   });
 
   it('keeps listening-history artists as seeds before they are saved', () => {

@@ -216,11 +216,16 @@ export const beginTrackChange = (): void => {
   stopVolumeRamp();
   // Silence the engine before touching listeners: a listener cleanup failure
   // must never orphan an audible player.
-  playerInstance?.pause();
+  try {
+    playerInstance?.pause();
+  } catch {
+    disposeCurrentPlayer();
+    return;
+  }
   detachPlayerSubscriptions();
 };
 
-const disposeCurrentPlayer = () => {
+function disposeCurrentPlayer() {
   stopVolumeRamp();
   const previous = playerInstance;
   try { previous?.pause(); } catch {}
@@ -229,7 +234,7 @@ const disposeCurrentPlayer = () => {
   try { previous?.remove(); } catch {}
   try { previous?.release(); } catch {}
   playerInstance = null;
-};
+}
 
 const isAppActive = () =>
   Platform.OS === 'web' || !AppState?.currentState || AppState.currentState === 'active';

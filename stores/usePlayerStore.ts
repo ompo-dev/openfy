@@ -125,10 +125,9 @@ const STORAGE_LYRICS_PREFIX = `openfy_lyrics_cache_${LYRICS_CACHE_VERSION}_`;
 const AUDIO_SOURCE_TTL_MS = 10 * 60_000;
 const MIN_PRELOADED_SOURCE_LIFETIME_MS = 5_000;
 
-const IS_SPOTIFY_ID = /^[a-zA-Z0-9]{22}$/;
 const warmedAudioSources = new Map<
   string,
-  { source: AudioSourceInput; expiresAt: number }
+  { source: AudioSourceInput; expiresAt: number; trackId: string }
 >();
 const activeAudioWarmups = new Map<string, Promise<void>>();
 const queuePreloadKeys = new Set<string>();
@@ -164,18 +163,19 @@ const getResolverTrackId = (track: PlayerTrack): string =>
     ? `yt_${track.youtubeVideoId}`
     : track.spotifyId;
 
-// Helper: Normalize cache key to prevent cross-song cache collisions
+// Every imported catalog id is authoritative, including yt_* ids. Falling
+// back to artist/title for valid ids can make two different recordings share
+// a warmed source.
 const getCacheKey = (track: PlayerTrack) => {
-  if (track.spotifyId && IS_SPOTIFY_ID.test(track.spotifyId)) {
-    return track.spotifyId;
-  }
+  const trackId = track.spotifyId?.trim();
+  if (trackId) return `track:${trackId}`;
   const cleanTitle = (track.title || '')
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '_');
   const cleanArtist = (track.artistName || '')
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '_');
-  return `${cleanArtist}_${cleanTitle}`;
+  return `metadata:${cleanArtist}:${cleanTitle}:${track.duration_ms || 0}:${track.albumName || ''}`;
 };
 
 const getLyricsCacheKey = (track: PlayerTrack) =>
@@ -234,7 +234,9 @@ const getFreshPreloadedSource = (
   }
 
   const warmed = warmedAudioSources.get(getCacheKey(track));
-  return warmed && warmed.expiresAt > now + MIN_PRELOADED_SOURCE_LIFETIME_MS
+  return warmed &&
+    warmed.trackId === track.spotifyId &&
+    warmed.expiresAt > now + MIN_PRELOADED_SOURCE_LIFETIME_MS
     ? warmed.source
     : null;
 };
@@ -243,6 +245,7 @@ const cacheAudioSource = (track: PlayerTrack, source: AudioSourceInput) => {
   warmedAudioSources.set(getCacheKey(track), {
     source,
     expiresAt: Date.now() + AUDIO_SOURCE_TTL_MS,
+    trackId: track.spotifyId,
   });
 };
 
@@ -513,6 +516,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           error: 'Não foi possível carregar o áudio desta faixa.',
         },
       });
+      // Resolution failed for the selected id. Dispose the paused previous
+      // engine so no later native/lock-screen command can resume another song.
+      await unload();
       if (get().activeRequestId === requestId) {
         await restoreCurrentVolume();
       }

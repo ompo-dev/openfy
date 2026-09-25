@@ -8,8 +8,8 @@ import { useDetailNavigation } from '@hooks';
 import type {
   LibraryTrack,
   LocalAlbumCollection,
-  LocalArtistCollection,
   LocalPlaylist,
+  PersonalizedHomeArtist,
   PersonalizedHomeSnapshot,
   PersonalizedHomeTrack,
 } from '@services';
@@ -141,7 +141,7 @@ const AlbumShelf = ({ albums }: { albums: LocalAlbumCollection[] }) => {
   );
 };
 
-const ArtistShelf = ({ artists }: { artists: LocalArtistCollection[] }) => {
+const ArtistShelf = ({ artists }: { artists: PersonalizedHomeArtist[] }) => {
   const { openDetail } = useDetailNavigation();
   if (!artists.length) return null;
 
@@ -158,11 +158,7 @@ const ArtistShelf = ({ artists }: { artists: LocalArtistCollection[] }) => {
             accessibilityLabel={`Abrir artista ${artist.title}`}
             key={artist.id}
             onPress={() =>
-              openDetail(
-                'artist',
-                `local_artist_${encodeURIComponent(artist.id)}`,
-                'home'
-              )
+              openDetail('artist', artist.spotifyArtistId, 'home')
             }
             style={styles.collectionTile}
           >
@@ -182,7 +178,7 @@ const ArtistShelf = ({ artists }: { artists: LocalArtistCollection[] }) => {
               {artist.title}
             </Text>
             <Text numberOfLines={1} style={[styles.itemSubtitle, styles.artistTitle]}>
-              {artist.tracks.length} {artist.tracks.length === 1 ? 'música' : 'músicas'}
+              Recomendado para você
             </Text>
           </LoggedPressable>
         ))}
@@ -225,7 +221,7 @@ const PlaylistShelf = ({
               }
               style={styles.collectionTile}
             >
-              <PlaylistMosaic imageURLs={[...new Set(images)]} size={142} />
+              <PlaylistMosaic imageURLs={[...new Set(images)]} size={104} />
               <Text numberOfLines={1} style={styles.itemTitle}>{playlist.title}</Text>
               <Text numberOfLines={1} style={styles.itemSubtitle}>
                 {playlistTracks.length} {playlistTracks.length === 1 ? 'música' : 'músicas'}
@@ -277,7 +273,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: '#FFFFFF',
     fontFamily: 'SF-Bold',
-    fontSize: 20,
+    fontSize: 18,
     paddingHorizontal: 16,
   },
   horizontalContent: {
@@ -286,23 +282,23 @@ const styles = StyleSheet.create({
   },
   trackTile: {
     gap: 4,
-    width: 142,
+    width: 104,
   },
   collectionTile: {
     gap: 4,
-    width: 142,
+    width: 104,
   },
   artworkFrame: {
-    height: 142,
+    height: 104,
     position: 'relative',
-    width: 142,
+    width: 104,
   },
   artwork: {
     borderRadius: 6,
-    height: 142,
-    width: 142,
+    height: 104,
+    width: 104,
   },
-  artistArtwork: { borderRadius: 71 },
+  artistArtwork: { borderRadius: 52 },
   artistTitle: { textAlign: 'center' },
   fallback: {
     alignItems: 'center',
@@ -313,12 +309,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#1ED760',
     borderRadius: 18,
-    bottom: 8,
-    height: 36,
+    bottom: 6,
+    height: 30,
     justifyContent: 'center',
     position: 'absolute',
-    right: 8,
-    width: 36,
+    right: 6,
+    width: 30,
   },
   itemTitle: {
     color: '#FFFFFF',

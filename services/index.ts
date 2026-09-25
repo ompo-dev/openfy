@@ -57,6 +57,7 @@ export {
 } from './home/personalizedHome';
 export type {
   PersonalizedHomeSnapshot,
+  PersonalizedHomeArtist,
   PersonalizedHomeTrack,
   RecommendationSeed,
 } from './home/personalizedHome';
@@ -70,8 +71,10 @@ export {
   getDownloadedTrack,
   isTrackDownloaded,
   deleteDownloadedTrack,
+  deleteAllDownloadedTracks,
   cancelDownload,
   ensureDirectories,
+  getDownloadStorageInfo,
   getPendingDownloads,
   processPendingDownloads,
   queueDownloads,
@@ -91,6 +94,8 @@ export type {
   DownloadProgress,
   DownloadTrackInput,
   PendingDownload,
+  DownloadStorageInfo,
+  DownloadStorageTrack,
 } from './download/downloadManager';
 
 export {
@@ -108,6 +113,8 @@ export type {
 export {
   getCatalogTracks,
   getLibraryTracks,
+  removeCatalogTrack,
+  removeCatalogTracks,
   toDownloadTrackInput,
   upsertCatalogTracks,
 } from './library/catalogLibrary';

@@ -5,6 +5,7 @@ import {
   type DownloadedTrack,
   type DownloadTrackInput,
 } from '../download/downloadManager';
+import { removeTrackFromLocalPlaylists } from './localPlaylistManager';
 
 export type CatalogSourcePlatform = 'spotify' | 'youtube';
 
@@ -186,6 +187,31 @@ export const upsertCatalogTracks = async (
   await operation;
   return saved;
 };
+
+/** Remove catalog-only entries and detach them from every local playlist. */
+export const removeCatalogTracks = async (
+  spotifyIds: string[]
+): Promise<number> => {
+  const ids = new Set(spotifyIds.map((id) => id.trim()).filter(Boolean));
+  if (!ids.size) return 0;
+
+  let removed = 0;
+  const operation = storageMutation.then(async () => {
+    const current = await getCatalogTracks();
+    const next = current.filter((track) => !ids.has(track.spotifyId));
+    removed = current.length - next.length;
+    if (removed > 0) {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    }
+  });
+  storageMutation = operation.catch(() => {});
+  await operation;
+  await Promise.all([...ids].map(removeTrackFromLocalPlaylists));
+  return removed;
+};
+
+export const removeCatalogTrack = (spotifyId: string): Promise<number> =>
+  removeCatalogTracks([spotifyId]);
 
 export const getLibraryTracks = async (): Promise<LibraryTrack[]> => {
   const [catalogTracks, downloadedTracks] = await Promise.all([

@@ -24,9 +24,12 @@ import {
   GlassSurface,
   LoggedPressable,
   swiftFont,
+  swiftFrame,
   swiftForegroundStyle,
+  swiftLabelStyle,
   swiftPickerStyle,
   swiftTag,
+  swiftTint,
   glassCircleModifiers,
 } from '../native';
 
@@ -49,6 +52,7 @@ type LibraryControlsPickerProps =
       onSearchToggle: () => void;
       activeDownloadsCount: number;
       onDownloadsPress: () => void;
+      embedded?: boolean;
     };
 
 const SORT_OPTIONS: readonly Option<LibrarySort>[] = [
@@ -77,6 +81,7 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
   const [anchor, setAnchor] = React.useState({ x: 12, y: 8, height: 44 });
   const [menuHeight, setMenuHeight] = React.useState(252);
   const isFilter = props.kind === 'filter';
+  const embedded = isFilter && Boolean(props.embedded);
   const label = isFilter ? 'Filtrar biblioteca' : labelFor(VIEW_OPTIONS, props.view);
   const downloadStatus = isFilter && props.activeDownloadsCount > 0
     ? `${props.activeDownloadsCount} ${props.activeDownloadsCount === 1 ? 'download' : 'downloads'} em andamento`
@@ -156,7 +161,13 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
         <SwiftMenu
           label={triggerLabel}
           systemImage="line.3.horizontal.decrease"
-          modifiers={glassCircleModifiers(40, '#B8B8B8')}
+          modifiers={embedded
+            ? [
+                swiftLabelStyle?.('iconOnly'),
+                swiftTint?.('#B8B8B8'),
+                swiftFrame?.({ width: 40, height: 40 }),
+              ].filter(Boolean)
+            : glassCircleModifiers(40, '#B8B8B8')}
         >
           <SwiftButton
             label={searchLabel}
@@ -188,37 +199,42 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
 
   const options = props.kind === 'filter' ? SORT_OPTIONS : VIEW_OPTIONS;
   const selectedValue = props.kind === 'filter' ? props.sort : props.view;
+  const fallbackTrigger = (
+    <LoggedPressable
+      accessibilityLabel={triggerLabel}
+      accessibilityRole="button"
+      accessibilityState={{ expanded: menuVisible }}
+      {...(Platform.OS === 'web' ? { 'aria-haspopup': 'menu' as const } : {})}
+      onPress={openMenu}
+      style={({ pressed }) => [
+        styles.fallbackTrigger,
+        isFilter && styles.fallbackIconTrigger,
+        pressed && styles.optionRowPressed,
+      ]}
+    >
+      {isFilter ? (
+        <Ionicons name="options-outline" size={20} color="#B8B8B8" />
+      ) : (
+        <>
+          <Text numberOfLines={1} style={styles.fallbackLabel}>{label}</Text>
+          <Ionicons name="chevron-down" size={14} color="#B8B8B8" />
+        </>
+      )}
+    </LoggedPressable>
+  );
 
   return (
     <>
       <View ref={triggerRef} collapsable={false} style={styles.triggerAnchor}>
-        <GlassSurface
-          glass="clear"
-          isInteractive
-          style={[styles.fallbackControl, isFilter && styles.fallbackIconControl]}
-        >
-          <LoggedPressable
-            accessibilityLabel={triggerLabel}
-            accessibilityRole="button"
-            accessibilityState={{ expanded: menuVisible }}
-            {...(Platform.OS === 'web' ? { 'aria-haspopup': 'menu' as const } : {})}
-            onPress={openMenu}
-            style={({ pressed }) => [
-              styles.fallbackTrigger,
-              isFilter && styles.fallbackIconTrigger,
-              pressed && styles.optionRowPressed,
-            ]}
+        {embedded ? fallbackTrigger : (
+          <GlassSurface
+            glass="clear"
+            isInteractive
+            style={[styles.fallbackControl, isFilter && styles.fallbackIconControl]}
           >
-            {isFilter ? (
-              <Ionicons name="options-outline" size={20} color="#B8B8B8" />
-            ) : (
-              <>
-                <Text numberOfLines={1} style={styles.fallbackLabel}>{label}</Text>
-                <Ionicons name="chevron-down" size={14} color="#B8B8B8" />
-              </>
-            )}
-          </LoggedPressable>
-        </GlassSurface>
+            {fallbackTrigger}
+          </GlassSurface>
+        )}
       </View>
 
       <Modal

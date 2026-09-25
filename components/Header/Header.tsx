@@ -10,7 +10,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ImportModal } from '../ImportModal';
 import { DownloadsModal } from '../DownloadsModal';
-import { NativeIconButton } from '../native';
+import {
+  AppIcon,
+  GlassSurface,
+  LoggedPressable,
+  NativeIconButton,
+} from '../native';
 import { useDownloads, useLibrarySelectedCategory } from '@context';
 import { LibraryControlsPicker } from './LibraryControlsPicker';
 
@@ -45,37 +50,51 @@ export const Header = () => {
     <View style={[styles.container, { paddingTop: statusBarOffset + 8 }]}>
       <View style={styles.topRow}>
         <View style={styles.leadingControls}>
-          <NativeIconButton
-            systemImage="plus"
-            iconName="add"
-            label="Adicionar música"
-            size={40}
-            onPress={() => setImportModalVisible(true)}
+          <GlassSurface glass="regular" isInteractive style={styles.actionGroup}>
+            <LoggedPressable
+              accessibilityLabel="Adicionar música"
+              accessibilityRole="button"
+              onPress={() => setImportModalVisible(true)}
+              style={({ pressed }) => [styles.groupButton, pressed && styles.groupPressed]}
+            >
+              <AppIcon color="#B8B8B8" name="add" size={21} />
+            </LoggedPressable>
+            <View style={styles.groupDivider} />
+            <View style={styles.filterControl}>
+              <LibraryControlsPicker
+                embedded
+                kind="filter"
+                sort={librarySort}
+                onSortChange={setLibrarySort}
+                searchLabel={`Pesquisar ${searchCopy}`}
+                searchVisible={searchVisible}
+                onSearchToggle={() => setSearchVisible((visible) => !visible)}
+                activeDownloadsCount={activeDownloadsCount}
+                onDownloadsPress={() => setDownloadsModalVisible(true)}
+              />
+              {activeDownloadsCount > 0 ? (
+                <View
+                  style={styles.downloadBadge}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  aria-hidden
+                >
+                  <Text style={styles.downloadBadgeText}>
+                    {activeDownloadsCount > 99 ? '99+' : activeDownloadsCount}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          </GlassSurface>
+        </View>
+        <View style={styles.centerPicker}>
+          <LibraryControlsPicker
+            kind="view"
+            view={libraryView}
+            onViewChange={setLibraryView}
           />
-          <View style={styles.filterControl}>
-            <LibraryControlsPicker
-              kind="filter"
-              sort={librarySort}
-              onSortChange={setLibrarySort}
-              searchLabel={`Pesquisar ${searchCopy}`}
-              searchVisible={searchVisible}
-              onSearchToggle={() => setSearchVisible((visible) => !visible)}
-              activeDownloadsCount={activeDownloadsCount}
-              onDownloadsPress={() => setDownloadsModalVisible(true)}
-            />
-            {activeDownloadsCount > 0 ? (
-              <View
-                style={styles.downloadBadge}
-                accessibilityElementsHidden
-                importantForAccessibility="no-hide-descendants"
-                aria-hidden
-              >
-                <Text style={styles.downloadBadgeText}>
-                  {activeDownloadsCount > 99 ? '99+' : activeDownloadsCount}
-                </Text>
-              </View>
-            ) : null}
-          </View>
+        </View>
+        <View style={styles.trailingControls}>
           <NativeIconButton
             systemImage="gearshape"
             iconName="settings-outline"
@@ -88,14 +107,6 @@ export const Header = () => {
             }
           />
         </View>
-        <View style={styles.centerPicker}>
-          <LibraryControlsPicker
-            kind="view"
-            view={libraryView}
-            onViewChange={setLibraryView}
-          />
-        </View>
-        <View style={styles.trailingSpace} pointerEvents="none" />
       </View>
 
       {searchVisible ? (
@@ -140,8 +151,27 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  leadingControls: { flexDirection: 'row', gap: 2, width: 124 },
-  trailingSpace: { width: 124 },
+  leadingControls: { alignItems: 'center', width: 82 },
+  trailingControls: { alignItems: 'flex-end', width: 82 },
+  actionGroup: {
+    alignItems: 'center',
+    borderRadius: 20,
+    flexDirection: 'row',
+    height: 40,
+    width: 81,
+  },
+  groupButton: {
+    alignItems: 'center',
+    height: 40,
+    justifyContent: 'center',
+    width: 40,
+  },
+  groupDivider: {
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    height: 20,
+    width: StyleSheet.hairlineWidth,
+  },
+  groupPressed: { opacity: 0.58 },
   filterControl: {
     height: 40,
     position: 'relative',

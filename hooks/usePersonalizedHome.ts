@@ -53,15 +53,6 @@ export const usePersonalizedHome = () => {
         const localSnapshot = build([]);
         publish(localSnapshot);
 
-        const artistImages = Promise.all(
-          localSnapshot.artists.map(async (artist) => {
-            if (!artist.spotifyArtistId) return artist;
-            const imageURL = await getCachedArtistImage(artist.id, () =>
-              getSpotifyArtistImage(artist.spotifyArtistId!)
-            );
-            return imageURL ? { ...artist, imageURL } : artist;
-          })
-        );
         const discoveries = settings.personalizedHome
           ? loadHomeDiscoveries(
               localSnapshot.seeds,
@@ -69,11 +60,16 @@ export const usePersonalizedHome = () => {
               settings.allowExplicitRecommendations
             )
           : Promise.resolve([]);
-        const [resolvedArtists, resolvedDiscoveries] = await Promise.all([
-          artistImages,
-          discoveries,
-        ]);
+        const resolvedDiscoveries = await discoveries;
         const enriched = build(resolvedDiscoveries);
+        const resolvedArtists = await Promise.all(
+          enriched.artists.map(async (artist) => {
+            const imageURL = await getCachedArtistImage(artist.id, () =>
+              getSpotifyArtistImage(artist.spotifyArtistId)
+            );
+            return imageURL ? { ...artist, imageURL } : artist;
+          })
+        );
         publish({ ...enriched, artists: resolvedArtists });
       })().catch(() => {
         if (active && request === generation.current) setIsLoading(false);

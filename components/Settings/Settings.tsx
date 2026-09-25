@@ -17,11 +17,14 @@ import { checkForOTAUpdateNow } from '@hooks';
 import {
   clearUserProfile,
   clearHomeDiscoveryCache,
+  getDownloadStorageInfo,
   getLibraryTracks,
   getLocalPlaylists,
   type AppSettings,
+  type DownloadStorageInfo,
 } from '@services';
 import { AppIcon, LoggedPressable, NativeIconButton } from '../native';
+import { formatStorageSize, StorageManagerModal } from './StorageManagerModal';
 
 type LibrarySummary = {
   downloads: number;
@@ -30,6 +33,7 @@ type LibrarySummary = {
 };
 
 const EMPTY_SUMMARY: LibrarySummary = { downloads: 0, playlists: 0, tracks: 0 };
+const EMPTY_STORAGE: DownloadStorageInfo = { directory: '', totalBytes: 0, tracks: [] };
 
 const SettingRow = ({
   description,
@@ -108,19 +112,22 @@ export const Settings = () => {
   const { top } = useSafeAreaInsets();
   const { settings, setSetting, resetSettings } = useAppSettings();
   const [summary, setSummary] = React.useState(EMPTY_SUMMARY);
+  const [storage, setStorage] = React.useState(EMPTY_STORAGE);
+  const [storageVisible, setStorageVisible] = React.useState(false);
   const [updateStatus, setUpdateStatus] = React.useState('');
   const [checkingUpdate, setCheckingUpdate] = React.useState(false);
 
   React.useEffect(() => {
     let active = true;
-    void Promise.all([getLibraryTracks(), getLocalPlaylists()]).then(
-      ([tracks, playlists]) => {
+    void Promise.all([getLibraryTracks(), getLocalPlaylists(), getDownloadStorageInfo()]).then(
+      ([tracks, playlists, nextStorage]) => {
         if (!active) return;
         setSummary({
           downloads: tracks.filter((track) => track.isDownloaded).length,
           playlists: playlists.length,
           tracks: tracks.length,
         });
+        setStorage(nextStorage);
       }
     );
     return () => {
@@ -237,6 +244,16 @@ export const Settings = () => {
             <Text style={styles.summaryDot}>•</Text>
             <Text style={styles.summaryText}>{summary.playlists} playlists</Text>
           </View>
+          <View style={styles.separator} />
+          <ActionRow
+            detail={formatStorageSize(storage.totalBytes)}
+            icon="folder-outline"
+            label="Gerenciar armazenamento"
+            onPress={() => setStorageVisible(true)}
+          />
+          <Text selectable numberOfLines={2} style={styles.storagePath}>
+            {storage.directory || 'Armazenamento interno do app'}
+          </Text>
         </Section>
 
         <Section title="ATUALIZAÇÕES">
@@ -288,6 +305,17 @@ export const Settings = () => {
           />
         </Section>
       </ScrollView>
+      <StorageManagerModal
+        visible={storageVisible}
+        onClose={() => setStorageVisible(false)}
+        onStorageChanged={(nextStorage) => {
+          setStorage(nextStorage);
+          setSummary((current) => ({
+            ...current,
+            downloads: nextStorage.tracks.length,
+          }));
+        }}
+      />
     </View>
   );
 };
@@ -380,6 +408,14 @@ const styles = StyleSheet.create({
   },
   summaryText: { color: '#A8A8AD', fontFamily: 'SF-Regular', fontSize: 12 },
   summaryDot: { color: '#5A5A5F', fontSize: 12 },
+  storagePath: {
+    color: '#6F6F74',
+    fontFamily: 'SF-Regular',
+    fontSize: 10,
+    lineHeight: 14,
+    paddingBottom: 11,
+    paddingHorizontal: 14,
+  },
   statusText: {
     borderTopColor: '#303033',
     borderTopWidth: StyleSheet.hairlineWidth,
