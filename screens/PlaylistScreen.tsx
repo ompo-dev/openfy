@@ -1,9 +1,9 @@
 import * as React from 'react';
 import { View } from 'react-native';
-import { Href, useRouter, useSegments } from 'expo-router';
 
 import { CollectionDetail, LocalPlaylist } from '@components';
 import { PlaylistModel, TrackModel } from '@models';
+import { useDetailNavigation } from '@hooks';
 import { checkSavedTracks, getPlaylist, getPlaylistItems } from '@api';
 import { formatCollectionMeta } from '@utils';
 
@@ -19,8 +19,7 @@ export const PlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) =>
   );
 
 const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
-  const router = useRouter();
-  const segments = useSegments();
+  const { openDetail } = useDetailNavigation();
   const [playlist, setPlaylist] = React.useState<PlaylistModel | null>(null);
   const [tracks, setTracks] = React.useState<TrackModel[]>([]);
   const offsetRef = React.useRef(0);
@@ -104,10 +103,9 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
 
   const handleArtistPress = React.useCallback(
     (artistId: string) => {
-      const section = segments.join('/').includes('library') ? 'library' : 'home';
-      router.push(`/(tabs)/${section}/artist/${artistId}` as Href);
+      openDetail('artist', artistId);
     },
-    [router, segments]
+    [openDetail]
   );
 
   if (!playlist) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;

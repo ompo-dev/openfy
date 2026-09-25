@@ -1,11 +1,11 @@
 import * as React from 'react';
-import { useRouter, useSegments } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import Foundation from '@expo/vector-icons/Foundation';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 
 import { COLORS, Shapes, Sizes } from '@config';
+import { useDetailNavigation } from '@hooks';
 import { styling } from './styles';
 
 export type CardPropsType = {
@@ -28,17 +28,14 @@ const Card = React.memo(
     size = Sizes.BIG,
     shape = Shapes.SQUARE,
   }: CardPropsType) => {
-    const router = useRouter();
+    const { openDetail } = useDetailNavigation();
     const styles = styling(size, shape);
-    const pathname = useSegments().slice(0, 2).join('/') as
-      | '(tabs)/home'
-      | '(tabs)/library';
 
     const handlePress = React.useCallback(
       (typeID: string) => {
-        router.push(`/${pathname}/${type}/${typeID}`);
+        openDetail(type, typeID);
       },
-      [router, type, pathname]
+      [openDetail, type]
     );
 
     const renderIcon = React.useCallback(() => {

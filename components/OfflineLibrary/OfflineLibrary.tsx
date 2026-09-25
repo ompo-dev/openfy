@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { Href, useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { Swipeable } from 'react-native-gesture-handler';
 import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
 
@@ -26,6 +26,7 @@ import {
   type LocalPlaylist,
 } from '@services';
 import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
+import { useDetailNavigation } from '@hooks';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { LoggedPressable } from '../native';
 import { PlaylistMosaic } from '../PlaylistMosaic';
@@ -44,7 +45,7 @@ const toPlayerTrack = (track: LibraryTrack) => ({
 });
 
 export const OfflineLibrary = () => {
-  const router = useRouter();
+  const { openDetail } = useDetailNavigation();
   const [tracks, setTracks] = React.useState<LibraryTrack[]>([]);
   const [playlists, setPlaylists] = React.useState<LocalPlaylist[]>([]);
   const [artistImageURLs, setArtistImageURLs] = React.useState<Record<string, string>>({});
@@ -303,7 +304,7 @@ export const OfflineLibrary = () => {
       <LoggedPressable
         accessibilityRole="button"
         accessibilityLabel={`Abrir playlist ${item.title}`}
-        onPress={() => router.push(`/library/playlist/${item.id}`)}
+        onPress={() => openDetail('playlist', item.id, 'library')}
         style={styles.playlistItem}
       >
         <PlaylistMosaic imageURLs={imageURLs} size={62} />
@@ -330,11 +331,17 @@ export const OfflineLibrary = () => {
         accessibilityLabel={`${isArtist ? 'Abrir artista' : 'Abrir álbum'} ${item.title}`}
         onPress={() => {
           if (isArtist) {
-            router.push(`/library/artist/local_artist_${encodeURIComponent(item.id)}` as Href);
+            openDetail(
+              'artist',
+              `local_artist_${encodeURIComponent(item.id)}`,
+              'library'
+            );
             return;
           }
-          router.push(
-            `/library/album/local_album_${encodeURIComponent(item.id)}` as Href
+          openDetail(
+            'album',
+            `local_album_${encodeURIComponent(item.id)}`,
+            'library'
           );
         }}
         style={styles.playlistItem}

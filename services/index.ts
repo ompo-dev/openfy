@@ -143,6 +143,7 @@ export {
   releasePreloadedAudio,
   releaseAllPreloadedAudio,
   configureAudioSession,
+  setRemotePlaybackHandlers,
   getAudioDiagnosticsSnapshot,
   recordAudioDiagnostic,
   DEFAULT_STATE,
@@ -151,6 +152,7 @@ export type {
   AudioDiagnosticEvent,
   PlayerState,
   AudioSourceInput,
+  RemotePlaybackHandlers,
 } from './audio/playerService';
 
 export {

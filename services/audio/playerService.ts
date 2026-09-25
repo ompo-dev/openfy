@@ -48,6 +48,11 @@ export type PlaybackDiagnosticTrack = {
   albumName: string;
 };
 
+export type RemotePlaybackHandlers = {
+  next?: () => void | Promise<void>;
+  previous?: () => void | Promise<void>;
+};
+
 export type AudioDiagnosticEvent = {
   at: string;
   event: string;
@@ -85,8 +90,12 @@ export const getAudioSourceUri = (input: AudioSourceInput): string =>
 let playerInstance: AudioPlayer | null = null;
 let playerStatusSubscription: { remove(): void } | undefined;
 let playerAppStateSubscription: { remove(): void } | undefined;
+let playerRemoteNextSubscription: { remove(): void } | undefined;
+let playerRemotePreviousSubscription: { remove(): void } | undefined;
 let loadGeneration = 0;
 let isSeeking = false;
+let remoteCommandInFlight = false;
+let remotePlaybackHandlers: RemotePlaybackHandlers = {};
 let currentSourceKind: AudioDiagnosticEvent['sourceKind'] = 'none';
 let currentSourceHost: string | undefined;
 let currentDiagnosticSpotifyId: string | null = null;
@@ -174,10 +183,31 @@ const describeSource = (uri?: string): Pick<AudioDiagnosticEvent, 'sourceKind' |
 const detachPlayerSubscriptions = () => {
   const status = playerStatusSubscription;
   const appState = playerAppStateSubscription;
+  const remoteNext = playerRemoteNextSubscription;
+  const remotePrevious = playerRemotePreviousSubscription;
   playerStatusSubscription = undefined;
   playerAppStateSubscription = undefined;
+  playerRemoteNextSubscription = undefined;
+  playerRemotePreviousSubscription = undefined;
   try { status?.remove(); } catch {}
   try { appState?.remove(); } catch {}
+  try { remoteNext?.remove(); } catch {}
+  try { remotePrevious?.remove(); } catch {}
+};
+
+export const setRemotePlaybackHandlers = (
+  handlers: RemotePlaybackHandlers
+): void => {
+  remotePlaybackHandlers = handlers;
+};
+
+const runRemoteCommand = (command: keyof RemotePlaybackHandlers): void => {
+  const handler = remotePlaybackHandlers[command];
+  if (!handler || remoteCommandInFlight) return;
+  remoteCommandInFlight = true;
+  void Promise.resolve(handler()).finally(() => {
+    remoteCommandInFlight = false;
+  });
 };
 
 /** Invalidate pending loads immediately when a different track is selected. */
@@ -491,11 +521,20 @@ export const loadAndPlay = async (
     if (Platform.OS !== 'ios') void enqueuePreloadCleanup(uri, playerSource);
     player.volume = fadeInDurationMs > 0 ? 0 : 1;
 
+    playerRemoteNextSubscription = player.addListener('remoteNextTrack', () => {
+      runRemoteCommand('next');
+    });
+    playerRemotePreviousSubscription = player.addListener('remotePreviousTrack', () => {
+      runRemoteCommand('previous');
+    });
+
     if (lockScreenMetadata) {
       try {
         player.setActiveForLockScreen(true, lockScreenMetadata, {
-          showSeekBackward: true,
-          showSeekForward: true,
+          showNextTrack: true,
+          showPreviousTrack: true,
+          showSeekBackward: false,
+          showSeekForward: false,
         });
       } catch (error) {
         console.warn('[PlayerService] Lock screen controls unavailable:', error);

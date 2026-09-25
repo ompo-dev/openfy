@@ -9,7 +9,8 @@ import {
 } from '@services';
 import { FullPlayer } from '../FullPlayer';
 
-const mockPush = jest.fn();
+const mockNavigate = jest.fn();
+const mockReplace = jest.fn();
 const mockSwipeableArtwork = jest.fn((props) => {
   const React = require('react');
   const { Image, View } = require('react-native');
@@ -28,7 +29,7 @@ const mockSwipeableArtwork = jest.fn((props) => {
   );
 });
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ navigate: mockNavigate, replace: mockReplace }),
   useSegments: () => ['(tabs)', 'library'],
 }));
 jest.mock('@api', () => ({ findArtistIdByName: jest.fn() }));
@@ -181,8 +182,9 @@ describe('FullPlayer artist row and YouTube source', () => {
       await fireEvent.press(
         screen.getByLabelText(`Abrir artista ${artist.name}`)
       );
-      expect(mockPush).toHaveBeenLastCalledWith(
-        `/(tabs)/library/artist/${artist.id}`
+      expect(mockNavigate).toHaveBeenLastCalledWith(
+        `/(tabs)/library/artist/${artist.id}`,
+        { dangerouslySingular: true }
       );
     }
   });

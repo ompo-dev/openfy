@@ -28,6 +28,7 @@ jest.mock('@services', () => ({
   restoreCurrentVolume: jest.fn().mockResolvedValue(undefined),
   preloadAudio: jest.fn().mockResolvedValue(undefined),
   releasePreloadedAudio: jest.fn(),
+  setRemotePlaybackHandlers: jest.fn(),
   recordInteraction: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('../../services/lyrics/lyricsService', () => ({

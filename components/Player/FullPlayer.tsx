@@ -27,9 +27,9 @@ import * as Haptics from 'expo-haptics';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Href, useRouter, useSegments } from 'expo-router';
 import { findArtistIdByName } from '@api';
 import { usePlayer } from '@context';
+import { useDetailNavigation } from '@hooks';
 import {
   getCatalogMapping,
   getLyricGapRange,
@@ -231,8 +231,7 @@ function PlayerGlassButton({
 }
 
 export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
-  const router = useRouter();
-  const segments = useSegments();
+  const { openDetail } = useDetailNavigation();
   const {
     currentTrack,
     playerState,
@@ -331,13 +330,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           : artistId) ||
         (await findArtistIdByName(artistName)) ||
         `local_artist_${encodeURIComponent(artistName)}`;
-      const section = segments.join('/').includes('library')
-        ? 'library'
-        : 'home';
-      router.push(`/(tabs)/${section}/artist/${targetArtistId}` as Href);
+      openDetail('artist', targetArtistId);
       requestAnimationFrame(onClose);
     },
-    [currentTrack?.localAudioPath, onClose, router, segments]
+    [currentTrack?.localAudioPath, onClose, openDetail]
   );
 
   const renderArtistPill = () => (

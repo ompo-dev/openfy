@@ -29,6 +29,7 @@ jest.mock('@services', () => ({
   restoreCurrentVolume: jest.fn().mockResolvedValue(undefined),
   preloadAudio: jest.fn().mockResolvedValue(undefined),
   releasePreloadedAudio: jest.fn(),
+  setRemotePlaybackHandlers: jest.fn(),
   recordInteraction: jest.fn().mockResolvedValue(undefined),
   reportDirectYouTubeStreamRefusal: jest.fn().mockResolvedValue(undefined),
   getDirectYouTubeMediaHeaders: jest.fn((url: string) => {

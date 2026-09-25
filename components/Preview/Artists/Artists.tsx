@@ -1,8 +1,8 @@
 import * as React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { Image } from 'expo-image';
-import { Href, useRouter, useSegments } from 'expo-router';
 
+import { useDetailNavigation } from '@hooks';
 import { ArtistModel } from '@models';
 
 import { styles } from './styles';
@@ -12,13 +12,12 @@ export type ArtistsPropsType = {
 };
 
 export const Artists = ({ artists }: ArtistsPropsType) => {
-  const router = useRouter();
-  const pathname = useSegments().slice(0, 2).join('/');
+  const { openDetail } = useDetailNavigation();
   const handlePress = React.useCallback(
     (artistId: string) => {
-      router.push(`/${pathname}/artist/${artistId}` as Href);
+      openDetail('artist', artistId);
     },
-    [pathname, router]
+    [openDetail]
   );
 
   const checkArtistIDisEmpty = React.useMemo(

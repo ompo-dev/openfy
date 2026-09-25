@@ -34,6 +34,7 @@ import {
   recordAudioDiagnostic,
   releasePreloadedAudio,
   releaseAllPreloadedAudio,
+  setRemotePlaybackHandlers,
   unload,
   toAudioSource,
 } from '../playerService';
@@ -91,6 +92,7 @@ describe('playerService fades', () => {
     (createAudioPlayer as jest.Mock).mockReset().mockReturnValue(createPlayer());
     (preload as jest.Mock).mockResolvedValue(undefined);
     jest.mocked(prepareLocalAudioForPlayback).mockResolvedValue(undefined);
+    setRemotePlaybackHandlers({});
   });
 
   afterEach(async () => {
@@ -441,7 +443,9 @@ describe('playerService fades', () => {
     jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
     const onStatus = jest.fn();
     await loadAndPlay('file:///offline.m4a', onStatus);
-    const emitStatus = player.addListener.mock.calls[0][1];
+    const emitStatus = player.addListener.mock.calls.find(
+      ([event]) => event === 'playbackStatusUpdate'
+    )![1];
     const changeState = jest.mocked(AppState.addEventListener).mock.calls.at(-1)![1];
     const playing = { ...player.currentStatus, playing: true, currentTime: 10, duration: 200 };
     emitStatus(playing);
@@ -461,6 +465,49 @@ describe('playerService fades', () => {
     AppState.currentState = 'active';
     changeState('active');
     expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ positionMs: 151000 }));
+  });
+
+  it('uses track navigation controls on the lock screen', async () => {
+    (Platform as { OS: string }).OS = 'ios';
+    const listeners = new Map<string, () => void>();
+    const player = {
+      ...createPlayer(),
+      setActiveForLockScreen: jest.fn(),
+      addListener: jest.fn((event: string, callback: () => void) => {
+        listeners.set(event, callback);
+        return { remove: jest.fn() };
+      }),
+    };
+    const next = jest.fn().mockResolvedValue(undefined);
+    const previous = jest.fn().mockResolvedValue(undefined);
+    setRemotePlaybackHandlers({ next, previous });
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+
+    await loadAndPlay('file:///offline.m4a', undefined, {
+      title: 'Faixa',
+      artist: 'Artista',
+      albumTitle: 'Album',
+      artworkUrl: 'file:///cover.jpg',
+    });
+
+    expect(player.setActiveForLockScreen).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ title: 'Faixa' }),
+      {
+        showNextTrack: true,
+        showPreviousTrack: true,
+        showSeekBackward: false,
+        showSeekForward: false,
+      }
+    );
+
+    listeners.get('remoteNextTrack')?.();
+    await flushMicrotasks();
+    expect(next).toHaveBeenCalledTimes(1);
+
+    listeners.get('remotePreviousTrack')?.();
+    await flushMicrotasks();
+    expect(previous).toHaveBeenCalledTimes(1);
   });
 
   it('does not recreate a pending preload after entering background', async () => {

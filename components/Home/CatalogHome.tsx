@@ -2,9 +2,10 @@ import * as React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { Href, useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 
 import { useLibrarySelectedCategory, usePlayer } from '@context';
+import { useDetailNavigation } from '@hooks';
 import type { CanonicalTrack } from '../../models/CanonicalTrack';
 import {
   getContinueListening,
@@ -150,7 +151,7 @@ const TrackShelf = ({
 };
 
 const AlbumShelf = ({ albums }: { albums: LocalAlbumCollection[] }) => {
-  const router = useRouter();
+  const { openDetail } = useDetailNavigation();
   if (!albums.length) return null;
   return (
     <View style={styles.section}>
@@ -165,8 +166,10 @@ const AlbumShelf = ({ albums }: { albums: LocalAlbumCollection[] }) => {
             accessibilityLabel={`Abrir álbum ${album.title}`}
             key={album.id}
             onPress={() =>
-              router.push(
-                `/(tabs)/home/album/local_album_${encodeURIComponent(album.id)}` as Href
+              openDetail(
+                'album',
+                `local_album_${encodeURIComponent(album.id)}`,
+                'home'
               )
             }
             style={styles.collectionTile}
@@ -199,7 +202,7 @@ const PlaylistShelf = ({
   playlists: LocalPlaylist[];
   tracksById: Map<string, LibraryTrack>;
 }) => {
-  const router = useRouter();
+  const { openDetail } = useDetailNavigation();
   if (!playlists.length) return null;
   return (
     <View style={styles.section}>
@@ -222,7 +225,7 @@ const PlaylistShelf = ({
               accessibilityLabel={`Abrir playlist ${playlist.title}`}
               key={playlist.id}
               onPress={() =>
-                router.push(`/(tabs)/home/playlist/${playlist.id}` as Href)
+                openDetail('playlist', playlist.id, 'home')
               }
               style={styles.collectionTile}
             >

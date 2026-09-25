@@ -1,9 +1,9 @@
 import * as React from 'react';
 import { View } from 'react-native';
-import { Href, useRouter, useSegments } from 'expo-router';
 
 import { CollectionDetail, LocalAlbum } from '@components';
 import { getAlbum, getArtist } from '@api';
+import { useDetailNavigation } from '@hooks';
 import { AlbumModel, ArtistModel } from '@models';
 import { getDisplayTime } from '@utils';
 
@@ -30,8 +30,7 @@ export const AlbumScreen = ({ albumId }: AlbumScreenPropsType) =>
   );
 
 const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
-  const router = useRouter();
-  const segments = useSegments();
+  const { openDetail } = useDetailNavigation();
   const [album, setAlbum] = React.useState<AlbumModel | null>(null);
   const [artists, setArtists] = React.useState<ArtistModel[]>([]);
 
@@ -63,10 +62,9 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
 
   const handleArtistPress = React.useCallback(
     (artistId: string) => {
-      const section = segments.join('/').includes('library') ? 'library' : 'home';
-      router.push(`/(tabs)/${section}/artist/${artistId}` as Href);
+      openDetail('artist', artistId);
     },
-    [router, segments]
+    [openDetail]
   );
 
   if (!album) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;

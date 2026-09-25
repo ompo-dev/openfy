@@ -34,6 +34,7 @@ import {
   reportDirectYouTubeStreamRefusal,
   getDirectYouTubeMediaHeaders,
   AudioSourceInput,
+  setRemotePlaybackHandlers,
 } from '@services';
 import {
   fetchLyrics,
@@ -940,3 +941,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     }
   },
 }));
+
+setRemotePlaybackHandlers({
+  next: () => usePlayerStore.getState().playNext(),
+  previous: () => usePlayerStore.getState().playPrevious(),
+});

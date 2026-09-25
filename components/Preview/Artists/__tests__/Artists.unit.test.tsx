@@ -23,7 +23,8 @@ enum TEST_IDS {
 
 describe('AlbumArtists', () => {
   let container: RenderResult;
-  const mockRouter = jest.fn();
+  const mockNavigate = jest.fn();
+  const mockReplace = jest.fn();
   const defaultProps: ArtistsPropsType = {
     artists: [
       {
@@ -42,7 +43,10 @@ describe('AlbumArtists', () => {
   };
 
   beforeEach(async () => {
-    (useRouter as jest.Mock).mockReturnValue({ push: mockRouter });
+    (useRouter as jest.Mock).mockReturnValue({
+      navigate: mockNavigate,
+      replace: mockReplace,
+    });
     (useSegments as jest.Mock).mockReturnValue(['(tabs)', 'home']);
     container = await render(<Artists {...defaultProps} />);
   });
@@ -61,14 +65,20 @@ describe('AlbumArtists', () => {
       const artist1 = container.getByTestId(TEST_IDS.ARTIST_LINK_ID_1);
 
       fireEvent.press(artist1);
-      expect(mockRouter).toHaveBeenCalledWith('/(tabs)/home/artist/id_1');
+      expect(mockNavigate).toHaveBeenCalledWith(
+        '/(tabs)/home/artist/id_1',
+        { dangerouslySingular: true }
+      );
     });
 
     it('navigates to the first artist page with given ID', () => {
       const artist2 = container.getByTestId(TEST_IDS.ARTIST_LINK_ID_2);
 
       fireEvent.press(artist2);
-      expect(mockRouter).toHaveBeenCalledWith('/(tabs)/home/artist/id_2');
+      expect(mockNavigate).toHaveBeenCalledWith(
+        '/(tabs)/home/artist/id_2',
+        { dangerouslySingular: true }
+      );
     });
   });
 

@@ -15,23 +15,23 @@ export default function LibraryLayout() {
         options={{ headerShown: false, animation: 'default' }}
       />
       <Stack.Screen
-        name="playlist"
+        name="playlist/[id]"
         options={detailStackOptions}
       />
       <Stack.Screen
-        name="album"
+        name="album/[id]"
         options={detailStackOptions}
       />
       <Stack.Screen
-        name="artist"
+        name="artist/[id]"
         options={detailStackOptions}
       />
       <Stack.Screen
-        name="episode"
+        name="episode/[id]"
         options={{ headerShown: false, animation: 'default' }}
       />
       <Stack.Screen
-        name="show"
+        name="show/[id]"
         options={{ headerShown: false, animation: 'default' }}
       />
     </Stack>

@@ -2,9 +2,7 @@ import * as React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 
-import { useRouter, useSegments } from 'expo-router';
-
-import { useApplicationDimensions } from '@hooks';
+import { useApplicationDimensions, useDetailNavigation } from '@hooks';
 import { getRecentlyPlayed, updateRecentlyPlayed } from '@api';
 import { RecentlyPlayedModel } from '@models';
 import { RECENTLY_PLAYED_COVER_SIZE } from '@config';
@@ -23,11 +21,8 @@ export const RecentlyPlayed = () => {
       imageURL: '',
     }),
   ]);
-  const pathname = useSegments().slice(0, 2).join('/') as
-    | '(tabs)/home'
-    | '(tabs)/library';
   const { width } = useApplicationDimensions();
-  const router = useRouter();
+  const { openDetail } = useDetailNavigation();
 
   const gap = 8;
   const paddingHorizontal = 16;
@@ -69,7 +64,7 @@ export const RecentlyPlayed = () => {
       ) : (
         recentlyPlayedData.map(({ id, title, imageURL }, index) => (
           <Pressable
-            onPress={() => router.push(`/${pathname}/album/${id}`)}
+            onPress={() => openDetail('album', id)}
             key={index}
             style={[
               styles.link,
