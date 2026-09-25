@@ -100,8 +100,12 @@ describe('queue preload window', () => {
       lyricsData: null,
       playerState: DEFAULT_STATE,
       queue: [],
+      queueOriginalOrder: [],
       queueIndex: 0,
       queueSourceId: null,
+      isShuffle: false,
+      repeatMode: 'off',
+      playTrack: realPlayTrack,
     });
   });
 
@@ -181,6 +185,37 @@ describe('queue preload window', () => {
     );
   });
 
+  it('streams a catalog-only YouTube track without requiring a download', async () => {
+    const catalogTrack: PlayerTrack = {
+      ...tracks[1],
+      spotifyId: 'catalog-only-track',
+      title: 'Faixa só no catálogo',
+      youtubeVideoId: 'V1M1hYxmRvA',
+    };
+    const streamUrl = 'https://media.test/catalog-only.m4a';
+    (resolveAudioUrl as jest.Mock).mockResolvedValue({
+      url: streamUrl,
+      format: 'm4a',
+    });
+
+    await usePlayerStore.getState().playTrack(catalogTrack);
+
+    expect(getDownloadedTrack).toHaveBeenCalledWith(catalogTrack.spotifyId);
+    expect(resolveAudioUrl).toHaveBeenCalledWith(
+      catalogTrack.title,
+      catalogTrack.artistName,
+      `yt_${catalogTrack.youtubeVideoId}`,
+      catalogTrack.duration_ms
+    );
+    expect(loadAndPlay).toHaveBeenCalledWith(
+      streamUrl,
+      expect.any(Function),
+      expect.any(Object),
+      0,
+      catalogTrack
+    );
+  });
+
   describe('playQueueIndex', () => {
     afterEach(() => {
       usePlayerStore.setState({ playTrack: realPlayTrack });
@@ -217,6 +252,66 @@ describe('queue preload window', () => {
       expect(usePlayerStore.getState().queueIndex).toBe(2);
       expect(usePlayerStore.getState().queueSourceId).toBe('playlist:daily');
       expect(playTrack).toHaveBeenCalledWith(tracks[2], { setQueue: false });
+    });
+  });
+
+  describe('stable shuffle queue', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+      usePlayerStore.setState({ playTrack: realPlayTrack });
+    });
+
+    it('shuffles once and moves forward and backward through that exact order', async () => {
+      const playTrack = jest.fn().mockResolvedValue(undefined);
+      const randomSpy = jest
+        .spyOn(Math, 'random')
+        .mockReturnValueOnce(0)
+        .mockReturnValueOnce(0.5);
+      usePlayerStore.setState({ playTrack });
+
+      await usePlayerStore
+        .getState()
+        .playWithQueue(tracks, 0, 'playlist:shuffle', { shuffle: true });
+
+      const shuffledQueue = [...usePlayerStore.getState().queue];
+      expect(usePlayerStore.getState().isShuffle).toBe(true);
+      expect(usePlayerStore.getState().queueOriginalOrder).toEqual(tracks);
+      expect(shuffledQueue).toHaveLength(tracks.length);
+      expect(new Set(shuffledQueue.map((track) => track.spotifyId))).toEqual(
+        new Set(tracks.map((track) => track.spotifyId))
+      );
+      expect(randomSpy).toHaveBeenCalledTimes(tracks.length - 1);
+
+      await usePlayerStore.getState().playNext();
+      await usePlayerStore.getState().playNext();
+      expect(usePlayerStore.getState().queueIndex).toBe(2);
+      expect(playTrack).toHaveBeenLastCalledWith(shuffledQueue[2], {
+        setQueue: false,
+      });
+      expect(randomSpy).toHaveBeenCalledTimes(tracks.length - 1);
+
+      await usePlayerStore.getState().playPrevious();
+      expect(usePlayerStore.getState().queueIndex).toBe(1);
+      expect(playTrack).toHaveBeenLastCalledWith(shuffledQueue[1], {
+        setQueue: false,
+      });
+      expect(randomSpy).toHaveBeenCalledTimes(tracks.length - 1);
+    });
+
+    it('keeps the current track selected when shuffle is disabled', () => {
+      const shuffledQueue = [tracks[2], tracks[0], tracks[1]];
+      usePlayerStore.setState({
+        queue: shuffledQueue,
+        queueOriginalOrder: tracks,
+        queueIndex: 2,
+        isShuffle: true,
+      });
+
+      usePlayerStore.getState().toggleShuffle();
+
+      expect(usePlayerStore.getState().queue).toEqual(tracks);
+      expect(usePlayerStore.getState().queueIndex).toBe(1);
+      expect(usePlayerStore.getState().isShuffle).toBe(false);
     });
   });
 });

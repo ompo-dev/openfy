@@ -5,6 +5,7 @@ import {
   Share,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -22,7 +23,13 @@ import { GlassSurface, LoggedPressable, NativeIconButton } from '../native';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
 
-type CollectionTrack = TrackModel & { localAudioPath?: string };
+type CollectionTrack = TrackModel & {
+  localAudioPath?: string;
+  localImagePath?: string;
+  audioUrl?: string;
+  streamUrl?: string;
+  releaseDate?: string;
+};
 type ExtraTrackSection = {
   id: string;
   title: string;
@@ -43,7 +50,7 @@ export type CollectionDetailProps = {
   tracks: CollectionTrack[];
   artists?: { id: string; name: string }[];
   onAddTracksPress?: () => void | Promise<void>;
-  onArtistPress?: (artistId: string) => void;
+  onArtistPress?: (artistId: string, artistName: string) => void | Promise<void>;
   onDeletePress?: () => void | Promise<void>;
   onEndReached?: () => void;
   onSharePress?: () => void | Promise<void>;
@@ -59,8 +66,10 @@ const toPlayerTrack = (track: CollectionTrack, collectionName: string) => ({
   title: track.title,
   artistName: track.subtitle,
   albumName: track.albumName || collectionName,
-  imageURL: track.imageURL || '',
+  imageURL: track.localImagePath || track.imageURL || '',
   localAudioPath: track.localAudioPath,
+  streamUrl: track.streamUrl || track.audioUrl,
+  releaseDate: track.releaseDate,
   duration_ms: track.durationMs || 0,
   artists: track.artists,
   albumId: track.albumId,
@@ -68,6 +77,34 @@ const toPlayerTrack = (track: CollectionTrack, collectionName: string) => ({
   youtubeVideoId: track.youtubeVideoId,
   youtubeUrl: track.youtubeUrl,
 });
+
+const normalizeSearchValue = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase()
+    .trim();
+
+const getTrackArtists = (track: CollectionTrack) => {
+  if (track.artists?.length) return track.artists;
+  return track.subtitle
+    .split(/\s*(?:,|&|feat\.?|ft\.?|·)\s*/i)
+    .map((name) => ({ id: '', name: name.trim() }))
+    .filter((artist) => artist.name);
+};
+
+const trackMatchesSearch = (track: CollectionTrack, query: string) => {
+  if (!query) return true;
+  const searchable = [
+    track.title,
+    track.subtitle,
+    track.albumName || '',
+    ...getTrackArtists(track).map((artist) => artist.name),
+  ]
+    .map(normalizeSearchValue)
+    .join(' ');
+  return searchable.includes(query);
+};
 
 const toDownloadInput = (
   track: CollectionTrack,
@@ -114,10 +151,13 @@ export const CollectionDetail = ({
   const segments = useSegments();
   const insets = useSafeAreaInsets();
   const [sortAscending, setSortAscending] = React.useState(false);
+  const [isSearchOpen, setIsSearchOpen] = React.useState(false);
+  const [searchQuery, setSearchQuery] = React.useState('');
   const { downloads, enqueueDownloads } = useDownloads();
   const {
     addToQueue,
     currentTrack,
+    isLoadingAudio,
     isShuffle,
     playerState,
     playWithQueue,
@@ -130,19 +170,39 @@ export const CollectionDetail = ({
     [downloads]
   );
   const collectionPlaybackId = `${kind}:${collectionId}`;
-  const isCollectionPlayback = queueSourceId === collectionPlaybackId;
+  const isCollectionPlayback = Boolean(
+    queueSourceId === collectionPlaybackId ||
+      queueSourceId?.startsWith(`${collectionPlaybackId}:`)
+  );
+  const isCollectionPlaying =
+    isCollectionPlayback && (playerState.isPlaying || isLoadingAudio);
+  const isCollectionShuffleActive = isCollectionPlayback && isShuffle;
   const metadata = metadataProp || formatCollectionMeta({
     createdAt,
     trackCount: trackCount ?? tracks.length,
     totalDurationMs:
       totalDurationMs ?? tracks.reduce((total, track) => total + (track.durationMs || 0), 0),
   });
-  const visibleTracks = React.useMemo(
+  const normalizedSearchQuery = normalizeSearchValue(searchQuery);
+  const visibleTracks = React.useMemo(() => {
+    const filtered = tracks.filter((track) =>
+      trackMatchesSearch(track, normalizedSearchQuery)
+    );
+    return sortAscending
+      ? [...filtered].sort((first, second) => first.title.localeCompare(second.title))
+      : filtered;
+  }, [normalizedSearchQuery, sortAscending, tracks]);
+  const visibleExtraSections = React.useMemo(
     () =>
-      sortAscending
-        ? [...tracks].sort((first, second) => first.title.localeCompare(second.title))
-        : tracks,
-    [sortAscending, tracks]
+      extraTrackSections
+        .map((section) => ({
+          ...section,
+          tracks: section.tracks.filter((track) =>
+            trackMatchesSearch(track, normalizedSearchQuery)
+          ),
+        }))
+        .filter((section) => section.tracks.length > 0),
+    [extraTrackSections, normalizedSearchQuery]
   );
 
   const playTrackList = React.useCallback(
@@ -155,18 +215,14 @@ export const CollectionDetail = ({
       const playableTracks = sourceTracks;
       const playerTracks = playableTracks.map((track) => toPlayerTrack(track, title));
       if (playerTracks.length === 0) return;
-      if (isShuffle !== shuffled) toggleShuffle();
-      const index = shuffled
-        ? Math.floor(Math.random() * playerTracks.length)
-        : startIndex;
-      await playWithQueue(playerTracks, index, sourceId);
+      await playWithQueue(playerTracks, startIndex, sourceId, {
+        shuffle: shuffled,
+      });
     },
     [
       collectionPlaybackId,
-      isShuffle,
       playWithQueue,
       title,
-      toggleShuffle,
     ]
   );
 
@@ -246,6 +302,26 @@ export const CollectionDetail = ({
     await playCollection();
   }, [isCollectionPlayback, playCollection, togglePlayPause]);
 
+  const handleShufflePlay = React.useCallback(async () => {
+    if (isCollectionPlayback) {
+      toggleShuffle();
+      return;
+    }
+    await playCollection(true);
+  }, [isCollectionPlayback, playCollection, toggleShuffle]);
+
+  const closeSearch = React.useCallback(() => {
+    setSearchQuery('');
+    setIsSearchOpen(false);
+  }, []);
+
+  const openSearch = React.useCallback(() => {
+    setIsSearchOpen(true);
+    if (resolveTracksForPlayback) {
+      void resolveTracksForPlayback().catch(() => {});
+    }
+  }, [resolveTracksForPlayback]);
+
   const handleShare = React.useCallback(async () => {
     if (onSharePress) {
       await onSharePress();
@@ -277,7 +353,7 @@ export const CollectionDetail = ({
             download?.status === 'downloading'
           ? 'active'
           : 'idle';
-      const rowArtists = item.artists ?? [];
+      const rowArtists = getTrackArtists(item);
       const shouldLinkArtists = Boolean(
         rowArtists.length && onArtistPress && !disableTrackArtistLinks
       );
@@ -315,9 +391,12 @@ export const CollectionDetail = ({
               <View style={styles.trackArtistLinks}>
                 {rowArtists.map((artist, artistIndex) => (
                   <LoggedPressable
-                    key={artist.id}
+                    key={`${artist.id || artist.name}-${artistIndex}`}
                     accessibilityLabel={`Abrir artista ${artist.name}`}
-                    onPress={() => onArtistPress?.(artist.id)}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      void onArtistPress?.(artist.id, artist.name);
+                    }}
                   >
                     <Text numberOfLines={1} style={styles.trackSubtitle}>
                       {artist.name}
@@ -377,9 +456,7 @@ export const CollectionDetail = ({
     [collectionPlaybackId, renderTrackRow, visibleTracks]
   );
 
-  const extraSections = extraTrackSections.filter(
-    (section) => section.tracks.length > 0
-  );
+  const extraSections = visibleExtraSections;
 
   return (
     <View style={styles.screen}>
@@ -426,22 +503,54 @@ export const CollectionDetail = ({
                 size={42}
                 onPress={handleBack}
               />
-              <GlassSurface glass="regular" isInteractive style={styles.topTools}>
-                <LoggedPressable
-                  accessibilityLabel={sortAscending ? 'Ordem original' : 'Ordenar por título'}
-                  onPress={() => setSortAscending((value) => !value)}
-                  style={styles.topToolAction}
-                >
-                  <Ionicons name="swap-vertical" size={20} color="#FFFFFF" />
-                </LoggedPressable>
-                <View style={styles.toolDivider} />
-                <LoggedPressable
-                  accessibilityLabel="Buscar"
-                  onPress={() => router.push('/search' as Href)}
-                  style={styles.topToolAction}
-                >
-                  <Ionicons name="search" size={19} color="#FFFFFF" />
-                </LoggedPressable>
+              <GlassSurface
+                glass="regular"
+                isInteractive
+                style={[styles.topTools, isSearchOpen && styles.topToolsExpanded]}
+              >
+                {isSearchOpen ? (
+                  <>
+                    <Ionicons name="search" size={18} color="rgba(255,255,255,0.72)" />
+                    <TextInput
+                      accessibilityLabel="Buscar nesta coleção"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      autoFocus
+                      onChangeText={setSearchQuery}
+                      placeholder="Buscar nesta coleção"
+                      placeholderTextColor="rgba(255,255,255,0.52)"
+                      returnKeyType="search"
+                      selectionColor="#1ED760"
+                      style={styles.searchInput}
+                      value={searchQuery}
+                    />
+                    <LoggedPressable
+                      accessibilityLabel="Fechar busca"
+                      onPress={closeSearch}
+                      style={styles.topToolAction}
+                    >
+                      <Ionicons name="close-circle" size={20} color="rgba(255,255,255,0.72)" />
+                    </LoggedPressable>
+                  </>
+                ) : (
+                  <>
+                    <LoggedPressable
+                      accessibilityLabel={sortAscending ? 'Ordem original' : 'Ordenar por título'}
+                      onPress={() => setSortAscending((value) => !value)}
+                      style={styles.topToolAction}
+                    >
+                      <Ionicons name="swap-vertical" size={20} color="#FFFFFF" />
+                    </LoggedPressable>
+                    <View style={styles.toolDivider} />
+                    <LoggedPressable
+                      accessibilityLabel="Buscar"
+                      onPress={openSearch}
+                      style={styles.topToolAction}
+                    >
+                      <Ionicons name="search" size={19} color="#FFFFFF" />
+                    </LoggedPressable>
+                  </>
+                )}
               </GlassSurface>
             </View>
             <View style={styles.heroCopy}>
@@ -452,7 +561,7 @@ export const CollectionDetail = ({
                     <LoggedPressable
                       key={artist.id}
                       accessibilityLabel={`Abrir artista ${artist.name}`}
-                      onPress={() => onArtistPress?.(artist.id)}
+                      onPress={() => void onArtistPress?.(artist.id, artist.name)}
                       disabled={!onArtistPress}
                     >
                       <Text style={styles.artistName}>
@@ -469,9 +578,10 @@ export const CollectionDetail = ({
               <NativeIconButton
                 systemImage="shuffle"
                 iconName="shuffle"
-                label="Tocar aleatório"
+                label={isCollectionShuffleActive ? 'Desativar aleatório' : 'Tocar aleatório'}
                 size={44}
-                onPress={() => void playCollection(true)}
+                tint={isCollectionShuffleActive ? '#1ED760' : '#FFFFFF'}
+                onPress={() => void handleShufflePlay()}
               />
               <GlassSurface glass="regular" isInteractive style={styles.actionPill}>
                 <LoggedPressable
@@ -536,16 +646,16 @@ export const CollectionDetail = ({
                 </LoggedPressable>
               </GlassSurface>
               <NativeIconButton
-                systemImage={isCollectionPlayback && playerState.isPlaying ? 'pause.fill' : 'play.fill'}
-                iconName={isCollectionPlayback && playerState.isPlaying ? 'pause' : 'play'}
-                label={isCollectionPlayback && playerState.isPlaying ? 'Pausar' : 'Tocar'}
+                systemImage={isCollectionPlaying ? 'pause.fill' : 'play.fill'}
+                iconName={isCollectionPlaying ? 'pause' : 'play'}
+                label={isCollectionPlaying ? 'Pausar' : 'Tocar'}
                 size={52}
                 onPress={() => void handlePrimaryPlay()}
               />
             </View>
             </View>
             <View style={styles.contentTopSpacer} />
-            {sectionTitle ? <Text style={styles.sectionTitle}>{sectionTitle}</Text> : null}
+            {sectionTitle && visibleTracks.length ? <Text style={styles.sectionTitle}>{sectionTitle}</Text> : null}
           </>
         }
         ListFooterComponent={
@@ -573,7 +683,15 @@ export const CollectionDetail = ({
         ListFooterComponentStyle={
           extraSections.length || footer ? styles.listFooter : undefined
         }
-        ListEmptyComponent={<Text style={styles.empty}>Nenhuma música nesta coleção.</Text>}
+        ListEmptyComponent={
+          extraSections.length ? null : (
+            <Text style={styles.empty}>
+              {normalizedSearchQuery
+                ? 'Nenhuma música encontrada.'
+                : 'Nenhuma música nesta coleção.'}
+            </Text>
+          )
+        }
       />
     </View>
   );
@@ -585,9 +703,11 @@ const styles = StyleSheet.create({
   heroArtwork: { ...(StyleSheet.absoluteFill as any), opacity: 0.9 },
   artistHeroFallback: { ...(StyleSheet.absoluteFill as any), alignItems: 'center', backgroundColor: '#242424', justifyContent: 'center' },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  topTools: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10 },
+  topTools: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 999, minHeight: 42, paddingHorizontal: 14, paddingVertical: 10 },
+  topToolsExpanded: { flex: 1, marginLeft: 12, maxWidth: 286 },
   topToolAction: { alignItems: 'center', justifyContent: 'center' },
   toolDivider: { width: StyleSheet.hairlineWidth, height: 20, backgroundColor: 'rgba(255,255,255,0.28)' },
+  searchInput: { color: '#FFFFFF', flex: 1, fontFamily: 'SF-Regular', fontSize: 14, height: 22, padding: 0 },
   heroCopy: { alignItems: 'center', paddingHorizontal: 8, marginTop: 'auto' },
   collectionTitle: { color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 28, lineHeight: 33, textAlign: 'center' },
   artistLinks: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 5 },

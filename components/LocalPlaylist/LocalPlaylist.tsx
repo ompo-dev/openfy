@@ -12,11 +12,13 @@ import {
   type LocalPlaylist as LocalPlaylistModel,
 } from '@services';
 import { useLibrarySelectedCategory } from '@context';
+import { useDetailNavigation } from '@hooks';
 import { CollectionDetail } from '../CollectionDetail';
 import { PlaylistTrackPickerModal } from './PlaylistTrackPickerModal';
 
 export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
   const router = useRouter();
+  const { openDetail } = useDetailNavigation();
   const { refreshLibrary } = useLibrarySelectedCategory();
   const [playlist, setPlaylist] = React.useState<LocalPlaylistModel | null>(null);
   const [libraryTracks, setLibraryTracks] = React.useState<LibraryTrack[]>([]);
@@ -96,6 +98,16 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
     );
   }, [playlist, refreshLibrary, router]);
 
+  const handleArtistPress = React.useCallback(
+    (artistId: string, artistName: string) => {
+      const targetArtistId = artistId
+        ? artistId
+        : `local_artist_${encodeURIComponent(artistName)}`;
+      openDetail('artist', targetArtistId, 'library');
+    },
+    [openDetail]
+  );
+
   if (!playlist) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
 
   const collectionTracks = tracks.map((track) => ({
@@ -110,6 +122,7 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
     albumArtists: track.albumArtists,
     youtubeVideoId: track.youtubeVideoId,
     youtubeUrl: track.youtubeUrl,
+    audioUrl: track.audioUrl,
     isDownloaded: track.isDownloaded,
     localAudioPath: track.localAudioPath,
   }));
@@ -133,6 +146,7 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
         createdAt={playlist.createdAt}
         onAddTracksPress={() => setIsPickerVisible(true)}
         onDeletePress={confirmDelete}
+        onArtistPress={handleArtistPress}
         onSharePress={copyPlaylistLink}
         trackCount={playlist.trackIds.length}
         tracks={collectionTracks}

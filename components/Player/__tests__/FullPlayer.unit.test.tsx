@@ -626,9 +626,8 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(playQueueIndex).toHaveBeenCalledWith(0);
   });
 
-  it('keeps a stable shuffle preview and swipes to that exact random target', async () => {
+  it('uses the next item from the already shuffled queue for preview and swipe', async () => {
     const playQueueIndex = jest.fn().mockResolvedValue(undefined);
-    const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.8);
     const queue = [
       { ...sampleTrack, spotifyId: 'first-id', title: 'First song' },
       {
@@ -663,6 +662,5 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(firstPreview).toBe(queue[2].imageURL);
     expect(getLastArtworkProps().nextArtworkUri).toBe(firstPreview);
     expect(playQueueIndex).toHaveBeenCalledWith(2);
-    expect(randomSpy).toHaveBeenCalledTimes(1);
   });
 });

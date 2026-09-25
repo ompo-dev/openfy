@@ -7,9 +7,11 @@ import {
   groupLocalAlbums,
   type LocalAlbumCollection,
 } from '@services';
+import { useDetailNavigation } from '@hooks';
 import { CollectionDetail } from '../CollectionDetail';
 
 export const LocalAlbum = ({ albumId }: { albumId: string }) => {
+  const { openDetail } = useDetailNavigation();
   const [album, setAlbum] = React.useState<LocalAlbumCollection | null>(null);
 
   const loadAlbum = React.useCallback(async () => {
@@ -25,6 +27,13 @@ export const LocalAlbum = ({ albumId }: { albumId: string }) => {
 
   if (!album) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
 
+  const handleArtistPress = (artistId: string, artistName: string) => {
+    const targetArtistId = artistId
+      ? artistId
+      : `local_artist_${encodeURIComponent(artistName)}`;
+    openDetail('artist', targetArtistId, 'library');
+  };
+
   return (
     <CollectionDetail
       kind="album"
@@ -35,6 +44,7 @@ export const LocalAlbum = ({ albumId }: { albumId: string }) => {
         album.tracks.length === 1 ? 'música' : 'músicas'
       }`}
       trackCount={album.tracks.length}
+      onArtistPress={handleArtistPress}
       tracks={album.tracks.map((track) => ({
         ...track,
         id: track.spotifyId,

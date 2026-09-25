@@ -4,7 +4,12 @@ import { View } from 'react-native';
 import { CollectionDetail, LocalPlaylist } from '@components';
 import { PlaylistModel, TrackModel } from '@models';
 import { useDetailNavigation } from '@hooks';
-import { checkSavedTracks, getPlaylist, getPlaylistItems } from '@api';
+import {
+  checkSavedTracks,
+  findArtistIdByName,
+  getPlaylist,
+  getPlaylistItems,
+} from '@api';
 import { formatCollectionMeta } from '@utils';
 
 export type PlaylistScreenPropsType = {
@@ -102,8 +107,10 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
   }, [loadTrackPage, playlistId]);
 
   const handleArtistPress = React.useCallback(
-    (artistId: string) => {
-      openDetail('artist', artistId);
+    async (artistId: string, artistName: string) => {
+      const targetArtistId =
+        artistId || (await findArtistIdByName(artistName));
+      if (targetArtistId) openDetail('artist', targetArtistId);
     },
     [openDetail]
   );

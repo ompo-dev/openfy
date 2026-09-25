@@ -2,7 +2,7 @@ import * as React from 'react';
 import { View } from 'react-native';
 
 import { CollectionDetail, LocalAlbum } from '@components';
-import { getAlbum, getArtist } from '@api';
+import { findArtistIdByName, getAlbum, getArtist } from '@api';
 import { useDetailNavigation } from '@hooks';
 import { AlbumModel, ArtistModel } from '@models';
 import { getDisplayTime } from '@utils';
@@ -61,8 +61,10 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
   }, [albumId]);
 
   const handleArtistPress = React.useCallback(
-    (artistId: string) => {
-      openDetail('artist', artistId);
+    async (artistId: string, artistName: string) => {
+      const targetArtistId =
+        artistId || (await findArtistIdByName(artistName));
+      if (targetArtistId) openDetail('artist', targetArtistId);
     },
     [openDetail]
   );

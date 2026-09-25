@@ -76,6 +76,7 @@ export interface PlayerStoreState {
 
   // Queue & Navigation
   queue: PlayerTrack[];
+  queueOriginalOrder: PlayerTrack[];
   queueIndex: number;
   queueSourceId: string | null;
   history: PlayerTrack[];
@@ -93,7 +94,8 @@ export interface PlayerStoreState {
   playWithQueue: (
     tracks: PlayerTrack[],
     startIndex?: number,
-    sourceId?: string
+    sourceId?: string,
+    options?: { shuffle?: boolean }
   ) => Promise<void>;
   playDownloadedTrack: (track: DownloadedTrack) => Promise<void>;
   togglePlayPause: () => Promise<void>;
@@ -131,6 +133,35 @@ const activeAudioWarmups = new Map<string, Promise<void>>();
 const queuePreloadKeys = new Set<string>();
 const isAppActiveForPreload = () =>
   !AppState?.currentState || AppState.currentState === 'active';
+
+const shuffleTracks = (tracks: PlayerTrack[]): PlayerTrack[] => {
+  const shuffled = [...tracks];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[randomIndex]] = [
+      shuffled[randomIndex],
+      shuffled[index],
+    ];
+  }
+  return shuffled;
+};
+
+const findTrackIndex = (tracks: PlayerTrack[], target?: PlayerTrack) => {
+  if (!target) return -1;
+  const referenceIndex = tracks.findIndex((track) => track === target);
+  if (referenceIndex >= 0) return referenceIndex;
+  return tracks.findIndex(
+    (track) =>
+      track.spotifyId === target.spotifyId &&
+      track.title === target.title &&
+      track.artistName === target.artistName
+  );
+};
+
+const getResolverTrackId = (track: PlayerTrack): string =>
+  track.youtubeVideoId && /^[A-Za-z0-9_-]{11}$/.test(track.youtubeVideoId)
+    ? `yt_${track.youtubeVideoId}`
+    : track.spotifyId;
 
 // Helper: Normalize cache key to prevent cross-song cache collisions
 const getCacheKey = (track: PlayerTrack) => {
@@ -248,7 +279,7 @@ const warmTrackAudio = (
     const resolved = await resolveAudioUrl(
       track.title,
       track.artistName,
-      track.spotifyId,
+      getResolverTrackId(track),
       track.duration_ms,
       track.releaseDate
     );
@@ -299,6 +330,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   isLoadingLyrics: false,
   lyricsData: null,
   queue: [],
+  queueOriginalOrder: [],
   queueIndex: 0,
   queueSourceId: null,
   history: [],
@@ -345,7 +377,13 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         durationMs: track.duration_ms || 0,
       },
       ...(setQueue
-        ? { queue: [track], queueIndex: 0, queueSourceId: null }
+        ? {
+            queue: [track],
+            queueOriginalOrder: [track],
+            queueIndex: 0,
+            queueSourceId: null,
+            isShuffle: false,
+          }
         : {}),
     });
     warmQueueNeighbors(get().queue, get().queueIndex);
@@ -389,7 +427,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       const resolved = await resolveAudioUrl(
         track.title,
         track.artistName,
-        track.spotifyId,
+        getResolverTrackId(track),
         track.duration_ms
       );
 
@@ -575,7 +613,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
             const recovered = await resolveAudioUrl(
               track.title,
               track.artistName,
-              track.spotifyId,
+              getResolverTrackId(track),
               track.duration_ms,
               undefined,
               true
@@ -696,7 +734,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       const fallbackResolved = await resolveAudioUrl(
         track.title,
         track.artistName,
-        track.spotifyId,
+        getResolverTrackId(track),
         track.duration_ms,
         undefined,
         true
@@ -726,16 +764,25 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   playWithQueue: async (
     tracks: PlayerTrack[],
     startIndex = 0,
-    sourceId?: string
+    sourceId?: string,
+    options = {}
   ) => {
     if (!tracks || tracks.length === 0) return;
     const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
+    const originalQueue = [...tracks];
+    const shouldShuffle = Boolean(options.shuffle);
+    const playbackQueue = shouldShuffle && tracks.length > 1
+      ? shuffleTracks(originalQueue)
+      : originalQueue;
+    const playbackIndex = shouldShuffle ? 0 : safeIndex;
     set({
-      queue: tracks,
-      queueIndex: safeIndex,
+      queue: playbackQueue,
+      queueOriginalOrder: originalQueue,
+      queueIndex: playbackIndex,
       queueSourceId: sourceId ?? null,
+      isShuffle: shouldShuffle,
     });
-    await get().playTrack(tracks[safeIndex], { setQueue: false });
+    await get().playTrack(playbackQueue[playbackIndex], { setQueue: false });
   },
 
   playDownloadedTrack: async (downloaded: DownloadedTrack) => {
@@ -789,15 +836,11 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   },
 
   playNext: async () => {
-    const { queue, queueIndex, isShuffle, repeatMode, playTrack } = get();
+    const { queue, queueIndex, repeatMode, playTrack } = get();
     if (queue.length === 0) return;
 
     let nextIndex = queueIndex + 1;
-    if (isShuffle && queue.length > 1) {
-      do {
-        nextIndex = Math.floor(Math.random() * queue.length);
-      } while (nextIndex === queueIndex);
-    } else if (nextIndex >= queue.length) {
+    if (nextIndex >= queue.length) {
       if (repeatMode === 'all') {
         nextIndex = 0;
       } else {
@@ -832,19 +875,32 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   addToQueue: (tracks: PlayerTrack[]) => {
     set((state) => ({
       queue: [...state.queue, ...tracks],
+      queueOriginalOrder: [...state.queueOriginalOrder, ...tracks],
     }));
   },
 
   removeFromQueue: (index: number) => {
     set((state) => {
+      if (!Number.isInteger(index) || index < 0 || index >= state.queue.length) {
+        return state;
+      }
       const newQueue = [...state.queue];
-      newQueue.splice(index, 1);
+      const [removedTrack] = newQueue.splice(index, 1);
       const newIndex =
-        state.queueIndex >= newQueue.length
+        index < state.queueIndex
+          ? Math.max(0, state.queueIndex - 1)
+          : state.queueIndex >= newQueue.length
           ? Math.max(0, newQueue.length - 1)
           : state.queueIndex;
+      const originalIndex = findTrackIndex(
+        state.queueOriginalOrder,
+        removedTrack
+      );
+      const newOriginalOrder = [...state.queueOriginalOrder];
+      if (originalIndex >= 0) newOriginalOrder.splice(originalIndex, 1);
       return {
         queue: newQueue,
+        queueOriginalOrder: newOriginalOrder,
         queueIndex: newIndex,
       };
     });
@@ -853,13 +909,46 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   clearQueue: () => {
     set({
       queue: [],
+      queueOriginalOrder: [],
       queueIndex: 0,
       queueSourceId: null,
+      isShuffle: false,
     });
   },
 
   toggleShuffle: () => {
-    set((state) => ({ isShuffle: !state.isShuffle }));
+    const state = get();
+    if (state.queue.length < 2) {
+      set({ isShuffle: !state.isShuffle });
+      return;
+    }
+
+    const currentTrack = state.queue[state.queueIndex];
+    if (state.isShuffle) {
+      const restoredQueue = state.queueOriginalOrder.length
+        ? [...state.queueOriginalOrder]
+        : [...state.queue];
+      const restoredIndex = Math.max(
+        0,
+        findTrackIndex(restoredQueue, currentTrack)
+      );
+      set({
+        queue: restoredQueue,
+        queueIndex: restoredIndex,
+        isShuffle: false,
+      });
+    } else {
+      const remainingTracks = state.queue.filter(
+        (_, index) => index !== state.queueIndex
+      );
+      set({
+        queue: [currentTrack, ...shuffleTracks(remainingTracks)],
+        queueOriginalOrder: [...state.queue],
+        queueIndex: 0,
+        isShuffle: true,
+      });
+    }
+    warmQueueNeighbors(get().queue, get().queueIndex);
   },
 
   setRepeatMode: (mode: RepeatMode) => {

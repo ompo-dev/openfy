@@ -280,22 +280,14 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const currentTrackKey = getTrackKey(currentTrack);
   const artworkUrl = getTrackArtworkUri(currentTrack);
   const queueHasMultipleTracks = queue.length > 1;
-  const shuffleNextQueueIndex = React.useMemo(() => {
-    if (!currentTrackKey || !queueHasMultipleTracks || !isShuffle) return -1;
-
-    const candidateCount = queue.length - 1;
-    const pickedIndex = Math.floor(Math.random() * candidateCount);
-    return pickedIndex >= queueIndex ? pickedIndex + 1 : pickedIndex;
-  }, [currentTrackKey, isShuffle, queue.length, queueHasMultipleTracks, queueIndex]);
   const previousQueueIndex =
     queueIndex > 0
       ? queueIndex - 1
       : repeatMode === 'all'
         ? queue.length - 1
         : -1;
-  const nextQueueIndex = isShuffle
-    ? shuffleNextQueueIndex
-    : queueIndex < queue.length - 1
+  const nextQueueIndex =
+    queueIndex < queue.length - 1
       ? queueIndex + 1
       : repeatMode === 'all'
         ? 0
