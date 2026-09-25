@@ -47,6 +47,7 @@ import type {
   TrackCatalogMetadata,
   DownloadedTrack,
 } from '../services/download/downloadManager';
+import { getCachedAppSettings } from '../services/settings/appSettings';
 
 export type PlayerTrack = TrackCatalogMetadata & {
   spotifyId: string;
@@ -298,6 +299,7 @@ const warmTrackAudio = (
 };
 
 const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
+  if (!getCachedAppSettings().preloadNextTrack) return;
   if (Platform.OS !== 'web' && !isAppActiveForPreload()) return;
   const currentTrack = queue[queueIndex];
   const neighbors = [queue[queueIndex - 1], queue[queueIndex + 1]].filter(

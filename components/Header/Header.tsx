@@ -5,6 +5,7 @@
 
 import * as React from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { type Href, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ImportModal } from '../ImportModal';
@@ -21,6 +22,7 @@ const libraryCopy = {
 } as const;
 
 export const Header = () => {
+  const router = useRouter();
   const { top: statusBarOffset } = useSafeAreaInsets();
   const [importModalVisible, setImportModalVisible] = React.useState(false);
   const [downloadsModalVisible, setDownloadsModalVisible] = React.useState(false);
@@ -47,7 +49,7 @@ export const Header = () => {
             systemImage="plus"
             iconName="add"
             label="Adicionar música"
-            size={44}
+            size={40}
             onPress={() => setImportModalVisible(true)}
           />
           <View style={styles.filterControl}>
@@ -74,6 +76,17 @@ export const Header = () => {
               </View>
             ) : null}
           </View>
+          <NativeIconButton
+            systemImage="gearshape"
+            iconName="settings-outline"
+            label="Abrir configurações"
+            size={40}
+            onPress={() =>
+              router.navigate('/(tabs)/library/settings' as Href, {
+                dangerouslySingular: true,
+              })
+            }
+          />
         </View>
         <View style={styles.centerPicker}>
           <LibraryControlsPicker
@@ -127,12 +140,12 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  leadingControls: { flexDirection: 'row', gap: 4, width: 92 },
-  trailingSpace: { width: 92 },
+  leadingControls: { flexDirection: 'row', gap: 2, width: 124 },
+  trailingSpace: { width: 124 },
   filterControl: {
-    height: 44,
+    height: 40,
     position: 'relative',
-    width: 44,
+    width: 40,
   },
   downloadBadge: {
     alignItems: 'center',

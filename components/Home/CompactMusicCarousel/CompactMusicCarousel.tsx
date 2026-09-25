@@ -18,7 +18,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
-import { useHomeTrackRefresh } from '@hooks';
 import { LoggedPressable } from '../../native';
 import { MarqueeText } from '../../common/MarqueeText';
 
@@ -33,99 +32,30 @@ export interface CompactTrackItem {
   explicit?: boolean;
   streamUrl?: string;
   streamExpiresAt?: number;
+  artists?: { id: string; name: string }[];
+  albumId?: string;
+  albumArtists?: { id: string; name: string }[];
+  youtubeVideoId?: string;
+  youtubeUrl?: string;
+  localAudioPath?: string;
+  localImagePath?: string;
 }
-
-const COMPACT_TRACKS: CompactTrackItem[] = [
-  {
-    id: 'compact_headlines',
-    spotifyId: '2FY7MXti3Mu8Zt597qSz2i',
-    title: 'Headlines',
-    artist: 'Drake',
-    albumName: 'Take Care',
-    imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27326f7f19c7f0381e56156c94a',
-    duration_ms: 236000,
-    explicit: true,
-  },
-  {
-    id: 'compact_dietrying',
-    spotifyId: '6DCZcSspjsKoFjzjrWoCdn',
-    title: "God's Plan",
-    artist: 'Drake',
-    albumName: 'Scorpion',
-    imageUrl: 'https://i.ytimg.com/vi/m1a_GqJf02M/maxresdefault.jpg',
-    duration_ms: 198000,
-    explicit: true,
-  },
-  {
-    id: 'compact_poetas',
-    spotifyId: '5sIC52iprWHz3f2O22bWkL',
-    title: 'Poetas no Topo 4',
-    artist: 'PineappleStormTV',
-    albumName: 'Poetas no Topo 4',
-    imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2737e10812d9b103f2656dc91c6',
-    duration_ms: 1067860,
-    explicit: true,
-  },
-  {
-    id: 'compact_birds',
-    spotifyId: '6dOtVTDmmpzgGQ9qd0RMiZ',
-    title: 'BIRDS OF A FEATHER',
-    artist: 'Billie Eilish',
-    albumName: 'HIT ME HARD AND SOFT',
-    imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27371d62ea7ea8a5be92d3c1f62',
-    duration_ms: 194000,
-    explicit: false,
-  },
-  {
-    id: 'compact_blinding',
-    spotifyId: '0VjIjW4GlUZAMYd2vXMi3b',
-    title: 'Blinding Lights',
-    artist: 'The Weeknd',
-    albumName: 'After Hours',
-    imageUrl: 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2738863bc11d2aa12b54f5aeb36',
-    duration_ms: 200000,
-    explicit: false,
-  },
-];
 
 const CARD_SNAP_WIDTH = 168; // 154 width + 14 gap
 
-const COMPACT_TRACK_SEEDS = COMPACT_TRACKS.map((track) => ({
-  key: track.id,
-  spotifyId: track.spotifyId,
-  title: track.title,
-  artistName: track.artist,
-  albumName: track.albumName || 'Single',
-  imageURL: track.imageUrl,
-  duration_ms: track.duration_ms,
-}));
-
-export const CompactMusicCarousel = () => {
-  const refreshedTracks = useHomeTrackRefresh(COMPACT_TRACK_SEEDS);
-  const tracks = React.useMemo(
-    () =>
-      COMPACT_TRACKS.map((track) => {
-        const refreshed = refreshedTracks[track.id];
-        return refreshed
-          ? {
-              ...track,
-              title: refreshed.title,
-              artist: refreshed.artistName,
-              albumName: refreshed.albumName,
-              imageUrl: refreshed.imageURL,
-              duration_ms: refreshed.duration_ms,
-              streamUrl: refreshed.streamUrl,
-              streamExpiresAt: refreshed.streamExpiresAt,
-            }
-          : track;
-      }),
-    [refreshedTracks]
-  );
+export const CompactMusicCarousel = ({
+  title = 'Em Alta Agora',
+  tracks,
+}: {
+  title?: string;
+  tracks: CompactTrackItem[];
+}) => {
+  if (!tracks.length) return null;
 
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <Text style={styles.sectionTitle}>Em Alta Agora</Text>
+        <Text style={styles.sectionTitle}>{title}</Text>
         <Text style={styles.seeAllText}>Ver tudo</Text>
       </View>
       <CompactMusicCards tracks={tracks} />
@@ -138,24 +68,40 @@ export const CompactMusicCards = ({
 }: {
   tracks: CompactTrackItem[];
 }) => {
-  const { playTrack, currentTrack, playerState } = usePlayer();
+  const { currentTrack, playWithQueue, playerState, togglePlayPause } = usePlayer();
   const scrollX = React.useRef(new Animated.Value(0)).current;
 
-  const handlePlay = (item: CompactTrackItem) => {
-    try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    } catch {}
-
-    playTrack({
+  const queue = React.useMemo(
+    () => tracks.map((item) => ({
       spotifyId: item.spotifyId,
       title: item.title,
       artistName: item.artist,
       albumName: item.albumName || 'Single',
-      imageURL: item.imageUrl,
+      imageURL: item.localImagePath || item.imageUrl,
       duration_ms: item.duration_ms,
       streamUrl: item.streamUrl,
       streamExpiresAt: item.streamExpiresAt,
-    });
+      artists: item.artists,
+      albumId: item.albumId,
+      albumArtists: item.albumArtists,
+      youtubeVideoId: item.youtubeVideoId,
+      youtubeUrl: item.youtubeUrl,
+      localAudioPath: item.localAudioPath,
+      localImagePath: item.localImagePath,
+    })),
+    [tracks]
+  );
+
+  const handlePlay = (item: CompactTrackItem, index: number) => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch {}
+
+    if (currentTrack?.spotifyId === item.spotifyId) {
+      void togglePlayPause();
+      return;
+    }
+    void playWithQueue(queue, index, 'home:compact');
   };
 
   return (
@@ -204,7 +150,7 @@ export const CompactMusicCards = ({
             >
               <LoggedPressable
                 style={[styles.card, isPlaying && styles.cardActive]}
-                onPress={() => handlePlay(item)}
+                onPress={() => handlePlay(item, index)}
                 accessibilityRole="button"
                 accessibilityLabel={`Tocar ${item.title} de ${item.artist}`}
               >

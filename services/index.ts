@@ -47,6 +47,19 @@ export type { CatalogMapping } from './audio/catalogMappingCache';
 
 export { refreshHomeTracks } from './home/homeTrackRefresh';
 export type { HomeTrackSeed, RefreshedHomeTrack } from './home/homeTrackRefresh';
+export {
+  buildPersonalizedHome,
+  buildRecommendationSeeds,
+  clearHomeDiscoveryCache,
+  EMPTY_PERSONALIZED_HOME,
+  libraryTrackToHomeTrack,
+  loadHomeDiscoveries,
+} from './home/personalizedHome';
+export type {
+  PersonalizedHomeSnapshot,
+  PersonalizedHomeTrack,
+  RecommendationSeed,
+} from './home/personalizedHome';
 
 export {
   downloadTrack,
@@ -185,6 +198,7 @@ export {
 } from './canonical/canonicalMatcher';
 
 export {
+  clearUserProfile,
   recordInteraction,
   getUserProfile,
   getTopAffinityArtist,
@@ -196,3 +210,13 @@ export type {
   UserProfile,
   InteractionType,
 } from './recommendation/recommendationEngine';
+
+export {
+  DEFAULT_APP_SETTINGS,
+  getAppSettings,
+  getCachedAppSettings,
+  resetAppSettings,
+  subscribeAppSettings,
+  updateAppSettings,
+} from './settings/appSettings';
+export type { AppSettings } from './settings/appSettings';

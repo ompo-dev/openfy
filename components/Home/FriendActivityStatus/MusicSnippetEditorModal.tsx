@@ -168,7 +168,7 @@ export const MusicSnippetEditorModal: React.FC<
   const imageUri =
     track.localImagePath ||
     track.imageURL ||
-    'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&auto=format&fit=crop&q=80';
+    '';
 
   const handleConfirm = () => {
     try {
@@ -190,12 +190,14 @@ export const MusicSnippetEditorModal: React.FC<
       <GestureHandlerRootView style={S.gestureHandlerRoot}>
         <Pressable style={S.overlay} onPress={onClose}>
           <Pressable style={S.sheet} onPress={(e) => e.stopPropagation()}>
-            <Image
-              source={{ uri: imageUri }}
-              style={S.backgroundCover}
-              blurRadius={22}
-              resizeMode="cover"
-            />
+            {imageUri ? (
+              <Image
+                source={{ uri: imageUri }}
+                style={S.backgroundCover}
+                blurRadius={22}
+                resizeMode="cover"
+              />
+            ) : null}
             <View style={[S.backgroundScrim, { pointerEvents: 'none' }]} />
 
             <View style={S.content}>

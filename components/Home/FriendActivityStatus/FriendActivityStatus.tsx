@@ -22,7 +22,6 @@ import {
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePlayer } from '@context';
-import { useHomeTrackRefresh } from '@hooks';
 import { LoggedPressable } from '../../native';
 import { MyNoteModal, MyNote } from './MyNoteModal';
 import { FriendNoteSheet } from './FriendNoteSheet';
@@ -52,208 +51,39 @@ export interface FriendNoteItem {
     duration_ms?: number;
     streamUrl?: string;
     streamExpiresAt?: number;
+    artists?: { id: string; name: string }[];
+    albumId?: string;
+    albumArtists?: { id: string; name: string }[];
+    youtubeVideoId?: string;
+    youtubeUrl?: string;
+    localAudioPath?: string;
+    localImagePath?: string;
   };
 }
 
 const DEFAULT_BUBBLE_COLOR = '#1C1E24';
 const NOTE_ASSEMBLY_WIDTH = 100;
 
-const FRIEND_NOTES: FriendNoteItem[] = [
-  {
-    id: 'note_user',
-    user: {
-      name: 'Sua nota',
-      avatarUrl:
-        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-      isCurrentUser: true,
-    },
-    note: {
-      type: 'text',
-      title: 'Deixe uma nota...',
-      bubbleColor: '#1C1E24',
-    },
-  },
-  {
-    id: 'note_flavia',
-    user: {
-      name: 'Flavia Helena',
-      avatarUrl:
-        'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=200&auto=format&fit=crop&q=80',
-      nameStyle: 'italic',
-    },
-    note: {
-      type: 'music',
-      iconType: 'wave',
-      title: 'Canned Heat',
-      subtitle: 'Jamiroquai',
-      spotifyId: '1A7ODrG8Zg38f1Aee0wZ11',
-      artist: 'Jamiroquai',
-      imageUrl:
-        'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27341ea22e92c68e146eb4a7812',
-      duration_ms: 330000,
-      bubbleColor: '#EC4899',
-    },
-  },
-  {
-    id: 'note_pedro',
-    user: {
-      name: 'Pedro Henrique',
-      avatarUrl:
-        'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200&auto=format&fit=crop&q=80',
-    },
-    note: {
-      type: 'music',
-      iconType: 'wave',
-      title: "If I Ain't Got You",
-      subtitle: 'Alicia Keys',
-      spotifyId: 'yt_h5EwdeOwcGU',
-      artist: 'Alicia Keys',
-      imageUrl:
-        'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27376a91eb0625902047ff6535d',
-      duration_ms: 228000,
-      bubbleColor: '#0EA5E9',
-    },
-  },
-  {
-    id: 'note_peixe',
-    user: {
-      name: 'Peixe',
-      avatarUrl:
-        'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=200&auto=format&fit=crop&q=80',
-    },
-    note: {
-      type: 'music',
-      iconType: 'wave',
-      title: 'Quando Bate Aquela Saudade',
-      subtitle: 'Rubel',
-      spotifyId: '4g4b4a3N9J9g8s7d8f9a2b',
-      artist: 'Rubel',
-      imageUrl:
-        'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b273d22eb74f32ba56e9cce35b1c',
-      duration_ms: 198000,
-      bubbleColor: '#22C55E',
-    },
-  },
-  {
-    id: 'note_lucas',
-    user: {
-      name: 'Lucas Pontes',
-      avatarUrl:
-        'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-    },
-    note: {
-      type: 'music',
-      iconType: 'wave',
-      title: 'Lonely Day',
-      subtitle: 'System Of A Down',
-      spotifyId: 'yt_DnGdoEa1tPg',
-      artist: 'System Of A Down',
-      imageUrl:
-        'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b273397982f1b4028448ea92c903',
-      duration_ms: 167000,
-      bubbleColor: '#F59E0B',
-    },
-  },
-  {
-    id: 'note_maria',
-    user: {
-      name: 'Maria Duda',
-      avatarUrl:
-        'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&auto=format&fit=crop&q=80',
-    },
-    note: {
-      type: 'music',
-      iconType: 'wave',
-      title: 'Elvira Pagã',
-      subtitle: 'Rita Lee',
-      spotifyId: 'yt_c6jDf1r_de0',
-      artist: 'Rita Lee',
-      imageUrl:
-        'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2738faea51fe535bb1dc74c2d43',
-      duration_ms: 195000,
-      bubbleColor: '#8B5CF6',
-    },
-  },
-  {
-    id: 'note_igor',
-    user: {
-      name: 'igor★',
-      avatarUrl:
-        'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=200&auto=format&fit=crop&q=80',
-      nameStyle: 'star',
-    },
-    note: {
-      type: 'music',
-      iconType: 'wave',
-      title: 'Willy Wonka',
-      subtitle: 'Akashi Cruz',
-      spotifyId: 'yt_b14l17iFqyI',
-      artist: 'Akashi Cruz',
-      imageUrl:
-        'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b273c52a3be631df815bc1458e0a',
-      duration_ms: 185000,
-      bubbleColor: '#EF4444',
-    },
-  },
-];
-
-const FRIEND_NOTE_TRACKS = FRIEND_NOTES.flatMap((item) =>
-  item.note.spotifyId
-    ? [
-        {
-          key: item.id,
-          spotifyId: item.note.spotifyId,
-          title: item.note.title,
-          artistName: item.note.artist || item.note.subtitle || 'Artista',
-          albumName: 'Nota Musical',
-          imageURL: item.note.imageUrl || '',
-          duration_ms: item.note.duration_ms || 0,
-        },
-      ]
-    : []
-);
-
 const MY_NOTE_KEY = 'openfy_my_note';
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export interface FriendActivityStatusProps {
+  notes: FriendNoteItem[];
   tailTuning?: Partial<NoteTailTuning>;
   tailTuningByNoteId?: NoteTailTuningById;
 }
 
 export const FriendActivityStatus = ({
+  notes,
   tailTuning,
   tailTuningByNoteId,
 }: FriendActivityStatusProps) => {
   const { playTrack, currentTrack, playerState } = usePlayer();
-  const refreshedNotes = useHomeTrackRefresh(FRIEND_NOTE_TRACKS);
-  const notes = React.useMemo(
-    () =>
-      FRIEND_NOTES.map((item) => {
-        const refreshed = refreshedNotes[item.id];
-        if (!refreshed) return item;
-
-        return {
-          ...item,
-          note: {
-            ...item.note,
-            title: refreshed.title,
-            subtitle: refreshed.artistName,
-            artist: refreshed.artistName,
-            imageUrl: refreshed.imageURL,
-            duration_ms: refreshed.duration_ms,
-            streamUrl: refreshed.streamUrl,
-            streamExpiresAt: refreshed.streamExpiresAt,
-          },
-        };
-      }),
-    [refreshedNotes]
-  );
 
   // Each note has its own native-driven spring so drag inertia travels through
   // the row instead of rotating every bubble at the same instant.
   const tiltAnimations = React.useRef(
-    FRIEND_NOTES.map(() => new Animated.Value(0))
+    Array.from({ length: 12 }, () => new Animated.Value(0))
   ).current;
   const lastScrollX = React.useRef(0);
   const lastScrollTime = React.useRef(Date.now());
@@ -391,12 +221,17 @@ export const FriendActivityStatus = ({
         title: item.note.title,
         artistName: item.note.artist || item.note.subtitle || 'Artista',
         albumName: 'Nota Musical',
-        imageURL:
-          item.note.imageUrl ||
-          'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27341ea22e92c68e146eb4a7812',
+        imageURL: item.note.imageUrl || '',
         duration_ms: item.note.duration_ms || 200000,
         streamUrl: item.note.streamUrl,
         streamExpiresAt: item.note.streamExpiresAt,
+        artists: item.note.artists,
+        albumId: item.note.albumId,
+        albumArtists: item.note.albumArtists,
+        youtubeVideoId: item.note.youtubeVideoId,
+        youtubeUrl: item.note.youtubeUrl,
+        localAudioPath: item.note.localAudioPath,
+        localImagePath: item.note.localImagePath,
       });
     }
     setFriendSheetNote(item);

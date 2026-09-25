@@ -19,9 +19,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { usePlayer } from '@context';
-import { useHomeTrackRefresh } from '@hooks';
-import { downloadTrack } from '@services';
+import { useLibrarySelectedCategory, usePlayer } from '@context';
+import { upsertCatalogTracks } from '@services';
 import { GlassSurface, LoggedPressable } from '../../native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -31,86 +30,68 @@ const CARD_GAP = 14;
 const SNAP_INTERVAL = CARD_WIDTH + CARD_GAP;
 const SIDE_PADDING = (SCREEN_WIDTH - CARD_WIDTH) / 2;
 
-type FeaturedItem = {
+export type FeaturedItem = {
   id: string;
   spotifyId: string;
   artist: string;
   title: string;
+  albumName?: string;
   imageUrl: string;
   titleColor: string;
   duration_ms: number;
   streamUrl?: string;
   streamExpiresAt?: number;
+  artists?: { id: string; name: string }[];
+  albumId?: string;
+  albumArtists?: { id: string; name: string }[];
+  youtubeVideoId?: string;
+  youtubeUrl?: string;
+  localAudioPath?: string;
+  localImagePath?: string;
+  isSaved?: boolean;
 };
-
-const FEATURED_ITEMS: FeaturedItem[] = [
-  {
-    id: 'hero_die_with_a_smile',
-    spotifyId: '0SiywuOBRcynK0uKGWdCnn',
-    artist: 'LADY GAGA',
-    title: 'BAD ROMANCE',
-    imageUrl: 'https://i.ytimg.com/vi/NlK9u6a69Dg/maxresdefault.jpg',
-    titleColor: '#FF1E27',
-    duration_ms: 295000,
-  },
-  {
-    id: 'hero_birds_of_a_feather',
-    spotifyId: '6dOtVTDmmpzgGQ9qd0RMiZ',
-    artist: 'BILLIE EILISH',
-    title: 'BIRDS OF A FEATHER',
-    imageUrl:
-      'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27371d62ea7ea8a5be92d3c1f62',
-    titleColor: '#38BDF8',
-    duration_ms: 194000,
-  },
-  {
-    id: 'hero_blinding_lights',
-    spotifyId: '0VjIjW4GlUZAMYd2vXMi3b',
-    artist: 'THE WEEKND',
-    title: 'BLINDING LIGHTS',
-    imageUrl:
-      'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b2738863bc11d2aa12b54f5aeb36',
-    titleColor: '#FB923C',
-    duration_ms: 200000,
-  },
-];
-
-const FEATURED_TRACK_SEEDS = FEATURED_ITEMS.map((item) => ({
-  key: item.id,
-  spotifyId: item.spotifyId,
-  title: item.title,
-  artistName: item.artist,
-  albumName: 'Featured Single',
-  imageURL: item.imageUrl,
-  duration_ms: item.duration_ms,
-}));
-
-export const HeroBanner = () => {
-  const { playTrack, currentTrack, playerState, togglePlayPause } = usePlayer();
-  const refreshedTracks = useHomeTrackRefresh(FEATURED_TRACK_SEEDS);
-  const featuredItems = React.useMemo(
-    () =>
-      FEATURED_ITEMS.map((item) => {
-        const refreshed = refreshedTracks[item.id];
-        return refreshed
-          ? {
-              ...item,
-              title: refreshed.title,
-              artist: refreshed.artistName,
-              imageUrl: refreshed.imageURL,
-              duration_ms: refreshed.duration_ms,
-              streamUrl: refreshed.streamUrl,
-              streamExpiresAt: refreshed.streamExpiresAt,
-            }
-          : item;
-      }),
-    [refreshedTracks]
-  );
+export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] }) => {
+  const { currentTrack, playerState, playWithQueue, togglePlayPause } = usePlayer();
+  const { refreshLibrary } = useLibrarySelectedCategory();
   const [addingId, setAddingId] = React.useState<string | null>(null);
-  const [addedIds, setAddedIds] = React.useState<Record<string, boolean>>({});
+  const [addedIds, setAddedIds] = React.useState<Record<string, boolean>>(() =>
+    Object.fromEntries(featuredItems.filter((item) => item.isSaved).map((item) => [item.id, true]))
+  );
   const scrollX = React.useRef(new Animated.Value(0)).current;
 
-  const handlePlay = (item: FeaturedItem) => {
+  React.useEffect(() => {
+    setAddedIds((current) => ({
+      ...current,
+      ...Object.fromEntries(
+        featuredItems.filter((item) => item.isSaved).map((item) => [item.id, true])
+      ),
+    }));
+  }, [featuredItems]);
+
+  const queue = React.useMemo(
+    () => featuredItems.map((item) => ({
+      spotifyId: item.spotifyId,
+      title: item.title,
+      artistName: item.artist,
+      albumName: item.albumName || 'Single',
+      imageURL: item.imageUrl,
+      duration_ms: item.duration_ms,
+      streamUrl: item.streamUrl,
+      streamExpiresAt: item.streamExpiresAt,
+      artists: item.artists,
+      albumId: item.albumId,
+      albumArtists: item.albumArtists,
+      youtubeVideoId: item.youtubeVideoId,
+      youtubeUrl: item.youtubeUrl,
+      localAudioPath: item.localAudioPath,
+      localImagePath: item.localImagePath,
+    })),
+    [featuredItems]
+  );
+
+  if (!featuredItems.length) return null;
+
+  const handlePlay = (item: FeaturedItem, index: number) => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch {}
@@ -120,16 +101,7 @@ export const HeroBanner = () => {
       return;
     }
 
-    playTrack({
-      spotifyId: item.spotifyId,
-      title: item.title,
-      artistName: item.artist,
-      albumName: 'Featured Single',
-      imageURL: item.imageUrl,
-      duration_ms: item.duration_ms,
-      streamUrl: item.streamUrl,
-      streamExpiresAt: item.streamExpiresAt,
-    });
+    void playWithQueue(queue, index, 'home:featured');
   };
 
   const handleAddToList = async (item: FeaturedItem) => {
@@ -140,15 +112,21 @@ export const HeroBanner = () => {
     } catch {}
 
     try {
-      await downloadTrack({
+      await upsertCatalogTracks([{
         spotifyId: item.spotifyId,
         title: item.title,
         artistName: item.artist,
-        albumName: 'Featured Single',
+        albumName: item.albumName || 'Single',
         imageURL: item.imageUrl,
         duration_ms: item.duration_ms,
-      }, item.streamUrl);
+        artists: item.artists,
+        albumId: item.albumId,
+        albumArtists: item.albumArtists,
+        youtubeVideoId: item.youtubeVideoId,
+        youtubeUrl: item.youtubeUrl,
+      }]);
       setAddedIds((prev) => ({ ...prev, [item.id]: true }));
+      refreshLibrary();
     } catch {
       // ignore
     } finally {
@@ -234,7 +212,7 @@ export const HeroBanner = () => {
                   {/* Horizontally centered Bottom Action Pills */}
                   <View style={styles.actionsContainer}>
                     <LoggedPressable
-                      onPress={() => handlePlay(item)}
+                      onPress={() => handlePlay(item, index)}
                       style={styles.playButton}
                       accessibilityRole="button"
                       accessibilityLabel={isCurrentPlaying ? 'Pausar' : 'Tocar'}

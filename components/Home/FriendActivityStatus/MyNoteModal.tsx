@@ -340,7 +340,7 @@ export const MyNoteModal = ({
           title: currentNote.songTitle || 'Nota Musical',
           artistName: currentNote.songArtist || 'Artista',
           albumName: 'Nota Musical',
-          imageURL: currentNote.imageUrl || 'https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b27341ea22e92c68e146eb4a7812',
+          imageURL: currentNote.imageUrl || '',
           duration_ms: currentNote.songDuration || 200000,
         });
       }
@@ -777,7 +777,7 @@ export const MyNoteModal = ({
                 const coverUri =
                   item.localImagePath ||
                   item.imageURL ||
-                  'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&auto=format&fit=crop&q=80';
+                  '';
                 return (
                   <TouchableOpacity
                     style={[S.musicRow, isSelected && S.musicRowActive]}
@@ -798,7 +798,13 @@ export const MyNoteModal = ({
                       });
                     }}
                   >
-                    <Image source={{ uri: coverUri }} style={S.musicCover} />
+                    {coverUri ? (
+                      <Image source={{ uri: coverUri }} style={S.musicCover} />
+                    ) : (
+                      <View style={[S.musicCover, S.musicCoverFallback]}>
+                        <Ionicons name="musical-note" size={20} color="#8E8E93" />
+                      </View>
+                    )}
                     <View style={S.musicInfo}>
                       <Text style={S.musicTitle} numberOfLines={1}>
                         {item.title}
@@ -1233,6 +1239,11 @@ const S = StyleSheet.create({
     height: 46,
     borderRadius: 6,
     backgroundColor: '#2C2C2E',
+  },
+  musicCoverFallback: {
+    alignItems: 'center',
+    backgroundColor: '#28282D',
+    justifyContent: 'center',
   },
   musicInfo: {
     flex: 1,

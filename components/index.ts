@@ -12,4 +12,5 @@ export { LocalPlaylist } from './LocalPlaylist';
 export { LocalAlbum } from './LocalAlbum';
 export { CollectionDetail } from './CollectionDetail';
 export type { CollectionDetailProps } from './CollectionDetail';
+export { Settings } from './Settings';
 export * from './native';

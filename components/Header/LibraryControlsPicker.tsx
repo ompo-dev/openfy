@@ -156,7 +156,7 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
         <SwiftMenu
           label={triggerLabel}
           systemImage="line.3.horizontal.decrease"
-          modifiers={glassCircleModifiers(44, '#B8B8B8')}
+          modifiers={glassCircleModifiers(40, '#B8B8B8')}
         >
           <SwiftButton
             label={searchLabel}
@@ -192,7 +192,11 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
   return (
     <>
       <View ref={triggerRef} collapsable={false} style={styles.triggerAnchor}>
-        <GlassSurface glass="clear" isInteractive style={styles.fallbackControl}>
+        <GlassSurface
+          glass="clear"
+          isInteractive
+          style={[styles.fallbackControl, isFilter && styles.fallbackIconControl]}
+        >
           <LoggedPressable
             accessibilityLabel={triggerLabel}
             accessibilityRole="button"
@@ -333,10 +337,11 @@ const NativeMenuLabel = ({ label }: { label: string }) => (
 );
 
 const styles = StyleSheet.create({
-  nativePickerHost: { height: 44, justifyContent: 'center', minWidth: 108, maxWidth: '100%' },
-  nativeIconHost: { height: 44, justifyContent: 'center', width: 44 },
+  nativePickerHost: { height: 44, justifyContent: 'center', minWidth: 92, maxWidth: '100%' },
+  nativeIconHost: { height: 40, justifyContent: 'center', width: 40 },
   triggerAnchor: { maxWidth: '100%' },
   fallbackControl: { alignItems: 'center', borderRadius: 22, height: 44, overflow: 'hidden' },
+  fallbackIconControl: { height: 40, width: 40 },
   fallbackTrigger: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -346,7 +351,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     maxWidth: '100%',
   },
-  fallbackIconTrigger: { paddingHorizontal: 0, width: 44 },
+  fallbackIconTrigger: { height: 40, paddingHorizontal: 0, width: 40 },
   fallbackLabel: { color: '#B8B8B8', fontFamily: 'SF-Semibold', fontSize: 12, flexShrink: 1 },
   menuOverlay: { flex: 1 },
   optionMenu: { position: 'absolute' },

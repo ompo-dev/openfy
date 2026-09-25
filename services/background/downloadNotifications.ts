@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import { getAppSettings } from '../settings/appSettings';
 
 const isNative = Platform.OS !== 'web';
 const CHANNEL_ID = 'downloads';
@@ -23,6 +24,7 @@ const hasPermission = (
 
 export const requestDownloadNotificationPermission = async () => {
   if (!isNative) return false;
+  if (!(await getAppSettings()).downloadNotifications) return false;
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
@@ -43,6 +45,7 @@ export const notifyDownloadResult = async (
   failed = 0
 ) => {
   if (!isNative || completed === 0) return;
+  if (!(await getAppSettings()).downloadNotifications) return;
 
   const permission = await Notifications.getPermissionsAsync();
   if (!hasPermission(permission)) return;

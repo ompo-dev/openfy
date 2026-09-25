@@ -27,6 +27,10 @@ export default function LibraryLayout() {
         options={detailStackOptions}
       />
       <Stack.Screen
+        name="settings"
+        options={detailStackOptions}
+      />
+      <Stack.Screen
         name="episode/[id]"
         options={{ headerShown: false, animation: 'default' }}
       />

@@ -10,3 +10,5 @@ export type { PlayerTrack } from './PlayerContext';
 
 export { DownloadProvider, useDownloads } from './DownloadContext';
 export type { DownloadJob, DownloadJobStatus } from './DownloadContext';
+
+export { AppSettingsProvider, useAppSettings } from './AppSettingsContext';

@@ -85,6 +85,11 @@ export const getUserProfile = async (): Promise<UserProfile> => {
   }
 };
 
+export const clearUserProfile = async (): Promise<void> => {
+  STREAM_CACHE.clear();
+  await AsyncStorage.removeItem(USER_PROFILE_KEY);
+};
+
 /**
  * Save user profile to storage
  */
@@ -105,16 +110,26 @@ export const recordInteraction = async (
     albumName?: string;
     imageURL?: string;
     duration_ms?: number;
+    artists?: { id?: string; name: string }[];
   },
   interaction: InteractionType
 ): Promise<void> => {
   try {
     const profile = await getUserProfile();
     const weight = INTERACTION_WEIGHTS[interaction] || 1;
-    const artist = track.artistName || 'Unknown';
+    const artistNames = track.artists?.map((artist) => artist.name.trim()).filter(Boolean) || [];
+    const canonicalArtists = artistNames.length
+      ? [...new Set(artistNames)]
+      : (track.artistName || 'Unknown')
+          .split(/\s*(?:,|&| feat\.?)\s*/i)
+          .map((artist) => artist.trim())
+          .filter(Boolean);
+    const artist = canonicalArtists[0] || track.artistName || 'Unknown';
 
     // Update Artist Weight
-    profile.artistWeights[artist] = (profile.artistWeights[artist] || 0) + weight;
+    canonicalArtists.forEach((name) => {
+      profile.artistWeights[name] = (profile.artistWeights[name] || 0) + weight;
+    });
 
     // Update Recently Played
     const existingIndex = profile.recentlyPlayedTracks.findIndex(
@@ -125,7 +140,7 @@ export const recordInteraction = async (
       id: track.spotifyId,
       spotifyId: track.spotifyId,
       title: track.title,
-      artists: [track.artistName],
+      artists: canonicalArtists,
       primaryArtist: track.artistName,
       albumName: track.albumName || 'Spotify',
       durationMs: track.duration_ms || 0,

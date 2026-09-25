@@ -1,7 +1,9 @@
 export { useApplicationDimensions } from './useApplicationDimensions';
 export { useAppIsActive } from './useAppIsActive';
 export { useHomeTrackRefresh } from './useHomeTrackRefresh';
-export { useOTAUpdates } from './useOTAUpdates';
+export { checkForOTAUpdateNow, useOTAUpdates } from './useOTAUpdates';
+export type { OTAUpdateCheckResult } from './useOTAUpdates';
+export { usePersonalizedHome } from './usePersonalizedHome';
 export {
   getDetailHref,
   getSectionFromSegments,
