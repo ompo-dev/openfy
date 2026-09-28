@@ -123,7 +123,40 @@ describe('personalizedHome', () => {
     });
 
     expect(home.discoveries.map((item) => item.spotifyId)).toEqual(['new-clean']);
+    expect(home.quickPicks.map((item) => item.spotifyId)).toEqual(['new-clean']);
     expect(home.discoveryTitle).toBe('Descobertas para você');
+  });
+
+  it('rejects provider duplicates that have another id but the same song identity', () => {
+    const home = buildPersonalizedHome({
+      allowExplicitRecommendations: true,
+      discoveries: [{
+        id: 'youtube-copy',
+        spotifyId: 'yt_V1M1hYxmRvA',
+        title: 'Primeira',
+        artistName: 'Sotam',
+        artists: [{ id: '', name: 'Sotam' }],
+        albumName: 'YouTube Music',
+        imageURL: '',
+        duration_ms: 180_000,
+      }],
+      personalized: true,
+      playlists,
+      profile,
+      seed: 'fixed-seed',
+      tracks: library,
+    });
+
+    expect(home.discoveries).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ spotifyId: 'yt_V1M1hYxmRvA' }),
+      ])
+    );
+    expect(home.quickPicks).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ spotifyId: 'yt_V1M1hYxmRvA' }),
+      ])
+    );
   });
 
   it('recommends discovered artists that are not already in the library', () => {

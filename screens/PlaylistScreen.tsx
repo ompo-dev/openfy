@@ -3,10 +3,8 @@ import { View } from 'react-native';
 
 import { CollectionDetail, LocalPlaylist } from '@components';
 import { PlaylistModel, TrackModel } from '@models';
-import { useDetailNavigation } from '@hooks';
 import {
   checkSavedTracks,
-  findArtistIdByName,
   getPlaylist,
   getPlaylistItems,
 } from '@api';
@@ -24,7 +22,6 @@ export const PlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) =>
   );
 
 const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
-  const { openDetail } = useDetailNavigation();
   const [playlist, setPlaylist] = React.useState<PlaylistModel | null>(null);
   const [tracks, setTracks] = React.useState<TrackModel[]>([]);
   const offsetRef = React.useRef(0);
@@ -106,15 +103,6 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
     };
   }, [loadTrackPage, playlistId]);
 
-  const handleArtistPress = React.useCallback(
-    async (artistId: string, artistName: string) => {
-      const targetArtistId =
-        artistId || (await findArtistIdByName(artistName));
-      if (targetArtistId) openDetail('artist', targetArtistId);
-    },
-    [openDetail]
-  );
-
   if (!playlist) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
 
   return (
@@ -138,7 +126,7 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
           : 0
       }
       tracks={tracks}
-      onArtistPress={handleArtistPress}
+      disableTrackArtistLinks
       onEndReached={() => void loadTrackPage(playlist)}
       resolveTracksForPlayback={() => loadAllTrackPages(playlist)}
     />

@@ -164,4 +164,22 @@ describe('CollectionDetail', () => {
     expect(screen.getByText('Desativar aleatório:#1ED760')).toBeTruthy();
     expect(screen.getByLabelText('Pausar')).toBeTruthy();
   });
+
+  it('keeps playlist artists inert and replaces sharing with editing', async () => {
+    const onArtistPress = jest.fn();
+    const onEditPress = jest.fn();
+    const screen = await renderCollection({
+      kind: 'playlist',
+      disableTrackArtistLinks: true,
+      onArtistPress,
+      onEditPress,
+    });
+
+    expect(screen.queryByLabelText('Abrir artista Artista sem id')).toBeNull();
+    expect(screen.queryByLabelText('Compartilhar')).toBeNull();
+    fireEvent.press(screen.getByLabelText('Editar playlist'));
+
+    expect(onEditPress).toHaveBeenCalledTimes(1);
+    expect(onArtistPress).not.toHaveBeenCalled();
+  });
 });

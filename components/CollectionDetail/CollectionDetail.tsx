@@ -52,6 +52,7 @@ export type CollectionDetailProps = {
   onAddTracksPress?: () => void | Promise<void>;
   onArtistPress?: (artistId: string, artistName: string) => void | Promise<void>;
   onDeletePress?: () => void | Promise<void>;
+  onEditPress?: () => void | Promise<void>;
   onEndReached?: () => void;
   onSharePress?: () => void | Promise<void>;
   resolveTracksForPlayback?: () => Promise<CollectionTrack[]>;
@@ -139,6 +140,7 @@ export const CollectionDetail = ({
   onAddTracksPress,
   onArtistPress,
   onDeletePress,
+  onEditPress,
   onEndReached,
   onSharePress,
   resolveTracksForPlayback,
@@ -620,11 +622,15 @@ export const CollectionDetail = ({
                 </LoggedPressable>
                 <View style={styles.pillDivider} />
                 <LoggedPressable
-                  accessibilityLabel="Compartilhar"
-                  onPress={() => void handleShare()}
+                  accessibilityLabel={onEditPress ? 'Editar playlist' : 'Compartilhar'}
+                  onPress={() => void (onEditPress ? onEditPress() : handleShare())}
                   style={styles.pillAction}
                 >
-                  <Ionicons name="share-outline" size={21} color="#FFFFFF" />
+                  <Ionicons
+                    name={onEditPress ? 'pencil-outline' : 'share-outline'}
+                    size={21}
+                    color="#FFFFFF"
+                  />
                 </LoggedPressable>
                 <View style={styles.pillDivider} />
                 <LoggedPressable

@@ -11,9 +11,18 @@ export type NativeYouTubeTransferResult = {
 export type NativeYouTubePlaybackStatus = {
   isPlaying: boolean;
   isLoaded: boolean;
+  isBuffering?: boolean;
   positionMs: number;
   durationMs: number;
+  didJustFinish?: boolean;
   error?: string;
+};
+
+export type NativeYouTubePlaybackMetadata = {
+  title: string;
+  artist: string;
+  albumTitle?: string;
+  artworkUrl?: string;
 };
 
 declare class OpenfyYouTubeModule extends NativeModule<{}> {
@@ -44,6 +53,10 @@ declare class OpenfyYouTubeModule extends NativeModule<{}> {
    * using deterministic range requests over a persistent URLSession.
    */
   playNativeYouTubeAsync(videoId: string): Promise<void>;
+  playNativeYouTubeWithMetadataAsync(
+    videoId: string,
+    metadata: NativeYouTubePlaybackMetadata
+  ): Promise<void>;
   pauseNativeYouTubeAsync(): Promise<void>;
   resumeNativeYouTubeAsync(): Promise<void>;
   seekNativeYouTubeAsync(positionMs: number): Promise<void>;

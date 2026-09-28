@@ -22,6 +22,15 @@ export type {
   DirectYouTubeAudio,
   DirectYouTubeTrack,
 } from './audio/directYouTubeResolver';
+export {
+  hasNativeYouTubePlayback,
+  parseNativeYouTubePlaybackUri,
+  toNativeYouTubePlaybackUri,
+} from './audio/nativeYouTubeTransfer';
+export type {
+  NativeYouTubePlaybackMetadata,
+  NativeYouTubePlaybackStatus,
+} from './audio/nativeYouTubeTransfer';
 
 export type {
   MediaReference,
@@ -99,15 +108,20 @@ export type {
 } from './download/downloadManager';
 
 export {
+  addTracksToLocalPlaylist,
+  createLocalPlaylist,
   deleteLocalPlaylist,
   getLocalPlaylist,
   getLocalPlaylists,
+  removeTracksFromLocalPlaylist,
   removeTrackFromLocalPlaylists,
+  updateLocalPlaylist,
   upsertLocalPlaylist,
 } from './library/localPlaylistManager';
 export type {
   LocalPlaylist,
   LocalPlaylistInput,
+  LocalPlaylistUpdate,
 } from './library/localPlaylistManager';
 
 export {

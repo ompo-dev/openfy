@@ -75,7 +75,7 @@ export const EMPTY_PERSONALIZED_HOME: PersonalizedHomeSnapshot = {
   tracksById: new Map(),
 };
 
-const DISCOVERY_CACHE_KEY = 'openfy_home_discoveries_v1';
+const DISCOVERY_CACHE_KEY = 'openfy_home_discoveries_v2';
 const DISCOVERY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const DISCOVERY_REQUEST_TIMEOUT_MS = 9_000;
 let youtubeMusicClient: Promise<YouTubeMusicClient> | null = null;
@@ -89,12 +89,27 @@ type YouTubeMusicItem = {
   thumbnails?: { url?: string; width?: number }[];
 };
 
+type YouTubeMusicQueueItem = {
+  primary?: YouTubeMusicQueueItem | null;
+  selected?: boolean;
+  video_id?: string;
+  title?: string | { toString(): string };
+  duration?: { seconds?: number };
+  album?: { name?: string };
+  artists?: { name?: string; channel_id?: string }[];
+  thumbnail?: { url?: string; width?: number }[];
+};
+
 type YouTubeMusicClient = {
   music: {
     search: (
       query: string,
       filters: { type: 'song' }
     ) => Promise<{ songs?: { contents?: YouTubeMusicItem[] } }>;
+    getUpNext: (
+      videoId: string,
+      automix?: boolean
+    ) => Promise<{ contents?: YouTubeMusicQueueItem[] }>;
   };
 };
 
@@ -296,21 +311,40 @@ export const buildPersonalizedHome = ({
       (stableHash(`${seed}:${track.spotifyId}`) % 1000) / 1000;
     return score(second) - score(first);
   });
-  const quickPicks = diverseTracks(
+  const libraryQuickPicks = diverseTracks(
     rankedLibrary.filter((track) => !recentIds.has(track.spotifyId)).length
       ? rankedLibrary.filter((track) => !recentIds.has(track.spotifyId))
       : rankedLibrary,
     12
   );
   const knownIds = new Set(homeTracks.map((track) => track.spotifyId));
+  const knownNames = new Set(
+    homeTracks.map(
+      (track) =>
+        `${normalize(track.artists?.[0]?.name || track.artistName)}:${normalize(track.title)}`
+    )
+  );
   const remoteDiscoveries = discoveries.filter(
     (track) =>
       !knownIds.has(track.spotifyId) &&
+      !knownNames.has(
+        `${normalize(track.artists?.[0]?.name || track.artistName)}:${normalize(track.title)}`
+      ) &&
       (allowExplicitRecommendations || !track.explicit)
   );
+  const quickPicks = diverseTracks(
+    remoteDiscoveries.length ? remoteDiscoveries : libraryQuickPicks,
+    12
+  );
+  const quickPickIds = new Set(quickPicks.map((track) => track.spotifyId));
+  const remainingRemoteDiscoveries = remoteDiscoveries.filter(
+    (track) => !quickPickIds.has(track.spotifyId)
+  );
   const discoveryTracks = diverseTracks(
-    remoteDiscoveries.length
-      ? remoteDiscoveries
+    remainingRemoteDiscoveries.length
+      ? remainingRemoteDiscoveries
+      : remoteDiscoveries.length
+        ? remoteDiscoveries
       : rankedLibrary.filter((track) => !recentIds.has(track.spotifyId)),
     12
   );
@@ -477,6 +511,70 @@ const searchYouTubeMusic = async (
   }
 };
 
+const queueText = (value: YouTubeMusicQueueItem['title']): string => {
+  if (typeof value === 'string') return value.trim();
+  try {
+    return value?.toString().trim() || '';
+  } catch {
+    return '';
+  }
+};
+
+const queueItemToHomeTrack = (
+  entry: YouTubeMusicQueueItem,
+  fallbackArtist: string
+): PersonalizedHomeTrack | null => {
+  const item = entry.primary || entry;
+  if (item.selected) return null;
+  const videoId = item.video_id || '';
+  const title = queueText(item.title);
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId) || !title) return null;
+  const artists = (item.artists || [])
+    .map((artist) => ({ id: '', name: artist.name?.trim() || '' }))
+    .filter((artist) => artist.name);
+  const artistName = artists.map((artist) => artist.name).join(', ') || fallbackArtist;
+  const imageURL = [...(item.thumbnail || [])]
+    .sort((first, second) => (second.width || 0) - (first.width || 0))[0]?.url || '';
+  return {
+    id: `discovery_yt_${videoId}`,
+    spotifyId: `yt_${videoId}`,
+    title,
+    artistName,
+    artists: artists.length ? artists : [{ id: '', name: fallbackArtist }],
+    albumName: item.album?.name?.trim() || 'YouTube Music',
+    imageURL,
+    duration_ms: Math.max(0, item.duration?.seconds || 0) * 1000,
+    youtubeVideoId: videoId,
+    youtubeUrl: `https://www.youtube.com/watch?v=${videoId}`,
+  };
+};
+
+const loadYouTubeMusicRadio = async (
+  seed: RecommendationSeed,
+  anchorTracks: PersonalizedHomeTrack[]
+): Promise<PersonalizedHomeTrack[]> => {
+  const anchor = anchorTracks.find((track) => track.youtubeVideoId);
+  if (!anchor?.youtubeVideoId) return [];
+  try {
+    const client = await withDiscoveryTimeout(getYouTubeMusicClient());
+    if (!client) return [];
+    const panel = await withDiscoveryTimeout(
+      client.music.getUpNext(anchor.youtubeVideoId, true)
+    );
+    const tracks = (panel?.contents || [])
+      .map((entry) => queueItemToHomeTrack(entry, seed.name))
+      .filter((track): track is PersonalizedHomeTrack => Boolean(track));
+    const seedName = normalize(seed.name);
+    const newArtists = tracks.filter((track) =>
+      !trackArtistNames(track).some((artist) => normalize(artist) === seedName)
+    );
+    const familiarArtists = tracks.filter((track) => !newArtists.includes(track));
+    return diverseTracks([...newArtists, ...familiarArtists], 16);
+  } catch {
+    return [];
+  }
+};
+
 export const loadHomeDiscoveries = async (
   seeds: RecommendationSeed[],
   knownTrackIds: Set<string>,
@@ -506,13 +604,39 @@ export const loadHomeDiscoveries = async (
       const artistId = seed.id || await withDiscoveryTimeout(
         findArtistIdByName(seed.name)
       ) || '';
-      const spotifyTracks = artistId
-        ? await withDiscoveryTimeout(
-            getArtistTopTracks(artistId).catch(() => [])
-          ) || []
-        : [];
-      if (spotifyTracks.length) return spotifyTracks.map(trackModelToHomeTrack);
-      return searchYouTubeMusic(seed);
+      const [spotifyTracks, youtubeAnchorTracks] = await Promise.all([
+        artistId
+          ? withDiscoveryTimeout(getArtistTopTracks(artistId).catch(() => []))
+          : Promise.resolve([]),
+        searchYouTubeMusic(seed),
+      ]);
+      const seedSpotifyTracks = spotifyTracks || [];
+      const collaboratorIds = [...new Set(
+        seedSpotifyTracks.flatMap((track) => track.artists || [])
+          .filter((artist) =>
+            artist.id &&
+            artist.id !== artistId &&
+            normalize(artist.name) !== normalize(seed.name)
+          )
+          .map((artist) => artist.id)
+      )].slice(0, 2);
+      const [radioTracks, collaboratorGroups] = await Promise.all([
+        loadYouTubeMusicRadio(seed, youtubeAnchorTracks),
+        Promise.all(
+          collaboratorIds.map((id) =>
+            withDiscoveryTimeout(getArtistTopTracks(id).catch(() => []))
+          )
+        ),
+      ]);
+      const collaboratorTracks = collaboratorGroups
+        .flatMap((tracks) => tracks || [])
+        .map(trackModelToHomeTrack);
+      return [
+        ...radioTracks,
+        ...collaboratorTracks,
+        ...seedSpotifyTracks.map(trackModelToHomeTrack),
+        ...youtubeAnchorTracks,
+      ];
     })
   );
   const tracks = uniqueTracks(groups.flat());

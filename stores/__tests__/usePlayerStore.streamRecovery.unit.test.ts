@@ -38,6 +38,16 @@ jest.mock('@services', () => ({
     }
     return null;
   }),
+  hasNativeYouTubePlayback: jest.fn().mockReturnValue(false),
+  parseNativeYouTubePlaybackUri: jest.fn((uri: string) =>
+    uri.startsWith('openfy-youtube://video/')
+      ? uri.slice('openfy-youtube://video/'.length)
+      : null
+  ),
+  resolveSpotifyTrackVideoId: jest.fn(),
+  toNativeYouTubePlaybackUri: jest.fn(
+    (videoId: string) => `openfy-youtube://video/${videoId}`
+  ),
 }));
 
 jest.mock('../../services/lyrics/lyricsService', () => ({
@@ -46,9 +56,11 @@ jest.mock('../../services/lyrics/lyricsService', () => ({
 }));
 
 import {
+  hasNativeYouTubePlayback,
   loadAndPlay,
   reportDirectYouTubeStreamRefusal,
   resolveAudioUrl,
+  resolveSpotifyTrackVideoId,
   seekTo,
   type PlayerState,
 } from '@services';
@@ -70,6 +82,7 @@ const flushPromises = () => new Promise<void>((resolve) => setTimeout(resolve, 0
 describe('usePlayerStore — Stream Recovery Integration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.mocked(hasNativeYouTubePlayback).mockReturnValue(false);
     usePlayerStore.setState({
       activeRequestId: 0,
       queue: [],
@@ -84,6 +97,28 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
         durationMs: 0,
       },
     });
+  });
+
+  it('routes a catalog-only track through the native iOS streaming engine', async () => {
+    jest.mocked(hasNativeYouTubePlayback).mockReturnValue(true);
+    jest.mocked(resolveSpotifyTrackVideoId).mockResolvedValue({
+      status: 'resolved',
+      videoId: 'V1M1hYxmRvA',
+      confidence: 100,
+      matchedBy: 'search',
+    } as any);
+    jest.mocked(loadAndPlay).mockResolvedValue(true);
+
+    await usePlayerStore.getState().playTrack(sampleTrack);
+
+    expect(loadAndPlay).toHaveBeenCalledWith(
+      'openfy-youtube://video/V1M1hYxmRvA',
+      expect.any(Function),
+      expect.objectContaining({ title: sampleTrack.title }),
+      0,
+      sampleTrack
+    );
+    expect(resolveAudioUrl).not.toHaveBeenCalled();
   });
 
   it('completes the full recovery cycle on mid-stream 403 refusal: reports refusal, re-resolves fresh, reloads with headers, seeks to last position, and resets recovery flag', async () => {

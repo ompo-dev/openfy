@@ -48,10 +48,27 @@ public final class OpenfyYouTubeModule: Module {
 
   private static let rangeClient = YouTubeHTTPRangeClient(session: session)
   @MainActor
-  private lazy var nativePlayer = OpenfyNativeYouTubePlayer()
+  private lazy var nativePlayer: OpenfyNativeYouTubePlayer = {
+    let player = OpenfyNativeYouTubePlayer()
+    player.onPlaybackEnded = { [weak self] in
+      self?.sendEvent("onNativePlaybackEnded")
+    }
+    player.onNextTrack = { [weak self] in
+      self?.sendEvent("onNativeRemoteNext")
+    }
+    player.onPreviousTrack = { [weak self] in
+      self?.sendEvent("onNativeRemotePrevious")
+    }
+    return player
+  }()
 
   public func definition() -> ModuleDefinition {
     Name("OpenfyYouTube")
+    Events(
+      "onNativePlaybackEnded",
+      "onNativeRemoteNext",
+      "onNativeRemotePrevious"
+    )
 
     AsyncFunction("downloadGoogleVideoAsync") {
       (url: String, destination: String, headers: [String: String], chunkBytes: Int) async throws -> GoogleVideoTransferResult in
@@ -76,41 +93,14 @@ public final class OpenfyYouTubeModule: Module {
       )
     }
 
-    // Native Phase 1 POC: Openfy native streaming engine directly driving AVPlayer
-    // via AVAssetResourceLoaderDelegate and Range requests over persistent URLSession.
+    // Kept for OTA compatibility with binaries that shipped the first native player.
     AsyncFunction("playNativeYouTubeAsync") { (videoId: String) in
-      guard Self.isValidVideoId(videoId) else {
-        throw Self.transferError("invalid_video_id")
-      }
+      try await self.playNativeYouTube(videoId: videoId, metadata: [:])
+    }
 
-      NSLog("[NATIVE] Resolving videoId: %@", videoId)
-      let playerRes = try await Self.guestPlayerResponse(videoId: videoId)
-
-      guard (200...299).contains(playerRes.response.statusCode) else {
-        NSLog("[NATIVE] Player HTTP error: %ld", playerRes.response.statusCode)
-        throw StreamTransportError.http(statusCode: playerRes.response.statusCode)
-      }
-
-      guard Self.playerStatus(from: playerRes.payload) == "OK" else {
-        NSLog("[NATIVE] Player status not OK: %@", Self.playerStatus(from: playerRes.payload) ?? "nil")
-        throw StreamTransportError.audioTrackUnavailable
-      }
-
-      let headers = GuestPlayerClient.mediaHeaders
-      let descriptor = try await Self.bestAudioStreamDescriptor(
-        videoId: videoId,
-        payload: playerRes.payload,
-        headers: headers,
-        rangeClient: Self.rangeClient
-      )
-
-      NSLog("[NATIVE] Selected descriptor itag=%ld mime=%@ bitrate=%ld contentLength=%lld",
-            descriptor.itag ?? 0, descriptor.mimeType, descriptor.bitrate, descriptor.contentLength)
-
-      try await self.nativePlayer.play(
-        descriptor: descriptor,
-        rangeClient: Self.rangeClient
-      )
+    AsyncFunction("playNativeYouTubeWithMetadataAsync") {
+      (videoId: String, metadata: [String: String]) in
+      try await self.playNativeYouTube(videoId: videoId, metadata: metadata)
     }
 
     AsyncFunction("pauseNativeYouTubeAsync") {
@@ -132,6 +122,53 @@ public final class OpenfyYouTubeModule: Module {
     AsyncFunction("getNativePlaybackStatusAsync") { () -> [String: Any] in
       return await self.nativePlayer.getStatus()
     }
+  }
+
+  private func playNativeYouTube(
+    videoId: String,
+    metadata: [String: String]
+  ) async throws {
+    guard Self.isValidVideoId(videoId) else {
+      throw Self.transferError("invalid_video_id")
+    }
+
+    NSLog("[NATIVE] Resolving videoId: %@", videoId)
+    let playerRes = try await Self.guestPlayerResponse(videoId: videoId)
+
+    guard (200...299).contains(playerRes.response.statusCode) else {
+      NSLog("[NATIVE] Player HTTP error: %ld", playerRes.response.statusCode)
+      throw StreamTransportError.http(statusCode: playerRes.response.statusCode)
+    }
+
+    guard Self.playerStatus(from: playerRes.payload) == "OK" else {
+      NSLog(
+        "[NATIVE] Player status not OK: %@",
+        Self.playerStatus(from: playerRes.payload) ?? "nil"
+      )
+      throw StreamTransportError.audioTrackUnavailable
+    }
+
+    let headers = GuestPlayerClient.mediaHeaders
+    let descriptor = try await Self.bestAudioStreamDescriptor(
+      videoId: videoId,
+      payload: playerRes.payload,
+      headers: headers,
+      rangeClient: Self.rangeClient
+    )
+
+    NSLog(
+      "[NATIVE] Selected descriptor itag=%ld mime=%@ bitrate=%ld contentLength=%lld",
+      descriptor.itag ?? 0,
+      descriptor.mimeType,
+      descriptor.bitrate,
+      descriptor.contentLength
+    )
+
+    try await self.nativePlayer.play(
+      descriptor: descriptor,
+      rangeClient: Self.rangeClient,
+      metadata: OpenfyNowPlayingMetadata(values: metadata)
+    )
   }
 
   private static func resolveAndDownload(

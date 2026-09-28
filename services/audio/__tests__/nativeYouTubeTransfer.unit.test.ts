@@ -1,23 +1,34 @@
 const mockNativeDownload = jest.fn();
 const mockNativeResolveAndDownload = jest.fn();
+const mockNativePlay = jest.fn();
+const mockNativeStatus = jest.fn();
 
 jest.mock('../../../modules/openfy-youtube', () => ({
   __esModule: true,
   default: {
     downloadGoogleVideoAsync: mockNativeDownload,
     resolveAndDownloadGoogleVideoAsync: mockNativeResolveAndDownload,
+    playNativeYouTubeAsync: mockNativePlay,
+    playNativeYouTubeWithMetadataAsync: mockNativePlay,
+    getNativePlaybackStatusAsync: mockNativeStatus,
   },
 }));
 
 import {
   downloadYouTubeStreamNatively,
+  getNativeYouTubePlaybackStatus,
+  parseNativeYouTubePlaybackUri,
+  playYouTubeVideoNatively,
   resolveAndDownloadYouTubeVideoNatively,
+  toNativeYouTubePlaybackUri,
 } from '../nativeYouTubeTransfer';
 
 describe('downloadYouTubeStreamNatively', () => {
   beforeEach(() => {
     mockNativeDownload.mockReset();
     mockNativeResolveAndDownload.mockReset();
+    mockNativePlay.mockReset();
+    mockNativeStatus.mockReset();
   });
 
   it('delegates a fresh iOS player resolution and transfer to one native session', async () => {
@@ -94,6 +105,35 @@ describe('downloadYouTubeStreamNatively', () => {
     ).resolves.toEqual({
       headers: { server: 'googlevideo' },
       sourceUrl: 'https://rr1.googlevideo.com/videoplayback?c=IOS',
+    });
+  });
+
+  it('uses an exact virtual playback URI and forwards lock-screen metadata', async () => {
+    mockNativePlay.mockResolvedValue(undefined);
+    mockNativeStatus.mockResolvedValue({
+      isPlaying: true,
+      isLoaded: true,
+      isBuffering: false,
+      positionMs: 1200,
+      durationMs: 180000,
+    });
+    const uri = toNativeYouTubePlaybackUri('V1M1hYxmRvA');
+
+    expect(parseNativeYouTubePlaybackUri(uri)).toBe('V1M1hYxmRvA');
+    expect(parseNativeYouTubePlaybackUri('https://youtube.com/watch?v=V1M1hYxmRvA')).toBeNull();
+    await expect(playYouTubeVideoNatively('V1M1hYxmRvA', {
+      title: 'Faixa',
+      artist: 'Artista',
+      albumTitle: 'Álbum',
+    })).resolves.toBe(true);
+    await expect(getNativeYouTubePlaybackStatus()).resolves.toMatchObject({
+      isPlaying: true,
+      positionMs: 1200,
+    });
+    expect(mockNativePlay).toHaveBeenCalledWith('V1M1hYxmRvA', {
+      title: 'Faixa',
+      artist: 'Artista',
+      albumTitle: 'Álbum',
     });
   });
 });

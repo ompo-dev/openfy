@@ -35,6 +35,10 @@ import {
   getDirectYouTubeMediaHeaders,
   AudioSourceInput,
   setRemotePlaybackHandlers,
+  hasNativeYouTubePlayback,
+  parseNativeYouTubePlaybackUri,
+  resolveSpotifyTrackVideoId,
+  toNativeYouTubePlaybackUri,
 } from '@services';
 import {
   fetchLyrics,
@@ -163,6 +167,33 @@ const getResolverTrackId = (track: PlayerTrack): string =>
     ? `yt_${track.youtubeVideoId}`
     : track.spotifyId;
 
+const resolveNativeYouTubeSource = async (
+  track: PlayerTrack
+): Promise<string | null> => {
+  if (
+    typeof hasNativeYouTubePlayback !== 'function' ||
+    !hasNativeYouTubePlayback() ||
+    typeof toNativeYouTubePlaybackUri !== 'function'
+  ) return null;
+
+  const exactVideoId = track.youtubeVideoId ||
+    track.spotifyId.match(/^yt_([A-Za-z0-9_-]{11})$/)?.[1];
+  if (exactVideoId && /^[A-Za-z0-9_-]{11}$/.test(exactVideoId)) {
+    return toNativeYouTubePlaybackUri(exactVideoId);
+  }
+  if (typeof resolveSpotifyTrackVideoId !== 'function') return null;
+
+  const match = await resolveSpotifyTrackVideoId(
+    track.spotifyId,
+    track.title,
+    track.artists?.map((artist) => artist.name) || [track.artistName],
+    track.duration_ms
+  );
+  return match.status === 'resolved'
+    ? toNativeYouTubePlaybackUri(match.videoId)
+    : null;
+};
+
 // Every imported catalog id is authoritative, including yt_* ids. Falling
 // back to artist/title for valid ids can make two different recordings share
 // a warmed source.
@@ -278,6 +309,14 @@ const warmTrackAudio = (
       if (isStillNeeded()) void preloadAudio(downloadedSavedSource);
       return;
     }
+
+    // The iOS native engine opens the next YouTube item by canonical video ID.
+    // Resolving a short-lived JS URL here only wastes requests and can poison
+    // the client-health cache before the user reaches that track.
+    if (
+      typeof hasNativeYouTubePlayback === 'function' &&
+      hasNativeYouTubePlayback()
+    ) return;
 
     if (!isStillNeeded() || !isAppActiveForPreload() || getFreshPreloadedSource(track)) return;
     const resolved = await resolveAudioUrl(
@@ -415,6 +454,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         hasSavedWebDownload = Platform.OS === 'web';
         return downloadedSavedSource;
       }
+
+      const nativeYouTubeSource = await resolveNativeYouTubeSource(track);
+      if (nativeYouTubeSource) return nativeYouTubeSource;
 
       const preloadedSource = getFreshPreloadedSource(track);
       if (preloadedSource) {
@@ -609,6 +651,28 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
                 { title: track.title, artist: track.artistName,
                   albumTitle: track.albumName, artworkUrl: track.imageURL },
                 0, track
+              );
+              if (get().activeRequestId === requestId && recoveredOk && lastPosMs > 1000) {
+                await seekTo(lastPosMs);
+              }
+              return;
+            }
+            const nativeVideoId =
+              typeof parseNativeYouTubePlaybackUri === 'function'
+                ? parseNativeYouTubePlaybackUri(activeStreamUri)
+                : null;
+            if (nativeVideoId) {
+              const recoveredOk = await loadAndPlay(
+                activeStreamUri,
+                handleStatusUpdate,
+                {
+                  title: track.title,
+                  artist: track.artistName,
+                  albumTitle: track.albumName,
+                  artworkUrl: track.imageURL,
+                },
+                0,
+                track
               );
               if (get().activeRequestId === requestId && recoveredOk && lastPosMs > 1000) {
                 await seekTo(lastPosMs);

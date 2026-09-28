@@ -9,6 +9,30 @@ export type NativeYouTubeTransferResult = {
   sourceUrl: string;
 };
 
+export type NativeYouTubePlaybackStatus = {
+  isPlaying: boolean;
+  isLoaded: boolean;
+  isBuffering?: boolean;
+  positionMs: number;
+  durationMs: number;
+  didJustFinish?: boolean;
+  error?: string;
+};
+
+export type NativeYouTubePlaybackMetadata = {
+  title: string;
+  artist: string;
+  albumTitle?: string;
+  artworkUrl?: string;
+};
+
+export type NativeYouTubePlaybackEvent =
+  | 'onNativePlaybackEnded'
+  | 'onNativeRemoteNext'
+  | 'onNativeRemotePrevious';
+
+type NativeSubscription = { remove(): void };
+
 type OpenfyYouTubeNativeModule = {
   downloadGoogleVideoAsync(
     url: string,
@@ -21,6 +45,20 @@ type OpenfyYouTubeNativeModule = {
     destination: string,
     chunkBytes: number
   ): Promise<unknown>;
+  playNativeYouTubeAsync?(videoId: string): Promise<void>;
+  playNativeYouTubeWithMetadataAsync?(
+    videoId: string,
+    metadata: Record<string, string>
+  ): Promise<void>;
+  pauseNativeYouTubeAsync?(): Promise<void>;
+  resumeNativeYouTubeAsync?(): Promise<void>;
+  seekNativeYouTubeAsync?(positionMs: number): Promise<void>;
+  stopNativeYouTubeAsync?(): Promise<void>;
+  getNativePlaybackStatusAsync?(): Promise<unknown>;
+  addListener?(
+    eventName: NativeYouTubePlaybackEvent,
+    listener: () => void
+  ): NativeSubscription;
 };
 
 const NATIVE_TRANSFER_CHUNK_BYTES = 1024 * 1024;
@@ -60,6 +98,92 @@ export const hasNativeYouTubeTransfer = () => Boolean(getNativeModule());
 export const hasNativeYouTubeDownload = () =>
   Platform.OS === 'ios' &&
   typeof getNativeModule()?.resolveAndDownloadGoogleVideoAsync === 'function';
+
+export const NATIVE_YOUTUBE_PLAYBACK_PREFIX = 'openfy-youtube://video/';
+
+export const toNativeYouTubePlaybackUri = (videoId: string): string =>
+  `${NATIVE_YOUTUBE_PLAYBACK_PREFIX}${videoId}`;
+
+export const parseNativeYouTubePlaybackUri = (uri: string): string | null => {
+  if (!uri.startsWith(NATIVE_YOUTUBE_PLAYBACK_PREFIX)) return null;
+  const videoId = uri.slice(NATIVE_YOUTUBE_PLAYBACK_PREFIX.length);
+  return /^[A-Za-z0-9_-]{11}$/.test(videoId) ? videoId : null;
+};
+
+export const hasNativeYouTubePlayback = (): boolean =>
+  Platform.OS === 'ios' &&
+  typeof getNativeModule()?.playNativeYouTubeAsync === 'function';
+
+const metadataRecord = (
+  metadata: NativeYouTubePlaybackMetadata
+): Record<string, string> => ({
+  title: metadata.title,
+  artist: metadata.artist,
+  ...(metadata.albumTitle ? { albumTitle: metadata.albumTitle } : {}),
+  ...(metadata.artworkUrl ? { artworkUrl: metadata.artworkUrl } : {}),
+});
+
+export const playYouTubeVideoNatively = async (
+  videoId: string,
+  metadata: NativeYouTubePlaybackMetadata
+): Promise<boolean> => {
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return false;
+  const nativeModule = getNativeModule();
+  if (!nativeModule?.playNativeYouTubeAsync) return false;
+  if (nativeModule.playNativeYouTubeWithMetadataAsync) {
+    await nativeModule.playNativeYouTubeWithMetadataAsync(
+      videoId,
+      metadataRecord(metadata)
+    );
+  } else {
+    await nativeModule.playNativeYouTubeAsync(videoId);
+  }
+  return true;
+};
+
+export const pauseNativeYouTubePlayback = async (): Promise<void> => {
+  await getNativeModule()?.pauseNativeYouTubeAsync?.();
+};
+
+export const resumeNativeYouTubePlayback = async (): Promise<void> => {
+  await getNativeModule()?.resumeNativeYouTubeAsync?.();
+};
+
+export const seekNativeYouTubePlayback = async (
+  positionMs: number
+): Promise<void> => {
+  await getNativeModule()?.seekNativeYouTubeAsync?.(Math.max(0, positionMs));
+};
+
+export const stopNativeYouTubePlayback = async (): Promise<void> => {
+  await getNativeModule()?.stopNativeYouTubeAsync?.();
+};
+
+export const getNativeYouTubePlaybackStatus = async ():
+Promise<NativeYouTubePlaybackStatus | null> => {
+  const raw = await getNativeModule()?.getNativePlaybackStatusAsync?.();
+  if (!isRecord(raw)) return null;
+  return {
+    isPlaying: raw.isPlaying === true,
+    isLoaded: raw.isLoaded === true,
+    isBuffering: raw.isBuffering === true,
+    positionMs: typeof raw.positionMs === 'number' ? raw.positionMs : 0,
+    durationMs: typeof raw.durationMs === 'number' ? raw.durationMs : 0,
+    ...(raw.didJustFinish === true ? { didJustFinish: true } : {}),
+    ...(typeof raw.error === 'string' ? { error: raw.error } : {}),
+  };
+};
+
+export const addNativeYouTubePlaybackListener = (
+  eventName: NativeYouTubePlaybackEvent,
+  listener: () => void
+): NativeSubscription | null => {
+  try {
+    return getNativeModule()?.addListener?.(eventName, listener) || null;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Native iOS/Android range transfer used only for direct googlevideo sources.

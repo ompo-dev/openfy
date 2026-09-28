@@ -18,6 +18,27 @@ jest.mock('react-native', () => ({
   Platform: { OS: 'ios' },
 }));
 
+jest.mock('../nativeYouTubeTransfer', () => ({
+  addNativeYouTubePlaybackListener: jest.fn(() => ({ remove: jest.fn() })),
+  getNativeYouTubePlaybackStatus: jest.fn().mockResolvedValue({
+    isPlaying: true,
+    isLoaded: true,
+    isBuffering: false,
+    positionMs: 500,
+    durationMs: 180000,
+  }),
+  parseNativeYouTubePlaybackUri: jest.fn((uri: string) =>
+    uri.startsWith('openfy-youtube://video/')
+      ? uri.slice('openfy-youtube://video/'.length)
+      : null
+  ),
+  pauseNativeYouTubePlayback: jest.fn().mockResolvedValue(undefined),
+  playYouTubeVideoNatively: jest.fn().mockResolvedValue(true),
+  resumeNativeYouTubePlayback: jest.fn().mockResolvedValue(undefined),
+  seekNativeYouTubePlayback: jest.fn().mockResolvedValue(undefined),
+  stopNativeYouTubePlayback: jest.fn().mockResolvedValue(undefined),
+}));
+
 jest.mock('../directYouTubeResolver', () => {
   const original = jest.requireActual('../directYouTubeResolver');
   return {
@@ -28,6 +49,10 @@ jest.mock('../directYouTubeResolver', () => {
 
 import { createAudioPlayer } from 'expo-audio';
 import { reportDirectYouTubeStreamRefusal } from '../directYouTubeResolver';
+import {
+  getNativeYouTubePlaybackStatus,
+  playYouTubeVideoNatively,
+} from '../nativeYouTubeTransfer';
 import {
   loadAndPlay,
   toAudioSource,
@@ -74,6 +99,14 @@ describe('Stream Recovery & Refusal Tests', () => {
     };
     mocks.createAudioPlayer.mockReset();
     mocks.setAudioModeAsync.mockResolvedValue(undefined);
+    jest.mocked(playYouTubeVideoNatively).mockResolvedValue(true);
+    jest.mocked(getNativeYouTubePlaybackStatus).mockResolvedValue({
+      isPlaying: true,
+      isLoaded: true,
+      isBuffering: false,
+      positionMs: 500,
+      durationMs: 180000,
+    });
   });
 
   afterEach(async () => {
@@ -112,6 +145,29 @@ describe('Stream Recovery & Refusal Tests', () => {
         keepAudioSessionActive: true,
         preferredForwardBufferDuration: 30,
       }
+    );
+  });
+
+  it('streams a native YouTube media reference without creating an Expo player', async () => {
+    const onStatus = jest.fn();
+    const success = await loadAndPlay(
+      'openfy-youtube://video/V1M1hYxmRvA',
+      onStatus,
+      {
+        title: 'Faixa',
+        artist: 'Artista',
+        albumTitle: 'Álbum',
+      }
+    );
+
+    expect(success).toBe(true);
+    expect(createAudioPlayer).not.toHaveBeenCalled();
+    expect(playYouTubeVideoNatively).toHaveBeenCalledWith(
+      'V1M1hYxmRvA',
+      expect.objectContaining({ title: 'Faixa', artist: 'Artista' })
+    );
+    expect(onStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ isPlaying: true, durationMs: 180000 })
     );
   });
 

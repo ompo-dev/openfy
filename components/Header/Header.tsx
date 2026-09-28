@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ImportModal } from '../ImportModal';
 import { DownloadsModal } from '../DownloadsModal';
+import { PlaylistCreateModal } from '../LocalPlaylist';
 import {
   AppIcon,
   GlassSurface,
@@ -17,6 +18,7 @@ import {
   NativeIconButton,
 } from '../native';
 import { useDownloads, useLibrarySelectedCategory } from '@context';
+import { useDetailNavigation } from '@hooks';
 import { LibraryControlsPicker } from './LibraryControlsPicker';
 
 const libraryCopy = {
@@ -28,9 +30,11 @@ const libraryCopy = {
 
 export const Header = () => {
   const router = useRouter();
+  const { openDetail } = useDetailNavigation();
   const { top: statusBarOffset } = useSafeAreaInsets();
   const [importModalVisible, setImportModalVisible] = React.useState(false);
   const [downloadsModalVisible, setDownloadsModalVisible] = React.useState(false);
+  const [createPlaylistVisible, setCreatePlaylistVisible] = React.useState(false);
   const { activeDownloadsCount } = useDownloads();
   const {
     librarySearchQuery,
@@ -95,17 +99,43 @@ export const Header = () => {
           />
         </View>
         <View style={styles.trailingControls}>
-          <NativeIconButton
-            systemImage="gearshape"
-            iconName="settings-outline"
-            label="Abrir configurações"
-            size={40}
-            onPress={() =>
-              router.navigate('/(tabs)/library/settings' as Href, {
-                dangerouslySingular: true,
-              })
-            }
-          />
+          {libraryView === 'playlists' ? (
+            <GlassSurface glass="regular" isInteractive style={styles.actionGroup}>
+              <LoggedPressable
+                accessibilityLabel="Criar playlist"
+                accessibilityRole="button"
+                onPress={() => setCreatePlaylistVisible(true)}
+                style={({ pressed }) => [styles.groupButton, pressed && styles.groupPressed]}
+              >
+                <AppIcon color="#B8B8B8" name="add" size={21} />
+              </LoggedPressable>
+              <View style={styles.groupDivider} />
+              <LoggedPressable
+                accessibilityLabel="Abrir configurações"
+                accessibilityRole="button"
+                onPress={() =>
+                  router.navigate('/(tabs)/library/settings' as Href, {
+                    dangerouslySingular: true,
+                  })
+                }
+                style={({ pressed }) => [styles.groupButton, pressed && styles.groupPressed]}
+              >
+                <AppIcon color="#B8B8B8" name="settings-outline" size={20} />
+              </LoggedPressable>
+            </GlassSurface>
+          ) : (
+            <NativeIconButton
+              systemImage="gearshape"
+              iconName="settings-outline"
+              label="Abrir configurações"
+              size={40}
+              onPress={() =>
+                router.navigate('/(tabs)/library/settings' as Href, {
+                  dangerouslySingular: true,
+                })
+              }
+            />
+          )}
         </View>
       </View>
 
@@ -130,6 +160,14 @@ export const Header = () => {
       <DownloadsModal
         visible={downloadsModalVisible}
         onClose={() => setDownloadsModalVisible(false)}
+      />
+      <PlaylistCreateModal
+        visible={createPlaylistVisible}
+        onClose={() => setCreatePlaylistVisible(false)}
+        onCreated={async (playlist) => {
+          refreshLibrary();
+          openDetail('playlist', playlist.id, 'library');
+        }}
       />
     </View>
   );

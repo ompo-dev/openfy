@@ -15,6 +15,16 @@ import { AppState, Platform } from 'react-native';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
 import { getDirectYouTubeMediaHeaders } from './directYouTubeResolver';
 import { prepareLocalAudioForPlayback } from './localAudioRepair';
+import {
+  addNativeYouTubePlaybackListener,
+  getNativeYouTubePlaybackStatus,
+  parseNativeYouTubePlaybackUri,
+  pauseNativeYouTubePlayback,
+  playYouTubeVideoNatively,
+  resumeNativeYouTubePlayback,
+  seekNativeYouTubePlayback,
+  stopNativeYouTubePlayback,
+} from './nativeYouTubeTransfer';
 
 export type AudioSourceInput =
   | string
@@ -92,6 +102,12 @@ let playerStatusSubscription: { remove(): void } | undefined;
 let playerAppStateSubscription: { remove(): void } | undefined;
 let playerRemoteNextSubscription: { remove(): void } | undefined;
 let playerRemotePreviousSubscription: { remove(): void } | undefined;
+let nativeYouTubeSubscriptions: { remove(): void }[] = [];
+let nativeYouTubeStatusTimer: ReturnType<typeof setInterval> | undefined;
+let nativeYouTubeActive = false;
+let nativeYouTubeState: PlayerState = DEFAULT_STATE;
+let nativeYouTubeStatusCallback: ((state: PlayerState) => void) | null = null;
+let nativeStopPromise = Promise.resolve();
 let loadGeneration = 0;
 let isSeeking = false;
 let remoteCommandInFlight = false;
@@ -195,6 +211,32 @@ const detachPlayerSubscriptions = () => {
   try { remotePrevious?.remove(); } catch {}
 };
 
+const detachNativeYouTubeSubscriptions = () => {
+  if (nativeYouTubeStatusTimer) clearInterval(nativeYouTubeStatusTimer);
+  nativeYouTubeStatusTimer = undefined;
+  nativeYouTubeSubscriptions.forEach((subscription) => {
+    try { subscription.remove(); } catch {}
+  });
+  nativeYouTubeSubscriptions = [];
+  nativeYouTubeStatusCallback = null;
+  const appState = playerAppStateSubscription;
+  playerAppStateSubscription = undefined;
+  try { appState?.remove(); } catch {}
+};
+
+const stopNativeYouTubeEngine = (): Promise<void> => {
+  const shouldStop = nativeYouTubeActive || nativeYouTubeSubscriptions.length > 0;
+  nativeYouTubeActive = false;
+  nativeYouTubeState = DEFAULT_STATE;
+  detachNativeYouTubeSubscriptions();
+  if (!shouldStop) return nativeStopPromise;
+  nativeStopPromise = nativeStopPromise
+    .catch(() => undefined)
+    .then(() => stopNativeYouTubePlayback())
+    .catch(() => undefined);
+  return nativeStopPromise;
+};
+
 export const setRemotePlaybackHandlers = (
   handlers: RemotePlaybackHandlers
 ): void => {
@@ -214,6 +256,7 @@ const runRemoteCommand = (command: keyof RemotePlaybackHandlers): void => {
 export const beginTrackChange = (): void => {
   loadGeneration++;
   stopVolumeRamp();
+  void stopNativeYouTubeEngine();
   // Silence the engine before touching listeners: a listener cleanup failure
   // must never orphan an audible player.
   try {
@@ -227,6 +270,7 @@ export const beginTrackChange = (): void => {
 
 function disposeCurrentPlayer() {
   stopVolumeRamp();
+  void stopNativeYouTubeEngine();
   const previous = playerInstance;
   try { previous?.pause(); } catch {}
   detachPlayerSubscriptions();
@@ -417,6 +461,7 @@ const trimPreloadedSources = () => {
 export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void> => {
   const source = toAudioSource(sourceInput);
   const uri = source.uri;
+  if (parseNativeYouTubePlaybackUri(uri)) return;
   if (!uri || !isAppActive() || preloadedSources.has(uri)) return;
   // expo-audio preloads web URLs through fetch() and then plays the blob.
   // That bypasses the browser media element's Range handling for proxied audio.
@@ -459,6 +504,103 @@ export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void>
   await operation;
 };
 
+const loadAndPlayNativeYouTube = async (
+  videoId: string,
+  onStatusUpdate: ((state: PlayerState) => void) | undefined,
+  lockScreenMetadata: LockScreenMetadata | undefined,
+  diagnosticTrack: PlaybackDiagnosticTrack | undefined
+): Promise<boolean> => {
+  const generation = loadGeneration + 1;
+  try {
+    beginTrackChange();
+    // Native playback owns MPRemoteCommandCenter and Now Playing. Release any
+    // dormant Expo player so one tap cannot be delivered to both engines.
+    disposeCurrentPlayer();
+    await nativeStopPromise;
+    await configureAudioSession(diagnosticTrack?.spotifyId);
+    if (generation !== loadGeneration) return false;
+
+    currentSourceKind = 'remote';
+    currentSourceHost = 'youtube.com';
+    currentDiagnosticSpotifyId = diagnosticTrack?.spotifyId || null;
+    lastDiagnosticSignature = '';
+    nativeYouTubeActive = true;
+    nativeYouTubeState = {
+      ...DEFAULT_STATE,
+      isBuffering: true,
+      durationMs: 0,
+    };
+    nativeYouTubeStatusCallback = onStatusUpdate || null;
+    recordAudioDiagnostic('native-stream-load-start', videoId);
+
+    const publishStatus = async (force = false) => {
+      if (!nativeYouTubeActive || generation !== loadGeneration) return;
+      const status = await getNativeYouTubePlaybackStatus();
+      if (!status || !nativeYouTubeActive || generation !== loadGeneration) return;
+      const nextState: PlayerState = {
+        isPlaying: status.isPlaying,
+        isBuffering: status.isBuffering ?? false,
+        isLoaded: status.isLoaded,
+        positionMs: status.positionMs,
+        durationMs: status.durationMs,
+        didJustFinish: status.didJustFinish,
+        error: status.error,
+      };
+      const changed = playbackTransition(nextState) !== playbackTransition(nativeYouTubeState) ||
+        Math.abs(nextState.positionMs - nativeYouTubeState.positionMs) >= 400;
+      nativeYouTubeState = nextState;
+      if (force || changed) {
+        recordStatusDiagnostic(nextState);
+        nativeYouTubeStatusCallback?.(nextState);
+      }
+    };
+
+    const ended = addNativeYouTubePlaybackListener('onNativePlaybackEnded', () => {
+      void publishStatus(true);
+    });
+    const next = addNativeYouTubePlaybackListener('onNativeRemoteNext', () => {
+      runRemoteCommand('next');
+    });
+    const previous = addNativeYouTubePlaybackListener('onNativeRemotePrevious', () => {
+      runRemoteCommand('previous');
+    });
+    nativeYouTubeSubscriptions = [ended, next, previous].filter(
+      (subscription): subscription is { remove(): void } => Boolean(subscription)
+    );
+
+    const started = await playYouTubeVideoNatively(videoId, {
+      title: lockScreenMetadata?.title || diagnosticTrack?.title || 'Openfy Music',
+      artist: lockScreenMetadata?.artist || diagnosticTrack?.artistName || '',
+      albumTitle: lockScreenMetadata?.albumTitle || diagnosticTrack?.albumName,
+      artworkUrl: lockScreenMetadata?.artworkUrl,
+    });
+    if (!started || generation !== loadGeneration) {
+      await stopNativeYouTubeEngine();
+      return false;
+    }
+
+    nativeYouTubeStatusTimer = setInterval(() => {
+      void publishStatus();
+    }, 500);
+    playerAppStateSubscription = AppState?.addEventListener('change', (state) => {
+      if (!nativeYouTubeActive || generation !== loadGeneration) return;
+      if (state === 'active') void publishStatus(true);
+      else releaseAllPreloadedAudio();
+    });
+    await publishStatus(true);
+    recordAudioDiagnostic('native-stream-play-called', videoId);
+    return true;
+  } catch (error) {
+    if (generation !== loadGeneration) return false;
+    await stopNativeYouTubeEngine();
+    const failedState = { ...DEFAULT_STATE, error: String(error) };
+    recordStatusDiagnostic(failedState);
+    onStatusUpdate?.(failedState);
+    console.error('[PlayerService] Native YouTube playback failed:', error);
+    return false;
+  }
+};
+
 /** Release a queued neighbor once it is no longer adjacent to the current track. */
 export const releasePreloadedAudio = (sourceInput: AudioSourceInput): void => {
   const uri = getAudioSourceUri(sourceInput);
@@ -486,6 +628,15 @@ export const loadAndPlay = async (
 ): Promise<boolean> => {
   const source = toAudioSource(sourceInput);
   const uri = source.uri;
+  const nativeYouTubeVideoId = parseNativeYouTubePlaybackUri(uri);
+  if (nativeYouTubeVideoId) {
+    return loadAndPlayNativeYouTube(
+      nativeYouTubeVideoId,
+      onStatusUpdate,
+      lockScreenMetadata,
+      diagnosticTrack
+    );
+  }
   const generation = loadGeneration + 1;
   try {
     beginTrackChange();
@@ -600,6 +751,14 @@ export const loadAndPlay = async (
  * Play / resume playback.
  */
 export const play = async (): Promise<void> => {
+  if (nativeYouTubeActive) {
+    await configureAudioSession();
+    await resumeNativeYouTubePlayback();
+    nativeYouTubeState = { ...nativeYouTubeState, isPlaying: true };
+    nativeYouTubeStatusCallback?.(nativeYouTubeState);
+    recordAudioDiagnostic('native-resume-called');
+    return;
+  }
   const player = playerInstance;
   const generation = loadGeneration;
   if (!player) return;
@@ -617,6 +776,13 @@ export const play = async (): Promise<void> => {
  * Pause playback.
  */
 export const pause = async (): Promise<void> => {
+  if (nativeYouTubeActive) {
+    await pauseNativeYouTubePlayback();
+    nativeYouTubeState = { ...nativeYouTubeState, isPlaying: false };
+    nativeYouTubeStatusCallback?.(nativeYouTubeState);
+    recordAudioDiagnostic('native-pause-called');
+    return;
+  }
   if (!playerInstance) return;
   try {
     playerInstance.pause();
@@ -634,6 +800,16 @@ export const pause = async (): Promise<void> => {
  * Seek to position in milliseconds.
  */
 export const seekTo = async (positionMs: number): Promise<void> => {
+  if (nativeYouTubeActive) {
+    await seekNativeYouTubePlayback(positionMs);
+    nativeYouTubeState = {
+      ...nativeYouTubeState,
+      positionMs: Math.max(0, positionMs),
+      didJustFinish: false,
+    };
+    nativeYouTubeStatusCallback?.(nativeYouTubeState);
+    return;
+  }
   if (!playerInstance || isSeeking) return;
   isSeeking = true;
   try {
@@ -674,6 +850,7 @@ export const unload = async (): Promise<void> => {
  * Get current player state.
  */
 export const getPlayerState = (): PlayerState => {
+  if (nativeYouTubeActive) return nativeYouTubeState;
   if (!playerInstance) return DEFAULT_STATE;
   try {
     const status = playerInstance.currentStatus;

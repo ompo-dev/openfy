@@ -1,29 +1,28 @@
 import * as React from 'react';
 import { Alert, View } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import {
+  addTracksToLocalPlaylist,
   deleteLocalPlaylist,
   getLibraryTracks,
   getLocalPlaylist,
-  upsertLocalPlaylist,
   type LibraryTrack,
   type LocalPlaylist as LocalPlaylistModel,
 } from '@services';
 import { useLibrarySelectedCategory } from '@context';
-import { useDetailNavigation } from '@hooks';
 import { CollectionDetail } from '../CollectionDetail';
+import { PlaylistEditorModal } from './PlaylistEditorModal';
 import { PlaylistTrackPickerModal } from './PlaylistTrackPickerModal';
 
 export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
   const router = useRouter();
-  const { openDetail } = useDetailNavigation();
   const { refreshLibrary } = useLibrarySelectedCategory();
   const [playlist, setPlaylist] = React.useState<LocalPlaylistModel | null>(null);
   const [libraryTracks, setLibraryTracks] = React.useState<LibraryTrack[]>([]);
   const [tracks, setTracks] = React.useState<LibraryTrack[]>([]);
   const [isPickerVisible, setIsPickerVisible] = React.useState(false);
+  const [isEditorVisible, setIsEditorVisible] = React.useState(false);
 
   const loadPlaylist = React.useCallback(async () => {
     const [localPlaylist, downloaded] = await Promise.all([
@@ -53,28 +52,12 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
   const addTracks = React.useCallback(
     async (trackIds: string[]) => {
       if (!playlist || trackIds.length === 0) return;
-      await upsertLocalPlaylist({
-        sourcePlatform: playlist.sourcePlatform,
-        sourceId: playlist.sourceId,
-        title: playlist.title,
-        trackIds: [...playlist.trackIds, ...trackIds],
-        coverImageURLs: playlist.coverImageURLs,
-      });
+      await addTracksToLocalPlaylist(playlist.id, trackIds);
       await loadPlaylist();
       refreshLibrary();
     },
     [loadPlaylist, playlist, refreshLibrary]
   );
-
-  const copyPlaylistLink = React.useCallback(async () => {
-    if (!playlist) return;
-    const sourceLink =
-      playlist.sourcePlatform === 'spotify'
-        ? `https://open.spotify.com/playlist/${encodeURIComponent(playlist.sourceId)}`
-        : `https://www.youtube.com/playlist?list=${encodeURIComponent(playlist.sourceId)}`;
-    await Clipboard.setStringAsync(sourceLink);
-    Alert.alert('Link copiado', 'Link da playlist copiado para a área de transferência.');
-  }, [playlist]);
 
   const confirmDelete = React.useCallback(() => {
     if (!playlist) return;
@@ -97,16 +80,6 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
       ]
     );
   }, [playlist, refreshLibrary, router]);
-
-  const handleArtistPress = React.useCallback(
-    (artistId: string, artistName: string) => {
-      const targetArtistId = artistId
-        ? artistId
-        : `local_artist_${encodeURIComponent(artistName)}`;
-      openDetail('artist', targetArtistId, 'library');
-    },
-    [openDetail]
-  );
 
   if (!playlist) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
 
@@ -140,16 +113,34 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
         title={playlist.title}
         imageURL={imageURL}
         imageURLs={[...new Set(imageURLs)].slice(0, 4)}
-        description={`Playlist importada do ${
-          playlist.sourcePlatform === 'spotify' ? 'Spotify' : 'YouTube'
-        }.`}
+        description={
+          playlist.description ||
+          (playlist.sourcePlatform === 'local'
+            ? 'Playlist criada no Openfy.'
+            : `Playlist importada do ${
+                playlist.sourcePlatform === 'spotify' ? 'Spotify' : 'YouTube'
+              }.`)
+        }
         createdAt={playlist.createdAt}
         onAddTracksPress={() => setIsPickerVisible(true)}
         onDeletePress={confirmDelete}
-        onArtistPress={handleArtistPress}
-        onSharePress={copyPlaylistLink}
+        onEditPress={() => setIsEditorVisible(true)}
+        disableTrackArtistLinks
         trackCount={playlist.trackIds.length}
         tracks={collectionTracks}
+      />
+      <PlaylistEditorModal
+        onAddTracks={() => {
+          setTimeout(() => setIsPickerVisible(true), 220);
+        }}
+        onClose={() => setIsEditorVisible(false)}
+        onSaved={async () => {
+          await loadPlaylist();
+          refreshLibrary();
+        }}
+        playlist={playlist}
+        tracks={tracks}
+        visible={isEditorVisible}
       />
       <PlaylistTrackPickerModal
         existingTrackIds={playlist.trackIds}

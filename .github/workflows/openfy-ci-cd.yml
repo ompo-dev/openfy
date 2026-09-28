@@ -185,6 +185,17 @@ jobs:
             scripts/check-youtube-retry.swift -o "$RUNNER_TEMP/check-youtube-retry"
           "$RUNNER_TEMP/check-youtube-retry"
 
+      - name: Validar player nativo de streaming
+        run: |
+          xcrun swiftc -typecheck -parse-as-library \
+            -target arm64-apple-ios16.4 \
+            -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            modules/openfy-youtube/ios/YouTubeRequestRetry.swift \
+            modules/openfy-youtube/ios/YouTubeStreamDescriptor.swift \
+            modules/openfy-youtube/ios/YouTubeHTTPRangeClient.swift \
+            modules/openfy-youtube/ios/OpenfyAssetResourceLoader.swift \
+            modules/openfy-youtube/ios/OpenfyNativeYouTubePlayer.swift
+
   gerar-ipa:
     needs: validar
     if: github.event_name == 'push' || inputs.build_ios

@@ -1,9 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
+  addTracksToLocalPlaylist,
+  createLocalPlaylist,
   deleteLocalPlaylist,
   getLocalPlaylist,
   getLocalPlaylists,
+  removeTracksFromLocalPlaylist,
+  updateLocalPlaylist,
   upsertLocalPlaylist,
 } from '../localPlaylistManager';
 
@@ -51,5 +55,32 @@ describe('localPlaylistManager', () => {
 
     await expect(getLocalPlaylist(first.id)).resolves.toBeNull();
     await expect(getLocalPlaylists()).resolves.toEqual([second]);
+  });
+
+  it('creates and edits a device-local playlist without changing its identity', async () => {
+    const created = await createLocalPlaylist('  Favoritas  ', '  Para treinar  ');
+
+    expect(created).toMatchObject({
+      sourcePlatform: 'local',
+      title: 'Favoritas',
+      description: 'Para treinar',
+      trackIds: [],
+    });
+
+    await addTracksToLocalPlaylist(created.id, ['track-2', 'track-1', 'track-2']);
+    await removeTracksFromLocalPlaylist(created.id, ['track-2']);
+    const updated = await updateLocalPlaylist(created.id, {
+      title: 'Favoritas atualizadas',
+      description: '',
+    });
+
+    expect(updated).toMatchObject({
+      id: created.id,
+      sourcePlatform: 'local',
+      sourceId: created.sourceId,
+      title: 'Favoritas atualizadas',
+      trackIds: ['track-1'],
+    });
+    expect(updated?.description).toBeUndefined();
   });
 });
