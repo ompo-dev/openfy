@@ -24,6 +24,7 @@ export type NativeYouTubePlaybackMetadata = {
   artist: string;
   albumTitle?: string;
   artworkUrl?: string;
+  durationMs?: number;
 };
 
 export type NativeYouTubePlaybackEvent =
@@ -121,6 +122,9 @@ const metadataRecord = (
   artist: metadata.artist,
   ...(metadata.albumTitle ? { albumTitle: metadata.albumTitle } : {}),
   ...(metadata.artworkUrl ? { artworkUrl: metadata.artworkUrl } : {}),
+  ...(metadata.durationMs && metadata.durationMs > 0
+    ? { durationMs: String(Math.round(metadata.durationMs)) }
+    : {}),
 });
 
 export const playYouTubeVideoNatively = async (

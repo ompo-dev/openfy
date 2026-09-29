@@ -31,6 +31,10 @@ export type {
   NativeYouTubePlaybackMetadata,
   NativeYouTubePlaybackStatus,
 } from './audio/nativeYouTubeTransfer';
+export {
+  clampPlaybackPositionMs,
+  reconcilePlaybackDurationMs,
+} from './audio/playbackDuration';
 
 export type {
   MediaReference,
@@ -153,6 +157,7 @@ export type {
   LocalAlbumCollection,
   LocalArtistCollection,
 } from './library/localCollections';
+export { mergeArtistProfileTracks } from './library/artistProfileTracks';
 
 export {
   BACKGROUND_DOWNLOAD_TASK,

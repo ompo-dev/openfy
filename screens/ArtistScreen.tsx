@@ -3,15 +3,18 @@ import { View } from 'react-native';
 
 import { getArtist, getArtistAlbums, getArtistTopTracks } from '@api';
 import { CollectionDetail } from '@components';
+import { usePlayer } from '@context';
 import { ArtistModel, LibraryItemModel, TrackModel } from '@models';
 import { Shapes, Sizes } from '@config';
 import {
   getCachedArtistImage,
   getLibraryTracks,
+  getUserProfile,
   groupLocalAlbums,
   groupLocalArtists,
   isTrackParticipantArtist,
   isTrackPrimaryArtist,
+  mergeArtistProfileTracks,
   type LibraryTrack,
 } from '@services';
 import { getSpotifyArtistImage } from '../services/metadata/spotifyMetadata';
@@ -30,6 +33,38 @@ const toTrackModel = (track: LibraryTrack): TrackModel => ({
   albumName: track.albumName,
   durationMs: track.duration_ms,
   isDownloaded: track.isDownloaded,
+});
+
+const toHistoryTrackModel = (
+  track: Awaited<
+    ReturnType<typeof getUserProfile>
+  >['recentlyPlayedTracks'][number]['track']
+): TrackModel => ({
+  id: track.spotifyId,
+  title: track.title,
+  subtitle: track.artists.join(', ') || track.primaryArtist,
+  imageURL: track.imageURL,
+  albumName: track.albumName,
+  durationMs: track.durationMs,
+  artists: track.artists.map((name) => ({ id: '', name })),
+  isDownloaded: Boolean(track.localAudioPath),
+});
+
+const toCurrentTrackModel = (
+  track: NonNullable<ReturnType<typeof usePlayer>['currentTrack']>
+): TrackModel => ({
+  id: track.spotifyId,
+  title: track.title,
+  subtitle: track.artistName,
+  imageURL: track.localImagePath || track.imageURL,
+  albumName: track.albumName,
+  albumId: track.albumId,
+  albumArtists: track.albumArtists,
+  youtubeVideoId: track.youtubeVideoId,
+  youtubeUrl: track.youtubeUrl,
+  durationMs: track.duration_ms,
+  artists: track.artists,
+  isDownloaded: Boolean(track.localAudioPath),
 });
 
 const isRemotePrimaryArtist = (
@@ -60,9 +95,13 @@ const artistMatchesAlbumPrimary = (
 };
 
 export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
+  const { currentTrack } = usePlayer();
   const [artist, setArtist] = React.useState<ArtistModel | null>(null);
   const [topTracks, setTopTracks] = React.useState<TrackModel[]>([]);
   const [participationTracks, setParticipationTracks] = React.useState<TrackModel[]>([]);
+  const [contextualTracks, setContextualTracks] = React.useState<TrackModel[]>(
+    []
+  );
   const [albums, setAlbums] = React.useState<LibraryItemModel[]>([]);
   const localArtistName = artistId.startsWith('local_artist_')
     ? decodeURIComponent(artistId.slice('local_artist_'.length))
@@ -73,10 +112,24 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     setArtist(null);
     setTopTracks([]);
     setParticipationTracks([]);
+    setContextualTracks([]);
     setAlbums([]);
 
+    const libraryPromise = getLibraryTracks();
+    void Promise.all([libraryPromise, getUserProfile()]).then(
+      ([libraryTracks, profile]) => {
+        if (!active) return;
+        setContextualTracks([
+          ...profile.recentlyPlayedTracks.map((entry) =>
+            toHistoryTrackModel(entry.track)
+          ),
+          ...libraryTracks.map(toTrackModel),
+        ]);
+      }
+    );
+
     if (localArtistName) {
-      void getLibraryTracks().then(async (downloaded) => {
+      void libraryPromise.then(async (downloaded) => {
         const collection = groupLocalArtists(downloaded).find((candidate) =>
           candidate.id === localArtistName ||
           candidate.title.toLocaleLowerCase() === localArtistName.toLocaleLowerCase()
@@ -157,6 +210,29 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     };
   }, [artistId, localArtistName]);
 
+  const mergedTracks = React.useMemo(() => {
+    if (!artist) {
+      return { primaryTracks: topTracks, participationTracks };
+    }
+    return mergeArtistProfileTracks({
+      artistId,
+      artistName: artist.name,
+      contextualTracks: [
+        ...(currentTrack ? [toCurrentTrackModel(currentTrack)] : []),
+        ...contextualTracks,
+      ],
+      primaryTracks: topTracks,
+      participationTracks,
+    });
+  }, [
+    artist,
+    artistId,
+    contextualTracks,
+    currentTrack,
+    participationTracks,
+    topTracks,
+  ]);
+
   if (!artist) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
 
   const metadata = [
@@ -177,14 +253,14 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       imageURL={artist.imageURL}
       description={description}
       metadata={metadata}
-      tracks={topTracks}
+      tracks={mergedTracks.primaryTracks}
       disableTrackArtistLinks
       sectionTitle="Músicas em destaque"
       extraTrackSections={[
         {
           id: 'participations',
           title: 'Participações',
-          tracks: participationTracks,
+          tracks: mergedTracks.participationTracks,
         },
       ]}
       footer={

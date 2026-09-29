@@ -56,6 +56,7 @@ export type PlaybackDiagnosticTrack = {
   title: string;
   artistName: string;
   albumName: string;
+  duration_ms?: number;
 };
 
 export type RemotePlaybackHandlers = {
@@ -573,6 +574,7 @@ const loadAndPlayNativeYouTube = async (
       artist: lockScreenMetadata?.artist || diagnosticTrack?.artistName || '',
       albumTitle: lockScreenMetadata?.albumTitle || diagnosticTrack?.albumName,
       artworkUrl: lockScreenMetadata?.artworkUrl,
+      durationMs: diagnosticTrack?.duration_ms,
     });
     if (!started || generation !== loadGeneration) {
       await stopNativeYouTubeEngine();

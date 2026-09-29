@@ -14,6 +14,7 @@ public struct YouTubeStreamDescriptor: Sendable {
   public let contentType: String
   public let bitrate: Int
   public let itag: Int?
+  public let durationMs: Double
 
   public init(
     videoId: String,
@@ -23,7 +24,8 @@ public struct YouTubeStreamDescriptor: Sendable {
     mimeType: String,
     contentType: String = "public.mpeg-4-audio",
     bitrate: Int,
-    itag: Int? = nil
+    itag: Int? = nil,
+    durationMs: Double = 0
   ) {
     self.videoId = videoId
     self.sourceURL = sourceURL
@@ -33,5 +35,6 @@ public struct YouTubeStreamDescriptor: Sendable {
     self.contentType = contentType
     self.bitrate = bitrate
     self.itag = itag
+    self.durationMs = durationMs
   }
 }

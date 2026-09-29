@@ -28,12 +28,14 @@ import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { findArtistIdByName } from '@api';
-import { usePlayer } from '@context';
+import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
 import { useDetailNavigation } from '@hooks';
 import {
+  deleteDownloadedTrack,
   getCatalogMapping,
   getLyricGapRange,
   getLyricTimelineBlocks,
+  isTrackDownloaded,
   LyricGapTarget,
   LyricSegment,
   LyricTimelineBlock,
@@ -46,13 +48,16 @@ import {
   resizeLyricGapStart,
   resizeLyricSegmentEnd,
   resizeLyricSegmentStart,
+  toDownloadTrackInput,
+  upsertCatalogTracks,
 } from '@services';
 import { GlassSurface, LoggedPressable } from '../native';
+import { TrackPlaylistPickerModal } from '../LocalPlaylist/TrackPlaylistPickerModal';
 import { LyricSyncEditor } from './LyricSyncEditor';
 import { MarqueeText } from '../common/MarqueeText';
 import { SwipeableArtwork } from './SwipeableArtwork';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COVER_SIZE = Math.min(SCREEN_WIDTH - 64, 340);
 
 type FullPlayerProps = {
@@ -232,6 +237,9 @@ function PlayerGlassButton({
 
 export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const { openDetail } = useDetailNavigation();
+  const { clearCompletedDownloads, downloads, enqueueDownloads } =
+    useDownloads();
+  const { libraryRevision, refreshLibrary } = useLibrarySelectedCategory();
   const {
     currentTrack,
     playerState,
@@ -245,10 +253,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     queueIndex,
     lyricsData,
     isLoadingLyrics,
-    isShuffle,
     repeatMode,
-    toggleShuffle,
-    setRepeatMode,
     updateLyricsSegments,
   } = usePlayer();
 
@@ -269,6 +274,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [isUpdatingAudio, setIsUpdatingAudio] = React.useState(false);
   const [isArtworkNavigationPending, setIsArtworkNavigationPending] =
     React.useState(false);
+  const [isDownloadMutationPending, setIsDownloadMutationPending] =
+    React.useState(false);
+  const [isCurrentTrackDownloaded, setIsCurrentTrackDownloaded] =
+    React.useState(false);
+  const [isPlaylistPickerVisible, setIsPlaylistPickerVisible] =
+    React.useState(false);
 
   const lyricsListRef = React.useRef<FlatList>(null);
   const lyricScrollRetriedRef = React.useRef(false);
@@ -278,6 +289,22 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const draftLyricSegmentsRef = React.useRef<LyricSegment[]>([]);
   const resumeAfterLyricEditRef = React.useRef(false);
   const currentTrackKey = getTrackKey(currentTrack);
+  const currentDownloadJob = React.useMemo(
+    () => downloads.find((job) => job.spotifyId === currentTrack?.spotifyId),
+    [currentTrack?.spotifyId, downloads]
+  );
+  const currentTrackInput = React.useMemo(
+    () => (currentTrack ? toDownloadTrackInput(currentTrack) : null),
+    [currentTrack]
+  );
+  const isCurrentTrackDownloading =
+    currentDownloadJob?.status === 'queued' ||
+    currentDownloadJob?.status === 'resolving' ||
+    currentDownloadJob?.status === 'downloading';
+  const currentDownloadProgress = Math.max(
+    0,
+    Math.min(100, Math.round((currentDownloadJob?.progress || 0) * 100))
+  );
   const artworkUrl = getTrackArtworkUri(currentTrack);
   const queueHasMultipleTracks = queue.length > 1;
   const previousQueueIndex =
@@ -359,6 +386,25 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   React.useEffect(() => {
     currentTrackRef.current = currentTrack;
   }, [currentTrack]);
+
+  React.useEffect(() => {
+    let active = true;
+    const spotifyId = currentTrack?.spotifyId;
+    if (!spotifyId) {
+      setIsCurrentTrackDownloaded(false);
+      return;
+    }
+    if (currentDownloadJob?.status === 'completed') {
+      setIsCurrentTrackDownloaded(true);
+      return;
+    }
+    void isTrackDownloaded(spotifyId).then((downloaded) => {
+      if (active) setIsCurrentTrackDownloaded(downloaded);
+    });
+    return () => {
+      active = false;
+    };
+  }, [currentDownloadJob?.status, currentTrack?.spotifyId, libraryRevision]);
 
   // Reset first so an old link can never open while next track resolves.
   React.useEffect(() => {
@@ -680,10 +726,50 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       ? playerState.positionMs / totalDurationMs
       : seekValue;
 
-  const handleToggleRepeat = () => {
-    const nextMode =
-      repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off';
-    setRepeatMode(nextMode);
+  const handleDownloadAction = () => {
+    if (!currentTrack || isCurrentTrackDownloading || isDownloadMutationPending)
+      return;
+
+    if (!isCurrentTrackDownloaded && currentTrackInput) {
+      enqueueDownloads([currentTrackInput]);
+      void upsertCatalogTracks([currentTrackInput])
+        .then(() => refreshLibrary())
+        .catch(() => {});
+      Haptics.selectionAsync().catch(() => {});
+      return;
+    }
+
+    Alert.alert(
+      'Excluir download?',
+      'A música continuará na biblioteca e poderá ser ouvida por streaming.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: () => {
+            setIsDownloadMutationPending(true);
+            void deleteDownloadedTrack(currentTrack.spotifyId)
+              .then((deleted) => {
+                if (!deleted) throw new Error('download_not_found');
+                clearCompletedDownloads();
+                setIsCurrentTrackDownloaded(false);
+                refreshLibrary();
+                return Haptics.notificationAsync(
+                  Haptics.NotificationFeedbackType.Success
+                );
+              })
+              .catch(() => {
+                Alert.alert(
+                  'Não foi possível excluir',
+                  'Feche outros players e tente novamente.'
+                );
+              })
+              .finally(() => setIsDownloadMutationPending(false));
+          },
+        },
+      ]
+    );
   };
 
   const beginLyricsEditing = () => {
@@ -1235,16 +1321,38 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                * BOTTOM PLAYBACK CONTROLS
                * ========================================================= */}
               <View style={styles.controlsRow}>
-                {/* AirPlay / Output icon */}
+                {/* Download state */}
                 <PlayerGlassButton
-                  accessibilityLabel="Dispositivo de saída"
+                  accessibilityLabel={
+                    isCurrentTrackDownloading
+                      ? `Baixando ${currentDownloadProgress}%`
+                      : isCurrentTrackDownloaded
+                        ? 'Excluir download'
+                        : 'Baixar música'
+                  }
+                  disabled={
+                    isCurrentTrackDownloading || isDownloadMutationPending
+                  }
+                  onPress={handleDownloadAction}
                   style={styles.sideControlBtn}
                 >
-                  <Ionicons
-                    name="radio-outline"
-                    size={24}
-                    color="rgba(255,255,255,0.75)"
-                  />
+                  {isCurrentTrackDownloading ? (
+                    <Text style={styles.downloadProgressText}>
+                      {currentDownloadProgress}%
+                    </Text>
+                  ) : isDownloadMutationPending ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <Ionicons
+                      name={
+                        isCurrentTrackDownloaded
+                          ? 'trash-outline'
+                          : 'download-outline'
+                      }
+                      size={23}
+                      color="rgba(255,255,255,0.82)"
+                    />
+                  )}
                 </PlayerGlassButton>
 
                 {/* Previous Track */}
@@ -1303,21 +1411,33 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   />
                 </PlayerGlassButton>
 
-                {/* Shuffle / Repeat toggle */}
+                {/* Add current track to one or more playlists */}
                 <PlayerGlassButton
-                  accessibilityLabel="Alternar reprodução aleatória"
-                  onPress={toggleShuffle}
+                  accessibilityLabel="Adicionar música a playlists"
+                  onPress={() => setIsPlaylistPickerVisible(true)}
                   style={styles.sideControlBtn}
                 >
                   <MaterialCommunityIcons
-                    name="shuffle-variant"
+                    name="playlist-plus"
                     size={24}
-                    color={isShuffle ? '#1ED760' : 'rgba(255,255,255,0.75)'}
+                    color="rgba(255,255,255,0.82)"
                   />
                 </PlayerGlassButton>
               </View>
             </>
           ) : null}
+
+          <TrackPlaylistPickerModal
+            onAdded={() => {
+              refreshLibrary();
+              void Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Success
+              );
+            }}
+            onClose={() => setIsPlaylistPickerVisible(false)}
+            track={currentTrackInput!}
+            visible={isPlaylistPickerVisible}
+          />
 
           {/* =========================================================
            * YOUTUBE ACTIONS PICKER SHEET MODAL (Web & Cross-Platform)
@@ -1731,6 +1851,11 @@ const styles = StyleSheet.create({
     height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  downloadProgressText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
   seekControlBtn: {
     width: 52,

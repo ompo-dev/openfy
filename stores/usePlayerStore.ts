@@ -37,6 +37,8 @@ import {
   setRemotePlaybackHandlers,
   hasNativeYouTubePlayback,
   parseNativeYouTubePlaybackUri,
+  clampPlaybackPositionMs,
+  reconcilePlaybackDurationMs,
   resolveSpotifyTrackVideoId,
   toNativeYouTubePlaybackUri,
 } from '@services';
@@ -208,6 +210,9 @@ const getCacheKey = (track: PlayerTrack) => {
     .replace(/[^a-z0-9]/g, '_');
   return `metadata:${cleanArtist}:${cleanTitle}:${track.duration_ms || 0}:${track.albumName || ''}`;
 };
+
+const getLockScreenArtworkUrl = (track: PlayerTrack): string =>
+  track.localImagePath || track.imageURL;
 
 const getLyricsCacheKey = (track: PlayerTrack) =>
   `${getCacheKey(track)}:${LYRICS_CACHE_VERSION}`;
@@ -601,12 +606,20 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
       if (state.isLoaded && !state.error) lastPlaybackPositionMs = state.positionMs;
 
-      const currentDuration = state.durationMs || track.duration_ms || 0;
+      const currentDuration = reconcilePlaybackDurationMs(
+        state.durationMs,
+        track.duration_ms
+      );
+      const currentPosition = clampPlaybackPositionMs(
+        state.positionMs,
+        currentDuration
+      );
       if (state.isPlaying && !state.didJustFinish) handledTrackFinish = false;
       set({
         isLoadingAudio: false,
         playerState: {
           ...state,
+          positionMs: currentPosition,
           durationMs: currentDuration,
         },
       });
@@ -649,7 +662,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
               const recoveredOk = await loadAndPlay(
                 activeStreamUri, handleStatusUpdate,
                 { title: track.title, artist: track.artistName,
-                  albumTitle: track.albumName, artworkUrl: track.imageURL },
+                  albumTitle: track.albumName, artworkUrl: getLockScreenArtworkUrl(track) },
                 0, track
               );
               if (get().activeRequestId === requestId && recoveredOk && lastPosMs > 1000) {
@@ -669,7 +682,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
                   title: track.title,
                   artist: track.artistName,
                   albumTitle: track.albumName,
-                  artworkUrl: track.imageURL,
+                  artworkUrl: getLockScreenArtworkUrl(track),
                 },
                 0,
                 track
@@ -706,7 +719,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
                   title: track.title,
                   artist: track.artistName,
                   albumTitle: track.albumName,
-                  artworkUrl: track.imageURL,
+                  artworkUrl: getLockScreenArtworkUrl(track),
                 },
                 0,
                 track
@@ -729,11 +742,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         state.isLoaded &&
         !handledTrackFinish &&
         (state.didJustFinish ||
-          (state.didJustFinish === undefined &&
-            !state.isPlaying &&
-            state.positionMs > 0 &&
+          (currentPosition > 0 &&
             currentDuration > 0 &&
-            state.positionMs >= currentDuration - 500))
+            currentPosition >= currentDuration))
       ) {
         handledTrackFinish = true;
         const repeat = get().repeatMode;
@@ -752,7 +763,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         title: track.title,
         artist: track.artistName,
         albumTitle: track.albumName,
-        artworkUrl: track.imageURL,
+        artworkUrl: getLockScreenArtworkUrl(track),
       },
       0,
       track
@@ -824,7 +835,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
             title: track.title,
             artist: track.artistName,
             albumTitle: track.albumName,
-            artworkUrl: track.imageURL,
+            artworkUrl: getLockScreenArtworkUrl(track),
           },
           0,
           track

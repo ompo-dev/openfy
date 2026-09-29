@@ -1,16 +1,21 @@
 @preconcurrency import AVFoundation
 @preconcurrency import MediaPlayer
+@preconcurrency import UIKit
 import Foundation
 
 public struct OpenfyNowPlayingMetadata: Sendable {
   public let title: String
   public let artist: String
   public let albumTitle: String?
+  public let artworkURL: String?
+  public let durationMs: Double
 
   public init(values: [String: String]) {
     title = values["title"] ?? "Openfy Music"
     artist = values["artist"] ?? ""
     albumTitle = values["albumTitle"]
+    artworkURL = values["artworkUrl"]
+    durationMs = Double(values["durationMs"] ?? "") ?? 0
   }
 }
 
@@ -25,7 +30,12 @@ public final class OpenfyNativeYouTubePlayer {
   private var itemStatusObserver: NSKeyValueObservation?
   private var timeControlStatusObserver: NSKeyValueObservation?
   private var playbackEndObserver: NSObjectProtocol?
+  private var playbackBoundaryObserver: Any?
   private var nowPlayingMetadata: OpenfyNowPlayingMetadata?
+  private var nowPlayingArtwork: MPMediaItemArtwork?
+  private var artworkTask: Task<Void, Never>?
+  private var artworkLoadToken: UUID?
+  private var expectedDurationSeconds = 0.0
   private var didJustFinish = false
 
   public var onPlaybackEnded: (() -> Void)?
@@ -45,6 +55,10 @@ public final class OpenfyNativeYouTubePlayer {
     stop()
     didJustFinish = false
     nowPlayingMetadata = metadata
+    expectedDurationSeconds = max(
+      0,
+      (metadata.durationMs > 0 ? metadata.durationMs : descriptor.durationMs) / 1000.0
+    )
 
     let audioSession = AVAudioSession.sharedInstance()
     try audioSession.setCategory(.playback, mode: .default)
@@ -71,6 +85,22 @@ public final class OpenfyNativeYouTubePlayer {
     player.automaticallyWaitsToMinimizeStalling = true
     self.player = player
 
+    if expectedDurationSeconds > 0 {
+      let expectedEnd = CMTime(
+        seconds: expectedDurationSeconds,
+        preferredTimescale: 600
+      )
+      item.forwardPlaybackEndTime = expectedEnd
+      playbackBoundaryObserver = player.addBoundaryTimeObserver(
+        forTimes: [NSValue(time: expectedEnd)],
+        queue: .main
+      ) { [weak self] in
+        Task { @MainActor [weak self] in
+          self?.finishPlaybackIfNeeded()
+        }
+      }
+    }
+
     playbackEndObserver = NotificationCenter.default.addObserver(
       forName: .AVPlayerItemDidPlayToEndTime,
       object: item,
@@ -78,9 +108,7 @@ public final class OpenfyNativeYouTubePlayer {
     ) { [weak self] _ in
       Task { @MainActor [weak self] in
         guard let self else { return }
-        self.didJustFinish = true
-        self.updateNowPlayingInfo()
-        self.onPlaybackEnded?()
+        self.finishPlaybackIfNeeded()
       }
     }
 
@@ -115,6 +143,7 @@ public final class OpenfyNativeYouTubePlayer {
     }
 
     updateNowPlayingInfo()
+    loadNowPlayingArtwork(from: metadata.artworkURL)
     player.play()
   }
 
@@ -147,6 +176,10 @@ public final class OpenfyNativeYouTubePlayer {
       NotificationCenter.default.removeObserver(playbackEndObserver)
       self.playbackEndObserver = nil
     }
+    if let playbackBoundaryObserver, let player {
+      player.removeTimeObserver(playbackBoundaryObserver)
+      self.playbackBoundaryObserver = nil
+    }
     player?.pause()
     player?.replaceCurrentItem(with: nil)
     resourceLoader?.cancelAll()
@@ -154,6 +187,11 @@ public final class OpenfyNativeYouTubePlayer {
     resourceLoader = nil
     didJustFinish = false
     nowPlayingMetadata = nil
+    expectedDurationSeconds = 0
+    artworkLoadToken = nil
+    artworkTask?.cancel()
+    artworkTask = nil
+    nowPlayingArtwork = nil
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     NSLog("[PLAYER] Playback stopped and resources released")
   }
@@ -168,12 +206,20 @@ public final class OpenfyNativeYouTubePlayer {
       ]
     }
 
-    let isPlaying = player.timeControlStatus == .playing
     let isBuffering = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
     let posSec = CMTimeGetSeconds(player.currentTime())
-    let durSec = CMTimeGetSeconds(item.duration)
-    let positionMs = (posSec.isNaN || posSec.isInfinite) ? 0 : posSec * 1000.0
-    let durationMs = (durSec.isNaN || durSec.isInfinite) ? 0 : durSec * 1000.0
+    let durationSeconds = resolvedDurationSeconds(for: item)
+    let safePositionSeconds = posSec.isFinite ? max(0, posSec) : 0
+    if durationSeconds > 0,
+      safePositionSeconds >= durationSeconds,
+      !didJustFinish {
+      finishPlaybackIfNeeded()
+    }
+    let isPlaying = player.timeControlStatus == .playing
+    let positionMs = durationSeconds > 0
+      ? min(safePositionSeconds, durationSeconds) * 1000.0
+      : safePositionSeconds * 1000.0
+    let durationMs = durationSeconds * 1000.0
 
     var dict: [String: Any] = [
       "isPlaying": isPlaying,
@@ -232,8 +278,11 @@ public final class OpenfyNativeYouTubePlayer {
     guard let player, let item = player.currentItem, let metadata = nowPlayingMetadata else {
       return
     }
-    let position = CMTimeGetSeconds(player.currentTime())
-    let duration = CMTimeGetSeconds(item.duration)
+    let rawPosition = CMTimeGetSeconds(player.currentTime())
+    let duration = resolvedDurationSeconds(for: item)
+    let position = rawPosition.isFinite
+      ? (duration > 0 ? min(max(0, rawPosition), duration) : max(0, rawPosition))
+      : 0
     var info: [String: Any] = [
       MPMediaItemPropertyTitle: metadata.title,
       MPMediaItemPropertyArtist: metadata.artist,
@@ -248,6 +297,81 @@ public final class OpenfyNativeYouTubePlayer {
     if duration.isFinite && duration > 0 {
       info[MPMediaItemPropertyPlaybackDuration] = duration
     }
+    if let nowPlayingArtwork {
+      info[MPMediaItemPropertyArtwork] = nowPlayingArtwork
+    }
     MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+  }
+
+  private func finishPlaybackIfNeeded() {
+    guard !didJustFinish else { return }
+    player?.pause()
+    didJustFinish = true
+    updateNowPlayingInfo()
+    onPlaybackEnded?()
+  }
+
+  private func resolvedDurationSeconds(for item: AVPlayerItem) -> Double {
+    let measured = CMTimeGetSeconds(item.duration)
+    guard expectedDurationSeconds > 0 else {
+      return measured.isFinite && measured > 0 ? measured : 0
+    }
+    guard measured.isFinite && measured > 0 else {
+      return expectedDurationSeconds
+    }
+    let tolerance = max(3, expectedDurationSeconds * 0.08)
+    return abs(measured - expectedDurationSeconds) > tolerance
+      ? expectedDurationSeconds
+      : measured
+  }
+
+  private func loadNowPlayingArtwork(from rawURL: String?) {
+    artworkTask?.cancel()
+    artworkTask = nil
+    nowPlayingArtwork = nil
+    artworkLoadToken = nil
+
+    guard
+      let rawURL,
+      let url = URL(string: rawURL),
+      url.isFileURL || url.scheme?.lowercased() == "https"
+    else {
+      updateNowPlayingInfo()
+      return
+    }
+
+    let token = UUID()
+    artworkLoadToken = token
+    artworkTask = Task { @MainActor [weak self] in
+      do {
+        let data: Data
+        if url.isFileURL {
+          data = try Data(contentsOf: url, options: .mappedIfSafe)
+        } else {
+          let (downloaded, response) = try await URLSession.shared.data(from: url)
+          guard
+            let http = response as? HTTPURLResponse,
+            (200...299).contains(http.statusCode),
+            downloaded.count <= 15 * 1024 * 1024
+          else { return }
+          data = downloaded
+        }
+
+        guard
+          !Task.isCancelled,
+          let self,
+          self.artworkLoadToken == token,
+          let image = UIImage(data: data)
+        else { return }
+
+        self.nowPlayingArtwork = MPMediaItemArtwork(
+          boundsSize: image.size,
+          requestHandler: { _ in image }
+        )
+        self.updateNowPlayingInfo()
+      } catch {
+        // Artwork is optional and must never interrupt playback.
+      }
+    }
   }
 }

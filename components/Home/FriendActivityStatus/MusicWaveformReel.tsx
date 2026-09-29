@@ -33,7 +33,7 @@ const BAR_PITCH = BAR_WIDTH + BAR_GAP;
 const NOTE_BARS_PER_SECOND = 12 / 30;
 const FRAME_BORDER_WIDTH = 3.5;
 const MIN_FRAME_WIDTH = 24;
-const HANDLE_HIT_AREA = 14;
+const HANDLE_HIT_AREA = 26;
 const DEFAULT_CONTAINER_WIDTH = Math.max(
   1,
   Dimensions.get('window').width - 48
@@ -41,6 +41,23 @@ const DEFAULT_CONTAINER_WIDTH = Math.max(
 
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.max(minimum, Math.min(value, maximum));
+
+export type WaveformGestureAction = 'move' | 'resize-start' | 'resize-end';
+
+export const resolveWaveformGestureAction = (
+  x: number,
+  frameLeft: number,
+  frameWidth: number,
+  resizable: boolean,
+  handleHitArea = HANDLE_HIT_AREA
+): WaveformGestureAction => {
+  if (!resizable) return 'move';
+  const startDistance = Math.abs(x - frameLeft);
+  const endDistance = Math.abs(x - (frameLeft + frameWidth));
+  const nearestDistance = Math.min(startDistance, endDistance);
+  if (nearestDistance > handleHitArea) return 'move';
+  return startDistance <= endDistance ? 'resize-start' : 'resize-end';
+};
 
 export function MusicWaveformReel({
   totalDurationMs,
@@ -59,12 +76,12 @@ export function MusicWaveformReel({
     DEFAULT_CONTAINER_WIDTH
   );
   const scrollAnim = React.useRef(new Animated.Value(0)).current;
+  const containerRef = React.useRef<View>(null);
+  const containerPageXRef = React.useRef<number | null>(null);
   const scrollValueRef = React.useRef(0);
   const isDraggingRef = React.useRef(false);
   const panStartRef = React.useRef(0);
-  const actionRef = React.useRef<'move' | 'resize-start' | 'resize-end'>(
-    'move'
-  );
+  const actionRef = React.useRef<WaveformGestureAction>('move');
   const appliedResizeDeltaRef = React.useRef(0);
   const tapPositionRef = React.useRef<number | undefined>(undefined);
 
@@ -167,23 +184,25 @@ export function MusicWaveformReel({
 
   const panResponder = React.useRef(
     PanResponder.create({
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: (event) => {
         const values = valuesRef.current;
-        // `locationX` stays relative to this fixed selector on native, while
-        // `pageX` can be stale during a gesture after layout changes.
-        const x = event.nativeEvent.locationX;
+        const measuredPageX = containerPageXRef.current;
+        const x =
+          measuredPageX === null
+            ? event.nativeEvent.locationX
+            : event.nativeEvent.pageX - measuredPageX;
         const resizable = Boolean(values.onResizeStart && values.onResizeEnd);
-        actionRef.current =
-          resizable && Math.abs(x - values.frameLeft) <= HANDLE_HIT_AREA
-            ? 'resize-start'
-            : resizable &&
-                Math.abs(x - (values.frameLeft + values.frameWidth)) <=
-                  HANDLE_HIT_AREA
-              ? 'resize-end'
-              : 'move';
+        actionRef.current = resolveWaveformGestureAction(
+          x,
+          values.frameLeft,
+          values.frameWidth,
+          resizable
+        );
         tapPositionRef.current =
           actionRef.current === 'move' &&
           x >= values.frameLeft &&
@@ -252,17 +271,22 @@ export function MusicWaveformReel({
 
   return (
     <View
+      ref={containerRef}
       accessibilityHint="Arraste onda para mover trecho. Arraste pontos laterais para alterar intervalo."
       accessibilityLabel="Seletor de trecho da música"
       accessibilityRole="adjustable"
       onLayout={(event: LayoutChangeEvent) => {
         const nextWidth = event.nativeEvent.layout.width;
         if (nextWidth > 0) setContainerWidth(nextWidth);
+        containerRef.current?.measureInWindow((x) => {
+          containerPageXRef.current = x;
+        });
       }}
       style={styles.container}
       {...panResponder.panHandlers}
     >
       <Animated.View
+        pointerEvents="none"
         style={[
           styles.waveformReel,
           {
@@ -419,14 +443,14 @@ const styles = StyleSheet.create({
   handle: {
     position: 'absolute',
     top: '50%',
-    width: 10,
-    height: 10,
-    marginTop: -5,
-    borderRadius: 5,
+    width: 14,
+    height: 14,
+    marginTop: -7,
+    borderRadius: 7,
     backgroundColor: '#FFFFFF',
     borderWidth: 2,
     borderColor: '#101116',
   },
-  handleStart: { left: -5 },
-  handleEnd: { right: -5 },
+  handleStart: { left: -7 },
+  handleEnd: { right: -7 },
 });

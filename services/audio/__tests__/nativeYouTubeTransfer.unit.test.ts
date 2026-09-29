@@ -120,12 +120,18 @@ describe('downloadYouTubeStreamNatively', () => {
     const uri = toNativeYouTubePlaybackUri('V1M1hYxmRvA');
 
     expect(parseNativeYouTubePlaybackUri(uri)).toBe('V1M1hYxmRvA');
-    expect(parseNativeYouTubePlaybackUri('https://youtube.com/watch?v=V1M1hYxmRvA')).toBeNull();
-    await expect(playYouTubeVideoNatively('V1M1hYxmRvA', {
-      title: 'Faixa',
-      artist: 'Artista',
-      albumTitle: 'Álbum',
-    })).resolves.toBe(true);
+    expect(
+      parseNativeYouTubePlaybackUri('https://youtube.com/watch?v=V1M1hYxmRvA')
+    ).toBeNull();
+    await expect(
+      playYouTubeVideoNatively('V1M1hYxmRvA', {
+        title: 'Faixa',
+        artist: 'Artista',
+        albumTitle: 'Álbum',
+        artworkUrl: 'https://images.example/cover.jpg',
+        durationMs: 180123,
+      })
+    ).resolves.toBe(true);
     await expect(getNativeYouTubePlaybackStatus()).resolves.toMatchObject({
       isPlaying: true,
       positionMs: 1200,
@@ -134,6 +140,8 @@ describe('downloadYouTubeStreamNatively', () => {
       title: 'Faixa',
       artist: 'Artista',
       albumTitle: 'Álbum',
+      artworkUrl: 'https://images.example/cover.jpg',
+      durationMs: '180123',
     });
   });
 });

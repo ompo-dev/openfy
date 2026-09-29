@@ -476,7 +476,7 @@ public final class OpenfyYouTubeModule: Module {
     // for native Apple AVAssetResourceLoader playback compatibility.
     // NOTE: Native POC currently requires a direct deciphered format["url"].
     // Full decipher is handled by youtubei.js on the JS resolver side when needed.
-    let candidates = formats.compactMap { format -> (url: URL, mimeType: String, bitrate: Int, contentLength: Int64?, itag: Int?, score: Int)? in
+    let candidates = formats.compactMap { format -> (url: URL, mimeType: String, bitrate: Int, contentLength: Int64?, itag: Int?, durationMs: Double, score: Int)? in
       guard let rawMimeType = format["mimeType"] as? String,
         rawMimeType.lowercased().hasPrefix("audio/mp4"),
         rawMimeType.lowercased().contains("mp4a"),
@@ -493,8 +493,11 @@ public final class OpenfyYouTubeModule: Module {
       let bitrate = format["bitrate"] as? Int ?? 0
       let itag = format["itag"] as? Int
       let contentLength: Int64? = (format["contentLength"] as? String).flatMap(Int64.init)
+      let durationMs =
+        (format["approxDurationMs"] as? String).flatMap(Double.init) ??
+        (format["approxDurationMs"] as? NSNumber)?.doubleValue ?? 0
 
-      return (url, rawMimeType, bitrate, contentLength, itag, quality + bitrate)
+      return (url, rawMimeType, bitrate, contentLength, itag, durationMs, quality + bitrate)
     }
 
     guard let best = candidates.max(by: { $0.score < $1.score }) else {
@@ -520,7 +523,8 @@ public final class OpenfyYouTubeModule: Module {
       mimeType: best.mimeType,
       contentType: "public.mpeg-4-audio",
       bitrate: best.bitrate,
-      itag: best.itag
+      itag: best.itag,
+      durationMs: best.durationMs
     )
   }
 

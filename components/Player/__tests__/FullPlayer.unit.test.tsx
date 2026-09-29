@@ -1,16 +1,21 @@
 import * as React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { ActionSheetIOS, Alert, Linking, Platform } from 'react-native';
-import { usePlayer } from '@context';
+import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
 import {
+  deleteDownloadedTrack,
   getCatalogMapping,
+  isTrackDownloaded,
   resolveDirectYouTubeAudio,
   resolveSpotifyTrackVideoId,
+  toDownloadTrackInput,
+  upsertCatalogTracks,
 } from '@services';
 import { FullPlayer } from '../FullPlayer';
 
 const mockNavigate = jest.fn();
 const mockReplace = jest.fn();
+const mockTrackPlaylistPicker = jest.fn(() => null);
 const mockSwipeableArtwork = jest.fn((props) => {
   const React = require('react');
   const { Image, View } = require('react-native');
@@ -33,7 +38,11 @@ jest.mock('expo-router', () => ({
   useSegments: () => ['(tabs)', 'library'],
 }));
 jest.mock('@api', () => ({ findArtistIdByName: jest.fn() }));
-jest.mock('@context', () => ({ usePlayer: jest.fn() }));
+jest.mock('@context', () => ({
+  useDownloads: jest.fn(),
+  useLibrarySelectedCategory: jest.fn(),
+  usePlayer: jest.fn(),
+}));
 jest.mock('react-native-gesture-handler', () => {
   const React = require('react');
   const { View } = require('react-native');
@@ -50,9 +59,16 @@ jest.mock('@services', () => ({
   ...jest.requireActual('../../../services/lyrics/lyricTimeline'),
   ...jest.requireActual('../../../services/spotify/linkParser'),
   getCatalogMapping: jest.fn(),
+  isTrackDownloaded: jest.fn(),
   resolveSpotifyTrackVideoId: jest.fn(),
   resolveDirectYouTubeAudio: jest.fn(),
   resolveDirectYouTubeTrack: jest.fn(),
+  deleteDownloadedTrack: jest.fn(),
+  toDownloadTrackInput: jest.fn((track) => track),
+  upsertCatalogTracks: jest.fn(),
+}));
+jest.mock('../../LocalPlaylist/TrackPlaylistPickerModal', () => ({
+  TrackPlaylistPickerModal: (props: unknown) => mockTrackPlaylistPicker(props),
 }));
 jest.mock('../SwipeableArtwork', () => ({
   SwipeableArtwork: (props: unknown) => mockSwipeableArtwork(props),
@@ -115,6 +131,25 @@ const makePlayerWithoutTrack = () => ({
   currentTrack: null,
 });
 
+const makeDownloads = (overrides = {}) => ({
+  downloads: [],
+  activeDownloadsCount: 0,
+  enqueueDownloads: jest.fn(),
+  cancelDownload: jest.fn(),
+  clearCompletedDownloads: jest.fn(),
+  retryDownload: jest.fn(),
+  refreshDownloads: jest.fn(),
+  ...overrides,
+});
+
+const makeLibrary = (overrides = {}) => ({
+  selectedCategory: 'songs',
+  setSelectedCategory: jest.fn(),
+  libraryRevision: 0,
+  refreshLibrary: jest.fn(),
+  ...overrides,
+});
+
 const mountPlayer = async (track = {}) => {
   jest.mocked(usePlayer).mockReturnValue(makePlayer(track) as any);
   return render(<FullPlayer visible onClose={jest.fn()} />);
@@ -134,7 +169,18 @@ describe('FullPlayer artist row and YouTube source', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockSwipeableArtwork.mockClear();
+    mockTrackPlaylistPicker.mockClear();
     Platform.OS = 'android';
+    jest.mocked(useDownloads).mockReturnValue(makeDownloads() as any);
+    jest
+      .mocked(useLibrarySelectedCategory)
+      .mockReturnValue(makeLibrary() as any);
+    jest.mocked(isTrackDownloaded).mockResolvedValue(false);
+    jest.mocked(deleteDownloadedTrack).mockResolvedValue(true);
+    jest
+      .mocked(toDownloadTrackInput)
+      .mockImplementation((track) => track as any);
+    jest.mocked(upsertCatalogTracks).mockResolvedValue([]);
     jest.mocked(getCatalogMapping).mockReset().mockResolvedValue(null);
     jest.mocked(resolveSpotifyTrackVideoId).mockReset().mockResolvedValue({
       status: 'not_found',
@@ -454,6 +500,93 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(artworkProps.fallbackSource).toEqual({
       uri: sampleTrack.localImagePath,
     });
+  });
+
+  it('queues the current streaming track for download', async () => {
+    const enqueueDownloads = jest.fn();
+    jest
+      .mocked(useDownloads)
+      .mockReturnValue(makeDownloads({ enqueueDownloads }) as any);
+    const screen = await mountPlayer();
+
+    await act(async () => {});
+    await fireEvent.press(screen.getByLabelText('Baixar música'));
+
+    expect(toDownloadTrackInput).toHaveBeenCalledWith(
+      expect.objectContaining({ spotifyId: sampleTrack.spotifyId })
+    );
+    expect(enqueueDownloads).toHaveBeenCalledWith([
+      expect.objectContaining({ spotifyId: sampleTrack.spotifyId }),
+    ]);
+    expect(upsertCatalogTracks).toHaveBeenCalledWith([
+      expect.objectContaining({ spotifyId: sampleTrack.spotifyId }),
+    ]);
+  });
+
+  it('shows live download progress in the player control', async () => {
+    jest.mocked(useDownloads).mockReturnValue(
+      makeDownloads({
+        downloads: [
+          {
+            spotifyId: sampleTrack.spotifyId,
+            status: 'downloading',
+            progress: 0.42,
+          },
+        ],
+      }) as any
+    );
+
+    const screen = await mountPlayer();
+
+    expect(screen.getByLabelText('Baixando 42%')).toBeTruthy();
+    expect(screen.getByText('42%')).toBeTruthy();
+  });
+
+  it('removes an existing download after confirmation', async () => {
+    const clearCompletedDownloads = jest.fn();
+    const refreshLibrary = jest.fn();
+    jest.mocked(isTrackDownloaded).mockResolvedValue(true);
+    jest.mocked(useDownloads).mockReturnValue(
+      makeDownloads({ clearCompletedDownloads }) as any
+    );
+    jest.mocked(useLibrarySelectedCategory).mockReturnValue(
+      makeLibrary({ refreshLibrary }) as any
+    );
+    const screen = await mountPlayer();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Excluir download')).toBeTruthy()
+    );
+    await fireEvent.press(screen.getByLabelText('Excluir download'));
+    const confirmation = jest.mocked(Alert.alert).mock.calls.at(-1)?.[2];
+    await act(async () => {
+      confirmation?.find((button) => button.text === 'Excluir')?.onPress?.();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(deleteDownloadedTrack).toHaveBeenCalledWith(sampleTrack.spotifyId)
+    );
+    expect(clearCompletedDownloads).toHaveBeenCalled();
+    expect(refreshLibrary).toHaveBeenCalled();
+  });
+
+  it('opens the playlist picker for the current track', async () => {
+    const screen = await mountPlayer();
+
+    await fireEvent.press(
+      screen.getByLabelText('Adicionar música a playlists')
+    );
+
+    expect(mockTrackPlaylistPicker).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        track: expect.objectContaining({
+          spotifyId: sampleTrack.spotifyId,
+          title: sampleTrack.title,
+        }),
+        visible: true,
+      })
+    );
   });
 
   it.each(['file:///covers/migrated-hq.jpg', ''])(

@@ -6,6 +6,7 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 jest.mock('@services', () => ({
+  ...jest.requireActual('../../services/audio/playbackDuration'),
   DEFAULT_STATE: {
     isPlaying: false,
     isBuffering: false,
@@ -82,6 +83,13 @@ const flushPromises = () => new Promise<void>((resolve) => setTimeout(resolve, 0
 describe('usePlayerStore — Stream Recovery Integration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.mocked(loadAndPlay).mockReset();
+    jest.mocked(resolveAudioUrl).mockReset();
+    jest.mocked(resolveSpotifyTrackVideoId).mockReset();
+    const { ensurePlaybackDiagnostics } = jest.requireMock('@services');
+    (ensurePlaybackDiagnostics as jest.Mock)
+      .mockReset()
+      .mockResolvedValue(undefined);
     jest.mocked(hasNativeYouTubePlayback).mockReturnValue(false);
     usePlayerStore.setState({
       activeRequestId: 0,
@@ -119,6 +127,36 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       sampleTrack
     );
     expect(resolveAudioUrl).not.toHaveBeenCalled();
+  });
+
+  it('reconciles a doubled media timeline with the canonical track duration', async () => {
+    const durationTrack = {
+      ...sampleTrack,
+      spotifyId: 'track_duration_double',
+    };
+    let status!: (state: PlayerState) => void;
+    jest.mocked(resolveAudioUrl).mockResolvedValue({
+      url: 'https://media.test/song.m4a',
+      source: 'youtube',
+    } as any);
+    jest.mocked(loadAndPlay).mockImplementation(async (_source, callback) => {
+      status = callback!;
+      return true;
+    });
+
+    await usePlayerStore.getState().playTrack(durationTrack);
+    status({
+      isPlaying: true,
+      isBuffering: false,
+      isLoaded: true,
+      positionMs: 42000,
+      durationMs: durationTrack.duration_ms * 2,
+    });
+
+    expect(usePlayerStore.getState().playerState).toMatchObject({
+      positionMs: 42000,
+      durationMs: durationTrack.duration_ms,
+    });
   });
 
   it('completes the full recovery cycle on mid-stream 403 refusal: reports refusal, re-resolves fresh, reloads with headers, seeks to last position, and resets recovery flag', async () => {
@@ -374,21 +412,45 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
   });
 
   it('recovers a downloaded track offline from its last known position without contacting a provider', async () => {
-    const local = { ...sampleTrack, spotifyId: 'offline-recovery', localAudioPath: 'file:///offline.m4a' };
-    jest.mocked(FileSystem.getInfoAsync).mockResolvedValue({ exists: true, size: 80000 } as any);
+    const local = {
+      ...sampleTrack,
+      spotifyId: 'offline-recovery',
+      localAudioPath: 'file:///offline.m4a',
+      localImagePath: 'file:///offline-cover.jpg',
+    };
+    jest
+      .mocked(FileSystem.getInfoAsync)
+      .mockResolvedValue({ exists: true, size: 80000 } as any);
     let status!: (state: PlayerState) => void;
     jest.mocked(loadAndPlay).mockImplementation(async (_source, callback) => {
       status = callback!;
       return true;
     });
     await usePlayerStore.getState().playTrack(local);
-    status({ isPlaying: true, isLoaded: true, isBuffering: false, positionMs: 83000, durationMs: 210000 });
-    status({ isPlaying: false, isLoaded: false, isBuffering: false, positionMs: 0, durationMs: 0, error: 'decoder reset' });
+    status({
+      isPlaying: true,
+      isLoaded: true,
+      isBuffering: false,
+      positionMs: 83000,
+      durationMs: 210000,
+    });
+    status({
+      isPlaying: false,
+      isLoaded: false,
+      isBuffering: false,
+      positionMs: 0,
+      durationMs: 0,
+      error: 'decoder reset',
+    });
     await flushPromises();
     expect(resolveAudioUrl).not.toHaveBeenCalled();
     expect(reportDirectYouTubeStreamRefusal).not.toHaveBeenCalled();
     expect(loadAndPlay).toHaveBeenLastCalledWith(
-      local.localAudioPath, expect.any(Function), expect.any(Object), 0, local
+      local.localAudioPath,
+      expect.any(Function),
+      expect.objectContaining({ artworkUrl: local.localImagePath }),
+      0,
+      local
     );
     expect(seekTo).toHaveBeenCalledWith(83000);
     jest.mocked(FileSystem.getInfoAsync).mockReset();

@@ -23,6 +23,7 @@ export type NativeYouTubePlaybackMetadata = {
   artist: string;
   albumTitle?: string;
   artworkUrl?: string;
+  durationMs?: number;
 };
 
 declare class OpenfyYouTubeModule extends NativeModule<{}> {
