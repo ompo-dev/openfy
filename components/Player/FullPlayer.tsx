@@ -343,16 +343,27 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
   const handleArtistPress = React.useCallback(
     async (artistId: string, artistName: string) => {
-      const targetArtistId =
-        (currentTrack?.localAudioPath
-          ? `local_artist_${encodeURIComponent(artistId ? `spotify:${artistId}` : artistName)}`
-          : artistId) ||
-        (await findArtistIdByName(artistName)) ||
-        `local_artist_${encodeURIComponent(artistName)}`;
+      const isYouTubeTrack = currentTrack?.spotifyId.startsWith('yt_') ||
+        Boolean(currentTrack?.youtubeVideoId);
+      const targetArtistId = artistId.startsWith('ytartist_')
+        ? artistId
+        : isYouTubeTrack
+          ? `ytartist_name_${encodeURIComponent(artistName)}`
+          : (currentTrack?.localAudioPath
+            ? `local_artist_${encodeURIComponent(artistId ? `spotify:${artistId}` : artistName)}`
+            : artistId) ||
+          (await findArtistIdByName(artistName)) ||
+          `local_artist_${encodeURIComponent(artistName)}`;
       openDetail('artist', targetArtistId);
       requestAnimationFrame(onClose);
     },
-    [currentTrack?.localAudioPath, onClose, openDetail]
+    [
+      currentTrack?.localAudioPath,
+      currentTrack?.spotifyId,
+      currentTrack?.youtubeVideoId,
+      onClose,
+      openDetail,
+    ]
   );
 
   const renderArtistPill = () => (
@@ -463,9 +474,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     playerState.durationMs > 0
       ? playerState.durationMs
       : currentTrack?.duration_ms || 0;
-  const displayedLyricSegments = isLyricsEditing
-    ? draftLyricSegments
-    : lyricsData?.segments || [];
+  const displayedLyricSegments = React.useMemo(
+    () => isLyricsEditing ? draftLyricSegments : lyricsData?.segments || [],
+    [draftLyricSegments, isLyricsEditing, lyricsData?.segments]
+  );
   const lyricTimelineDurationMs = Math.max(
     lyricDurationMs,
     getLastSegmentEndMs(displayedLyricSegments)

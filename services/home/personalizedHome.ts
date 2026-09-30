@@ -1,11 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { findArtistIdByName } from '../../api/artists/artist';
-import { getArtistTopTracks } from '../../api/artists/artistTopTracks';
-import type { TrackModel } from '../../models/Track/TrackModel';
 import type { UserProfile } from '../recommendation/recommendationEngine';
 import type { LibraryTrack } from '../library/catalogLibrary';
 import type { LocalPlaylist } from '../library/localPlaylistManager';
+import {
+  getYouTubeMusicClient,
+  getYouTubeMusicThumbnails,
+  type YouTubeMusicItem,
+} from '../youtubeMusicClient';
 import {
   groupLocalAlbums,
   groupLocalArtists,
@@ -44,6 +46,7 @@ export type RecommendationSeed = {
 
 export type PersonalizedHomeArtist = {
   id: string;
+  artistId: string;
   spotifyArtistId: string;
   title: string;
   imageURL: string;
@@ -76,43 +79,9 @@ export const EMPTY_PERSONALIZED_HOME: PersonalizedHomeSnapshot = {
   tracksById: new Map(),
 };
 
-const DISCOVERY_CACHE_KEY = 'openfy_home_discoveries_v2';
+const DISCOVERY_CACHE_KEY = 'openfy_home_discoveries_v3';
 const DISCOVERY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const DISCOVERY_REQUEST_TIMEOUT_MS = 9_000;
-let youtubeMusicClient: Promise<YouTubeMusicClient> | null = null;
-
-type YouTubeMusicItem = {
-  id?: string;
-  title?: string;
-  duration?: { seconds?: number };
-  album?: { name?: string };
-  artists?: { name?: string }[];
-  thumbnails?: { url?: string; width?: number }[];
-};
-
-type YouTubeMusicQueueItem = {
-  primary?: YouTubeMusicQueueItem | null;
-  selected?: boolean;
-  video_id?: string;
-  title?: string | { toString(): string };
-  duration?: { seconds?: number };
-  album?: { name?: string };
-  artists?: { name?: string; channel_id?: string }[];
-  thumbnail?: { url?: string; width?: number }[];
-};
-
-type YouTubeMusicClient = {
-  music: {
-    search: (
-      query: string,
-      filters: { type: 'song' }
-    ) => Promise<{ songs?: { contents?: YouTubeMusicItem[] } }>;
-    getUpNext: (
-      videoId: string,
-      automix?: boolean
-    ) => Promise<{ contents?: YouTubeMusicQueueItem[] }>;
-  };
-};
 
 const normalize = (value: string) =>
   value.trim().toLocaleLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -375,18 +344,19 @@ export const buildPersonalizedHome = ({
   const artistCandidates = new Map<string, PersonalizedHomeArtist>();
   remoteDiscoveries.forEach((track) => {
     track.artists?.forEach((artist) => {
-      const spotifyArtistId = artist.id?.trim();
       const title = artist.name?.trim();
+      const artistId = artist.id?.trim() ||
+        `ytartist_name_${encodeURIComponent(title || '')}`;
       if (
-        !spotifyArtistId ||
         !title ||
-        knownArtistIds.has(spotifyArtistId) ||
+        knownArtistIds.has(artistId) ||
         knownArtistNames.has(normalize(title))
       ) return;
-      const current = artistCandidates.get(spotifyArtistId);
-      artistCandidates.set(spotifyArtistId, {
-        id: `recommended_artist_${spotifyArtistId}`,
-        spotifyArtistId,
+      const current = artistCandidates.get(artistId);
+      artistCandidates.set(artistId, {
+        id: `recommended_artist_${artistId}`,
+        artistId,
+        spotifyArtistId: artistId,
         title,
         imageURL: current?.imageURL || track.imageURL,
         appearances: (current?.appearances || 0) + 1,
@@ -396,8 +366,8 @@ export const buildPersonalizedHome = ({
   const artists = [...artistCandidates.values()]
     .sort((first, second) =>
       second.appearances - first.appearances ||
-      (stableHash(`${seed}:${first.spotifyArtistId}`) % 1000) -
-        (stableHash(`${seed}:${second.spotifyArtistId}`) % 1000)
+      (stableHash(`${seed}:${first.artistId}`) % 1000) -
+        (stableHash(`${seed}:${second.artistId}`) % 1000)
     )
     .slice(0, 10);
   const orderedPlaylists = [...playlists]
@@ -421,41 +391,10 @@ export const buildPersonalizedHome = ({
   };
 };
 
-const trackModelToHomeTrack = (track: TrackModel): PersonalizedHomeTrack => ({
-  id: `discovery_${track.id}`,
-  spotifyId: track.id,
-  title: track.title,
-  artistName: track.subtitle,
-  albumName: track.albumName || 'Single',
-  imageURL: track.imageURL || '',
-  duration_ms: track.durationMs || 0,
-  explicit: track.explicit,
-  artists: track.artists,
-  albumId: track.albumId,
-  albumArtists: track.albumArtists,
-});
-
 type DiscoveryCache = {
   fetchedAt: number;
   seedKey: string;
   tracks: PersonalizedHomeTrack[];
-};
-
-const getYouTubeMusicClient = (): Promise<YouTubeMusicClient> => {
-  if (!youtubeMusicClient) {
-    const { Innertube } = require('youtubei.js') as {
-      Innertube: { create: (options: object) => Promise<YouTubeMusicClient> };
-    };
-    youtubeMusicClient = Innertube.create({
-      generate_session_locally: false,
-      retrieve_innertube_config: true,
-      retrieve_player: false,
-    }).catch((error) => {
-      youtubeMusicClient = null;
-      throw error;
-    });
-  }
-  return youtubeMusicClient;
 };
 
 const withDiscoveryTimeout = async <Value,>(promise: Promise<Value>): Promise<Value | null> => {
@@ -489,9 +428,16 @@ const searchYouTubeMusic = async (
         const videoId = item.id || '';
         const title = item.title?.trim() || '';
         if (!/^[A-Za-z0-9_-]{11}$/.test(videoId) || !title) return [];
-        const artistNames = item.artists?.map((artist) => artist.name?.trim()).filter(
-          (name): name is string => Boolean(name)
-        ) || [seed.name];
+        const artists = item.artists?.flatMap((artist) => {
+          const name = artist.name?.trim() || '';
+          if (!name) return [];
+          const artistId = artist.channel_id
+            ? encodeURIComponent(artist.channel_id)
+            : `name_${encodeURIComponent(name)}`;
+          return [{ id: `ytartist_${artistId}`, name }];
+        }) || [];
+        const artistNames = artists.map((artist) => artist.name);
+        if (!artistNames.length) artistNames.push(seed.name);
         const imageURL = [...(item.thumbnails || [])]
           .sort((first, second) => (second.width || 0) - (first.width || 0))[0]?.url || '';
         return [{
@@ -499,7 +445,7 @@ const searchYouTubeMusic = async (
           spotifyId: `yt_${videoId}`,
           title,
           artistName: artistNames.join(', '),
-          artists: artistNames.map((name) => ({ id: '', name })),
+          artists: artists.length ? artists : [{ id: '', name: seed.name }],
           albumName: item.album?.name?.trim() || 'YouTube Music',
           imageURL,
           duration_ms: Math.max(0, item.duration?.seconds || 0) * 1000,
@@ -513,7 +459,7 @@ const searchYouTubeMusic = async (
   }
 };
 
-const queueText = (value: YouTubeMusicQueueItem['title']): string => {
+const queueText = (value: YouTubeMusicItem['title'] | { toString(): string } | undefined): string => {
   if (typeof value === 'string') return value.trim();
   try {
     return value?.toString().trim() || '';
@@ -523,7 +469,7 @@ const queueText = (value: YouTubeMusicQueueItem['title']): string => {
 };
 
 const queueItemToHomeTrack = (
-  entry: YouTubeMusicQueueItem,
+  entry: YouTubeMusicItem,
   fallbackArtist: string
 ): PersonalizedHomeTrack | null => {
   const item = entry.primary || entry;
@@ -532,10 +478,15 @@ const queueItemToHomeTrack = (
   const title = queueText(item.title);
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId) || !title) return null;
   const artists = (item.artists || [])
-    .map((artist) => ({ id: '', name: artist.name?.trim() || '' }))
+    .map((artist) => ({
+      id: artist.channel_id
+        ? `ytartist_${encodeURIComponent(artist.channel_id)}`
+        : '',
+      name: artist.name?.trim() || '',
+    }))
     .filter((artist) => artist.name);
   const artistName = artists.map((artist) => artist.name).join(', ') || fallbackArtist;
-  const imageURL = [...(item.thumbnail || [])]
+  const imageURL = [...getYouTubeMusicThumbnails(item)]
     .sort((first, second) => (second.width || 0) - (first.width || 0))[0]?.url || '';
   return {
     id: `discovery_yt_${videoId}`,
@@ -607,42 +558,9 @@ export const loadHomeDiscoveries = async (
 
   const groups = await Promise.all(
     activeSeeds.map(async (seed) => {
-      const artistId = seed.matchArtist === false
-        ? ''
-        : seed.id || await withDiscoveryTimeout(findArtistIdByName(seed.name)) || '';
-      const [spotifyTracks, youtubeAnchorTracks] = await Promise.all([
-        artistId
-          ? withDiscoveryTimeout(getArtistTopTracks(artistId).catch(() => []))
-          : Promise.resolve([]),
-        searchYouTubeMusic(seed),
-      ]);
-      const seedSpotifyTracks = spotifyTracks || [];
-      const collaboratorIds = [...new Set(
-        seedSpotifyTracks.flatMap((track) => track.artists || [])
-          .filter((artist) =>
-            artist.id &&
-            artist.id !== artistId &&
-            normalize(artist.name) !== normalize(seed.name)
-          )
-          .map((artist) => artist.id)
-      )].slice(0, 2);
-      const [radioTracks, collaboratorGroups] = await Promise.all([
-        loadYouTubeMusicRadio(seed, youtubeAnchorTracks),
-        Promise.all(
-          collaboratorIds.map((id) =>
-            withDiscoveryTimeout(getArtistTopTracks(id).catch(() => []))
-          )
-        ),
-      ]);
-      const collaboratorTracks = collaboratorGroups
-        .flatMap((tracks) => tracks || [])
-        .map(trackModelToHomeTrack);
-      return [
-        ...radioTracks,
-        ...collaboratorTracks,
-        ...seedSpotifyTracks.map(trackModelToHomeTrack),
-        ...youtubeAnchorTracks,
-      ];
+      const anchors = await searchYouTubeMusic(seed);
+      const radio = await loadYouTubeMusicRadio(seed, anchors);
+      return [...radio, ...anchors];
     })
   );
   const tracks = uniqueTracks(groups.flat());

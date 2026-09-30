@@ -9,14 +9,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { findArtistIdByName } from '@api';
+import { getYouTubeMusicArtistProfile } from '@api';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { useUserData, type PlayerTrack } from '@context';
 import { usePersonalizedHome } from '@hooks';
-import {
-  getCachedArtistImage,
-  type PersonalizedHomeTrack,
-} from '@services';
+import { getCachedArtistImage, type PersonalizedHomeTrack } from '@services';
 import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
 
 import { ListeningFeed } from './ListeningFeed';
@@ -95,25 +92,26 @@ export const Feed = () => {
       const name = artist?.name?.trim() || track.artistName.split(',')[0]?.trim() || '';
       if (name) unique.set(normalize(name), { id: artist?.id || '', name });
     });
-    return [...unique.values()];
+    return [...unique.values()].slice(0, 6);
   }, [noteTracks]);
   const [artistImages, setArtistImages] = React.useState<Record<string, string>>({});
 
   React.useEffect(() => {
     let active = true;
-    void Promise.all(
-      artists.map(async (artist) => {
-        const spotifyId = /^[A-Za-z0-9]{22}$/.test(artist.id)
-          ? artist.id
-          : await findArtistIdByName(artist.name);
-        if (!spotifyId) return [normalize(artist.name), ''] as const;
-        const image = await getCachedArtistImage(spotifyId, () =>
-          getSpotifyArtistImage(spotifyId)
+    void Promise.all(artists.map(async (artist) => {
+      if (artist.id.startsWith('ytartist_')) {
+        const profile = await getYouTubeMusicArtistProfile(artist.id).catch(() => null);
+        return [normalize(artist.name), profile?.artist.imageURL || ''] as const;
+      }
+      if (/^[A-Za-z0-9]{22}$/.test(artist.id)) {
+        const image = await getCachedArtistImage(artist.id, () =>
+          getSpotifyArtistImage(artist.id)
         );
         return [normalize(artist.name), image] as const;
-      })
-    ).then((entries) => {
-      if (active) setArtistImages(Object.fromEntries(entries));
+      }
+      return [normalize(artist.name), ''] as const;
+    })).then((entries) => {
+      if (active) setArtistImages((current) => ({ ...current, ...Object.fromEntries(entries) }));
     });
     return () => {
       active = false;

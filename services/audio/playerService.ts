@@ -668,9 +668,15 @@ export const loadAndPlay = async (
     );
 
     const playerSource = source.headers ? source : uri;
-    // Finish any pending preload before consuming it. Otherwise its late
-    // completion can leave another native AVPlayer cached for the active URI.
-    await preloadedSources.get(uri)?.operation;
+    // Only consume a finished preload. A neighbor buffer must never hold up
+    // an explicit play request; an unfinished buffer is cancelled and released
+    // by its own completion handler.
+    const preloadEntry = preloadedSources.get(uri);
+    if (preloadEntry?.nativeReady) {
+      await preloadEntry.operation;
+    } else if (preloadEntry) {
+      preloadEntry.cancelled = true;
+    }
     if (generation !== loadGeneration) return false;
     preloadedSources.delete(uri);
     const player = playerInstance || createAudioPlayer(playerSource as any, getPlayerOptions());

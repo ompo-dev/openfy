@@ -33,32 +33,42 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
   const { openDetail } = useDetailNavigation();
   const [album, setAlbum] = React.useState<AlbumModel | null>(null);
   const [artists, setArtists] = React.useState<ArtistModel[]>([]);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const [refreshSequence, setRefreshSequence] = React.useState(0);
+  const refresh = React.useCallback(() => {
+    setIsRefreshing(true);
+    setRefreshSequence((sequence) => sequence + 1);
+  }, []);
 
   React.useEffect(() => {
     let active = true;
 
-    void (async () => {
-      try {
-        const albumData = await getAlbum(albumId);
-        const artistData = await Promise.all(
-          albumData.artists.map(({ id }) => getArtist(id))
-        );
+    void getAlbum(albumId)
+      .then((albumData) => {
         if (!active) return;
         setAlbum(albumData);
-        setArtists(artistData);
-      } catch (error) {
+        setArtists([]);
+        void Promise.all(albumData.artists.map(({ id }) => getArtist(id)))
+          .then((artistData) => {
+            if (active) setArtists(artistData);
+          })
+          .catch(() => {});
+      })
+      .catch((error) => {
         if (active) {
           setAlbum(null);
           setArtists([]);
         }
         console.error('Failed to get album data:', error);
-      }
-    })();
+      })
+      .finally(() => {
+        if (active) setIsRefreshing(false);
+      });
 
     return () => {
       active = false;
     };
-  }, [albumId]);
+  }, [albumId, refreshSequence]);
 
   const handleArtistPress = React.useCallback(
     async (artistId: string, artistName: string) => {
@@ -93,6 +103,8 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
       tracks={album.tracks.items}
       artists={artists.map(({ id, name }) => ({ id, name }))}
       onArtistPress={handleArtistPress}
+      onRefresh={refresh}
+      refreshing={isRefreshing}
     />
   );
 };

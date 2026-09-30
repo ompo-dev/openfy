@@ -1,7 +1,12 @@
 import * as React from 'react';
 import { View } from 'react-native';
 
-import { getArtist, getArtistAlbums, getArtistTopTracks } from '@api';
+import {
+  getArtist,
+  getArtistAlbums,
+  getArtistTopTracks,
+  getYouTubeMusicArtistProfile,
+} from '@api';
 import { CollectionDetail } from '@components';
 import { usePlayer } from '@context';
 import { ArtistModel, LibraryItemModel, TrackModel } from '@models';
@@ -103,17 +108,28 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     []
   );
   const [albums, setAlbums] = React.useState<LibraryItemModel[]>([]);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const [refreshSequence, setRefreshSequence] = React.useState(0);
+  const activeArtistId = React.useRef(artistId);
+  const refresh = React.useCallback(() => {
+    setIsRefreshing(true);
+    setRefreshSequence((sequence) => sequence + 1);
+  }, []);
   const localArtistName = artistId.startsWith('local_artist_')
     ? decodeURIComponent(artistId.slice('local_artist_'.length))
     : '';
+  const isYouTubeArtist = artistId.startsWith('ytartist_');
 
   React.useEffect(() => {
     let active = true;
-    setArtist(null);
-    setTopTracks([]);
-    setParticipationTracks([]);
-    setContextualTracks([]);
-    setAlbums([]);
+    if (activeArtistId.current !== artistId) {
+      activeArtistId.current = artistId;
+      setArtist(null);
+      setTopTracks([]);
+      setParticipationTracks([]);
+      setContextualTracks([]);
+      setAlbums([]);
+    }
 
     const libraryPromise = getLibraryTracks();
     void Promise.all([libraryPromise, getUserProfile()]).then(
@@ -126,17 +142,14 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           ...libraryTracks.map(toTrackModel),
         ]);
       }
-    );
+    ).catch(() => {});
 
     if (localArtistName) {
-      void libraryPromise.then(async (downloaded) => {
+      void libraryPromise.then((downloaded) => {
         const collection = groupLocalArtists(downloaded).find((candidate) =>
           candidate.id === localArtistName ||
           candidate.title.toLocaleLowerCase() === localArtistName.toLocaleLowerCase()
         );
-        const profileImage = collection?.spotifyArtistId
-          ? await getCachedArtistImage(collection.id, () =>
-              getSpotifyArtistImage(collection.spotifyArtistId!)) : '';
         if (!active) return;
         const collectionTracks = collection?.tracks || [];
         const featuredTracks = collectionTracks.filter((track) =>
@@ -160,18 +173,49 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           id: artistId,
           type: 'artist',
           name: collection?.title || localArtistName,
-          imageURL: profileImage,
+          imageURL: '',
         });
         setTopTracks(featuredTracks.map(toTrackModel));
         setParticipationTracks(participationOnlyTracks.map(toTrackModel));
         setAlbums(artistAlbums);
+        setIsRefreshing(false);
+        if (collection?.spotifyArtistId && /^[A-Za-z0-9]{22}$/.test(collection.spotifyArtistId)) {
+          void getCachedArtistImage(collection.id, () =>
+            getSpotifyArtistImage(collection.spotifyArtistId!)
+          ).then((imageURL) => {
+            if (active && imageURL) {
+              setArtist((current) => current ? { ...current, imageURL } : current);
+            }
+          });
+        }
+      }).catch(() => {
+        if (active) setIsRefreshing(false);
       });
       return () => {
         active = false;
       };
     }
 
-    void getArtist(artistId)
+    if (isYouTubeArtist) {
+      void getYouTubeMusicArtistProfile(artistId)
+        .then(({ artist: artistData, tracks }) => {
+          if (!active) return;
+          setArtist(artistData);
+          setTopTracks(tracks);
+        })
+        .catch((error) => {
+          if (active) setArtist(null);
+          console.error('Failed to get YouTube Music artist data:', error);
+        })
+        .finally(() => {
+          if (active) setIsRefreshing(false);
+        });
+      return () => {
+        active = false;
+      };
+    }
+
+    const artistRequest = getArtist(artistId)
       .then((artistData) => {
         if (!active) return;
         setArtist(artistData);
@@ -183,7 +227,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         console.error('Failed to get artist data:', error);
       });
 
-    void getArtistTopTracks(artistId)
+    const tracksRequest = getArtistTopTracks(artistId)
       .then((trackData) => {
         if (!active) return;
         setTopTracks(
@@ -199,16 +243,20 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       })
       .catch((error) => console.error('Failed to get artist top tracks:', error));
 
-    void getArtistAlbums(artistId, 'album,single', 20)
+    const albumsRequest = getArtistAlbums(artistId, 'album,single', 20)
       .then((albumData) => {
         if (active) setAlbums(albumData);
       })
       .catch((error) => console.error('Failed to get artist albums:', error));
 
+    void Promise.allSettled([artistRequest, tracksRequest, albumsRequest]).finally(() => {
+      if (active) setIsRefreshing(false);
+    });
+
     return () => {
       active = false;
     };
-  }, [artistId, localArtistName]);
+  }, [artistId, isYouTubeArtist, localArtistName, refreshSequence]);
 
   const mergedTracks = React.useMemo(() => {
     if (!artist) {
@@ -263,6 +311,8 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           tracks: mergedTracks.participationTracks,
         },
       ]}
+      onRefresh={refresh}
+      refreshing={isRefreshing}
       footer={
         albums.length ? (
           <Slider

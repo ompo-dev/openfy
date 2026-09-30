@@ -64,6 +64,8 @@ const toPlayerTrackFromSearch = (track: TrackModel): PlayerTrack => ({
   artists: track.artists,
   albumId: track.albumId,
   albumArtists: track.albumArtists,
+  youtubeVideoId: track.youtubeVideoId,
+  youtubeUrl: track.youtubeUrl,
 });
 
 const artistNames = (artist: ArtistModel) => artist.genres?.slice(0, 2).join(' · ') || 'Artista';
@@ -138,6 +140,9 @@ export const Home = () => {
         albumId: track.albumId,
         artists: track.artists,
         albumArtists: track.albumArtists,
+        youtubeVideoId: track.youtubeVideoId,
+        youtubeUrl: track.youtubeUrl,
+        sourcePlatform: track.youtubeVideoId ? 'youtube' : 'spotify',
       }]);
       setSavedTrackIds((current) => new Set(current).add(track.id));
       refreshLibrary();

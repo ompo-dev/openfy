@@ -5,7 +5,6 @@ import { useAppSettings, useLibrarySelectedCategory } from '@context';
 import {
   buildPersonalizedHome,
   EMPTY_PERSONALIZED_HOME,
-  getCachedArtistImage,
   getLibraryTracks,
   getLocalPlaylists,
   getUserProfile,
@@ -13,7 +12,8 @@ import {
   type PersonalizedHomeSnapshot,
   type PersonalizedHomeTrack,
 } from '@services';
-import { getSpotifyArtistImage } from '../services/metadata/spotifyMetadata';
+
+const MIN_REFRESH_INDICATOR_MS = 350;
 
 export const usePersonalizedHome = () => {
   const { libraryRevision } = useLibrarySelectedCategory();
@@ -24,11 +24,16 @@ export const usePersonalizedHome = () => {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [refreshSequence, setRefreshSequence] = React.useState(0);
+  const requestKey = `${libraryRevision}:${refreshSequence}`;
+  const latestRequestKey = React.useRef(requestKey);
+  latestRequestKey.current = requestKey;
   const forceRefreshRef = React.useRef(false);
+  const refreshStartedAt = React.useRef(0);
   const homeRef = React.useRef(home);
   homeRef.current = home;
   const generation = React.useRef(0);
   const refresh = React.useCallback(() => {
+    refreshStartedAt.current = Date.now();
     setIsRefreshing(true);
     forceRefreshRef.current = true;
     setRefreshSequence((sequence) => sequence + 1);
@@ -38,11 +43,16 @@ export const usePersonalizedHome = () => {
     React.useCallback(() => {
       let active = true;
       const request = ++generation.current;
+      const requestKeyForEffect = requestKey;
       const forceRefresh = forceRefreshRef.current;
       forceRefreshRef.current = false;
 
       const publish = (snapshot: PersonalizedHomeSnapshot) => {
-        if (!active || request !== generation.current) return;
+        if (
+          !active ||
+          request !== generation.current ||
+          requestKeyForEffect !== latestRequestKey.current
+        ) return;
         setHome(snapshot);
         setIsLoading(false);
       };
@@ -66,45 +76,45 @@ export const usePersonalizedHome = () => {
           settings.personalizedHome ? homeRef.current.discoveries : []
         );
         publish(localSnapshot);
-
-        const discoveries = settings.personalizedHome
-          ? loadHomeDiscoveries(
-              localSnapshot.seeds.length
-                ? localSnapshot.seeds
-                : [
-                    { name: 'músicas populares Brasil', score: 0, matchArtist: false },
-                    { name: 'lançamentos música brasileira', score: 0, matchArtist: false },
-                  ],
-              new Set(tracks.map((track) => track.spotifyId)),
-              settings.allowExplicitRecommendations,
-              forceRefresh
-            )
-          : Promise.resolve([]);
-        const resolvedDiscoveries = await discoveries;
-        const enriched = build(
-          resolvedDiscoveries.length ? resolvedDiscoveries : localSnapshot.discoveries
-        );
-        const resolvedArtists = await Promise.all(
-          enriched.artists.map(async (artist) => {
-            const imageURL = await getCachedArtistImage(artist.id, () =>
-              getSpotifyArtistImage(artist.spotifyArtistId)
-            );
-            return imageURL ? { ...artist, imageURL } : artist;
-          })
-        );
-        publish({ ...enriched, artists: resolvedArtists });
-      })().catch(() => {
-        if (active && request === generation.current) setIsLoading(false);
-      }).finally(() => {
+        if (forceRefresh) {
+          const remaining = MIN_REFRESH_INDICATOR_MS -
+            (Date.now() - refreshStartedAt.current);
+          if (remaining > 0) {
+            await new Promise((resolve) => setTimeout(resolve, remaining));
+          }
+        }
         if (active && request === generation.current) setIsRefreshing(false);
+
+        if (!settings.personalizedHome) return;
+        const seeds = localSnapshot.seeds.length
+          ? localSnapshot.seeds
+          : [
+              { name: 'músicas populares Brasil', score: 0, matchArtist: false },
+              { name: 'lançamentos música brasileira', score: 0, matchArtist: false },
+            ];
+        void loadHomeDiscoveries(
+          seeds,
+          new Set(tracks.map((track) => track.spotifyId)),
+          settings.allowExplicitRecommendations,
+          forceRefresh
+        ).then((discoveries) => {
+          if (!active || request !== generation.current) return;
+          publish(build(
+            discoveries.length ? discoveries : localSnapshot.discoveries
+          ));
+        }).catch(() => {});
+      })().catch(() => {
+        if (active && request === generation.current) {
+          setIsLoading(false);
+          setIsRefreshing(false);
+        }
       });
 
       return () => {
         active = false;
       };
     }, [
-      libraryRevision,
-      refreshSequence,
+      requestKey,
       settings.allowExplicitRecommendations,
       settings.personalizedHome,
     ])

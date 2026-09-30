@@ -2,6 +2,7 @@ import * as React from 'react';
 import {
   Alert,
   FlatList,
+  RefreshControl,
   Share,
   StyleSheet,
   Text,
@@ -60,6 +61,8 @@ export type CollectionDetailProps = {
   disableTrackArtistLinks?: boolean;
   extraTrackSections?: ExtraTrackSection[];
   footer?: React.ReactNode;
+  onRefresh?: () => void | Promise<void>;
+  refreshing?: boolean;
 };
 
 const toPlayerTrack = (track: CollectionTrack, collectionName: string) => ({
@@ -148,6 +151,8 @@ export const CollectionDetail = ({
   disableTrackArtistLinks = false,
   extraTrackSections = [],
   footer,
+  onRefresh,
+  refreshing = false,
 }: CollectionDetailProps) => {
   const router = useRouter();
   const segments = useSegments();
@@ -470,6 +475,14 @@ export const CollectionDetail = ({
         onEndReachedThreshold={0.6}
         contentContainerStyle={{ paddingBottom: BOTTOM_NAVIGATION_HEIGHT + 112 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={onRefresh ? (
+          <RefreshControl
+            tintColor="#FFFFFF"
+            colors={['#1DB954']}
+            refreshing={refreshing}
+            onRefresh={() => void onRefresh()}
+          />
+        ) : undefined}
         ListHeaderComponent={
           <>
             <View style={[styles.hero, { paddingTop: insets.top + 8 }]}>

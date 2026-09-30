@@ -435,14 +435,6 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           }
         : {}),
     });
-    warmQueueNeighbors(get().queue, get().queueIndex);
-    const playbackDiagnosticsReady = ensurePlaybackDiagnostics(track).catch(
-      () => {}
-    );
-
-    // Record interaction metric
-    recordInteraction(track, 'play').catch(() => {});
-
     // 2. CONCURRENT AUDIO STREAM RESOLUTION & PERSISTENT CACHE
     const resolveAudioPromise = (async (): Promise<AudioSourceInput | null> => {
       const directSavedSource = await getSavedAudioSource(track);
@@ -494,49 +486,43 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       return null;
     })();
 
-    // 3. CONCURRENT LYRICS RESOLUTION & PERSISTENT CACHE
-    const resolveLyricsPromise = (async (): Promise<LyricsData | null> => {
-      if (cachedLyrics) return cachedLyrics;
-
-      try {
-        const stored = await AsyncStorage.getItem(
-          `${STORAGE_LYRICS_PREFIX}${cacheKey}`
-        );
-        if (stored) {
-          const parsed = JSON.parse(stored) as LyricsData;
-          lyricsCache.set(lyricsCacheKey, parsed);
-          return parsed;
+    const startLyricsLoading = () => {
+      if (cachedLyrics) return;
+      void (async () => {
+        let lyrics: LyricsData | null = null;
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          if (get().activeRequestId !== requestId) return;
+          const stored = await AsyncStorage.getItem(
+            `${STORAGE_LYRICS_PREFIX}${cacheKey}`
+          );
+          if (stored) {
+            lyrics = JSON.parse(stored) as LyricsData;
+            lyricsCache.set(lyricsCacheKey, lyrics);
+          } else {
+            lyrics = await fetchLyrics(
+              track.title,
+              track.artistName,
+              track.duration_ms ? track.duration_ms / 1000 : undefined,
+              track.albumName
+            );
+            if (lyrics) {
+              lyricsCache.set(lyricsCacheKey, lyrics);
+              void AsyncStorage.setItem(
+                `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
+                JSON.stringify(lyrics)
+              ).catch(() => {});
+            }
+          }
+        } catch {
+          lyrics = null;
+        } finally {
+          if (get().activeRequestId === requestId) {
+            set({ lyricsData: lyrics, isLoadingLyrics: false });
+          }
         }
-      } catch {}
-
-      const fetched = await fetchLyrics(
-        track.title,
-        track.artistName,
-        track.duration_ms ? track.duration_ms / 1000 : undefined,
-        track.albumName
-      );
-
-      if (fetched) {
-        lyricsCache.set(lyricsCacheKey, fetched);
-        AsyncStorage.setItem(
-          `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
-          JSON.stringify(fetched)
-        ).catch(() => {});
-        return fetched;
-      }
-
-      return null;
-    })();
-
-    // Execute Lyrics resolution and update store if generation lock matches
-    resolveLyricsPromise.catch(() => null).then((lyrics) => {
-      if (get().activeRequestId === requestId) {
-        set({
-          lyricsData: lyrics,
-          isLoadingLyrics: false,
-        });
-      }
-    });
+      })();
+    };
 
     // Execute Audio resolution
     const streamSource = await resolveAudioPromise.catch((error) => {
@@ -563,6 +549,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           error: 'Não foi possível carregar o áudio desta faixa.',
         },
       });
+      startLyricsLoading();
+      void ensurePlaybackDiagnostics(track).catch(() => {});
       // Resolution failed for the selected id. Dispose the paused previous
       // engine so no later native/lock-screen command can resume another song.
       await unload();
@@ -584,8 +572,6 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     let lastPlaybackPositionMs = 0;
 
     console.log(`[PlayerStore #${requestId}] Playing stream:`, activeStreamUri);
-    await playbackDiagnosticsReady;
-
     if (get().activeRequestId !== requestId) return;
 
     /**
@@ -774,6 +760,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     if (get().activeRequestId !== requestId) return;
 
     if (success) {
+      startLyricsLoading();
+      void ensurePlaybackDiagnostics(track).catch(() => {});
+      recordInteraction(track, 'play').catch(() => {});
+      warmQueueNeighbors(get().queue, get().queueIndex);
       set((state) => ({
         isLoadingAudio: false,
         history: [track, ...state.history.slice(0, 49)],
@@ -805,6 +795,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         ).catch(() => {});
       }
     } else {
+      startLyricsLoading();
+      void ensurePlaybackDiagnostics(track).catch(() => {});
       const playerState = get().playerState;
       const loadError = playerState.error ?? '';
       const isRefusal = isLikelyStreamRefusal(loadError);

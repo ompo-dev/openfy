@@ -24,11 +24,22 @@ export const PlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) =>
 const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
   const [playlist, setPlaylist] = React.useState<PlaylistModel | null>(null);
   const [tracks, setTracks] = React.useState<TrackModel[]>([]);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const [refreshSequence, setRefreshSequence] = React.useState(0);
   const offsetRef = React.useRef(0);
   const tracksRef = React.useRef<TrackModel[]>([]);
   const loadingPromiseRef = React.useRef<Promise<void> | null>(null);
+  const pageGenerationRef = React.useRef(0);
+  const activePlaylistId = React.useRef(playlistId);
+  const refresh = React.useCallback(() => {
+    setIsRefreshing(true);
+    setRefreshSequence((sequence) => sequence + 1);
+  }, []);
 
-  const loadTrackPage = React.useCallback(async (targetPlaylist: PlaylistModel) => {
+  const loadTrackPage = React.useCallback(async (
+    targetPlaylist: PlaylistModel,
+    generation = pageGenerationRef.current
+  ) => {
     if (offsetRef.current >= targetPlaylist.tracks.total) return;
     if (loadingPromiseRef.current) {
       await loadingPromiseRef.current;
@@ -36,28 +47,31 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
     }
 
     const request = (async () => {
-    try {
-      const page = await getPlaylistItems({
-        playlistId: targetPlaylist.id,
-        limit: 50,
-        offset: offsetRef.current,
-      });
-      const saved = await checkSavedTracks(page.map((track) => track.id)).catch(
-        () => []
-      );
-      offsetRef.current += 50;
-      tracksRef.current = [
-        ...tracksRef.current,
-        ...page.map((track, index) => ({
-          ...track,
-          isSaved: saved[index] ?? false,
-        })),
-      ];
-      setTracks(tracksRef.current);
-    } catch (error) {
-      offsetRef.current = targetPlaylist.tracks.total;
-      console.error('Failed to get playlist tracks:', error);
-    }
+      try {
+        const page = await getPlaylistItems({
+          playlistId: targetPlaylist.id,
+          limit: 50,
+          offset: offsetRef.current,
+        });
+        const saved = await checkSavedTracks(page.map((track) => track.id)).catch(
+          () => []
+        );
+        if (generation !== pageGenerationRef.current) return;
+        offsetRef.current += 50;
+        tracksRef.current = [
+          ...tracksRef.current,
+          ...page.map((track, index) => ({
+            ...track,
+            isSaved: saved[index] ?? false,
+          })),
+        ];
+        setTracks(tracksRef.current);
+      } catch (error) {
+        if (generation === pageGenerationRef.current) {
+          offsetRef.current = targetPlaylist.tracks.total;
+          console.error('Failed to get playlist tracks:', error);
+        }
+      }
     })();
 
     loadingPromiseRef.current = request;
@@ -82,26 +96,40 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
 
   React.useEffect(() => {
     let active = true;
-    offsetRef.current = 0;
-    tracksRef.current = [];
-    setPlaylist(null);
-    setTracks([]);
+    const generation = ++pageGenerationRef.current;
+    loadingPromiseRef.current = null;
+    const playlistChanged = activePlaylistId.current !== playlistId;
+    const refreshingExistingPlaylist = !playlistChanged && refreshSequence > 0;
+    activePlaylistId.current = playlistId;
+    if (!refreshingExistingPlaylist) {
+      offsetRef.current = 0;
+      tracksRef.current = [];
+      setPlaylist(null);
+      setTracks([]);
+    }
 
     void getPlaylist(playlistId)
-      .then((data) => {
+      .then(async (data) => {
         if (!active) return;
+        if (refreshingExistingPlaylist) {
+          offsetRef.current = 0;
+          tracksRef.current = [];
+        }
         setPlaylist(data);
-        void loadTrackPage(data);
+        await loadTrackPage(data, generation);
       })
       .catch((error) => {
-        if (active) setPlaylist(null);
+        if (active && !refreshingExistingPlaylist) setPlaylist(null);
         console.error('Failed to get playlist data:', error);
+      })
+      .finally(() => {
+        if (active) setIsRefreshing(false);
       });
 
     return () => {
       active = false;
     };
-  }, [loadTrackPage, playlistId]);
+  }, [loadTrackPage, playlistId, refreshSequence]);
 
   if (!playlist) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
 
@@ -127,6 +155,8 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
       }
       tracks={tracks}
       disableTrackArtistLinks
+      onRefresh={refresh}
+      refreshing={isRefreshing}
       onEndReached={() => void loadTrackPage(playlist)}
       resolveTracksForPlayback={() => loadAllTrackPages(playlist)}
     />

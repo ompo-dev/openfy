@@ -3,12 +3,29 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
+import { getYouTubeMusicArtistProfile } from '@api';
 import { useDetailNavigation } from '@hooks';
 import type { PersonalizedHomeSnapshot } from '@services';
 import { LoggedPressable } from '../native';
 
 export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
   const { openDetail } = useDetailNavigation();
+  const [artistImages, setArtistImages] = React.useState<Record<string, string>>({});
+
+  React.useEffect(() => {
+    let active = true;
+    void Promise.all(home.artists.map(async (artist) => {
+      if (!artist.artistId.startsWith('ytartist_')) return [artist.artistId, ''] as const;
+      const profile = await getYouTubeMusicArtistProfile(artist.artistId).catch(() => null);
+      return [artist.artistId, profile?.artist.imageURL || ''] as const;
+    })).then((entries) => {
+      if (active) setArtistImages((current) => ({ ...current, ...Object.fromEntries(entries) }));
+    });
+    return () => {
+      active = false;
+    };
+  }, [home.artists]);
+
   if (!home.artists.length) return null;
 
   return (
@@ -22,12 +39,12 @@ export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
         {home.artists.map((artist) => (
           <LoggedPressable
             accessibilityLabel={`Abrir artista ${artist.title}`}
-            key={artist.spotifyArtistId}
-            onPress={() => openDetail('artist', artist.spotifyArtistId, 'home')}
+            key={artist.artistId}
+            onPress={() => openDetail('artist', artist.artistId, 'home')}
             style={styles.artist}
           >
-            {artist.imageURL ? (
-              <Image source={{ uri: artist.imageURL }} contentFit="cover" style={styles.image} />
+            {artistImages[artist.artistId] ? (
+              <Image source={{ uri: artistImages[artist.artistId] }} contentFit="cover" style={styles.image} />
             ) : (
               <View style={[styles.image, styles.fallback]}>
                 <Ionicons name="person" size={26} color="#929292" />

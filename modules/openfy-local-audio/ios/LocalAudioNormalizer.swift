@@ -14,14 +14,34 @@ struct LocalAudioRepairResult: Sendable {
 
 actor LocalAudioRepairCoordinator {
   private var inFlight: [URL: Task<LocalAudioRepairResult, Error>] = [:]
+  private var completed: [
+    URL: (
+      identity: LocalAudioNormalizer.FileIdentity,
+      result: LocalAudioRepairResult
+    )
+  ] = [:]
 
   func repair(uri: String) async throws -> LocalAudioRepairResult {
     let url = try LocalAudioNormalizer.fileURL(uri)
+    let identity = try LocalAudioNormalizer.FileIdentity(url)
+    if let cached = completed[url], cached.identity == identity {
+      return cached.result
+    }
     if let task = inFlight[url] { return try await task.value }
-    let task = Task { try await LocalAudioNormalizer.repair(url: url) }
+    let task = Task {
+      try await LocalAudioNormalizer.repair(url: url, identity: identity)
+    }
     inFlight[url] = task
     defer { inFlight[url] = nil }
-    return try await task.value
+    let result = try await task.value
+    completed[url] = (
+      identity: try LocalAudioNormalizer.FileIdentity(url),
+      result: result
+    )
+    if completed.count > 128, let oldest = completed.keys.first, oldest != url {
+      completed[oldest] = nil
+    }
+    return result
   }
 }
 
@@ -33,7 +53,7 @@ enum LocalAudioNormalizer {
     let digest: SHA256.Digest
   }
 
-  struct FileIdentity: Equatable {
+  struct FileIdentity: Equatable, Sendable {
     let size: Int
     let modified: Date
 
@@ -57,8 +77,11 @@ enum LocalAudioNormalizer {
     return url.standardizedFileURL.resolvingSymlinksInPath()
   }
 
-  static func repair(url: URL) async throws -> LocalAudioRepairResult {
-    let identity = try FileIdentity(url)
+  static func repair(
+    url: URL,
+    identity: FileIdentity? = nil
+  ) async throws -> LocalAudioRepairResult {
+    let identity = try identity ?? FileIdentity(url)
     var protection = try allowPlaybackWhileLocked(url: url, identity: identity)
     guard try MP4Container.isFragmented(at: url) else {
       return LocalAudioRepairResult(

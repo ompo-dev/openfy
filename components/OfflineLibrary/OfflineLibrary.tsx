@@ -54,6 +54,8 @@ export const OfflineLibrary = () => {
   const [artistImageURLs, setArtistImageURLs] = React.useState<Record<string, string>>({});
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const requestedArtistImages = React.useRef(new Set<string>());
+  const libraryLoadRef = React.useRef<Promise<void> | null>(null);
+  const metadataRepairRef = React.useRef(false);
   const { playWithQueue, currentTrack, playerState } = usePlayer();
   const {
     cancelDownload,
@@ -75,16 +77,21 @@ export const OfflineLibrary = () => {
   } = useLibrarySelectedCategory();
 
   const loadLibrary = React.useCallback(async () => {
-    const [downloaded, localPlaylists] = await Promise.all([
-      getLibraryTracks(),
-      getLocalPlaylists(),
-    ]);
-    setTracks([...downloaded].reverse());
-    setPlaylists(
-      [...localPlaylists].sort((a, b) =>
-        b.updatedAt.localeCompare(a.updatedAt)
-      )
-    );
+    if (libraryLoadRef.current) return libraryLoadRef.current;
+    const request = Promise.all([getLibraryTracks(), getLocalPlaylists()])
+      .then(([downloaded, localPlaylists]) => {
+        setTracks([...downloaded].reverse());
+        setPlaylists(
+          [...localPlaylists].sort((a, b) =>
+            b.updatedAt.localeCompare(a.updatedAt)
+          )
+        );
+      })
+      .finally(() => {
+        if (libraryLoadRef.current === request) libraryLoadRef.current = null;
+      });
+    libraryLoadRef.current = request;
+    return request;
   }, []);
 
   useFocusEffect(
@@ -118,17 +125,28 @@ export const OfflineLibrary = () => {
   );
 
   const handleRefresh = React.useCallback(async () => {
+    const startedAt = Date.now();
     setIsRefreshing(true);
     try {
       await Promise.all([
         loadLibrary(),
         refreshDownloads(),
-        repairDownloadedTrackMetadata(),
       ]);
-      await loadLibrary();
+      const remaining = 300 - (Date.now() - startedAt);
+      if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
       refreshLibrary();
     } finally {
       setIsRefreshing(false);
+    }
+    if (!metadataRepairRef.current) {
+      metadataRepairRef.current = true;
+      void repairDownloadedTrackMetadata()
+        .catch(() => {})
+        .finally(() => {
+          metadataRepairRef.current = false;
+          void loadLibrary();
+          refreshLibrary();
+        });
     }
   }, [loadLibrary, refreshDownloads, refreshLibrary]);
 
@@ -182,7 +200,7 @@ export const OfflineLibrary = () => {
   React.useEffect(() => {
     const artistsToLoad = localArtists.filter(
       (artist) =>
-        Boolean(artist.spotifyArtistId) &&
+        Boolean(artist.spotifyArtistId && /^[A-Za-z0-9]{22}$/.test(artist.spotifyArtistId)) &&
         !requestedArtistImages.current.has(artist.id)
     );
     if (artistsToLoad.length === 0) return;

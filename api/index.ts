@@ -30,8 +30,8 @@ export {
   getRecommendations,
 } from './recommendations';
 
-export { getBrowseCategories, searchCatalog } from './search';
-export type { CatalogSearchResults } from './search';
+export { getBrowseCategories, getYouTubeMusicArtistProfile, searchCatalog } from './search';
+export type { CatalogSearchResults, YouTubeMusicArtistProfile } from './search';
 
 export { getSavedShows } from './shows';
 
