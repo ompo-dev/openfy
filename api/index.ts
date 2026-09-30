@@ -30,7 +30,8 @@ export {
   getRecommendations,
 } from './recommendations';
 
-export { getBrowseCategories } from './search';
+export { getBrowseCategories, searchCatalog } from './search';
+export type { CatalogSearchResults } from './search';
 
 export { getSavedShows } from './shows';
 

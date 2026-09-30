@@ -24,9 +24,13 @@ import {
 
 type PostAuthor = {
   name: string;
-  avatarUrl: string;
+  avatarUrl?: string;
   listeningTo?: string;
+  isBrand?: boolean;
 };
+
+const normalizeArtist = (name: string) =>
+  name.trim().toLocaleLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 const compactToPlayerTrack = (track: CompactTrackItem): PlayerTrack => ({
   spotifyId: track.spotifyId,
@@ -68,7 +72,17 @@ const PostHeader = ({
   children?: React.ReactNode;
 }) => (
   <View style={styles.postHeader}>
-    <Image source={{ uri: author.avatarUrl }} style={styles.authorAvatar} />
+    {author.avatarUrl ? (
+      <Image source={{ uri: author.avatarUrl }} style={styles.authorAvatar} />
+    ) : (
+      <View style={[styles.authorAvatar, styles.authorAvatarFallback]}>
+        <Ionicons
+          name={author.isBrand ? 'sparkles' : 'person'}
+          size={20}
+          color="#A3A3A3"
+        />
+      </View>
+    )}
     <View style={styles.authorCopy}>
       <Text style={styles.authorName}>{author.name}</Text>
       <View style={styles.authorStatus}>
@@ -381,11 +395,15 @@ export const ListeningFeed = ({
   queueTracks,
   shelfTitle,
   shelfTracks,
+  viewerAvatarUrl,
+  artistAvatarUrls = {},
 }: {
   lyricTrack?: PlayerTrack;
   queueTracks: PlayerTrack[];
   shelfTitle: string;
   shelfTracks: CompactTrackItem[];
+  viewerAvatarUrl?: string;
+  artistAvatarUrls?: Record<string, string>;
 }) => {
   const lead = shelfTracks[0];
   const queueLead = queueTracks[0];
@@ -393,16 +411,17 @@ export const ListeningFeed = ({
 
   const musicAuthor: PostAuthor | null = lead ? {
     name: 'Openfy Mix',
-    avatarUrl: lead.imageUrl,
     listeningTo: `Baseado em ${lead.artist}`,
+    isBrand: true,
   } : null;
   const queueAuthor: PostAuthor | null = queueLead ? {
     name: 'Sua biblioteca',
-    avatarUrl: queueLead.imageURL,
+    avatarUrl: viewerAvatarUrl,
   } : null;
   const lyricAuthor: PostAuthor | null = lyricTrack ? {
     name: lyricTrack.artistName,
-    avatarUrl: lyricTrack.imageURL,
+    avatarUrl:
+      artistAvatarUrls[normalizeArtist(lyricTrack.artists?.[0]?.name || lyricTrack.artistName)],
     listeningTo: `${lyricTrack.title} · ${lyricTrack.artistName}`,
   } : null;
 
@@ -443,6 +462,11 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     borderWidth: 2,
     borderColor: '#D78036',
+  },
+  authorAvatarFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#242428',
   },
   authorCopy: {
     flex: 1,

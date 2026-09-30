@@ -19,6 +19,14 @@ export default function TabLayout() {
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger
+        name="feed"
+        contentStyle={{ backgroundColor: '#121212' }}
+      >
+        <Label>Feed</Label>
+        <Icon sf={{ default: 'text.bubble', selected: 'text.bubble.fill' }} />
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger
         name="library"
         contentStyle={{ backgroundColor: '#121212' }}
       >

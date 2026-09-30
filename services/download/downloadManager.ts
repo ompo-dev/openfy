@@ -101,7 +101,7 @@ const cancelledDownloads = new Set<string>();
 const BACKGROUND_RETRY_BASE_MS = 15 * 60 * 1000;
 const BACKGROUND_RETRY_MAX_MS = 6 * 60 * 60 * 1000;
 const MAX_BACKGROUND_ATTEMPTS = 8;
-const METADATA_VERSION = 2;
+const METADATA_VERSION = 3;
 let metadataRepair: Promise<void> | null = null;
 const metadataRepairAttempts = new Map<string, number>();
 
@@ -329,9 +329,23 @@ export const repairDownloadedTrackMetadata = async (
 ): Promise<void> => {
   if (metadataRepair) return metadataRepair;
   metadataRepair = (async () => {
-    const tracks = (await getDownloadedTracks()).filter((track) =>
-      track.metadataVersion !== METADATA_VERSION &&
-      Date.now() - (metadataRepairAttempts.get(track.spotifyId) || 0) > 5 * 60_000
+    const savedTracks = await getDownloadedTracks();
+    const repairCandidates = await Promise.all(savedTracks.map(async (track) => {
+      if (
+        Date.now() - (metadataRepairAttempts.get(track.spotifyId) || 0) <= 5 * 60_000
+      ) return null;
+      if (track.metadataVersion !== METADATA_VERSION) return track;
+      if (Platform.OS === 'web') {
+        return track.localImagePath || track.imageURL ? null : track;
+      }
+      if (track.localImagePath?.startsWith('file:')) {
+        const info = await FileSystem.getInfoAsync(track.localImagePath).catch(() => null);
+        if (info?.exists && (info.size === undefined || info.size > 0)) return null;
+      }
+      return track;
+    }));
+    const tracks = repairCandidates.filter(
+      (track): track is DownloadedTrack => Boolean(track)
     );
     for (let offset = 0; offset < tracks.length; offset += 2) {
       await Promise.all(tracks.slice(offset, offset + 2).map(async (track) => {
@@ -342,9 +356,12 @@ export const repairDownloadedTrackMetadata = async (
             ? await getCatalogMapping(track.spotifyId) : null;
           const youtubeVideoId = track.youtubeVideoId || mapping?.videoId ||
             youtubeVideoIdFromTrackId(track.spotifyId);
-          const cover = metadata?.imageURL
-            ? await downloadCover(metadata.imageURL, `${track.id}_hq_v2`) : null;
-          if (!metadata && !youtubeVideoId) return;
+          const coverSource = metadata?.imageURL ||
+            (/^https?:\/\//i.test(track.imageURL) ? track.imageURL : '') ||
+            (/^https?:\/\//i.test(track.localImagePath) ? track.localImagePath : '');
+          const cover = coverSource
+            ? await downloadCover(coverSource, `${track.id}_hq_v3`) : null;
+          if (!metadata && !youtubeVideoId && !coverSource) return;
           await updateDownloadedTracks((current) => current.map((saved) =>
             saved.spotifyId === track.spotifyId && saved.localAudioPath === track.localAudioPath
               ? {
@@ -353,8 +370,7 @@ export const repairDownloadedTrackMetadata = async (
                   youtubeVideoId,
                   youtubeUrl: youtubeVideoId
                     ? `https://www.youtube.com/watch?v=${youtubeVideoId}` : saved.youtubeUrl,
-                  metadataVersion: metadata?.albumId && metadata.artists?.length && cover
-                    ? METADATA_VERSION : saved.metadataVersion,
+                  metadataVersion: cover ? METADATA_VERSION : saved.metadataVersion,
                 }
               : saved
           ));
@@ -1127,6 +1143,13 @@ export const downloadCover = async (
   try {
     await ensureDirectories();
     const localPath = `${COVERS_DIR}${trackId}.jpg`;
+    const existing = await FileSystem.getInfoAsync(localPath).catch(() => null);
+    if (existing?.exists && (existing.size === undefined || existing.size > 0)) {
+      return existing.uri || localPath;
+    }
+    if (existing?.exists) {
+      await FileSystem.deleteAsync(localPath, { idempotent: true });
+    }
 
     const result = await FileSystem.downloadAsync(imageUrl, localPath, {
       sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
@@ -1389,7 +1412,7 @@ const downloadTrackInternal = async (
     if (effectiveTrack.imageURL && effectiveTrack.imageURL.startsWith('http')) {
       const downloadedCoverUri = await downloadCover(
         effectiveTrack.imageURL,
-        `${trackId}_hq_v2`
+        `${trackId}_hq_v3`
       );
       if (downloadedCoverUri) {
         localImagePath = downloadedCoverUri;

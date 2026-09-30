@@ -19,6 +19,7 @@ export default function Layout() {
       tabBar={(props: any) => <BottomTabBar {...props} />}
     >
       <Tabs.Screen name="home" options={{ headerShown: false }} />
+      <Tabs.Screen name="feed" options={{ headerShown: false }} />
       <Tabs.Screen name="library" options={{ headerShown: false }} />
     </Tabs>
   );

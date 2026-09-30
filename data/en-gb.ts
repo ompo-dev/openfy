@@ -6,6 +6,7 @@ export const EN_GB = {
   },
   router: {
     home: 'Home',
+    feed: 'Feed',
     search: 'Search',
     library: 'Your Library',
   },

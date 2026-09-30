@@ -19,13 +19,13 @@ describe('BottomTabBar', () => {
       index: 0,
       routes: [
         { key: 'home', name: 'home' },
-        { key: 'search', name: 'search' },
+        { key: 'feed', name: 'feed' },
         { key: 'library', name: 'library' },
       ],
     },
     descriptors: {
       home: { options: {} },
-      search: { options: {} },
+      feed: { options: {} },
       library: { options: {} },
     },
     navigation: {
@@ -51,7 +51,9 @@ describe('BottomTabBar', () => {
     jest.clearAllMocks();
   });
 
-  it('renders correctly with import button', () => {
-    expect(container.getByLabelText('Importar do Spotify')).toBeTruthy();
+  it('renders the home, feed, and library tabs', () => {
+    expect(container.getByText('Home')).toBeTruthy();
+    expect(container.getByText('Feed')).toBeTruthy();
+    expect(container.getByText('Your Library')).toBeTruthy();
   });
 });

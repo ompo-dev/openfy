@@ -19,6 +19,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePlayer } from '@context';
@@ -311,10 +312,14 @@ export const FriendActivityStatus = ({
 
                 {/* Stable circular avatar */}
                 <View style={styles.avatarContainer}>
-                  <Image
-                    source={{ uri: item.user.avatarUrl }}
-                    style={styles.avatarImage}
-                  />
+                  {item.user.avatarUrl ? (
+                    <Image
+                      source={{ uri: item.user.avatarUrl }}
+                      style={styles.avatarImage}
+                    />
+                  ) : (
+                    <Ionicons name="person" size={30} color="#737373" />
+                  )}
                 </View>
 
                 {/* Name */}

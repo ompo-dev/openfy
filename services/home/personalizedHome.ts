@@ -39,6 +39,7 @@ export type RecommendationSeed = {
   id?: string;
   name: string;
   score: number;
+  matchArtist?: boolean;
 };
 
 export type PersonalizedHomeArtist = {
@@ -478,6 +479,7 @@ const searchYouTubeMusic = async (
     const artistNeedle = normalize(seed.name);
     return items
       .filter((item) => {
+        if (seed.matchArtist === false) return true;
         const names = item.artists?.map((artist) => normalize(artist.name || '')) || [];
         return !names.length || names.some((name) =>
           name === artistNeedle || name.includes(artistNeedle) || artistNeedle.includes(name)
@@ -578,16 +580,20 @@ const loadYouTubeMusicRadio = async (
 export const loadHomeDiscoveries = async (
   seeds: RecommendationSeed[],
   knownTrackIds: Set<string>,
-  allowExplicitRecommendations: boolean
+  allowExplicitRecommendations: boolean,
+  forceRefresh = false
 ): Promise<PersonalizedHomeTrack[]> => {
   const activeSeeds = seeds.slice(0, 4);
   if (!activeSeeds.length) return [];
-  const seedKey = activeSeeds.map((seed) => `${seed.id || ''}:${normalize(seed.name)}`).join('|');
+  const seedKey = activeSeeds
+    .map((seed) => `${seed.matchArtist === false ? 'query' : 'artist'}:${seed.id || ''}:${normalize(seed.name)}`)
+    .join('|');
 
   try {
     const raw = await AsyncStorage.getItem(DISCOVERY_CACHE_KEY);
     const cached = raw ? JSON.parse(raw) as DiscoveryCache : null;
     if (
+      !forceRefresh &&
       cached?.seedKey === seedKey &&
       Date.now() - cached.fetchedAt < DISCOVERY_CACHE_TTL_MS
     ) {
@@ -601,9 +607,9 @@ export const loadHomeDiscoveries = async (
 
   const groups = await Promise.all(
     activeSeeds.map(async (seed) => {
-      const artistId = seed.id || await withDiscoveryTimeout(
-        findArtistIdByName(seed.name)
-      ) || '';
+      const artistId = seed.matchArtist === false
+        ? ''
+        : seed.id || await withDiscoveryTimeout(findArtistIdByName(seed.name)) || '';
       const [spotifyTracks, youtubeAnchorTracks] = await Promise.all([
         artistId
           ? withDiscoveryTimeout(getArtistTopTracks(artistId).catch(() => []))

@@ -8,6 +8,7 @@ export enum PLATFORMS {
 
 export enum Pages {
   HOME = 'home',
+  FEED = 'feed',
   SEARCH = 'search',
   LIBRARY = 'library',
 }

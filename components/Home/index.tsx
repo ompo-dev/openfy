@@ -1,51 +1,38 @@
-/**
- * Home Component
- * Home layout with friend notes.
- */
-
 import * as React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
+import { searchCatalog } from '@api';
+import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
+import { useLibrarySelectedCategory, usePlayer, type PlayerTrack } from '@context';
+import { useDetailNavigation, usePersonalizedHome } from '@hooks';
 import {
-  FriendActivityStatus,
-  type FriendNoteItem,
-} from './FriendActivityStatus';
-import { ListeningFeed } from './ListeningFeed';
-import {
-  CompactMusicCarousel,
-  type CompactTrackItem,
-} from './CompactMusicCarousel';
+  upsertCatalogTracks,
+  type PersonalizedHomeTrack,
+} from '@services';
+import type { ArtistModel, TrackModel } from '@models';
+
+import { CompactMusicCarousel, type CompactTrackItem } from './CompactMusicCarousel';
 import { HeroBanner, type FeaturedItem } from './HeroBanner/HeroBanner';
 import { CatalogHome } from './CatalogHome';
-import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
-import { useUserData, type PlayerTrack } from '@context';
-import { usePersonalizedHome } from '@hooks';
-import type { PersonalizedHomeTrack } from '@services';
+import { ImportModal } from '../ImportModal';
+import { LoggedPressable } from '../native';
 
 export { FriendActivityStatus } from './FriendActivityStatus';
 export { CompactMusicCarousel } from './CompactMusicCarousel';
 
-const NOTE_COLORS = ['#EC4899', '#0EA5E9', '#22C55E', '#F59E0B', '#8B5CF6', '#EF4444'];
 const HERO_COLORS = ['#38BDF8', '#FF5C7A', '#F7B955', '#63D9A0', '#C08BFF'];
-
-const toPlayerTrack = (track: PersonalizedHomeTrack): PlayerTrack => ({
-  spotifyId: track.spotifyId,
-  title: track.title,
-  artistName: track.artistName,
-  albumName: track.albumName,
-  imageURL: track.localImagePath || track.imageURL,
-  duration_ms: track.duration_ms,
-  artists: track.artists,
-  albumId: track.albumId,
-  albumArtists: track.albumArtists,
-  youtubeVideoId: track.youtubeVideoId,
-  youtubeUrl: track.youtubeUrl,
-  localAudioPath: track.localAudioPath,
-  localImagePath: track.localImagePath,
-  streamUrl: track.streamUrl,
-  streamExpiresAt: track.streamExpiresAt,
-});
 
 const toCompactTrack = (track: PersonalizedHomeTrack): CompactTrackItem => ({
   id: track.id,
@@ -67,18 +54,106 @@ const toCompactTrack = (track: PersonalizedHomeTrack): CompactTrackItem => ({
   streamExpiresAt: track.streamExpiresAt,
 });
 
+const toPlayerTrackFromSearch = (track: TrackModel): PlayerTrack => ({
+  spotifyId: track.id,
+  title: track.title,
+  artistName: track.subtitle,
+  albumName: track.albumName || 'Single',
+  imageURL: track.imageURL || '',
+  duration_ms: track.durationMs || 0,
+  artists: track.artists,
+  albumId: track.albumId,
+  albumArtists: track.albumArtists,
+});
+
+const artistNames = (artist: ArtistModel) => artist.genres?.slice(0, 2).join(' · ') || 'Artista';
+
 export const Home = () => {
   const { top } = useSafeAreaInsets();
-  const { userData } = useUserData();
-  const { home, isLoading } = usePersonalizedHome();
-  const recommendationTracks = home.discoveries.length
-    ? home.discoveries
-    : home.quickPicks;
-  const compactTracks = recommendationTracks.slice(0, 8).map(toCompactTrack);
-  const queueTracks = (home.featured.length ? home.featured : home.quickPicks)
-    .slice(0, 6)
-    .map(toPlayerTrack);
-  const lyricTrack = (home.continueListening[0] || home.quickPicks[0]);
+  const { home, isLoading, isRefreshing, refresh } = usePersonalizedHome();
+  const { playTrack } = usePlayer();
+  const { refreshLibrary } = useLibrarySelectedCategory();
+  const { openDetail } = useDetailNavigation();
+  const [query, setQuery] = React.useState('');
+  const [results, setResults] = React.useState<{ artists: ArtistModel[]; tracks: TrackModel[] }>({
+    artists: [],
+    tracks: [],
+  });
+  const [searchLoading, setSearchLoading] = React.useState(false);
+  const [searchError, setSearchError] = React.useState('');
+  const [savedTrackIds, setSavedTrackIds] = React.useState<Set<string>>(new Set());
+  const [savingTrackIds, setSavingTrackIds] = React.useState<Set<string>>(new Set());
+  const [importVisible, setImportVisible] = React.useState(false);
+  const searchGeneration = React.useRef(0);
+
+  React.useEffect(() => {
+    const cleanQuery = query.trim();
+    const request = ++searchGeneration.current;
+    if (!cleanQuery) {
+      setResults({ artists: [], tracks: [] });
+      setSearchError('');
+      setSearchLoading(false);
+      return;
+    }
+
+    setSearchLoading(true);
+    const timer = setTimeout(() => {
+      void searchCatalog(cleanQuery)
+        .then((nextResults) => {
+          if (request === searchGeneration.current) {
+            setResults(nextResults);
+            setSearchError('');
+          }
+        })
+        .catch((error: unknown) => {
+          if (request === searchGeneration.current) {
+            setResults({ artists: [], tracks: [] });
+            setSearchError(
+              error instanceof Error ? error.message : 'Não foi possível pesquisar agora.'
+            );
+          }
+        })
+        .finally(() => {
+          if (request === searchGeneration.current) setSearchLoading(false);
+        });
+    }, 280);
+
+    return () => {
+      clearTimeout(timer);
+      searchGeneration.current += 1;
+    };
+  }, [query]);
+
+  const saveTrack = async (track: TrackModel) => {
+    if (savedTrackIds.has(track.id) || home.tracksById.has(track.id)) return;
+    setSavingTrackIds((current) => new Set(current).add(track.id));
+    try {
+      await upsertCatalogTracks([{
+        spotifyId: track.id,
+        title: track.title,
+        artistName: track.subtitle,
+        albumName: track.albumName || 'Single',
+        imageURL: track.imageURL || '',
+        duration_ms: track.durationMs || 0,
+        albumId: track.albumId,
+        artists: track.artists,
+        albumArtists: track.albumArtists,
+      }]);
+      setSavedTrackIds((current) => new Set(current).add(track.id));
+      refreshLibrary();
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : 'Não foi possível adicionar a música.');
+    } finally {
+      setSavingTrackIds((current) => {
+        const next = new Set(current);
+        next.delete(track.id);
+        return next;
+      });
+    }
+  };
+
+  const discoveries = home.discoveries.length ? home.discoveries : home.quickPicks;
+  const compactTracks = discoveries.slice(0, 10).map(toCompactTrack);
   const featuredItems: FeaturedItem[] = home.featured.slice(0, 5).map((track, index) => ({
     id: track.id,
     spotifyId: track.spotifyId,
@@ -99,114 +174,256 @@ export const Home = () => {
     localImagePath: track.localImagePath,
     isSaved: home.tracksById.has(track.spotifyId),
   }));
-  const noteTracks = [...home.continueListening, ...recommendationTracks]
-    .filter((track, index, tracks) =>
-      tracks.findIndex((candidate) =>
-        (candidate.artists?.[0]?.name || candidate.artistName).toLocaleLowerCase() ===
-        (track.artists?.[0]?.name || track.artistName).toLocaleLowerCase()
-      ) === index
-    )
-    .slice(0, 6);
-  const notes: FriendNoteItem[] = noteTracks.length ? [
-    {
-      id: 'note_user',
-      user: {
-        name: 'Sua nota',
-        avatarUrl:
-          userData.imageURL ||
-          noteTracks[0].localImagePath ||
-          noteTracks[0].imageURL,
-        isCurrentUser: true,
-      },
-      note: {
-        type: 'text',
-        title: 'Deixe uma nota...',
-        bubbleColor: '#1C1E24',
-      },
-    },
-    ...noteTracks.map((track, index): FriendNoteItem => ({
-      id: `recommendation_${track.spotifyId}`,
-      user: {
-        name: track.artists?.[0]?.name || track.artistName,
-        avatarUrl: track.localImagePath || track.imageURL,
-      },
-      note: {
-        type: 'music',
-        iconType: 'wave',
-        title: track.title,
-        subtitle: track.artistName,
-        spotifyId: track.spotifyId,
-        artist: track.artistName,
-        imageUrl: track.localImagePath || track.imageURL,
-        duration_ms: track.duration_ms,
-        streamUrl: track.streamUrl,
-        streamExpiresAt: track.streamExpiresAt,
-        artists: track.artists,
-        albumId: track.albumId,
-        albumArtists: track.albumArtists,
-        youtubeVideoId: track.youtubeVideoId,
-        youtubeUrl: track.youtubeUrl,
-        localAudioPath: track.localAudioPath,
-        localImagePath: track.localImagePath,
-        bubbleColor: NOTE_COLORS[index % NOTE_COLORS.length],
-      },
-    })),
-  ] : [];
-  const hasContent =
-    home.continueListening.length ||
-    home.quickPicks.length ||
-    home.albums.length ||
-    home.playlists.length;
+  const hasDiscovery = discoveries.length > 0 || home.artists.length > 0;
+  const searching = query.trim().length > 0;
 
   return (
     <View style={styles.container}>
       <ScrollView
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.scrollContent, { paddingTop: top + 8 }]}
+        contentContainerStyle={[styles.content, { paddingTop: top + 8 }]}
+        refreshControl={
+          <RefreshControl
+            tintColor="#FFFFFF"
+            colors={['#1DB954']}
+            refreshing={isRefreshing}
+            onRefresh={refresh}
+          />
+        }
       >
-        {/* 1. Friend Activity Listening Status (Stories / Speech Bubbles) */}
-        {notes.length ? <FriendActivityStatus notes={notes} /> : null}
-
-        <CatalogHome home={home} />
-
-        {/* 2. Music posts */}
-        <ListeningFeed
-          lyricTrack={lyricTrack ? toPlayerTrack(lyricTrack) : undefined}
-          queueTracks={queueTracks}
-          shelfTitle={home.seeds[0]
-            ? `Porque você ouve ${home.seeds[0].name}`
-            : 'Escolhas da sua biblioteca'}
-          shelfTracks={compactTracks.slice(0, 3)}
-        />
-
-        {/* 3. Compact music banner */}
-        <CompactMusicCarousel title={home.discoveryTitle} tracks={compactTracks} />
-
-        {/* 4. Featured music banner */}
-        <HeroBanner featuredItems={featuredItems} />
-
-        {!isLoading && !hasContent ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Sua Home começa com você</Text>
-            <Text style={styles.emptyText}>
-              Adicione músicas, álbuns ou playlists à Biblioteca para criar recomendações locais.
-            </Text>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.eyebrow}>OPENFY MUSIC</Text>
+            <Text style={styles.title}>Descobrir</Text>
           </View>
-        ) : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Importar música, álbum ou playlist"
+            onPress={() => setImportVisible(true)}
+            style={({ pressed }) => [styles.importButton, pressed && styles.pressed]}
+          >
+            <Ionicons name="add" size={26} color="#FFFFFF" />
+          </Pressable>
+        </View>
+
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={19} color="#9B9BA0" />
+          <TextInput
+            accessibilityLabel="Buscar músicas e artistas"
+            autoCapitalize="none"
+            autoCorrect={false}
+            onChangeText={setQuery}
+            placeholder="Músicas e artistas"
+            placeholderTextColor="#8E8E93"
+            returnKeyType="search"
+            style={styles.searchInput}
+            value={query}
+          />
+          {query.length ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Limpar busca"
+              onPress={() => setQuery('')}
+              hitSlop={10}
+            >
+              <Ionicons name="close-circle" size={19} color="#8E8E93" />
+            </Pressable>
+          ) : null}
+        </View>
+
+        {searching ? (
+          <View style={styles.searchResults}>
+            {searchLoading ? <ActivityIndicator color="#1DB954" style={styles.searchSpinner} /> : null}
+            {searchError ? <Text style={styles.errorText}>{searchError}</Text> : null}
+            {results.artists.length ? (
+              <View style={styles.resultSection}>
+                <Text style={styles.sectionTitle}>Artistas</Text>
+                {results.artists.map((artist) => (
+                  <LoggedPressable
+                    accessibilityLabel={`Abrir artista ${artist.name}`}
+                    key={artist.id}
+                    onPress={() => openDetail('artist', artist.id, 'home')}
+                    style={styles.artistResult}
+                  >
+                    {artist.imageURL ? (
+                      <Image source={{ uri: artist.imageURL }} contentFit="cover" style={styles.artistImage} />
+                    ) : (
+                      <View style={[styles.artistImage, styles.imageFallback]}>
+                        <Ionicons name="person" size={22} color="#8E8E93" />
+                      </View>
+                    )}
+                    <View style={styles.resultCopy}>
+                      <Text numberOfLines={1} style={styles.resultTitle}>{artist.name}</Text>
+                      <Text numberOfLines={1} style={styles.resultSubtitle}>{artistNames(artist)}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color="#85858A" />
+                  </LoggedPressable>
+                ))}
+              </View>
+            ) : null}
+            {results.tracks.length ? (
+              <View style={styles.resultSection}>
+                <Text style={styles.sectionTitle}>Músicas</Text>
+                {results.tracks.map((track) => {
+                  const isSaved = savedTrackIds.has(track.id) || home.tracksById.has(track.id);
+                  const isSaving = savingTrackIds.has(track.id);
+                  return (
+                    <View key={track.id} style={styles.trackResult}>
+                      <LoggedPressable
+                        accessibilityLabel={`Tocar ${track.title}, ${track.subtitle}`}
+                        onPress={() => void playTrack(toPlayerTrackFromSearch(track))}
+                        style={styles.trackPressable}
+                      >
+                        {track.imageURL ? (
+                          <Image source={{ uri: track.imageURL }} contentFit="cover" style={styles.trackImage} />
+                        ) : (
+                          <View style={[styles.trackImage, styles.imageFallback]}>
+                            <Ionicons name="musical-note" size={21} color="#8E8E93" />
+                          </View>
+                        )}
+                        <View style={styles.resultCopy}>
+                          <Text numberOfLines={1} style={styles.resultTitle}>{track.title}</Text>
+                          <Text numberOfLines={1} style={styles.resultSubtitle}>{track.subtitle}</Text>
+                        </View>
+                      </LoggedPressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={isSaved ? 'Na Biblioteca' : `Adicionar ${track.title} à Biblioteca`}
+                        disabled={isSaved || isSaving}
+                        onPress={() => void saveTrack(track)}
+                        style={styles.saveButton}
+                      >
+                        {isSaving ? (
+                          <ActivityIndicator size="small" color="#1DB954" />
+                        ) : (
+                          <Ionicons
+                            name={isSaved ? 'checkmark-circle' : 'add-circle-outline'}
+                            size={24}
+                            color={isSaved ? '#1DB954' : '#D8D8DA'}
+                          />
+                        )}
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : null}
+            {!searchLoading && !searchError && !results.artists.length && !results.tracks.length ? (
+              <Text style={styles.emptyText}>Nenhum resultado encontrado.</Text>
+            ) : null}
+          </View>
+        ) : (
+          <>
+            {home.continueListening.length ? (
+              <CompactMusicCarousel
+                title="Continue ouvindo"
+                tracks={home.continueListening.slice(0, 8).map(toCompactTrack)}
+              />
+            ) : null}
+            {compactTracks.length ? (
+              <CompactMusicCarousel title={home.discoveryTitle} tracks={compactTracks} />
+            ) : null}
+            <CatalogHome home={home} />
+            {featuredItems.length ? <HeroBanner featuredItems={featuredItems} /> : null}
+            {isLoading && !hasDiscovery ? (
+              <ActivityIndicator color="#1DB954" style={styles.loading} />
+            ) : null}
+            {!isLoading && !hasDiscovery ? (
+              <Text style={styles.emptyText}>Pesquise uma música ou artista para começar.</Text>
+            ) : null}
+          </>
+        )}
       </ScrollView>
+      <ImportModal visible={importVisible} onClose={() => setImportVisible(false)} />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  container: { flex: 1, backgroundColor: '#121212' },
+  content: { paddingBottom: BOTTOM_NAVIGATION_HEIGHT + 76 },
+  header: {
+    paddingHorizontal: 18,
+    paddingBottom: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  eyebrow: {
+    color: '#8E8E93',
+    fontSize: 10,
+    fontFamily: 'SF-Bold',
+    marginBottom: 3,
+  },
+  title: { color: '#FFFFFF', fontSize: 25, fontFamily: 'SF-Bold' },
+  importButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#242428',
+  },
+  pressed: { opacity: 0.72 },
+  searchBox: {
+    height: 48,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: '#242428',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  searchInput: {
     flex: 1,
-    backgroundColor: '#121212',
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontFamily: 'SF-Regular',
+    paddingVertical: 0,
   },
-  scrollContent: {
-    paddingBottom: BOTTOM_NAVIGATION_HEIGHT + 80,
+  searchResults: { paddingBottom: 20 },
+  searchSpinner: { marginVertical: 18 },
+  resultSection: { marginTop: 12 },
+  sectionTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontFamily: 'SF-Bold',
+    paddingHorizontal: 18,
+    marginBottom: 4,
   },
-  emptyState: { gap: 7, paddingHorizontal: 24, paddingVertical: 64 },
-  emptyTitle: { color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 21, textAlign: 'center' },
-  emptyText: { color: '#8E8E93', fontFamily: 'SF-Regular', fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  artistResult: {
+    minHeight: 72,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  trackResult: {
+    minHeight: 72,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  trackPressable: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  artistImage: { width: 52, height: 52, borderRadius: 26 },
+  trackImage: { width: 52, height: 52, borderRadius: 5 },
+  imageFallback: { backgroundColor: '#242428', alignItems: 'center', justifyContent: 'center' },
+  resultCopy: { flex: 1, minWidth: 0, gap: 4 },
+  resultTitle: { color: '#FFFFFF', fontSize: 15, fontFamily: 'SF-Semibold' },
+  resultSubtitle: { color: '#9B9BA0', fontSize: 12, fontFamily: 'SF-Regular' },
+  saveButton: { width: 42, height: 48, alignItems: 'flex-end', justifyContent: 'center' },
+  errorText: { color: '#FF8B8B', fontSize: 13, paddingHorizontal: 18, paddingVertical: 12 },
+  emptyText: {
+    color: '#8E8E93',
+    fontSize: 14,
+    fontFamily: 'SF-Regular',
+    lineHeight: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 42,
+    textAlign: 'center',
+  },
+  loading: { marginTop: 54 },
 });

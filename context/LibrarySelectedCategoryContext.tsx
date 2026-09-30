@@ -60,6 +60,10 @@ export const LibrarySelectedCategoryProvider = ({
   );
   const [libraryRevision, setLibraryRevision] = React.useState(0);
   const animatedValue = useSharedValue(1);
+  const refreshLibrary = React.useCallback(
+    () => setLibraryRevision((revision) => revision + 1),
+    []
+  );
 
   return (
     <LibrarySelectedCategoryContext.Provider
@@ -77,7 +81,7 @@ export const LibrarySelectedCategoryProvider = ({
         setLibraryView,
         toggleLibraryView: () => setLibraryView((view) => nextLibraryView[view]),
         libraryRevision,
-        refreshLibrary: () => setLibraryRevision((revision) => revision + 1),
+        refreshLibrary,
       }}
     >
       {children}

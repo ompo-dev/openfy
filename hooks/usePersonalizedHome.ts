@@ -22,12 +22,24 @@ export const usePersonalizedHome = () => {
     EMPTY_PERSONALIZED_HOME
   );
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const [refreshSequence, setRefreshSequence] = React.useState(0);
+  const forceRefreshRef = React.useRef(false);
+  const homeRef = React.useRef(home);
+  homeRef.current = home;
   const generation = React.useRef(0);
+  const refresh = React.useCallback(() => {
+    setIsRefreshing(true);
+    forceRefreshRef.current = true;
+    setRefreshSequence((sequence) => sequence + 1);
+  }, []);
 
   useFocusEffect(
     React.useCallback(() => {
       let active = true;
       const request = ++generation.current;
+      const forceRefresh = forceRefreshRef.current;
+      forceRefreshRef.current = false;
 
       const publish = (snapshot: PersonalizedHomeSnapshot) => {
         if (!active || request !== generation.current) return;
@@ -50,18 +62,28 @@ export const usePersonalizedHome = () => {
             profile,
             tracks,
           });
-        const localSnapshot = build([]);
+        const localSnapshot = build(
+          settings.personalizedHome ? homeRef.current.discoveries : []
+        );
         publish(localSnapshot);
 
         const discoveries = settings.personalizedHome
           ? loadHomeDiscoveries(
-              localSnapshot.seeds,
+              localSnapshot.seeds.length
+                ? localSnapshot.seeds
+                : [
+                    { name: 'músicas populares Brasil', score: 0, matchArtist: false },
+                    { name: 'lançamentos música brasileira', score: 0, matchArtist: false },
+                  ],
               new Set(tracks.map((track) => track.spotifyId)),
-              settings.allowExplicitRecommendations
+              settings.allowExplicitRecommendations,
+              forceRefresh
             )
           : Promise.resolve([]);
         const resolvedDiscoveries = await discoveries;
-        const enriched = build(resolvedDiscoveries);
+        const enriched = build(
+          resolvedDiscoveries.length ? resolvedDiscoveries : localSnapshot.discoveries
+        );
         const resolvedArtists = await Promise.all(
           enriched.artists.map(async (artist) => {
             const imageURL = await getCachedArtistImage(artist.id, () =>
@@ -73,6 +95,8 @@ export const usePersonalizedHome = () => {
         publish({ ...enriched, artists: resolvedArtists });
       })().catch(() => {
         if (active && request === generation.current) setIsLoading(false);
+      }).finally(() => {
+        if (active && request === generation.current) setIsRefreshing(false);
       });
 
       return () => {
@@ -80,10 +104,11 @@ export const usePersonalizedHome = () => {
       };
     }, [
       libraryRevision,
+      refreshSequence,
       settings.allowExplicitRecommendations,
       settings.personalizedHome,
     ])
   );
 
-  return { home, isLoading };
+  return { home, isLoading, isRefreshing, refresh };
 };

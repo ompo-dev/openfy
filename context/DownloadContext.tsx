@@ -8,6 +8,7 @@ import {
   notifyDownloadResult,
   queueDownloads,
   requestDownloadNotificationPermission,
+  repairDownloadedTrackMetadata,
   type DownloadTrackInput,
 } from '@services';
 
@@ -90,6 +91,25 @@ export function DownloadProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     void refreshDownloads();
   }, [refreshDownloads]);
+
+  React.useEffect(() => {
+    let active = true;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const refreshLibraryAfterRepair = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        if (active) refreshLibrary();
+      }, 200);
+    };
+    void repairDownloadedTrackMetadata(refreshLibraryAfterRepair).finally(() => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      if (active) refreshLibrary();
+    });
+    return () => {
+      active = false;
+      if (refreshTimer) clearTimeout(refreshTimer);
+    };
+  }, [refreshLibrary]);
 
   const runDownload = React.useCallback(
     async (

@@ -3,6 +3,8 @@
 import * as React from 'react';
 import {
   FlatList,
+  RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -50,6 +52,7 @@ export const OfflineLibrary = () => {
   const [tracks, setTracks] = React.useState<LibraryTrack[]>([]);
   const [playlists, setPlaylists] = React.useState<LocalPlaylist[]>([]);
   const [artistImageURLs, setArtistImageURLs] = React.useState<Record<string, string>>({});
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
   const requestedArtistImages = React.useRef(new Set<string>());
   const { playWithQueue, currentTrack, playerState } = usePlayer();
   const {
@@ -57,6 +60,7 @@ export const OfflineLibrary = () => {
     clearCompletedDownloads,
     downloads,
     enqueueDownloads,
+    refreshDownloads,
   } = useDownloads();
   const downloadsById = React.useMemo(
     () => new Map(downloads.map((download) => [download.spotifyId, download])),
@@ -93,14 +97,6 @@ export const OfflineLibrary = () => {
     loadLibrary();
   }, [libraryRevision, loadLibrary]);
 
-  React.useEffect(() => {
-    let active = true;
-    void repairDownloadedTrackMetadata(() => {
-      if (active) void loadLibrary();
-    });
-    return () => { active = false; };
-  }, [libraryRevision, loadLibrary]);
-
   const handleDelete = async (track: LibraryTrack) => {
     if (track.isDownloaded) {
       await deleteDownloadedTrack(track.spotifyId);
@@ -119,6 +115,30 @@ export const OfflineLibrary = () => {
       enqueueDownloads([toDownloadTrackInput(track)]);
     },
     [enqueueDownloads]
+  );
+
+  const handleRefresh = React.useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        loadLibrary(),
+        refreshDownloads(),
+        repairDownloadedTrackMetadata(),
+      ]);
+      await loadLibrary();
+      refreshLibrary();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [loadLibrary, refreshDownloads, refreshLibrary]);
+
+  const refreshControl = (
+    <RefreshControl
+      tintColor="#FFFFFF"
+      colors={['#1DB954']}
+      refreshing={isRefreshing}
+      onRefresh={() => void handleRefresh()}
+    />
   );
 
   const normalizedQuery = librarySearchQuery.trim().toLocaleLowerCase();
@@ -402,13 +422,20 @@ export const OfflineLibrary = () => {
 
   if (libraryView === 'songs' && tracks.length === 0) {
     return (
-      <View style={styles.emptyContainer}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[styles.emptyContainer, styles.emptyScrollable]}
+        refreshControl={refreshControl}
+        showsVerticalScrollIndicator={false}
+        alwaysBounceVertical
+        overScrollMode="always"
+      >
         <Ionicons name="musical-notes-outline" size={56} color="#666" />
         <Text style={styles.emptyTitle}>Sua biblioteca está vazia</Text>
         <Text style={styles.emptySubtitle}>
           Toque no botão + para adicionar músicas, playlists e álbuns. O download é opcional.
         </Text>
-      </View>
+      </ScrollView>
     );
   }
 
@@ -425,6 +452,7 @@ export const OfflineLibrary = () => {
           ]}
           ListEmptyComponent={noResults}
           showsVerticalScrollIndicator={false}
+          refreshControl={refreshControl}
         />
       ) : libraryView === 'playlists' ? (
         <FlatList
@@ -437,6 +465,7 @@ export const OfflineLibrary = () => {
           ]}
           ListEmptyComponent={noResults}
           showsVerticalScrollIndicator={false}
+          refreshControl={refreshControl}
         />
       ) : (
         <FlatList
@@ -449,6 +478,7 @@ export const OfflineLibrary = () => {
           ]}
           ListEmptyComponent={noResults}
           showsVerticalScrollIndicator={false}
+          refreshControl={refreshControl}
         />
       )}
     </View>
@@ -579,6 +609,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 40,
     gap: 12,
+  },
+  emptyScrollable: {
+    flexGrow: 1,
   },
   emptyTitle: {
     color: '#FFFFFF',

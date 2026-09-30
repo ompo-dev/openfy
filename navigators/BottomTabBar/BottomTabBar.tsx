@@ -1,18 +1,10 @@
-/**
- * BottomTabBar — iOS-style floating GlassSurface pill tab bar.
- * Rendered only on Android/Web (iOS resolves NativeTabs in _layout.ios.tsx).
- * Absolutely positioned floating capsule with GlassSurface blur,
- * central import button, and SF-style tab items.
- */
-
-import * as React from 'react';
+/** Floating three-tab GlassSurface navigation for Android and web. */
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { Pages } from '@config';
 import { translations } from '@data';
-import { ImportModal } from '@components';
 import { GlassSurface } from '../../components/native';
 
 type BottomTabBarProps = any;
@@ -23,6 +15,11 @@ const TAB_META: Record<string, { icon: string; iconActive: string; label: string
     iconActive: 'home',
     label: translations.router[Pages.HOME] ?? 'Home',
   },
+  [Pages.FEED]: {
+    icon: 'chatbubbles-outline',
+    iconActive: 'chatbubbles',
+    label: translations.router[Pages.FEED] ?? 'Feed',
+  },
   [Pages.LIBRARY]: {
     icon: 'library-outline',
     iconActive: 'library',
@@ -32,12 +29,7 @@ const TAB_META: Record<string, { icon: string; iconActive: string; label: string
 
 export const BottomTabBar = ({ state, descriptors, navigation }: BottomTabBarProps) => {
   const insets = useSafeAreaInsets();
-  const [importModalVisible, setImportModalVisible] = React.useState(false);
-
   const routes = state.routes;
-  const midIndex = Math.ceil(routes.length / 2);
-  const leftRoutes = routes.slice(0, midIndex);
-  const rightRoutes = routes.slice(midIndex);
 
   const renderTab = (route: (typeof routes)[0]) => {
     const globalIndex = routes.indexOf(route);
@@ -82,26 +74,8 @@ export const BottomTabBar = ({ state, descriptors, navigation }: BottomTabBarPro
       style={[styles.wrap, { paddingBottom: insets.bottom + 8, pointerEvents: 'box-none' }]}
     >
       <GlassSurface glass="regular" isInteractive style={styles.bar}>
-        {leftRoutes.map(renderTab)}
-
-        {/* Import / Add Button */}
-        <Pressable
-          onPress={() => setImportModalVisible(true)}
-          style={({ pressed }) => [styles.importBtn, { opacity: pressed ? 0.8 : 1 }]}
-          accessibilityLabel="Importar do Spotify"
-        >
-          <View style={styles.importBtnInner}>
-            <Ionicons name="add" size={28} color="#000" />
-          </View>
-        </Pressable>
-
-        {rightRoutes.map(renderTab)}
+        {routes.map(renderTab)}
       </GlassSurface>
-
-      <ImportModal
-        visible={importModalVisible}
-        onClose={() => setImportModalVisible(false)}
-      />
     </View>
   );
 };
@@ -116,6 +90,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   bar: {
+    width: '100%',
     flexDirection: 'row',
     borderRadius: 999,
     paddingHorizontal: 8,
@@ -129,31 +104,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 2,
     paddingVertical: 10,
-    paddingHorizontal: 16,
-    minWidth: 80,
+    paddingHorizontal: 8,
+    minWidth: 0,
   },
   tabLabel: {
     fontSize: 10,
     fontFamily: 'SF-Regular',
     lineHeight: 12,
     letterSpacing: 0.2,
-  },
-  importBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 8,
-  },
-  importBtnInner: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#1DB954',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#1DB954',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5,
-    shadowRadius: 6,
-    elevation: 4,
   },
 });
