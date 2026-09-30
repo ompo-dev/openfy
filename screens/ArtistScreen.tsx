@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import {
   getArtist,
@@ -24,6 +24,7 @@ import {
 } from '@services';
 import { getSpotifyArtistImage } from '../services/metadata/spotifyMetadata';
 import { Slider } from '../components/Slider';
+import { getYouTubeMusicArtistRouteName } from '../services/youtubeMusicClient';
 
 export type ArtistScreenPropsType = {
   artistId: string;
@@ -99,6 +100,55 @@ const artistMatchesAlbumPrimary = (
   );
 };
 
+const buildLocalArtistProfile = (
+  tracks: LibraryTrack[],
+  routeId: string,
+  lookup: string
+) => {
+  const normalizedLookup = lookup.toLocaleLowerCase();
+  const collection = groupLocalArtists(tracks).find((candidate) =>
+    candidate.id.toLocaleLowerCase() === normalizedLookup ||
+    candidate.id.toLocaleLowerCase() === `spotify:${normalizedLookup}` ||
+    candidate.spotifyArtistId?.toLocaleLowerCase() === normalizedLookup ||
+    candidate.title.toLocaleLowerCase() === normalizedLookup
+  );
+  if (!collection) return null;
+
+  const featuredTracks = collection.tracks.filter((track) =>
+    isTrackPrimaryArtist(track, collection.id)
+  );
+  const participationTracks = collection.tracks.filter((track) =>
+    isTrackParticipantArtist(track, collection.id)
+  );
+  const albums = groupLocalAlbums(
+    featuredTracks.filter((track) => artistMatchesAlbumPrimary(track, collection.id))
+  ).map((album) => ({
+    id: `local_album_${encodeURIComponent(album.id)}`,
+    type: 'album' as const,
+    title: album.title,
+    subtitle: album.subtitle,
+    imageURL: album.imageURL,
+  }));
+
+  return {
+    collection,
+    artist: {
+      id: routeId,
+      type: 'artist' as const,
+      name: collection.title,
+      imageURL:
+        collection.imageURL ||
+        collection.tracks.find((track) => track.localImagePath || track.imageURL)
+          ?.localImagePath ||
+        collection.tracks.find((track) => track.imageURL)?.imageURL ||
+        '',
+    },
+    topTracks: featuredTracks.map(toTrackModel),
+    participationTracks: participationTracks.map(toTrackModel),
+    albums,
+  };
+};
+
 export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
   const { currentTrack } = usePlayer();
   const [artist, setArtist] = React.useState<ArtistModel | null>(null);
@@ -108,10 +158,12 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     []
   );
   const [albums, setAlbums] = React.useState<LibraryItemModel[]>([]);
+  const [artistError, setArtistError] = React.useState('');
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [refreshSequence, setRefreshSequence] = React.useState(0);
   const activeArtistId = React.useRef(artistId);
   const refresh = React.useCallback(() => {
+    setArtistError('');
     setIsRefreshing(true);
     setRefreshSequence((sequence) => sequence + 1);
   }, []);
@@ -122,6 +174,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
 
   React.useEffect(() => {
     let active = true;
+    setArtistError('');
     if (activeArtistId.current !== artistId) {
       activeArtistId.current = artistId;
       setArtist(null);
@@ -146,50 +199,32 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
 
     if (localArtistName) {
       void libraryPromise.then((downloaded) => {
-        const collection = groupLocalArtists(downloaded).find((candidate) =>
-          candidate.id === localArtistName ||
-          candidate.title.toLocaleLowerCase() === localArtistName.toLocaleLowerCase()
-        );
         if (!active) return;
-        const collectionTracks = collection?.tracks || [];
-        const featuredTracks = collectionTracks.filter((track) =>
-          isTrackPrimaryArtist(track, collection?.id || localArtistName)
-        );
-        const participationOnlyTracks = collectionTracks.filter((track) =>
-          isTrackParticipantArtist(track, collection?.id || localArtistName)
-        );
-        const artistAlbums = groupLocalAlbums(
-          featuredTracks.filter((track) =>
-            artistMatchesAlbumPrimary(track, collection?.id || localArtistName)
-          )
-        ).map((album) => ({
-          id: `local_album_${encodeURIComponent(album.id)}`,
-          type: 'album' as const,
-          title: album.title,
-          subtitle: album.subtitle,
-          imageURL: album.imageURL,
-        }));
-        setArtist({
-          id: artistId,
-          type: 'artist',
-          name: collection?.title || localArtistName,
-          imageURL: '',
-        });
-        setTopTracks(featuredTracks.map(toTrackModel));
-        setParticipationTracks(participationOnlyTracks.map(toTrackModel));
-        setAlbums(artistAlbums);
+        const profile = buildLocalArtistProfile(downloaded, artistId, localArtistName);
+        if (!profile) {
+          setArtistError('Não encontrei músicas deste artista na biblioteca.');
+          setIsRefreshing(false);
+          return;
+        }
+        setArtist(profile.artist);
+        setTopTracks(profile.topTracks);
+        setParticipationTracks(profile.participationTracks);
+        setAlbums(profile.albums);
         setIsRefreshing(false);
-        if (collection?.spotifyArtistId && /^[A-Za-z0-9]{22}$/.test(collection.spotifyArtistId)) {
-          void getCachedArtistImage(collection.id, () =>
-            getSpotifyArtistImage(collection.spotifyArtistId!)
+        if (profile.collection.spotifyArtistId && /^[A-Za-z0-9]{22}$/.test(profile.collection.spotifyArtistId)) {
+          void getCachedArtistImage(profile.collection.id, () =>
+            getSpotifyArtistImage(profile.collection.spotifyArtistId!)
           ).then((imageURL) => {
             if (active && imageURL) {
               setArtist((current) => current ? { ...current, imageURL } : current);
             }
-          });
+          }).catch(() => {});
         }
       }).catch(() => {
-        if (active) setIsRefreshing(false);
+        if (active) {
+          setArtistError('Não foi possível carregar as músicas deste artista.');
+          setIsRefreshing(false);
+        }
       });
       return () => {
         active = false;
@@ -202,9 +237,25 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           if (!active) return;
           setArtist(artistData);
           setTopTracks(tracks);
+          setArtistError('');
         })
-        .catch((error) => {
-          if (active) setArtist(null);
+        .catch(async (error) => {
+          const artistName = getYouTubeMusicArtistRouteName(artistId);
+          const downloaded = await libraryPromise.catch(() => []);
+          if (!active) return;
+          const localProfile = artistName
+            ? buildLocalArtistProfile(downloaded, artistId, artistName)
+            : null;
+          if (localProfile) {
+            setArtist(localProfile.artist);
+            setTopTracks(localProfile.topTracks);
+            setParticipationTracks(localProfile.participationTracks);
+            setAlbums(localProfile.albums);
+            setArtistError('');
+          } else {
+            setArtist(null);
+            setArtistError('Não foi possível carregar o perfil agora. Verifique a conexão e tente novamente.');
+          }
           console.error('Failed to get YouTube Music artist data:', error);
         })
         .finally(() => {
@@ -219,10 +270,20 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       .then((artistData) => {
         if (!active) return;
         setArtist(artistData);
+        setArtistError('');
       })
-      .catch((error) => {
-        if (active) {
+      .catch(async (error) => {
+        const downloaded = await libraryPromise.catch(() => []);
+        if (!active) return;
+        const localProfile = buildLocalArtistProfile(downloaded, artistId, artistId);
+        if (localProfile) {
+          setArtist(localProfile.artist);
+          setTopTracks(localProfile.topTracks);
+          setParticipationTracks(localProfile.participationTracks);
+          setAlbums(localProfile.albums);
+        } else {
           setArtist(null);
+          setArtistError('Não foi possível carregar o perfil deste artista. Tente novamente.');
         }
         console.error('Failed to get artist data:', error);
       });
@@ -230,6 +291,18 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     const tracksRequest = getArtistTopTracks(artistId)
       .then((trackData) => {
         if (!active) return;
+        const fallbackArtistName = trackData[0]?.artists?.find(
+          (candidate) => candidate.id === artistId
+        )?.name || trackData[0]?.artists?.[0]?.name;
+        if (fallbackArtistName) {
+          setArtist((current) => current || {
+            id: artistId,
+            type: 'artist',
+            name: fallbackArtistName,
+            imageURL: trackData[0]?.imageURL || '',
+          });
+          setArtistError('');
+        }
         setTopTracks(
           trackData.filter((track) =>
             isRemotePrimaryArtist(track, artistId)
@@ -281,7 +354,38 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     topTracks,
   ]);
 
-  if (!artist) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
+  if (!artist) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 14,
+          paddingHorizontal: 28,
+          backgroundColor: '#101010',
+        }}
+      >
+        {artistError ? (
+          <>
+            <Text style={{ color: '#D0D0D0', fontSize: 15, textAlign: 'center' }}>
+              {artistError}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Tentar carregar perfil novamente"
+              onPress={refresh}
+              style={{ paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20, backgroundColor: '#262626' }}
+            >
+              <Text style={{ color: '#FFFFFF', fontSize: 14 }}>Tentar novamente</Text>
+            </Pressable>
+          </>
+        ) : (
+          <ActivityIndicator color="#1DB954" />
+        )}
+      </View>
+    );
+  }
 
   const metadata = [
     'Artista',

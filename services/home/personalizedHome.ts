@@ -6,6 +6,7 @@ import type { LocalPlaylist } from '../library/localPlaylistManager';
 import {
   getYouTubeMusicClient,
   getYouTubeMusicThumbnails,
+  toYouTubeMusicArtistRouteId,
   type YouTubeMusicItem,
 } from '../youtubeMusicClient';
 import {
@@ -431,10 +432,10 @@ const searchYouTubeMusic = async (
         const artists = item.artists?.flatMap((artist) => {
           const name = artist.name?.trim() || '';
           if (!name) return [];
-          const artistId = artist.channel_id
-            ? encodeURIComponent(artist.channel_id)
-            : `name_${encodeURIComponent(name)}`;
-          return [{ id: `ytartist_${artistId}`, name }];
+          return [{
+            id: toYouTubeMusicArtistRouteId(artist.channel_id, name),
+            name,
+          }];
         }) || [];
         const artistNames = artists.map((artist) => artist.name);
         if (!artistNames.length) artistNames.push(seed.name);
@@ -479,9 +480,7 @@ const queueItemToHomeTrack = (
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId) || !title) return null;
   const artists = (item.artists || [])
     .map((artist) => ({
-      id: artist.channel_id
-        ? `ytartist_${encodeURIComponent(artist.channel_id)}`
-        : '',
+      id: toYouTubeMusicArtistRouteId(artist.channel_id, artist.name?.trim() || ''),
       name: artist.name?.trim() || '',
     }))
     .filter((artist) => artist.name);

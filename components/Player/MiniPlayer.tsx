@@ -5,7 +5,8 @@
  */
 
 import * as React from 'react';
-import { Animated, Image, Platform, StyleSheet, View } from 'react-native';
+import { Animated, Platform, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
@@ -23,6 +24,15 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
   const { currentTrack, playerState, togglePlayPause, isPlayerVisible } =
     usePlayer();
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
+  const artworkUris = [...new Set([
+    currentTrack?.imageURL,
+    currentTrack?.localImagePath,
+  ].filter((uri): uri is string => Boolean(uri)))];
+  const [artworkIndex, setArtworkIndex] = React.useState(0);
+
+  React.useEffect(() => {
+    setArtworkIndex(0);
+  }, [currentTrack?.spotifyId, currentTrack?.localImagePath, currentTrack?.imageURL]);
 
   React.useEffect(() => {
     Animated.spring(fadeAnim, {
@@ -35,6 +45,8 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
   }, [isPlayerVisible, fadeAnim]);
 
   if (!currentTrack || !isPlayerVisible) return null;
+
+  const artworkUri = artworkUris[artworkIndex];
 
   const progress =
     playerState.durationMs > 0
@@ -84,9 +96,13 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
         <MiniPlayerSurface style={styles.glassContainer} testID="mini-player-surface">
           <View testID="mini-player-content" style={styles.contentRow}>
             <View testID="mini-player-cover" style={styles.coverWrapper}>
-              {currentTrack.imageURL ? (
+              {artworkUri ? (
                 <Image
-                  source={{ uri: currentTrack.imageURL }}
+                  cachePolicy="memory-disk"
+                  contentFit="cover"
+                  source={{ uri: artworkUri }}
+                  testID="mini-player-cover-image"
+                  onError={() => setArtworkIndex((index) => Math.min(index + 1, artworkUris.length))}
                   style={styles.coverImage}
                 />
               ) : (

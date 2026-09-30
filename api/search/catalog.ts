@@ -2,6 +2,9 @@ import type { ArtistModel, TrackModel } from '@models';
 import {
   getYouTubeMusicClient,
   getYouTubeMusicThumbnails,
+  toYouTubeMusicArtistRouteId,
+  YOUTUBE_MUSIC_ARTIST_PREFIX,
+  getYouTubeMusicArtistRouteName,
   withYouTubeMusicTimeout,
   type YouTubeMusicItem,
 } from '../../services/youtubeMusicClient';
@@ -16,13 +19,24 @@ export type YouTubeMusicArtistProfile = {
   tracks: TrackModel[];
 };
 
-const YOUTUBE_ARTIST_PREFIX = 'ytartist_';
 const validVideoId = (id?: string) => Boolean(id && /^[A-Za-z0-9_-]{11}$/.test(id));
 
-const largestImage = (item: YouTubeMusicItem) =>
+const decodeRoutePart = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const largestImage = (item: YouTubeMusicItem, preferredSize?: number) =>
   [...getYouTubeMusicThumbnails(item)]
     .sort((first, second) => (second.width || 0) - (first.width || 0))
-    .find((image) => image.url)?.url || '';
+    .find((image) => image.url)?.url
+    ?.replace(/=w\d+-h\d+(.*)$/, (size, suffix: string) => {
+      if (!preferredSize) return size;
+      return `=w${preferredSize}-h${preferredSize}${suffix}`;
+    }) || '';
 
 const toTrackModel = (item: YouTubeMusicItem): TrackModel | null => {
   const videoId = item.id || '';
@@ -30,9 +44,10 @@ const toTrackModel = (item: YouTubeMusicItem): TrackModel | null => {
   if (!validVideoId(videoId) || !title) return null;
   const artists = (item.artists || item.authors || [])
     .map((artist) => ({
-      id: artist.channel_id
-        ? `${YOUTUBE_ARTIST_PREFIX}${encodeURIComponent(artist.channel_id)}`
-        : `${YOUTUBE_ARTIST_PREFIX}name_${encodeURIComponent(artist.name?.trim() || '')}`,
+      id: toYouTubeMusicArtistRouteId(
+        artist.channel_id,
+        artist.name?.trim() || ''
+      ),
       name: artist.name?.trim() || '',
     }))
     .filter((artist) => artist.name);
@@ -41,7 +56,7 @@ const toTrackModel = (item: YouTubeMusicItem): TrackModel | null => {
     id: `yt_${videoId}`,
     title,
     subtitle: artists.map((artist) => artist.name).join(', '),
-    imageURL: largestImage(item),
+    imageURL: largestImage(item, 720),
     albumName: item.album?.name || 'YouTube Music',
     albumId: item.album?.id,
     youtubeVideoId: videoId,
@@ -53,12 +68,11 @@ const toTrackModel = (item: YouTubeMusicItem): TrackModel | null => {
 
 const toArtistModel = (item: YouTubeMusicItem): ArtistModel | null => {
   const name = item.name?.trim() || item.title?.trim() || '';
-  const browseId = item.id || item.author?.channel_id ||
-    `name_${encodeURIComponent(name)}`;
+  const browseId = item.id || item.author?.channel_id;
   if (!name) return null;
   return {
     type: 'artist',
-    id: `${YOUTUBE_ARTIST_PREFIX}${encodeURIComponent(browseId)}`,
+    id: toYouTubeMusicArtistRouteId(browseId, name),
     name,
     imageURL: largestImage(item),
   };
@@ -76,14 +90,28 @@ export const searchCatalog = async (
   if (!client) throw new Error('A busca está demorando. Tente novamente.');
 
   const results = await withYouTubeMusicTimeout(
-    client.music.search(cleanQuery, { type: 'all' })
+    client.music.search(cleanQuery, { type: 'all' }).catch(() => null)
   );
-  if (!results) throw new Error('A busca está demorando. Tente novamente.');
-  const tracks = (results.songs?.contents || [])
+  let songItems = results?.songs?.contents || [];
+  let artistItems = results?.artists?.contents || [];
+  if (!songItems.length && !artistItems.length) {
+    const fallbackResults = await withYouTubeMusicTimeout(
+      Promise.allSettled([
+        client.music.search(cleanQuery, { type: 'song' }),
+        client.music.search(cleanQuery, { type: 'artist' }),
+      ]),
+      12_000
+    );
+    if (!fallbackResults) throw new Error('A busca está demorando. Tente novamente.');
+    const [songs, artists] = fallbackResults;
+    songItems = songs.status === 'fulfilled' ? songs.value.songs?.contents || [] : [];
+    artistItems = artists.status === 'fulfilled' ? artists.value.artists?.contents || [] : [];
+  }
+  const tracks = songItems
     .map(toTrackModel)
     .filter((track): track is TrackModel => Boolean(track))
     .slice(0, limit);
-  const artists = (results.artists?.contents || [])
+  const artists = artistItems
     .map(toArtistModel)
     .filter((artist): artist is ArtistModel => Boolean(artist))
     .slice(0, Math.min(limit, 8));
@@ -94,24 +122,59 @@ export const searchCatalog = async (
 const loadYouTubeMusicArtistProfile = async (
   artistRouteId: string
 ): Promise<YouTubeMusicArtistProfile> => {
-  if (!artistRouteId.startsWith(YOUTUBE_ARTIST_PREFIX)) {
+  if (!artistRouteId.startsWith(YOUTUBE_MUSIC_ARTIST_PREFIX)) {
     throw new Error('Identificador de artista inválido.');
   }
-  let browseId = decodeURIComponent(artistRouteId.slice(YOUTUBE_ARTIST_PREFIX.length));
+  const routeValue = artistRouteId.slice(YOUTUBE_MUSIC_ARTIST_PREFIX.length);
+  const legacyName = routeValue.startsWith('name_');
+  const separator = legacyName ? -1 : routeValue.indexOf('~');
+  const encodedBrowseId = legacyName
+    ? routeValue
+    : separator >= 0
+      ? routeValue.slice(0, separator)
+      : routeValue;
+  const encodedName = legacyName
+    ? ''
+    : separator >= 0
+      ? routeValue.slice(separator + 1)
+      : '';
+  let browseId = legacyName ? '' : decodeRoutePart(encodedBrowseId);
+  let routeName = decodeRoutePart(encodedName) || getYouTubeMusicArtistRouteName(artistRouteId);
+
+  // Older saved links used `ytartist_name_<name>` without a browse id.
+  if (browseId.startsWith('name_')) {
+    if (!routeName) routeName = decodeRoutePart(browseId.slice('name_'.length));
+    browseId = '';
+  }
+
   const client = await withYouTubeMusicTimeout(getYouTubeMusicClient());
   if (!client) throw new Error('O perfil do artista está demorando para carregar.');
-  if (browseId.startsWith('name_')) {
-    const name = decodeURIComponent(browseId.slice('name_'.length));
+
+  const findArtistBrowseId = async (name: string) => {
     const search = await withYouTubeMusicTimeout(
       client.music.search(name, { type: 'artist' })
     );
-    const match = search?.artists?.contents?.find(
-      (item) => (item.name || item.title || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase()
-    ) || search?.artists?.contents?.[0];
-    browseId = match?.id || match?.author?.channel_id || '';
-    if (!browseId) throw new Error('Não foi possível localizar este artista.');
+    const items = search?.artists?.contents || [];
+    const normalizedName = name.trim().toLocaleLowerCase();
+    const match = items.find(
+      (item) => (item.name || item.title || '').trim().toLocaleLowerCase() === normalizedName
+    ) || items[0];
+    return match?.id || match?.author?.channel_id || '';
+  };
+
+  if (!browseId && routeName) browseId = await findArtistBrowseId(routeName);
+  if (!browseId) throw new Error('Não foi possível localizar este artista.');
+
+  const getArtistPage = (id: string) =>
+    withYouTubeMusicTimeout(client.music.getArtist(id)).catch(() => null);
+  let page = await getArtistPage(browseId);
+  if (!page && routeName) {
+    const matchedBrowseId = await findArtistBrowseId(routeName);
+    if (matchedBrowseId && matchedBrowseId !== browseId) {
+      browseId = matchedBrowseId;
+      page = await getArtistPage(browseId);
+    }
   }
-  const page = await withYouTubeMusicTimeout(client.music.getArtist(browseId));
   if (!page) throw new Error('Não foi possível carregar este artista agora.');
 
   const headerItem: YouTubeMusicItem = {
@@ -121,10 +184,27 @@ const loadYouTubeMusicArtistProfile = async (
   const songItems = (page.sections || [])
     .flatMap((section) => section.contents || [])
     .filter((item) => item.item_type === 'song' || validVideoId(item.id));
-  const tracks = songItems
+  let tracks = songItems
     .map(toTrackModel)
     .filter((track): track is TrackModel => Boolean(track));
-  const name = headerItem.title?.trim() || 'Artista';
+  const name = headerItem.title?.trim() || routeName || 'Artista';
+  if (!tracks.length && routeName) {
+    const search = await withYouTubeMusicTimeout(
+      client.music.search(routeName, { type: 'song' }),
+      12_000
+    ).catch(() => null);
+    const normalize = (value: string) => value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLocaleLowerCase();
+    const normalizedName = normalize(name);
+    tracks = (search?.songs?.contents || [])
+      .filter((item) => (item.artists || item.authors || []).some((artist) =>
+        normalize(artist.name || '') === normalizedName
+      ))
+      .map(toTrackModel)
+      .filter((track): track is TrackModel => Boolean(track));
+  }
 
   return {
     artist: {

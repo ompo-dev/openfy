@@ -5,6 +5,8 @@ import { usePlayer } from '@context';
 import { MiniPlayer } from '../MiniPlayer';
 
 jest.mock('@context', () => ({ usePlayer: jest.fn() }));
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+jest.mock('expo-image', () => ({ Image: require('react-native').Image }));
 jest.mock('../../native', () => ({ LoggedPressable: require('react-native').Pressable }));
 jest.mock('../MiniPlayerSurface', () => ({ MiniPlayerSurface: require('react-native').View }));
 jest.mock('../../common/MarqueeText', () => ({ MarqueeText: ({ text }: { text: string }) => {
@@ -47,6 +49,29 @@ describe('MiniPlayer', () => {
     expect(onPress).not.toHaveBeenCalled();
     await fireEvent.press(screen.getByLabelText('Abrir Player de Música'));
     expect(onPress).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses catalog artwork first and falls back to the downloaded cover', async () => {
+    jest.mocked(usePlayer).mockReturnValue({
+      currentTrack: {
+        spotifyId: 'track-with-local-art',
+        title: 'Taros',
+        artistName: 'Pedro Qualy',
+        imageURL: 'https://images.example/cover.jpg',
+        localImagePath: 'file:///covers/cover.jpg',
+      },
+      isPlayerVisible: true,
+      playerState: { isPlaying: false, positionMs: 0, durationMs: 180000 },
+      togglePlayPause,
+    } as any);
+    const screen = await render(<MiniPlayer />);
+    expect(screen.getByTestId('mini-player-cover-image').props.source.uri).toBe(
+      'https://images.example/cover.jpg'
+    );
+    await fireEvent(screen.getByTestId('mini-player-cover-image'), 'error');
+    expect(screen.getByTestId('mini-player-cover-image').props.source.uri).toBe(
+      'file:///covers/cover.jpg'
+    );
   });
 
   it('keeps the player materially more compact', async () => {

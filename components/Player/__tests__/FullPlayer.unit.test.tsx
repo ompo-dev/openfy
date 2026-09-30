@@ -93,6 +93,8 @@ jest.mock('expo-haptics', () => ({
 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('@expo/vector-icons/MaterialCommunityIcons', () => () => null);
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+jest.mock('expo-image', () => ({ Image: require('react-native').Image }));
 
 const sampleTrack = {
   spotifyId: 'AAAAAAAAAAAAAAAAAAAAAA',

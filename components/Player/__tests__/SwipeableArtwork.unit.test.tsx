@@ -4,6 +4,8 @@ import { Gesture } from 'react-native-gesture-handler';
 import { SwipeableArtwork } from '../SwipeableArtwork';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+jest.mock('expo-image', () => ({ Image: require('react-native').Image }));
 
 const mockTimingCallbacks: ((finished?: boolean) => void)[] = [];
 

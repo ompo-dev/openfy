@@ -4,6 +4,36 @@ export type YouTubeMusicArtistRef = {
   name?: string;
 };
 
+export const YOUTUBE_MUSIC_ARTIST_PREFIX = 'ytartist_';
+
+export const toYouTubeMusicArtistRouteId = (
+  browseId: string | undefined,
+  name: string
+) =>
+  `${YOUTUBE_MUSIC_ARTIST_PREFIX}${encodeURIComponent(browseId?.trim() || '')}~${encodeURIComponent(name.trim())}`;
+
+export const getYouTubeMusicArtistRouteName = (artistRouteId: string) => {
+  if (!artistRouteId.startsWith(YOUTUBE_MUSIC_ARTIST_PREFIX)) return '';
+  const routeValue = artistRouteId.slice(YOUTUBE_MUSIC_ARTIST_PREFIX.length);
+  if (routeValue.startsWith('name_')) {
+    const legacyName = routeValue.slice('name_'.length);
+    try {
+      return decodeURIComponent(legacyName);
+    } catch {
+      return legacyName;
+    }
+  }
+  const separator = routeValue.indexOf('~');
+  const encodedName = separator >= 0
+    ? routeValue.slice(separator + 1)
+    : '';
+  try {
+    return decodeURIComponent(encodedName);
+  } catch {
+    return encodedName;
+  }
+};
+
 export type YouTubeMusicItem = {
   id?: string;
   video_id?: string;

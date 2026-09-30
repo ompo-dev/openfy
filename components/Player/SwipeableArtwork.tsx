@@ -1,13 +1,13 @@
 import * as React from 'react';
 import {
   ActivityIndicator,
-  Image,
   ImageSourcePropType,
   StyleProp,
   StyleSheet,
   View,
   ViewStyle,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   cancelAnimation,
@@ -88,10 +88,11 @@ const ArtworkTile = ({
         <Image
           testID={testID}
           source={source}
+          cachePolicy="memory-disk"
+          contentFit="cover"
           onError={() => {
             if (uri) setFailedUri(uri);
           }}
-          resizeMode="cover"
           style={styles.image}
         />
       ) : (

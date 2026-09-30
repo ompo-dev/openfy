@@ -30,7 +30,11 @@ export {
   getRecommendations,
 } from './recommendations';
 
-export { getBrowseCategories, getYouTubeMusicArtistProfile, searchCatalog } from './search';
+export {
+  getBrowseCategories,
+  getYouTubeMusicArtistProfile,
+  searchCatalog,
+} from './search';
 export type { CatalogSearchResults, YouTubeMusicArtistProfile } from './search';
 
 export { getSavedShows } from './shows';

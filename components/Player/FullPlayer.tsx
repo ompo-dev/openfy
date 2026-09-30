@@ -11,7 +11,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Image,
   Linking,
   Modal,
   Platform,
@@ -22,6 +21,7 @@ import {
   View,
   Dimensions,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import Slider from '@react-native-community/slider';
@@ -124,9 +124,11 @@ const getTrackArtworkUri = (
   track: { imageURL?: string | null; localImagePath?: string | null } | null
 ) => track?.imageURL || track?.localImagePath || '';
 
-const getTrackLocalArtworkUri = (
-  track: { localImagePath?: string | null } | null
-) => track?.localImagePath || undefined;
+const getLocalArtworkFallback = (
+  track: { imageURL?: string | null; localImagePath?: string | null } | null
+) => track?.localImagePath && track.localImagePath !== track.imageURL
+  ? { uri: track.localImagePath }
+  : undefined;
 
 type LyricEditorTarget =
   { kind: 'lyric'; index: number } | { kind: 'gap'; target: LyricGapTarget };
@@ -347,13 +349,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
         Boolean(currentTrack?.youtubeVideoId);
       const targetArtistId = artistId.startsWith('ytartist_')
         ? artistId
-        : isYouTubeTrack
-          ? `ytartist_name_${encodeURIComponent(artistName)}`
-          : (currentTrack?.localAudioPath
-            ? `local_artist_${encodeURIComponent(artistId ? `spotify:${artistId}` : artistName)}`
-            : artistId) ||
-          (await findArtistIdByName(artistName)) ||
-          `local_artist_${encodeURIComponent(artistName)}`;
+        : currentTrack?.localAudioPath
+          ? `local_artist_${encodeURIComponent(artistId ? `spotify:${artistId}` : artistName)}`
+          : artistId ||
+            (isYouTubeTrack
+              ? `ytartist_name_${encodeURIComponent(artistName)}`
+              : (await findArtistIdByName(artistName)) ||
+                `local_artist_${encodeURIComponent(artistName)}`);
       openDetail('artist', targetArtistId);
       requestAnimationFrame(onClose);
     },
@@ -987,10 +989,11 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
         <View style={styles.container}>
           {artworkUrl ? (
             <Image
+              cachePolicy="memory-disk"
               source={{ uri: artworkUrl }}
               style={styles.backgroundCover}
               blurRadius={28}
-              resizeMode="cover"
+              contentFit="cover"
             />
           ) : null}
           <View style={[styles.backgroundScrim, { pointerEvents: 'none' }]} />
@@ -1195,19 +1198,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 onNext={handleArtworkNext}
                 loading={artworkIsLoading}
                 fallbackSource={
-                  currentTrack.localImagePath
-                    ? { uri: currentTrack.localImagePath }
-                    : undefined
+                  getLocalArtworkFallback(currentTrack)
                 }
                 previousFallbackSource={
-                  getTrackLocalArtworkUri(previousTrack)
-                    ? { uri: getTrackLocalArtworkUri(previousTrack) }
-                    : undefined
+                  getLocalArtworkFallback(previousTrack)
                 }
                 nextFallbackSource={
-                  getTrackLocalArtworkUri(nextTrack)
-                    ? { uri: getTrackLocalArtworkUri(nextTrack) }
-                    : undefined
+                  getLocalArtworkFallback(nextTrack)
                 }
                 style={styles.coverContainer}
                 testID="player-artwork"
