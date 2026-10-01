@@ -2,6 +2,7 @@ import { ArtistModel } from '@models';
 import { ArtistResponseType } from '@config';
 import { parseToArtist } from '@utils';
 import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
+import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 
 import { BASE_URL, spotifyGet } from '../config';
 
@@ -28,6 +29,20 @@ type ArtistSearchResponse = {
   };
 };
 
+const normalizeArtistName = (value: string) => value
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .trim()
+  .replace(/\s+/g, ' ')
+  .toLocaleLowerCase();
+
+const artistIdByNameCache = createAsyncResourceCache<string>({
+  name: 'Spotify artist id by name',
+  category: 'artist',
+  maxEntries: 250,
+  ttlFor: (artistId) => artistId ? 24 * 60 * 60_000 : 5 * 60_000,
+});
+
 /** Resolve imported/local artist names only when their Spotify id was not retained. */
 export const findArtistIdByName = async (
   artistName: string
@@ -35,21 +50,20 @@ export const findArtistIdByName = async (
   const query = artistName.trim();
   if (!query) return '';
 
-  try {
-    const response = await spotifyGet<ArtistSearchResponse>(
-      `${BASE_URL}/search`,
-      {
-        params: { q: query, type: 'artist', limit: 5 },
-      }
-    );
-    const artists = response.data.artists?.items ?? [];
-    const normalized = query.toLocaleLowerCase();
-    return (
-      artists.find((artist) => artist.name?.toLocaleLowerCase() === normalized)
-        ?.id ||
-      ''
-    );
-  } catch {
-    return '';
-  }
+  const normalized = normalizeArtistName(query);
+  return artistIdByNameCache.getOrLoad(normalized, async () => {
+    try {
+      const response = await spotifyGet<ArtistSearchResponse>(
+        `${BASE_URL}/search`,
+        {
+          params: { q: query, type: 'artist', limit: 5 },
+        }
+      );
+      const artists = response.data.artists?.items ?? [];
+      return artists.find((artist) => artist.name && normalizeArtistName(artist.name) === normalized)
+        ?.id || '';
+    } catch {
+      return '';
+    }
+  }, 24 * 60 * 60_000);
 };

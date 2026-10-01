@@ -142,7 +142,7 @@ export const Home = () => {
               : '');
             nextResults.artists.forEach((artist) => {
               if (artist.imageURL) {
-                void rememberCachedArtistImage(artist.id, artist.imageURL);
+                void rememberCachedArtistImage(artist.name, artist.imageURL, [artist.id]);
               }
             });
             log.search('catalog query completed', {

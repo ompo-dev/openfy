@@ -11,6 +11,7 @@ export {
 export {
   findArtistIdByName,
   getArtist,
+  getArtistDiscography,
   getArtistTopTracks,
   getUserTopArtists,
   getUserFollowedArtists,

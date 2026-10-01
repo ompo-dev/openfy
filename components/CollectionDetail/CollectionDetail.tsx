@@ -253,16 +253,18 @@ export const CollectionDetail = ({
 
   React.useEffect(() => {
     let active = true;
-    const unresolved = collectionArtists.filter((artist) => artist.id && !artist.imageURL && !artistImages[artist.id]);
+    const unresolved = collectionArtists.filter((artist) => artist.id && !artist.imageURL && !artistImages[artist.name]);
     if (!unresolved.length) return;
     void Promise.all(unresolved.map(async (artist) => {
-      const key = artist.id;
-      const imageURL = await getCachedArtistImage(key, () => {
+      const spotifyId = /^[A-Za-z0-9]{22}$/.test(artist.id)
+        ? artist.id
+        : await findArtistIdByName(artist.name);
+      const imageURL = await getCachedArtistImage(artist.name, () => {
+        if (spotifyId) return getSpotifyArtistImage(spotifyId);
         if (artist.id.startsWith('ytartist_')) return getYouTubeMusicArtistImage(artist.id);
-        if (/^[A-Za-z0-9]{22}$/.test(artist.id)) return getSpotifyArtistImage(artist.id);
         return Promise.resolve(null);
-      });
-      return [key, imageURL] as const;
+      }, [artist.id, ...(spotifyId ? [spotifyId] : [])]);
+      return [artist.name, imageURL] as const;
     })).then((results) => {
       if (active) setArtistImages((current) => ({
         ...current,
@@ -668,7 +670,7 @@ export const CollectionDetail = ({
                     style={styles.artistAvatarStack}
                   >
                     {collectionArtists.slice(0, 4).map((artist, index) => {
-                      const uri = artist.imageURL || artistImages[artist.id || artist.name];
+      const uri = artist.imageURL || artistImages[artist.name] || artistImages[artist.id];
                       return (
                         <View key={`${artist.id}-${artist.name}`} style={[styles.artistAvatar, index > 0 && styles.artistAvatarOverlap, { zIndex: 4 - index }]}>
                           {uri ? <SkeletonImage source={{ uri }} cachePolicy="memory-disk" contentFit="cover" style={styles.artistAvatarImage} /> : <Ionicons name="person" size={15} color="#DDD" />}
@@ -832,7 +834,7 @@ export const CollectionDetail = ({
             {isLoadingAllArtists ? <Text style={styles.artistModalLoading}>Carregando créditos da playlist…</Text> : null}
             <ScrollView showsVerticalScrollIndicator={false}>
               {collectionArtists.map((artist) => {
-                const uri = artist.imageURL || artistImages[artist.id || artist.name];
+                const uri = artist.imageURL || artistImages[artist.name] || artistImages[artist.id];
                 return (
                   <LoggedPressable
                     key={`artist-modal-${artist.id}-${artist.name}`}

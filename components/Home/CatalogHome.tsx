@@ -2,12 +2,13 @@ import * as React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { getYouTubeMusicArtistImage } from '@api';
+import { findArtistIdByName, getYouTubeMusicArtistImage } from '@api';
 import { useDetailNavigation } from '@hooks';
 import { getCachedArtistImage, type PersonalizedHomeSnapshot } from '@services';
 import { LoggedPressable } from '../native';
 import { log } from '../../utils/appLogger';
 import { SkeletonImage } from '../common/SkeletonImage';
+import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
 
 export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
   const { openDetail } = useDetailNavigation();
@@ -20,9 +21,13 @@ export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
       const finishImageLoad = log.time('home', 'discovery artist image load', {
         artistId: artist.artistId,
       });
-      void getCachedArtistImage(artist.artistId, () =>
-        getYouTubeMusicArtistImage(artist.artistId)
-      ).then((imageURL) => {
+      void (async () => {
+        const spotifyId = await findArtistIdByName(artist.title);
+        return getCachedArtistImage(artist.title, () => spotifyId
+          ? getSpotifyArtistImage(spotifyId)
+          : getYouTubeMusicArtistImage(artist.artistId),
+        [artist.artistId, ...(spotifyId ? [spotifyId] : [])]);
+      })().then((imageURL) => {
         if (active && imageURL) {
           setArtistImages((current) => ({ ...current, [artist.artistId]: imageURL }));
         }

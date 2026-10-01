@@ -209,8 +209,9 @@ export const OfflineLibrary = () => {
     void Promise.all(
       artistsToLoad.map(async (artist) => ({
         id: artist.id,
-        imageURL: await getCachedArtistImage(artist.id, () =>
-          getSpotifyArtistImage(artist.spotifyArtistId!)
+        imageURL: await getCachedArtistImage(artist.title, () =>
+          getSpotifyArtistImage(artist.spotifyArtistId!),
+          [artist.id, artist.spotifyArtistId!]
         ),
       }))
     ).then((images) => {

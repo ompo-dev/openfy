@@ -365,19 +365,19 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     setPrimaryArtistImage('');
     setArtistImages({});
     if (!primaryArtist) return;
-    const key = primaryArtist.id || primaryArtist.name;
-    void getCachedArtistImage(key, async () => {
-      if (primaryArtist.id.startsWith('ytartist_')) {
-        return getYouTubeMusicArtistImage(primaryArtist.id);
-      }
-      if (/^[A-Za-z0-9]{22}$/.test(primaryArtist.id)) {
-        return getSpotifyArtistImage(primaryArtist.id);
-      }
-      const spotifyId = await findArtistIdByName(primaryArtist.name);
-      return spotifyId ? getSpotifyArtistImage(spotifyId) : null;
-    }).then((imageURL) => {
+    const key = primaryArtist.name;
+    void (async () => {
+      const spotifyId = /^[A-Za-z0-9]{22}$/.test(primaryArtist.id)
+        ? primaryArtist.id
+        : await findArtistIdByName(primaryArtist.name);
+      const imageURL = await getCachedArtistImage(key, () => spotifyId
+        ? getSpotifyArtistImage(spotifyId)
+        : primaryArtist.id.startsWith('ytartist_')
+          ? getYouTubeMusicArtistImage(primaryArtist.id)
+          : getYouTubeMusicArtistImage(`ytartist_name_${encodeURIComponent(primaryArtist.name)}`),
+      [primaryArtist.id, ...(spotifyId ? [spotifyId] : [])]);
       if (active) setPrimaryArtistImage(imageURL);
-    });
+    })().catch(() => {});
     return () => { active = false; };
   }, [currentTrackKey, primaryArtist, primaryArtist?.id, primaryArtist?.name]);
 
@@ -403,14 +403,16 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     if (!visible) return () => { active = false; };
     const loadImages = async () => {
       await Promise.all(artistLinks.map(async (artist) => {
-        const key = artist.id || artist.name;
-        const imageURL = await getCachedArtistImage(key, async () => {
-          if (artist.id.startsWith('ytartist_')) return getYouTubeMusicArtistImage(artist.id);
-          if (/^[A-Za-z0-9]{22}$/.test(artist.id)) return getSpotifyArtistImage(artist.id);
-          const spotifyId = await findArtistIdByName(artist.name);
-          if (spotifyId) return getSpotifyArtistImage(spotifyId);
-          return getYouTubeMusicArtistImage(`ytartist_name_${encodeURIComponent(artist.name)}`);
-        });
+        const key = artist.name;
+        const spotifyId = /^[A-Za-z0-9]{22}$/.test(artist.id)
+          ? artist.id
+          : await findArtistIdByName(artist.name);
+        const imageURL = await getCachedArtistImage(key, () => spotifyId
+          ? getSpotifyArtistImage(spotifyId)
+          : artist.id.startsWith('ytartist_')
+            ? getYouTubeMusicArtistImage(artist.id)
+            : getYouTubeMusicArtistImage(`ytartist_name_${encodeURIComponent(artist.name)}`),
+        [artist.id, ...(spotifyId ? [spotifyId] : [])]);
         if (active && imageURL) {
           setArtistImages((current) => ({ ...current, [key]: imageURL }));
         }
@@ -1454,7 +1456,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   <Text numberOfLines={isBiographyExpanded ? undefined : 4} style={styles.artistBiographyText}>
                     {primaryArtistBiography}
                   </Text>
-                  {primaryArtistBiography.length > 220 ? (
+                  {primaryArtistBiography.length > 120 ? (
                     <LoggedPressable
                       accessibilityRole="button"
                       accessibilityLabel={isBiographyExpanded ? 'Mostrar menos sobre o artista' : 'Mostrar mais sobre o artista'}
@@ -1475,9 +1477,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   onPress={() => void handleArtistPress(artist.id, artist.name)}
                   style={styles.creditRow}
                 >
-                  {artistImages[artist.id || artist.name] ? (
+                  {artistImages[artist.name] ? (
                     <SkeletonImage
-                      source={{ uri: artistImages[artist.id || artist.name] }}
+                      source={{ uri: artistImages[artist.name] }}
                       cachePolicy="memory-disk"
                       contentFit="cover"
                       style={styles.creditAvatar}
@@ -1797,7 +1799,7 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   playerScroll: { flex: 1, minHeight: 0 },
-  playerScrollContent: { paddingBottom: Platform.OS === 'ios' ? 42 : 32 },
+  playerScrollContent: { paddingBottom: Platform.OS === 'ios' ? 136 : 96 },
   lyricsPlaybackBar: { paddingBottom: Platform.OS === 'ios' ? 24 : 14 },
   mainPlayerSection: {
     alignItems: 'center',

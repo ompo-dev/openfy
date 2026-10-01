@@ -1,8 +1,9 @@
 import { render, waitFor } from '@testing-library/react-native';
 
 import {
+  findArtistIdByName,
   getArtist,
-  getArtistAlbums,
+  getArtistDiscography,
   getArtistTopTracks,
   getCachedArtistSearchSeed,
   getYouTubeMusicArtistBiography,
@@ -24,8 +25,9 @@ import {
 import { ArtistScreen } from '../ArtistScreen';
 
 jest.mock('@api', () => ({
+  findArtistIdByName: jest.fn(),
   getArtist: jest.fn(),
-  getArtistAlbums: jest.fn(),
+  getArtistDiscography: jest.fn(),
   getArtistTopTracks: jest.fn(),
   getYouTubeMusicArtistImage: jest.fn(),
   getYouTubeMusicArtistBiography: jest.fn().mockResolvedValue(''),
@@ -119,8 +121,9 @@ describe('ArtistScreen', () => {
       participationTracks: value.participationTracks,
     }));
     jest.mocked(getArtist).mockRejectedValue(new Error('Spotify profile unavailable'));
+    jest.mocked(findArtistIdByName).mockResolvedValue('');
     jest.mocked(getArtistTopTracks).mockResolvedValue([] as never);
-    jest.mocked(getArtistAlbums).mockResolvedValue([] as never);
+    jest.mocked(getArtistDiscography).mockResolvedValue({ albums: [], tracks: [] });
   });
 
   afterEach(() => consoleError.mockRestore());
@@ -197,5 +200,45 @@ describe('ArtistScreen', () => {
     expect(view.getByTestId('artist-description').props.children).toBe('<empty>');
     expect(view.getByTestId('artist-metadata').props.children).toBe('<empty>');
     expect(view.queryByText('Artista')).toBeNull();
+  });
+
+  it('uses the exact Spotify discography for a YouTube search artist route', async () => {
+    const artistId = 'ytartist_UCspotify~Artista%20Real';
+    const spotifyArtistId = '1234567890123456789012';
+    jest.mocked(findArtistIdByName).mockResolvedValue(spotifyArtistId);
+    jest.mocked(getArtist).mockResolvedValue({
+      id: spotifyArtistId,
+      type: 'artist',
+      name: 'Artista Real',
+      imageURL: 'https://images.example/spotify-artist.jpg',
+    } as never);
+    jest.mocked(getArtistTopTracks).mockResolvedValue([{
+      id: 'spotify-popular-track',
+      title: 'Faixa popular oficial',
+      artists: [{ id: spotifyArtistId, name: 'Artista Real' }],
+    }] as never);
+    jest.mocked(getArtistDiscography).mockResolvedValue({
+      albums: [{
+        id: 'spotify-album',
+        type: 'album',
+        title: 'Álbum oficial',
+        imageURL: 'https://images.example/album.jpg',
+        subtitle: '2025 · album',
+      }],
+      tracks: [{
+        id: 'spotify-catalog-track',
+        title: 'Faixa do catálogo oficial',
+        artists: [{ id: spotifyArtistId, name: 'Artista Real' }],
+      }],
+    } as never);
+
+    const view = await render(<ArtistScreen artistId={artistId} />);
+
+    await waitFor(() => {
+      expect(view.getByText('track-count:2')).toBeTruthy();
+    });
+    expect(view.getByText('Artista Real')).toBeTruthy();
+    expect(getYouTubeMusicArtistProfile).not.toHaveBeenCalled();
+    expect(getArtistDiscography).toHaveBeenCalledWith(spotifyArtistId);
   });
 });

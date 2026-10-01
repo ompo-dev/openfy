@@ -11,43 +11,70 @@ const imageCache = createAsyncResourceCache<string>({
   ttlFor: (imageURL) => imageURL ? IMAGE_CACHE_TTL_MS : MISSING_IMAGE_CACHE_TTL_MS,
 });
 
-const getArtistCacheId = (artistName: string) =>
-  artistName.trim().toLocaleLowerCase();
+const getArtistCacheId = (artistName: string) => artistName
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .trim()
+  .replace(/\s+/g, ' ')
+  .toLocaleLowerCase();
 
 const isRemoteImage = (value: string) => /^https?:\/\//i.test(value);
 
-export const rememberCachedArtistImage = async (artistName: string, imageURL: string) => {
+const uniqueCacheIds = (artistName: string, aliases: string[] = []) =>
+  [...new Set([artistName, ...aliases].map(getArtistCacheId).filter(Boolean))];
+const getSpotifyArtistAlias = (aliases: string[]) =>
+  aliases.find((alias) => /^[A-Za-z0-9]{22}$/.test(alias)) || '';
+
+export const rememberCachedArtistImage = async (
+  artistName: string,
+  imageURL: string,
+  aliases: string[] = []
+) => {
   const id = getArtistCacheId(artistName);
   if (!id || !isRemoteImage(imageURL)) return;
-  imageCache.set(id, imageURL, IMAGE_CACHE_TTL_MS);
+  const cacheIds = uniqueCacheIds(artistName, aliases);
+  cacheIds.forEach((cacheId) => imageCache.set(cacheId, imageURL, IMAGE_CACHE_TTL_MS));
+  const spotifyArtistId = getSpotifyArtistAlias(aliases);
+  if (spotifyArtistId) {
+    imageCache.set(`spotify:${spotifyArtistId}`, imageURL, IMAGE_CACHE_TTL_MS);
+  }
   try {
-    await AsyncStorage.setItem(
-      `${STORAGE_KEY_PREFIX}${encodeURIComponent(id)}`,
-      imageURL
-    );
+    await AsyncStorage.multiSet(cacheIds.map((cacheId) => [
+      `${STORAGE_KEY_PREFIX}${encodeURIComponent(cacheId)}`,
+      imageURL,
+    ]));
   } catch {}
 };
 
 /** Keeps artist URLs across launches; Expo Image stores the image bytes on disk. */
 export const getCachedArtistImage = async (
   artistName: string,
-  loadImage: () => Promise<string | null>
+  loadImage: () => Promise<string | null>,
+  aliases: string[] = []
 ): Promise<string> => {
   const id = getArtistCacheId(artistName);
   if (!id) return '';
+  const cacheIds = uniqueCacheIds(artistName, aliases);
+  const spotifyArtistId = getSpotifyArtistAlias(aliases);
+  const cacheKey = spotifyArtistId ? `spotify:${spotifyArtistId}` : id;
+  const storageIds = spotifyArtistId ? [spotifyArtistId] : cacheIds;
 
-  return imageCache.getOrLoad(id, async () => {
+  return imageCache.getOrLoad(cacheKey, async () => {
     try {
-      const stored = await AsyncStorage.getItem(
-        `${STORAGE_KEY_PREFIX}${encodeURIComponent(id)}`
-      );
-      if (stored && isRemoteImage(stored)) return stored;
+      const stored = await AsyncStorage.multiGet(storageIds.map((cacheId) =>
+        `${STORAGE_KEY_PREFIX}${encodeURIComponent(cacheId)}`
+      ));
+      const persistedURL = stored.find(([, value]) => value && isRemoteImage(value))?.[1];
+      if (persistedURL) {
+        await rememberCachedArtistImage(artistName, persistedURL, aliases);
+        return persistedURL;
+      }
     } catch {}
 
     const imageURL = await loadImage().catch(() => '') || '';
     if (!isRemoteImage(imageURL)) return '';
 
-    await rememberCachedArtistImage(id, imageURL);
+    await rememberCachedArtistImage(artistName, imageURL, aliases);
     return imageURL;
   }, IMAGE_CACHE_TTL_MS);
 };
