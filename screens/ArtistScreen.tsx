@@ -26,6 +26,7 @@ import {
 import { getSpotifyArtistImage } from '../services/metadata/spotifyMetadata';
 import { Slider } from '../components/Slider';
 import { getYouTubeMusicArtistRouteName } from '../services/youtubeMusicClient';
+import { log } from '../utils/appLogger';
 
 export type ArtistScreenPropsType = {
   artistId: string;
@@ -228,6 +229,32 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     }
 
     if (isYouTubeArtist) {
+      log.artist('profile request started', { artistId, source: 'youtube-music' });
+      void libraryPromise.then((downloaded) => {
+        if (!active) return;
+        const artistName = getYouTubeMusicArtistRouteName(artistId);
+        const localProfile = artistName
+          ? buildLocalArtistProfile(downloaded, artistId, artistName)
+          : null;
+        if (!localProfile) return;
+        setArtist(localProfile.artist);
+        setTopTracks(localProfile.topTracks);
+        setParticipationTracks(localProfile.participationTracks);
+        setAlbums(localProfile.albums);
+        log.artist('profile rendered from local library', {
+          artistId,
+          tracks: localProfile.topTracks.length,
+          participations: localProfile.participationTracks.length,
+        });
+        void getCachedArtistImage(artistId, () =>
+          getYouTubeMusicArtistImage(artistId)
+        ).then((imageURL) => {
+          if (active && imageURL) {
+            setArtist((current) => current ? { ...current, imageURL } : current);
+          }
+        }).catch(() => {});
+      }).catch(() => {});
+
       void getYouTubeMusicArtistProfile(artistId)
         .then(async ({ artist: artistData, tracks }) => {
           if (!active) return;
@@ -242,8 +269,14 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           }
           setTopTracks(tracks);
           setArtistError('');
+          log.artist('profile loaded', {
+            artistId,
+            tracks: tracks.length,
+            hasImage: Boolean(imageURL),
+          });
         })
         .catch(async (error) => {
+          log.error('youtube music artist profile failed', { artistId, error });
           const artistName = getYouTubeMusicArtistRouteName(artistId);
           const downloaded = await libraryPromise.catch(() => []);
           if (!active) return;
@@ -264,10 +297,8 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
               }
             }).catch(() => {});
           } else {
-            setArtist(null);
             setArtistError('Não foi possível carregar o perfil agora. Verifique a conexão e tente novamente.');
           }
-          console.error('Failed to get YouTube Music artist data:', error);
         })
         .finally(() => {
           if (active) setIsRefreshing(false);
@@ -282,8 +313,10 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         if (!active) return;
         setArtist(artistData);
         setArtistError('');
+        log.artist('profile loaded', { artistId, source: 'spotify', hasImage: Boolean(artistData.imageURL) });
       })
       .catch(async (error) => {
+        log.error('spotify artist profile failed', { artistId, error });
         const downloaded = await libraryPromise.catch(() => []);
         if (!active) return;
         const localProfile = buildLocalArtistProfile(downloaded, artistId, artistId);
@@ -304,10 +337,8 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             }).catch(() => {});
           }
         } else {
-          setArtist(null);
           setArtistError('Não foi possível carregar o perfil deste artista. Tente novamente.');
         }
-        console.error('Failed to get artist data:', error);
       });
 
     const tracksRequest = getArtistTopTracks(artistId)
@@ -324,6 +355,13 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             imageURL: '',
           });
           setArtistError('');
+          void getCachedArtistImage(artistId, () =>
+            getSpotifyArtistImage(artistId)
+          ).then((imageURL) => {
+            if (active && imageURL) {
+              setArtist((current) => current ? { ...current, imageURL } : current);
+            }
+          }).catch(() => {});
         }
         setTopTracks(
           trackData.filter((track) =>

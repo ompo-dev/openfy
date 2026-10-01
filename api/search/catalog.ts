@@ -8,6 +8,7 @@ import {
   withYouTubeMusicTimeout,
   type YouTubeMusicItem,
 } from '../../services/youtubeMusicClient';
+import { log } from '../../utils/appLogger';
 
 export type CatalogSearchResults = {
   artists: ArtistModel[];
@@ -159,9 +160,14 @@ const loadYouTubeMusicArtistProfile = async (
   if (!client) throw new Error('O perfil do artista está demorando para carregar.');
 
   const findArtistBrowseId = async (name: string) => {
-    const search = await withYouTubeMusicTimeout(
-      client.music.search(name, { type: 'artist' })
-    );
+    let search: Awaited<ReturnType<typeof client.music.search>> | null = null;
+    try {
+      search = await withYouTubeMusicTimeout(
+        client.music.search(name, { type: 'artist' })
+      );
+    } catch (error) {
+      log.artist('catalog identity lookup failed', { artist: name, error });
+    }
     const items = search?.artists?.contents || [];
     const normalizedName = name.trim().toLocaleLowerCase();
     const match = items.find(
@@ -173,17 +179,37 @@ const loadYouTubeMusicArtistProfile = async (
   if (!browseId && routeName) browseId = await findArtistBrowseId(routeName);
   if (!browseId) throw new Error('Não foi possível localizar este artista.');
 
-  const getArtistPage = (id: string) =>
-    withYouTubeMusicTimeout(client.music.getArtist(id)).catch(() => null);
+  const getArtistPage = async (id: string) => {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const page = await withYouTubeMusicTimeout(client.music.getArtist(id));
+        if (page) return page;
+        log.artist('catalog profile response timed out', { browseId: id, attempt });
+      } catch (error) {
+        log.artist('catalog profile request failed', { browseId: id, attempt, error });
+      }
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+    return null;
+  };
   let page = await getArtistPage(browseId);
   if (!page && routeName) {
     const matchedBrowseId = await findArtistBrowseId(routeName);
     if (matchedBrowseId && matchedBrowseId !== browseId) {
+      log.artist('catalog identity recovered by name', {
+        previousBrowseId: browseId,
+        matchedBrowseId,
+      });
       browseId = matchedBrowseId;
       page = await getArtistPage(browseId);
     }
   }
-  if (!page) throw new Error('Não foi possível carregar este artista agora.');
+  if (!page) {
+    log.error('catalog artist profile exhausted retries', { artistRouteId, browseId });
+    throw new Error('Não foi possível carregar este artista agora.');
+  }
 
   const headerItem: YouTubeMusicItem = {
     title: page.header?.title?.toString(),

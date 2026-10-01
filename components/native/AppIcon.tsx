@@ -56,6 +56,10 @@ export type AppIconName =
   | 'star-outline'
   | 'notifications'
   | 'notifications-outline'
+  | 'document-text'
+  | 'options'
+  | 'eye'
+  | 'copy'
   | 'wifi'
   | 'bluetooth';
 
@@ -69,6 +73,11 @@ interface AppIconProps {
 
 export function AppIcon({ name, color = '#FFFFFF', size = 24, style }: AppIconProps) {
   const iconName =
-    name === 'cast' ? 'radio-outline' : name === 'sort' ? 'swap-vertical' : name;
+    name === 'cast' ? 'radio-outline' :
+    name === 'sort' ? 'swap-vertical' :
+    name === 'document-text' ? 'document-text-outline' :
+    name === 'options' ? 'options-outline' :
+    name === 'eye' ? 'eye-outline' :
+    name === 'copy' ? 'copy-outline' : name;
   return <Ionicons name={iconName as any} size={size} color={color} style={style as any} />;
 }

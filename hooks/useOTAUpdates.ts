@@ -3,6 +3,7 @@ import { AppState, AppStateStatus, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { getAppSettings } from '@services';
+import { log } from '../utils/appLogger';
 
 const MIN_UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -20,21 +21,115 @@ const canUseUpdates = () =>
   Updates.isEnabled;
 
 export type OTAUpdateCheckResult =
-  | 'disabled'
-  | 'up-to-date'
-  | 'downloaded'
-  | 'error';
+  | { status: 'disabled' }
+  | { status: 'up-to-date' }
+  | { status: 'downloaded'; rollback?: boolean }
+  | { status: 'download-failed' }
+  | { status: 'deferred' }
+  | { status: 'not-applicable'; reason: string }
+  | { status: 'error'; stage: 'check' | 'fetch'; code?: string };
 
-export const checkForOTAUpdateNow = async (): Promise<OTAUpdateCheckResult> => {
-  if (!canUseUpdates()) return 'disabled';
+type UpdateError = { code?: unknown; message?: unknown };
+
+const updateErrorDetails = (error: unknown) => {
+  const value = error as UpdateError;
+  return {
+    code: typeof value?.code === 'string' ? value.code : undefined,
+    message: error instanceof Error ? error.message : String(error),
+  };
+};
+
+const updateContext = () => ({
+  platform: Platform.OS,
+  enabled: Updates.isEnabled,
+  channel: Updates.channel,
+  runtimeVersion: Updates.runtimeVersion,
+  updateId: Updates.updateId,
+});
+
+export const checkForOTAUpdateNow = async (
+  source: 'manual' | 'automatic' = 'manual',
+  canContinue: () => boolean = () => true
+): Promise<OTAUpdateCheckResult> => {
+  if (!canUseUpdates()) {
+    log.updates('check unavailable in this runtime', {
+      source,
+      development: __DEV__,
+      expoGo: isExpoGo(),
+      ...updateContext(),
+    });
+    return { status: 'disabled' };
+  }
+
+  let stage: 'check' | 'fetch' = 'check';
+  log.updates('check started', { source, ...updateContext() });
 
   try {
     const update = await Updates.checkForUpdateAsync();
-    if (!update.isAvailable) return 'up-to-date';
-    await Updates.fetchUpdateAsync();
-    return 'downloaded';
-  } catch {
-    return 'error';
+    log.updates('check completed', {
+      source,
+      available: update.isAvailable,
+      rollback: update.isRollBackToEmbedded,
+      reason: update.reason,
+      ...updateContext(),
+    });
+
+    if (!canContinue()) {
+      log.updates('fetch deferred because app is inactive', { source });
+      return { status: 'deferred' };
+    }
+
+    if (!update.isAvailable && !update.isRollBackToEmbedded) {
+      if (update.reason === 'noUpdateAvailableOnServer') {
+        return { status: 'up-to-date' };
+      }
+      const reason = update.reason || 'selection-policy';
+      log.updates('update not applicable to this build', { source, reason });
+      return { status: 'not-applicable', reason };
+    }
+
+    stage = 'fetch';
+    const fetched = await Updates.fetchUpdateAsync();
+    if (!fetched.isNew && !fetched.isRollBackToEmbedded) {
+      log.error('update fetch returned no installable update', {
+        source,
+        rollback: fetched.isRollBackToEmbedded,
+        ...updateContext(),
+      });
+      return { status: 'download-failed' };
+    }
+
+    log.updates('update downloaded for next launch', {
+      source,
+      rollback: fetched.isRollBackToEmbedded,
+      ...updateContext(),
+    });
+    return {
+      status: 'downloaded',
+      ...(fetched.isRollBackToEmbedded ? { rollback: true } : {}),
+    };
+  } catch (error) {
+    const details = updateErrorDetails(error);
+    const nativeLogs = await Updates.readLogEntriesAsync(15 * 60 * 1000)
+      .catch(() => []);
+    log.error('OTA operation failed', {
+      source,
+      stage,
+      ...details,
+      ...updateContext(),
+      nativeLogs: nativeLogs.slice(-12).map((entry) => ({
+        timestamp: entry.timestamp,
+        level: entry.level,
+        code: entry.code,
+        message: entry.message,
+        updateId: entry.updateId,
+      })),
+    });
+    return {
+      status: 'error',
+      stage,
+      ...(details.code ? { code: details.code } : {}),
+    };
   }
 };
 
@@ -58,14 +153,14 @@ export function useOTAUpdates(options: UpdateCheckerOptions = {}) {
         try {
           const settings = await getAppSettings();
           if (!settings.automaticUpdates || !activeRef.current) return;
-          const update = await Updates.checkForUpdateAsync();
-          if (!update.isAvailable || !activeRef.current) return;
           if (AppState.currentState !== 'active') return;
-
-          await Updates.fetchUpdateAsync();
-        } catch {
-          // Updates are opportunistic. Offline or service failures should not
-          // disturb playback, downloads, edits, or startup.
+          const result = await checkForOTAUpdateNow(
+            'automatic',
+            () => activeRef.current && AppState.currentState === 'active'
+          );
+          log.updates('automatic check finished', { status: result.status });
+        } catch (error) {
+          log.error('automatic update check failed', error);
         }
       })().finally(() => {
         if (inFlightRef.current === check) {

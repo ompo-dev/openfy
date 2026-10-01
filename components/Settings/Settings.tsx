@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import Constants from 'expo-constants';
+import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -24,6 +25,7 @@ import {
   type DownloadStorageInfo,
 } from '@services';
 import { AppIcon, LoggedPressable, NativeIconButton } from '../native';
+import { clearLogBuffer, formatLogBuffer, getLogBuffer, log, logConfig } from '../../utils/appLogger';
 import { formatStorageSize, StorageManagerModal } from './StorageManagerModal';
 
 type LibrarySummary = {
@@ -116,6 +118,8 @@ export const Settings = () => {
   const [storageVisible, setStorageVisible] = React.useState(false);
   const [updateStatus, setUpdateStatus] = React.useState('');
   const [checkingUpdate, setCheckingUpdate] = React.useState(false);
+  const [captureLogs, setCaptureLogs] = React.useState(logConfig.capture);
+  const [verboseLogs, setVerboseLogs] = React.useState(logConfig.verbose);
 
   React.useEffect(() => {
     let active = true;
@@ -144,12 +148,59 @@ export const Settings = () => {
     setUpdateStatus('Verificando…');
     const result = await checkForOTAUpdateNow();
     setCheckingUpdate(false);
-    setUpdateStatus({
-      disabled: 'Disponível apenas no app instalado',
-      'up-to-date': 'Você já está na versão mais recente',
-      downloaded: 'Atualização pronta para o próximo início',
-      error: 'Não foi possível verificar agora',
-    }[result]);
+    switch (result.status) {
+      case 'disabled':
+        setUpdateStatus('Disponível apenas no app instalado.');
+        break;
+      case 'up-to-date':
+        setUpdateStatus('Você já está na versão mais recente.');
+        break;
+      case 'downloaded':
+        setUpdateStatus(
+          result.rollback
+            ? 'Correção de versão pronta para o próximo início.'
+            : 'Atualização pronta para o próximo início.'
+        );
+        break;
+      case 'download-failed':
+        setUpdateStatus('Atualização encontrada, mas não foi possível baixá-la.');
+        break;
+      case 'deferred':
+        setUpdateStatus('A consulta foi adiada até o app voltar ao primeiro plano.');
+        break;
+      case 'not-applicable':
+        setUpdateStatus(`Esta atualização não se aplica a esta versão (${result.reason}).`);
+        break;
+      case 'error':
+        setUpdateStatus(
+          `Falha na etapa ${result.stage}${result.code ? ` (${result.code})` : ''}. Consulte os logs. `
+        );
+        break;
+    }
+  };
+
+  const showRecentLogs = () => {
+    const entries = getLogBuffer();
+    Alert.alert(
+      `Logs (${entries.length})`,
+      formatLogBuffer(entries.slice(0, 35)).slice(0, 3900) || 'Nenhum log capturado.'
+    );
+  };
+
+  const copyLogs = async () => {
+    const text = formatLogBuffer();
+    try {
+      await Clipboard.setStringAsync(text || 'Nenhum log capturado.');
+      Alert.alert('Logs copiados', `${getLogBuffer().length} entradas copiadas.`);
+    } catch (error) {
+      log.error('copy diagnostics failed', error);
+      Alert.alert('Não foi possível copiar', 'Tente novamente.');
+    }
+  };
+
+  const clearLogs = () => {
+    clearLogBuffer();
+    Alert.alert('Logs limpos', 'O buffer local foi apagado.');
   };
 
   const resetRecommendations = () => {
@@ -287,6 +338,50 @@ export const Settings = () => {
             icon="trash"
             label="Redefinir histórico de recomendações"
             onPress={resetRecommendations}
+          />
+        </Section>
+
+        <Section title="DIAGNÓSTICOS">
+          <SettingRow
+            description="Guarda até 500 eventos nesta sessão, apenas neste aparelho."
+            icon="document-text"
+            label="Capturar logs"
+            onValueChange={(value) => {
+              logConfig.capture = value;
+              setCaptureLogs(value);
+            }}
+            value={captureLogs}
+          />
+          <View style={styles.separator} />
+          <SettingRow
+            description="Inclui eventos de digitação e rolagem."
+            icon="options"
+            label="Logs detalhados"
+            onValueChange={(value) => {
+              logConfig.verbose = value;
+              setVerboseLogs(value);
+            }}
+            value={verboseLogs}
+          />
+          <View style={styles.separator} />
+          <ActionRow
+            detail={`${getLogBuffer().length} eventos`}
+            icon="eye"
+            label="Ver logs recentes"
+            onPress={showRecentLogs}
+          />
+          <View style={styles.separator} />
+          <ActionRow
+            icon="copy"
+            label="Copiar todos os logs"
+            onPress={() => void copyLogs()}
+          />
+          <View style={styles.separator} />
+          <ActionRow
+            destructive
+            icon="trash"
+            label="Limpar logs"
+            onPress={clearLogs}
           />
         </Section>
 

@@ -30,3 +30,12 @@ export {
 } from './common';
 export { formatCollectionMeta } from './collection/collectionPresentation';
 export { getDynamicColorPalette } from './colorExtractor';
+export {
+  clearLogBuffer,
+  formatLogBuffer,
+  getLogBuffer,
+  installErrorLogging,
+  log,
+  logConfig,
+} from './appLogger';
+export type { LogCategory, LogEntry } from './appLogger';

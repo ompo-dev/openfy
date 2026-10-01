@@ -75,7 +75,7 @@ describe('public YouTube Music catalog', () => {
     expect(search).toHaveBeenNthCalledWith(3, 'Faixa', { type: 'artist' });
   });
 
-  it('recovers an artist profile by name when its original browse id fails', async () => {
+  it('retries a transient artist profile request with its original browse id', async () => {
     const page = {
       header: {
         title: { toString: () => 'Pedro Qualy' },
@@ -104,12 +104,49 @@ describe('public YouTube Music catalog', () => {
     );
 
     expect(getArtist).toHaveBeenNthCalledWith(1, 'stale');
-    expect(getArtist).toHaveBeenNthCalledWith(2, 'UCartist');
+    expect(getArtist).toHaveBeenNthCalledWith(2, 'stale');
+    expect(search).not.toHaveBeenCalled();
     expect(profile.artist).toMatchObject({
       name: 'Pedro Qualy',
       imageURL: 'https://images.example/profile.jpg',
     });
     expect(profile.tracks).toMatchObject([{ id: 'yt_abcdefghijk', title: 'Tarôs' }]);
+  });
+
+  it('recovers an artist profile by name after both original-id attempts fail', async () => {
+    const page = {
+      header: {
+        title: { toString: () => 'Pedro Qualy' },
+        thumbnail: { contents: [{ url: 'https://images.example/profile.jpg', width: 800 }] },
+      },
+      sections: [{ contents: [{
+        id: 'abcdefghijk',
+        title: 'Tarôs',
+        item_type: 'song',
+        artists: [{ channel_id: 'UCartist', name: 'Pedro Qualy' }],
+        duration: { seconds: 240 },
+      }] }],
+    };
+    const search = jest.fn().mockResolvedValue({
+      artists: { contents: [{ id: 'UCartist', name: 'Pedro Qualy' }] },
+    });
+    const getArtist = jest.fn()
+      .mockRejectedValueOnce(new Error('stale artist id'))
+      .mockRejectedValueOnce(new Error('stale artist id'))
+      .mockResolvedValueOnce(page);
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({
+      music: { search, getArtist },
+    } as never);
+
+    const profile = await getYouTubeMusicArtistProfile(
+      'ytartist_stale-second~Pedro%20Qualy'
+    );
+
+    expect(getArtist).toHaveBeenNthCalledWith(1, 'stale-second');
+    expect(getArtist).toHaveBeenNthCalledWith(2, 'stale-second');
+    expect(search).toHaveBeenCalledWith('Pedro Qualy', { type: 'artist' });
+    expect(getArtist).toHaveBeenNthCalledWith(3, 'UCartist');
+    expect(profile.artist).toMatchObject({ name: 'Pedro Qualy' });
   });
 
   it('gets the matching artist image without loading a full profile or using a fan result', async () => {

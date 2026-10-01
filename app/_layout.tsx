@@ -1,7 +1,7 @@
 import * as React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -19,10 +19,22 @@ import {
 import { MiniPlayer, FullPlayer } from '@components';
 import { registerBackgroundDownloadTask } from '@services';
 import { useOTAUpdates } from '@hooks';
+import { installErrorLogging, log } from '@utils';
 
 import 'react-native-reanimated';
 
 SplashScreen.preventAutoHideAsync();
+installErrorLogging();
+
+function NavigationDiagnostics() {
+  const pathname = usePathname();
+
+  React.useEffect(() => {
+    log.nav('route changed', { pathname });
+  }, [pathname]);
+
+  return null;
+}
 
 function PlayerOverlay() {
   const [fullPlayerVisible, setFullPlayerVisible] = React.useState(false);
@@ -59,6 +71,7 @@ export default function RootLayout() {
   }, [fontsLoaded]);
 
   React.useEffect(() => {
+    log.nav('app started', { platform: Platform.OS });
     registerBackgroundDownloadTask().catch(() => {});
   }, []);
 
@@ -75,6 +88,7 @@ export default function RootLayout() {
               <PlayerProvider>
                 <GestureHandlerRootView style={styles.gestureHandlerRootView}>
                   <View style={styles.gestureHandlerRootView}>
+                    <NavigationDiagnostics />
                     <Stack
                       screenOptions={{
                         headerShown: false,

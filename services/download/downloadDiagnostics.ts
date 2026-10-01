@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
 import type { DownloadTrackInput } from './downloadManager';
+import { log } from '../../utils/appLogger';
 
 const STORAGE_KEY = 'openfy_download_diagnostics_v1';
 const TRACK_CAPACITY = 24;
@@ -202,6 +203,7 @@ export const recordDownloadDiagnostic = (
   phase: string,
   details?: Record<string, unknown>
 ) => {
+  const normalized = normalizeDetails(details);
   const existing = diagnostics[spotifyId];
   if (!existing) return;
   const now = new Date().toISOString();
@@ -210,9 +212,11 @@ export const recordDownloadDiagnostic = (
     updatedAt: now,
     events: [
       ...existing.events,
-      { at: now, phase, details: normalizeDetails(details) },
+      { at: now, phase, details: normalized },
     ].slice(-EVENT_CAPACITY),
   });
+  const emit = phase.startsWith('player.') ? log.player : log.download;
+  emit(phase, { spotifyId, details: normalized });
   evictOverflow();
   void persist();
 };

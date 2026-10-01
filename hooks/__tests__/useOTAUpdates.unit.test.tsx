@@ -2,6 +2,7 @@ import * as React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { AppState, Platform } from 'react-native';
 import * as Updates from 'expo-updates';
+import { checkForOTAUpdateNow } from '../useOTAUpdates';
 
 const mockListeners = new Set<(state: string) => void>();
 const mockRemove = jest.fn();
@@ -16,6 +17,10 @@ jest.mock('expo-updates', () => ({
   checkForUpdateAsync: jest.fn(),
   fetchUpdateAsync: jest.fn(),
   reloadAsync: jest.fn(),
+  readLogEntriesAsync: jest.fn().mockResolvedValue([]),
+  channel: 'production',
+  runtimeVersion: '1.0.0',
+  updateId: 'current-update',
 }));
 
 const flushPromises = () => act(async () => {});
@@ -71,9 +76,10 @@ describe('useOTAUpdates', () => {
     jest.mocked(Updates.checkForUpdateAsync).mockResolvedValue({
       isAvailable: true,
     } as Awaited<ReturnType<typeof Updates.checkForUpdateAsync>>);
-    jest.mocked(Updates.fetchUpdateAsync).mockResolvedValue(
-      {} as Awaited<ReturnType<typeof Updates.fetchUpdateAsync>>
-    );
+    jest.mocked(Updates.fetchUpdateAsync).mockResolvedValue({
+      isNew: true,
+      isRollBackToEmbedded: false,
+    } as Awaited<ReturnType<typeof Updates.fetchUpdateAsync>>);
     ({ useOTAUpdates } = require('../useOTAUpdates'));
   });
 
@@ -199,5 +205,33 @@ describe('useOTAUpdates', () => {
 
     expect(mockRemove).toHaveBeenCalledTimes(1);
     expect(mockListeners.size).toBe(0);
+  });
+
+  it('reports a fetch that returned no update instead of claiming success', async () => {
+    jest.mocked(Updates.checkForUpdateAsync).mockResolvedValue({
+      isAvailable: true,
+      isRollBackToEmbedded: false,
+    } as Awaited<ReturnType<typeof Updates.checkForUpdateAsync>>);
+    jest.mocked(Updates.fetchUpdateAsync).mockResolvedValue({
+      isNew: false,
+      isRollBackToEmbedded: false,
+    } as Awaited<ReturnType<typeof Updates.fetchUpdateAsync>>);
+
+    await expect(checkForOTAUpdateNow()).resolves.toEqual({
+      status: 'download-failed',
+    });
+  });
+
+  it('returns the native OTA failure stage and code for manual checks', async () => {
+    jest.mocked(Updates.checkForUpdateAsync).mockRejectedValue(
+      Object.assign(new Error('offline'), { code: 'ERR_UPDATES_CHECK' })
+    );
+
+    await expect(checkForOTAUpdateNow()).resolves.toEqual({
+      status: 'error',
+      stage: 'check',
+      code: 'ERR_UPDATES_CHECK',
+    });
+    expect(Updates.readLogEntriesAsync).toHaveBeenCalled();
   });
 });

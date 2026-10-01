@@ -14,6 +14,7 @@ import type { AudioPlayer } from 'expo-audio/build/AudioModule.types';
 import { AppState, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
+import { log } from '../../utils/appLogger';
 import { getDirectYouTubeMediaHeaders } from './directYouTubeResolver';
 import { prepareLocalAudioForPlayback } from './localAudioRepair';
 import {
@@ -340,6 +341,12 @@ export const recordAudioDiagnostic = (event: string, note?: string): void => {
     note,
   });
   if (diagnostics.length > MAX_DIAGNOSTICS) diagnostics.shift();
+  log.player(event, {
+    note,
+    state,
+    sourceKind: currentSourceKind,
+    sourceHost: currentSourceHost,
+  });
   if (currentDiagnosticSpotifyId) {
     recordDownloadDiagnostic(currentDiagnosticSpotifyId, `player.${event}`, {
       note,
@@ -372,6 +379,11 @@ const recordStatusDiagnostic = (state: PlayerState) => {
     };
     diagnostics.push(transition);
     if (diagnostics.length > MAX_DIAGNOSTICS) diagnostics.shift();
+    log.player('status-transition', {
+      state,
+      sourceKind: currentSourceKind,
+      sourceHost: currentSourceHost,
+    });
     if (currentDiagnosticSpotifyId) {
       recordDownloadDiagnostic(currentDiagnosticSpotifyId, 'player.status-transition', {
         state,
@@ -404,6 +416,11 @@ const recordStatusDiagnostic = (state: PlayerState) => {
   };
   diagnostics.push(diagnostic);
   if (diagnostics.length > MAX_DIAGNOSTICS) diagnostics.shift();
+  log.player(event, {
+    state,
+    sourceKind: currentSourceKind,
+    sourceHost: currentSourceHost,
+  });
   if (currentDiagnosticSpotifyId) {
     recordDownloadDiagnostic(currentDiagnosticSpotifyId, `player.${event}`, {
       state,

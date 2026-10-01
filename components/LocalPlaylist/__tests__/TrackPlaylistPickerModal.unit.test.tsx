@@ -3,6 +3,7 @@ import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import {
   addTracksToLocalPlaylist,
+  getLibraryTracks,
   getLocalPlaylists,
   upsertCatalogTracks,
 } from '@services';
@@ -10,6 +11,7 @@ import { TrackPlaylistPickerModal } from '../TrackPlaylistPickerModal';
 
 jest.mock('@services', () => ({
   addTracksToLocalPlaylist: jest.fn(),
+  getLibraryTracks: jest.fn(),
   getLocalPlaylists: jest.fn(),
   upsertCatalogTracks: jest.fn(),
 }));
@@ -29,8 +31,16 @@ jest.mock('../../native', () => {
 });
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+jest.mock('expo-image', () => {
+  const React = jest.requireActual<typeof import('react')>('react');
+  const { View } = jest.requireActual<typeof import('react-native')>('react-native');
+  return {
+    Image: (props: object) => React.createElement(View, { ...props, testID: 'playlist-cover-image' }),
+  };
+});
 
 const mockAddTracksToLocalPlaylist = jest.mocked(addTracksToLocalPlaylist);
+const mockGetLibraryTracks = jest.mocked(getLibraryTracks);
 const mockGetLocalPlaylists = jest.mocked(getLocalPlaylists);
 const mockUpsertCatalogTracks = jest.mocked(upsertCatalogTracks);
 
@@ -53,6 +63,7 @@ describe('TrackPlaylistPickerModal', () => {
         trackIds: [],
       },
     ]);
+    mockGetLibraryTracks.mockResolvedValue([]);
     mockUpsertCatalogTracks.mockResolvedValue([]);
     mockAddTracksToLocalPlaylist.mockResolvedValue(undefined);
   });
@@ -80,5 +91,32 @@ describe('TrackPlaylistPickerModal', () => {
     expect(mockUpsertCatalogTracks.mock.invocationCallOrder[0]).toBeLessThan(
       mockAddTracksToLocalPlaylist.mock.invocationCallOrder[0]
     );
+  });
+
+  it('shows playlist artwork from its saved tracks', async () => {
+    mockGetLocalPlaylists.mockResolvedValue([
+      {
+        id: 'playlist-art',
+        title: 'Favoritas',
+        trackIds: ['saved-track'],
+      },
+    ]);
+    mockGetLibraryTracks.mockResolvedValue([
+      {
+        spotifyId: 'saved-track',
+        title: 'Faixa salva',
+        imageURL: 'https://images.example/saved-cover.jpg',
+        localImagePath: '',
+      } as never,
+    ]);
+
+    const screen = await render(
+      <TrackPlaylistPickerModal onClose={jest.fn()} track={track} visible />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Capa da playlist Favoritas')).toBeTruthy();
+      expect(screen.getByTestId('playlist-cover-image')).toBeTruthy();
+    });
   });
 });

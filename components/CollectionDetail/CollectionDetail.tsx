@@ -2,6 +2,7 @@ import * as React from 'react';
 import {
   Alert,
   FlatList,
+  Keyboard,
   RefreshControl,
   Share,
   StyleSheet,
@@ -19,7 +20,7 @@ import { TrackModel } from '@models';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { useDownloads, usePlayer } from '@context';
 import type { DownloadTrackInput } from '@services';
-import { formatCollectionMeta } from '@utils';
+import { formatCollectionMeta, log } from '@utils';
 import { GlassSurface, LoggedPressable, NativeIconButton } from '../native';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
@@ -318,16 +319,19 @@ export const CollectionDetail = ({
   }, [isCollectionPlayback, playCollection, toggleShuffle]);
 
   const closeSearch = React.useCallback(() => {
+    Keyboard.dismiss();
     setSearchQuery('');
     setIsSearchOpen(false);
-  }, []);
+    log.ui('close collection search', { kind, collectionId });
+  }, [collectionId, kind]);
 
   const openSearch = React.useCallback(() => {
+    log.ui('open collection search', { kind, collectionId });
     setIsSearchOpen(true);
     if (resolveTracksForPlayback) {
       void resolveTracksForPlayback().catch(() => {});
     }
-  }, [resolveTracksForPlayback]);
+  }, [collectionId, kind, resolveTracksForPlayback]);
 
   const handleShare = React.useCallback(async () => {
     if (onSharePress) {

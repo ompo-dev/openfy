@@ -58,6 +58,10 @@ const SF: Record<AppIconName, string> = {
   'star-outline': 'star',
   'notifications': 'bell.fill',
   'notifications-outline': 'bell',
+  'document-text': 'doc.text',
+  'options': 'slider.horizontal.3',
+  'eye': 'eye',
+  'copy': 'doc.on.doc',
   'wifi': 'wifi',
   'bluetooth': 'dot.radiowaves.left.and.right',
 };

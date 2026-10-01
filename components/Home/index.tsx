@@ -1,6 +1,7 @@
 import * as React from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -29,6 +30,7 @@ import { HeroBanner, type FeaturedItem } from './HeroBanner/HeroBanner';
 import { CatalogHome } from './CatalogHome';
 import { ImportModal } from '../ImportModal';
 import { LoggedPressable } from '../native';
+import { log } from '../../utils/appLogger';
 
 export { FriendActivityStatus } from './FriendActivityStatus';
 export { CompactMusicCarousel } from './CompactMusicCarousel';
@@ -101,6 +103,8 @@ export const Home = () => {
 
     setSearchLoading(true);
     const timer = setTimeout(() => {
+      const startedAt = Date.now();
+      log.search('catalog query started', { length: cleanQuery.length });
       void searchCatalog(cleanQuery)
         .then((nextResults) => {
           if (request === searchGeneration.current) {
@@ -109,6 +113,11 @@ export const Home = () => {
             void Promise.all(nextResults.artists.map((artist) =>
               getCachedArtistImage(artist.id, async () => artist.imageURL)
             ));
+            log.search('catalog query completed', {
+              durationMs: Date.now() - startedAt,
+              artists: nextResults.artists.length,
+              tracks: nextResults.tracks.length,
+            });
           }
         })
         .catch((error: unknown) => {
@@ -117,6 +126,10 @@ export const Home = () => {
             setSearchError(
               error instanceof Error ? error.message : 'Não foi possível pesquisar agora.'
             );
+            log.error('catalog query failed', {
+              durationMs: Date.now() - startedAt,
+              error,
+            });
           }
         })
         .finally(() => {
@@ -133,6 +146,7 @@ export const Home = () => {
   const saveTrack = async (track: TrackModel) => {
     if (savedTrackIds.has(track.id) || home.tracksById.has(track.id)) return;
     setSavingTrackIds((current) => new Set(current).add(track.id));
+    log.search('save result to library started', { trackId: track.id });
     try {
       await upsertCatalogTracks([{
         spotifyId: track.id,
@@ -150,8 +164,10 @@ export const Home = () => {
       }]);
       setSavedTrackIds((current) => new Set(current).add(track.id));
       refreshLibrary();
+      log.search('save result to library completed', { trackId: track.id });
     } catch (error) {
       setSearchError(error instanceof Error ? error.message : 'Não foi possível adicionar a música.');
+      log.error('save search result failed', { trackId: track.id, error });
     } finally {
       setSavingTrackIds((current) => {
         const next = new Set(current);
@@ -233,7 +249,11 @@ export const Home = () => {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Limpar busca"
-              onPress={() => setQuery('')}
+              onPress={() => {
+                Keyboard.dismiss();
+                setQuery('');
+                log.ui('clear music and artist search');
+              }}
               hitSlop={10}
             >
               <Ionicons name="close-circle" size={19} color="#8E8E93" />

@@ -1,6 +1,8 @@
 import * as React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
+import { Keyboard } from 'react-native';
+
 import { useDownloads, usePlayer } from '@context';
 import { CollectionDetail } from '../CollectionDetail';
 
@@ -127,6 +129,21 @@ describe('CollectionDetail', () => {
       expect(screen.getByText('Outra faixa')).toBeTruthy();
     });
     expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('dismisses the keyboard when closing inline search', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss');
+    const screen = await renderCollection();
+
+    fireEvent.press(screen.getByLabelText('Buscar'));
+    expect(await screen.findByLabelText('Buscar nesta coleção')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('Fechar busca'));
+
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(screen.queryByLabelText('Buscar nesta coleção')).toBeNull()
+    );
+    dismiss.mockRestore();
   });
 
   it('plays a single shuffled queue and exposes fallback artist links', async () => {
