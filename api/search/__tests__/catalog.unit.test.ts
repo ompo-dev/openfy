@@ -1,4 +1,5 @@
 import {
+  getYouTubeMusicArtistImage,
   getYouTubeMusicArtistProfile,
   searchCatalog,
 } from '../catalog';
@@ -51,6 +52,7 @@ describe('public YouTube Music catalog', () => {
       artists: [{
         id: 'ytartist_UCartist~Pedro%20Qualy',
         name: 'Pedro Qualy',
+        imageURL: 'https://images.example/artist.jpg',
       }],
     });
     expect(search).toHaveBeenCalledWith('Tarôs', { type: 'all' });
@@ -108,5 +110,32 @@ describe('public YouTube Music catalog', () => {
       imageURL: 'https://images.example/profile.jpg',
     });
     expect(profile.tracks).toMatchObject([{ id: 'yt_abcdefghijk', title: 'Tarôs' }]);
+  });
+
+  it('gets the matching artist image without loading a full profile or using a fan result', async () => {
+    const search = jest.fn().mockResolvedValue({
+      artists: { contents: [
+        {
+          id: 'UCfan',
+          name: 'Pedro Qualy',
+          thumbnails: [{ url: 'https://images.example/fan.jpg', width: 800 }],
+        },
+        {
+          id: 'UCartist',
+          name: 'Pedro Qualy',
+          thumbnails: [{ url: 'https://images.example/official.jpg', width: 800 }],
+        },
+      ] },
+    });
+    const getArtist = jest.fn();
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({
+      music: { search, getArtist },
+    } as never);
+
+    await expect(
+      getYouTubeMusicArtistImage('ytartist_UCartist~Pedro%20Qualy')
+    ).resolves.toBe('https://images.example/official.jpg');
+    expect(search).toHaveBeenCalledWith('Pedro Qualy', { type: 'artist' });
+    expect(getArtist).not.toHaveBeenCalled();
   });
 });

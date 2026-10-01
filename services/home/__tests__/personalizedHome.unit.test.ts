@@ -188,6 +188,7 @@ describe('personalizedHome', () => {
       expect.objectContaining({
         spotifyArtistId: 'artist-new',
         title: 'Artista Nova',
+        imageURL: '',
       }),
     ]);
     expect(home.artists).not.toEqual(

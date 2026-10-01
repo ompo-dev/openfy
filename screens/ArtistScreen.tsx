@@ -5,6 +5,7 @@ import {
   getArtist,
   getArtistAlbums,
   getArtistTopTracks,
+  getYouTubeMusicArtistImage,
   getYouTubeMusicArtistProfile,
 } from '@api';
 import { CollectionDetail } from '@components';
@@ -136,12 +137,7 @@ const buildLocalArtistProfile = (
       id: routeId,
       type: 'artist' as const,
       name: collection.title,
-      imageURL:
-        collection.imageURL ||
-        collection.tracks.find((track) => track.localImagePath || track.imageURL)
-          ?.localImagePath ||
-        collection.tracks.find((track) => track.imageURL)?.imageURL ||
-        '',
+      imageURL: '',
     },
     topTracks: featuredTracks.map(toTrackModel),
     participationTracks: participationTracks.map(toTrackModel),
@@ -233,9 +229,17 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
 
     if (isYouTubeArtist) {
       void getYouTubeMusicArtistProfile(artistId)
-        .then(({ artist: artistData, tracks }) => {
+        .then(async ({ artist: artistData, tracks }) => {
           if (!active) return;
-          setArtist(artistData);
+          const imageURL = artistData.imageURL || await getCachedArtistImage(
+            artistId,
+            () => getYouTubeMusicArtistImage(artistId)
+          );
+          if (!active) return;
+          setArtist({ ...artistData, imageURL });
+          if (artistData.imageURL) {
+            void getCachedArtistImage(artistId, async () => artistData.imageURL);
+          }
           setTopTracks(tracks);
           setArtistError('');
         })
@@ -252,6 +256,13 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             setParticipationTracks(localProfile.participationTracks);
             setAlbums(localProfile.albums);
             setArtistError('');
+            void getCachedArtistImage(artistId, () =>
+              getYouTubeMusicArtistImage(artistId)
+            ).then((imageURL) => {
+              if (active && imageURL) {
+                setArtist((current) => current ? { ...current, imageURL } : current);
+              }
+            }).catch(() => {});
           } else {
             setArtist(null);
             setArtistError('Não foi possível carregar o perfil agora. Verifique a conexão e tente novamente.');
@@ -281,6 +292,17 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           setTopTracks(localProfile.topTracks);
           setParticipationTracks(localProfile.participationTracks);
           setAlbums(localProfile.albums);
+          const spotifyArtistId = localProfile.collection.spotifyArtistId ||
+            (/^[A-Za-z0-9]{22}$/.test(artistId) ? artistId : '');
+          if (spotifyArtistId) {
+            void getCachedArtistImage(spotifyArtistId, () =>
+              getSpotifyArtistImage(spotifyArtistId)
+            ).then((imageURL) => {
+              if (active && imageURL) {
+                setArtist((current) => current ? { ...current, imageURL } : current);
+              }
+            }).catch(() => {});
+          }
         } else {
           setArtist(null);
           setArtistError('Não foi possível carregar o perfil deste artista. Tente novamente.');
@@ -299,7 +321,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             id: artistId,
             type: 'artist',
             name: fallbackArtistName,
-            imageURL: trackData[0]?.imageURL || '',
+            imageURL: '',
           });
           setArtistError('');
         }

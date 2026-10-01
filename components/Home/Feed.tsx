@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { getYouTubeMusicArtistProfile } from '@api';
+import { getYouTubeMusicArtistImage } from '@api';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { useUserData, type PlayerTrack } from '@context';
 import { usePersonalizedHome } from '@hooks';
@@ -100,8 +100,10 @@ export const Feed = () => {
     let active = true;
     void Promise.all(artists.map(async (artist) => {
       if (artist.id.startsWith('ytartist_')) {
-        const profile = await getYouTubeMusicArtistProfile(artist.id).catch(() => null);
-        return [normalize(artist.name), profile?.artist.imageURL || ''] as const;
+        const image = await getCachedArtistImage(artist.id, () =>
+          getYouTubeMusicArtistImage(artist.id)
+        ).catch(() => '');
+        return [normalize(artist.name), image] as const;
       }
       if (/^[A-Za-z0-9]{22}$/.test(artist.id)) {
         const image = await getCachedArtistImage(artist.id, () =>

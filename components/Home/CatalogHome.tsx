@@ -3,9 +3,9 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
-import { getYouTubeMusicArtistProfile } from '@api';
+import { getYouTubeMusicArtistImage } from '@api';
 import { useDetailNavigation } from '@hooks';
-import type { PersonalizedHomeSnapshot } from '@services';
+import { getCachedArtistImage, type PersonalizedHomeSnapshot } from '@services';
 import { LoggedPressable } from '../native';
 
 export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
@@ -16,8 +16,10 @@ export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
     let active = true;
     void Promise.all(home.artists.map(async (artist) => {
       if (!artist.artistId.startsWith('ytartist_')) return [artist.artistId, ''] as const;
-      const profile = await getYouTubeMusicArtistProfile(artist.artistId).catch(() => null);
-      return [artist.artistId, profile?.artist.imageURL || ''] as const;
+      const imageURL = await getCachedArtistImage(artist.artistId, () =>
+        getYouTubeMusicArtistImage(artist.artistId)
+      ).catch(() => '');
+      return [artist.artistId, imageURL] as const;
     })).then((entries) => {
       if (active) setArtistImages((current) => ({ ...current, ...Object.fromEntries(entries) }));
     });

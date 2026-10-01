@@ -1,8 +1,15 @@
 import { render, waitFor } from '@testing-library/react-native';
 
-import { getArtist, getArtistAlbums, getArtistTopTracks } from '@api';
+import {
+  getArtist,
+  getArtistAlbums,
+  getArtistTopTracks,
+  getYouTubeMusicArtistImage,
+  getYouTubeMusicArtistProfile,
+} from '@api';
 import { usePlayer } from '@context';
 import {
+  getCachedArtistImage,
   getLibraryTracks,
   getUserProfile,
   groupLocalAlbums,
@@ -17,6 +24,7 @@ jest.mock('@api', () => ({
   getArtist: jest.fn(),
   getArtistAlbums: jest.fn(),
   getArtistTopTracks: jest.fn(),
+  getYouTubeMusicArtistImage: jest.fn(),
   getYouTubeMusicArtistProfile: jest.fn(),
 }));
 jest.mock('@context', () => ({ usePlayer: jest.fn() }));
@@ -34,11 +42,16 @@ jest.mock('@components', () => {
   const React = jest.requireActual('react');
   const { Text, View } = jest.requireActual('react-native');
   return {
-    CollectionDetail: ({ title, tracks }: { title: string; tracks: unknown[] }) =>
+    CollectionDetail: ({ title, tracks, imageURL }: {
+      title: string;
+      tracks: unknown[];
+      imageURL: string;
+    }) =>
       React.createElement(
         View,
         null,
         React.createElement(Text, null, title),
+        React.createElement(Text, { testID: 'artist-image' }, imageURL || 'no-artist-image'),
         React.createElement(Text, null, `track-count:${tracks.length}`)
       ),
   };
@@ -67,6 +80,9 @@ describe('ArtistScreen', () => {
     consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
     jest.mocked(usePlayer).mockReturnValue({ currentTrack: null } as never);
     jest.mocked(getLibraryTracks).mockResolvedValue([localTrack] as never);
+    jest.mocked(getCachedArtistImage).mockResolvedValue('');
+    jest.mocked(getYouTubeMusicArtistImage).mockResolvedValue('');
+    jest.mocked(getYouTubeMusicArtistProfile).mockRejectedValue(new Error('YTM profile unavailable'));
     jest.mocked(getUserProfile).mockResolvedValue({ recentlyPlayedTracks: [] } as never);
     jest.mocked(groupLocalArtists).mockReturnValue([{
       id: 'spotify:existing-artist-id',
@@ -96,5 +112,17 @@ describe('ArtistScreen', () => {
       expect(view.getByText('Artista existente')).toBeTruthy();
       expect(view.getByText('track-count:1')).toBeTruthy();
     });
+  });
+
+  it('never uses a song cover as the artist portrait when the remote profile is unavailable', async () => {
+    const view = await render(
+      <ArtistScreen artistId="ytartist_UCartist~Artista%20existente" />
+    );
+
+    await waitFor(() => {
+      expect(view.getByText('Artista existente')).toBeTruthy();
+      expect(view.getByTestId('artist-image').props.children).toBe('no-artist-image');
+    });
+    expect(view.queryByText('https://images.example/cover.jpg')).toBeNull();
   });
 });

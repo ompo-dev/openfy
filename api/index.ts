@@ -32,6 +32,7 @@ export {
 
 export {
   getBrowseCategories,
+  getYouTubeMusicArtistImage,
   getYouTubeMusicArtistProfile,
   searchCatalog,
 } from './search';

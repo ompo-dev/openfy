@@ -211,8 +211,12 @@ const getCacheKey = (track: PlayerTrack) => {
   return `metadata:${cleanArtist}:${cleanTitle}:${track.duration_ms || 0}:${track.albumName || ''}`;
 };
 
-const getLockScreenArtworkUrl = (track: PlayerTrack): string =>
-  track.localImagePath || track.imageURL;
+const getLockScreenArtworkMetadata = (track: PlayerTrack) => ({
+  artworkUrl: track.localImagePath || track.imageURL,
+  ...(track.localImagePath && track.imageURL && track.localImagePath !== track.imageURL
+    ? { artworkFallbackUrl: track.imageURL }
+    : {}),
+});
 
 const getLyricsCacheKey = (track: PlayerTrack) =>
   `${getCacheKey(track)}:${LYRICS_CACHE_VERSION}`;
@@ -648,7 +652,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
               const recoveredOk = await loadAndPlay(
                 activeStreamUri, handleStatusUpdate,
                 { title: track.title, artist: track.artistName,
-                  albumTitle: track.albumName, artworkUrl: getLockScreenArtworkUrl(track) },
+                  albumTitle: track.albumName, ...getLockScreenArtworkMetadata(track) },
                 0, track
               );
               if (get().activeRequestId === requestId && recoveredOk && lastPosMs > 1000) {
@@ -668,7 +672,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
                   title: track.title,
                   artist: track.artistName,
                   albumTitle: track.albumName,
-                  artworkUrl: getLockScreenArtworkUrl(track),
+                  ...getLockScreenArtworkMetadata(track),
                 },
                 0,
                 track
@@ -705,7 +709,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
                   title: track.title,
                   artist: track.artistName,
                   albumTitle: track.albumName,
-                  artworkUrl: getLockScreenArtworkUrl(track),
+                  ...getLockScreenArtworkMetadata(track),
                 },
                 0,
                 track
@@ -749,7 +753,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         title: track.title,
         artist: track.artistName,
         albumTitle: track.albumName,
-        artworkUrl: getLockScreenArtworkUrl(track),
+        ...getLockScreenArtworkMetadata(track),
       },
       0,
       track
@@ -827,7 +831,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
             title: track.title,
             artist: track.artistName,
             albumTitle: track.albumName,
-            artworkUrl: getLockScreenArtworkUrl(track),
+            ...getLockScreenArtworkMetadata(track),
           },
           0,
           track

@@ -83,6 +83,7 @@ export const EMPTY_PERSONALIZED_HOME: PersonalizedHomeSnapshot = {
 const DISCOVERY_CACHE_KEY = 'openfy_home_discoveries_v3';
 const DISCOVERY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const DISCOVERY_REQUEST_TIMEOUT_MS = 9_000;
+let discoveryCacheGeneration = 0;
 
 const normalize = (value: string) =>
   value.trim().toLocaleLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -359,7 +360,7 @@ export const buildPersonalizedHome = ({
         artistId,
         spotifyArtistId: artistId,
         title,
-        imageURL: current?.imageURL || track.imageURL,
+        imageURL: current?.imageURL || '',
         appearances: (current?.appearances || 0) + 1,
       });
     });
@@ -527,13 +528,13 @@ const loadYouTubeMusicRadio = async (
   }
 };
 
-export const loadHomeDiscoveries = async (
+const loadHomeDiscoveriesUnshared = async (
   seeds: RecommendationSeed[],
   knownTrackIds: Set<string>,
   allowExplicitRecommendations: boolean,
   forceRefresh = false
 ): Promise<PersonalizedHomeTrack[]> => {
-  const activeSeeds = seeds.slice(0, 4);
+  const activeSeeds = seeds.slice(0, 3);
   if (!activeSeeds.length) return [];
   const seedKey = activeSeeds
     .map((seed) => `${seed.matchArtist === false ? 'query' : 'artist'}:${seed.id || ''}:${normalize(seed.name)}`)
@@ -555,19 +556,27 @@ export const loadHomeDiscoveries = async (
     }
   } catch {}
 
-  const groups = await Promise.all(
-    activeSeeds.map(async (seed) => {
-      const anchors = await searchYouTubeMusic(seed);
-      const radio = await loadYouTubeMusicRadio(seed, anchors);
-      return [...radio, ...anchors];
-    })
-  );
-  const tracks = uniqueTracks(groups.flat());
-  if (tracks.length) {
+  const cacheGeneration = ++discoveryCacheGeneration;
+  const anchorGroups = await Promise.all(activeSeeds.map(searchYouTubeMusic));
+  const tracks = uniqueTracks(anchorGroups.flat());
+  if (tracks.length && cacheGeneration === discoveryCacheGeneration) {
     await AsyncStorage.setItem(
       DISCOVERY_CACHE_KEY,
       JSON.stringify({ fetchedAt: Date.now(), seedKey, tracks } satisfies DiscoveryCache)
     ).catch(() => {});
+
+    // Radio expansion is useful enrichment, but must not hold the first useful
+    // discovery results behind a second round trip for every seed.
+    const radioSeed = activeSeeds[0];
+    const radioAnchors = anchorGroups[0] || [];
+    void loadYouTubeMusicRadio(radioSeed, radioAnchors).then(async (radio) => {
+      if (!radio.length || cacheGeneration !== discoveryCacheGeneration) return;
+      const expanded = uniqueTracks([...radio, ...tracks]);
+      await AsyncStorage.setItem(
+        DISCOVERY_CACHE_KEY,
+        JSON.stringify({ fetchedAt: Date.now(), seedKey, tracks: expanded } satisfies DiscoveryCache)
+      ).catch(() => {});
+    }).catch(() => {});
   }
 
   return tracks.filter(
@@ -575,6 +584,43 @@ export const loadHomeDiscoveries = async (
       !knownTrackIds.has(track.spotifyId) &&
       (allowExplicitRecommendations || !track.explicit)
   );
+};
+
+const pendingDiscoveryRequests = new Map<
+  string,
+  Promise<PersonalizedHomeTrack[]>
+>();
+
+/** Share recommendation requests between Home and Feed when both become active. */
+export const loadHomeDiscoveries = (
+  seeds: RecommendationSeed[],
+  knownTrackIds: Set<string>,
+  allowExplicitRecommendations: boolean,
+  forceRefresh = false
+): Promise<PersonalizedHomeTrack[]> => {
+  const requestKey = JSON.stringify([
+    seeds.slice(0, 3).map((seed) => [seed.id, normalize(seed.name), seed.matchArtist]),
+    [...knownTrackIds].sort(),
+    allowExplicitRecommendations,
+    forceRefresh,
+  ]);
+  const pending = pendingDiscoveryRequests.get(requestKey);
+  if (pending) return pending;
+
+  const request = loadHomeDiscoveriesUnshared(
+    seeds,
+    knownTrackIds,
+    allowExplicitRecommendations,
+    forceRefresh
+  );
+  pendingDiscoveryRequests.set(requestKey, request);
+  const clear = () => {
+    if (pendingDiscoveryRequests.get(requestKey) === request) {
+      pendingDiscoveryRequests.delete(requestKey);
+    }
+  };
+  void request.then(clear, clear);
+  return request;
 };
 
 export const clearHomeDiscoveryCache = () =>

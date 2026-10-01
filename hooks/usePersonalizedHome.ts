@@ -12,8 +12,75 @@ import {
   type PersonalizedHomeSnapshot,
   type PersonalizedHomeTrack,
 } from '@services';
+import type { LibraryTrack } from '../services/library/catalogLibrary';
+import type { LocalPlaylist } from '../services/library/localPlaylistManager';
+import type { UserProfile } from '../services/recommendation/recommendationEngine';
 
 const MIN_REFRESH_INDICATOR_MS = 350;
+const HOME_DATA_TTL_MS = 15_000;
+
+type HomeSourceData = {
+  tracks: LibraryTrack[];
+  playlists: LocalPlaylist[];
+  profile: UserProfile;
+};
+
+const sourceDataCache = new Map<number, {
+  expiresAt: number;
+  data?: HomeSourceData;
+  promise?: Promise<HomeSourceData>;
+}>();
+const snapshotCache = new Map<string, {
+  expiresAt: number;
+  snapshot: PersonalizedHomeSnapshot;
+}>();
+
+const loadHomeSourceData = (revision: number, force: boolean) => {
+  const cached = sourceDataCache.get(revision);
+  if (cached?.promise) return cached.promise;
+  if (!force && cached?.data && cached.expiresAt > Date.now()) {
+    return Promise.resolve(cached.data);
+  }
+
+  const promise = Promise.all([
+    getLibraryTracks(),
+    getLocalPlaylists(),
+    getUserProfile(),
+  ]).then(([tracks, playlists, profile]) => ({ tracks, playlists, profile }));
+  const entry = { expiresAt: Date.now() + HOME_DATA_TTL_MS, promise };
+  sourceDataCache.set(revision, entry);
+  while (sourceDataCache.size > 4) {
+    const oldest = sourceDataCache.keys().next().value;
+    if (oldest === undefined || oldest === revision) break;
+    sourceDataCache.delete(oldest);
+  }
+  void promise.then(
+    (data) => {
+      if (sourceDataCache.get(revision) === entry) {
+        sourceDataCache.set(revision, {
+          expiresAt: Date.now() + HOME_DATA_TTL_MS,
+          data,
+        });
+      }
+    },
+    () => {
+      if (sourceDataCache.get(revision) === entry) sourceDataCache.delete(revision);
+    }
+  );
+  return promise;
+};
+
+const cacheHomeSnapshot = (key: string, snapshot: PersonalizedHomeSnapshot) => {
+  snapshotCache.set(key, {
+    expiresAt: Date.now() + HOME_DATA_TTL_MS,
+    snapshot,
+  });
+  while (snapshotCache.size > 8) {
+    const oldest = snapshotCache.keys().next().value;
+    if (!oldest || oldest === key) break;
+    snapshotCache.delete(oldest);
+  }
+};
 
 export const usePersonalizedHome = () => {
   const { libraryRevision } = useLibrarySelectedCategory();
@@ -24,7 +91,12 @@ export const usePersonalizedHome = () => {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [refreshSequence, setRefreshSequence] = React.useState(0);
-  const requestKey = `${libraryRevision}:${refreshSequence}`;
+  const snapshotKey = [
+    libraryRevision,
+    settings.personalizedHome ? 'personalized' : 'general',
+    settings.allowExplicitRecommendations ? 'explicit' : 'clean',
+  ].join(':');
+  const requestKey = `${snapshotKey}:${refreshSequence}`;
   const latestRequestKey = React.useRef(requestKey);
   latestRequestKey.current = requestKey;
   const forceRefreshRef = React.useRef(false);
@@ -46,6 +118,25 @@ export const usePersonalizedHome = () => {
       const requestKeyForEffect = requestKey;
       const forceRefresh = forceRefreshRef.current;
       forceRefreshRef.current = false;
+      const cachedSnapshot = snapshotCache.get(snapshotKey);
+
+      if (cachedSnapshot) {
+        setHome(cachedSnapshot.snapshot);
+        setIsLoading(false);
+      } else {
+        setIsLoading(true);
+      }
+
+      if (
+        !forceRefresh &&
+        cachedSnapshot &&
+        cachedSnapshot.expiresAt > Date.now()
+      ) {
+        setIsRefreshing(false);
+        return () => {
+          active = false;
+        };
+      }
 
       const publish = (snapshot: PersonalizedHomeSnapshot) => {
         if (
@@ -53,16 +144,16 @@ export const usePersonalizedHome = () => {
           request !== generation.current ||
           requestKeyForEffect !== latestRequestKey.current
         ) return;
+        cacheHomeSnapshot(snapshotKey, snapshot);
         setHome(snapshot);
         setIsLoading(false);
       };
 
       void (async () => {
-        const [tracks, playlists, profile] = await Promise.all([
-          getLibraryTracks(),
-          getLocalPlaylists(),
-          getUserProfile(),
-        ]);
+        const { tracks, playlists, profile } = await loadHomeSourceData(
+          libraryRevision,
+          forceRefresh
+        );
         const build = (discoveries: PersonalizedHomeTrack[]) =>
           buildPersonalizedHome({
             allowExplicitRecommendations: settings.allowExplicitRecommendations,
@@ -73,7 +164,9 @@ export const usePersonalizedHome = () => {
             tracks,
           });
         const localSnapshot = build(
-          settings.personalizedHome ? homeRef.current.discoveries : []
+          settings.personalizedHome
+            ? cachedSnapshot?.snapshot.discoveries || homeRef.current.discoveries
+            : []
         );
         publish(localSnapshot);
         if (forceRefresh) {
@@ -115,6 +208,8 @@ export const usePersonalizedHome = () => {
       };
     }, [
       requestKey,
+      snapshotKey,
+      libraryRevision,
       settings.allowExplicitRecommendations,
       settings.personalizedHome,
     ])

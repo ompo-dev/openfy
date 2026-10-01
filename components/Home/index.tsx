@@ -18,6 +18,7 @@ import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { useLibrarySelectedCategory, usePlayer, type PlayerTrack } from '@context';
 import { useDetailNavigation, usePersonalizedHome } from '@hooks';
 import {
+  getCachedArtistImage,
   upsertCatalogTracks,
   type PersonalizedHomeTrack,
 } from '@services';
@@ -105,6 +106,9 @@ export const Home = () => {
           if (request === searchGeneration.current) {
             setResults(nextResults);
             setSearchError('');
+            void Promise.all(nextResults.artists.map((artist) =>
+              getCachedArtistImage(artist.id, async () => artist.imageURL)
+            ));
           }
         })
         .catch((error: unknown) => {

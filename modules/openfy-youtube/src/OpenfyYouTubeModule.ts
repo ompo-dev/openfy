@@ -23,6 +23,7 @@ export type NativeYouTubePlaybackMetadata = {
   artist: string;
   albumTitle?: string;
   artworkUrl?: string;
+  artworkFallbackUrl?: string;
   durationMs?: number;
 };
 

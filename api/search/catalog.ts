@@ -29,6 +29,34 @@ const decodeRoutePart = (value: string) => {
   }
 };
 
+const normalizeArtistName = (value: string) =>
+  value.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase();
+
+const parseArtistRoute = (artistRouteId: string) => {
+  const routeValue = artistRouteId.slice(YOUTUBE_MUSIC_ARTIST_PREFIX.length);
+  const legacyName = routeValue.startsWith('name_');
+  const separator = legacyName ? -1 : routeValue.indexOf('~');
+  const encodedBrowseId = legacyName
+    ? routeValue
+    : separator >= 0
+      ? routeValue.slice(0, separator)
+      : routeValue;
+  const encodedName = legacyName
+    ? ''
+    : separator >= 0
+      ? routeValue.slice(separator + 1)
+      : '';
+  let browseId = legacyName ? '' : decodeRoutePart(encodedBrowseId);
+  let routeName = decodeRoutePart(encodedName) || getYouTubeMusicArtistRouteName(artistRouteId);
+
+  if (browseId.startsWith('name_')) {
+    if (!routeName) routeName = decodeRoutePart(browseId.slice('name_'.length));
+    browseId = '';
+  }
+
+  return { browseId, routeName };
+};
+
 const largestImage = (item: YouTubeMusicItem, preferredSize?: number) =>
   [...getYouTubeMusicThumbnails(item)]
     .sort((first, second) => (second.width || 0) - (first.width || 0))
@@ -125,27 +153,7 @@ const loadYouTubeMusicArtistProfile = async (
   if (!artistRouteId.startsWith(YOUTUBE_MUSIC_ARTIST_PREFIX)) {
     throw new Error('Identificador de artista inválido.');
   }
-  const routeValue = artistRouteId.slice(YOUTUBE_MUSIC_ARTIST_PREFIX.length);
-  const legacyName = routeValue.startsWith('name_');
-  const separator = legacyName ? -1 : routeValue.indexOf('~');
-  const encodedBrowseId = legacyName
-    ? routeValue
-    : separator >= 0
-      ? routeValue.slice(0, separator)
-      : routeValue;
-  const encodedName = legacyName
-    ? ''
-    : separator >= 0
-      ? routeValue.slice(separator + 1)
-      : '';
-  let browseId = legacyName ? '' : decodeRoutePart(encodedBrowseId);
-  let routeName = decodeRoutePart(encodedName) || getYouTubeMusicArtistRouteName(artistRouteId);
-
-  // Older saved links used `ytartist_name_<name>` without a browse id.
-  if (browseId.startsWith('name_')) {
-    if (!routeName) routeName = decodeRoutePart(browseId.slice('name_'.length));
-    browseId = '';
-  }
+  let { browseId, routeName } = parseArtistRoute(artistRouteId);
 
   const client = await withYouTubeMusicTimeout(getYouTubeMusicClient());
   if (!client) throw new Error('O perfil do artista está demorando para carregar.');
@@ -157,8 +165,8 @@ const loadYouTubeMusicArtistProfile = async (
     const items = search?.artists?.contents || [];
     const normalizedName = name.trim().toLocaleLowerCase();
     const match = items.find(
-      (item) => (item.name || item.title || '').trim().toLocaleLowerCase() === normalizedName
-    ) || items[0];
+      (item) => normalizeArtistName(item.name || item.title || '') === normalizeArtistName(normalizedName)
+    );
     return match?.id || match?.author?.channel_id || '';
   };
 
@@ -211,7 +219,10 @@ const loadYouTubeMusicArtistProfile = async (
       type: 'artist',
       id: artistRouteId,
       name,
-      imageURL: largestImage(headerItem),
+      imageURL:
+        !routeName || normalizeArtistName(name) === normalizeArtistName(routeName)
+          ? largestImage(headerItem)
+          : '',
     },
     tracks,
   };
@@ -251,5 +262,70 @@ export const getYouTubeMusicArtistProfile = (
     if (!oldest || oldest === artistRouteId) break;
     artistProfileCache.delete(oldest);
   }
+  return entry.promise;
+};
+
+const ARTIST_IMAGE_CACHE_MS = 6 * 60 * 60 * 1000;
+const EMPTY_ARTIST_IMAGE_CACHE_MS = 30 * 1000;
+const artistImageRequests = new Map<
+  string,
+  { expiresAt: number; promise: Promise<string> }
+>();
+
+const loadYouTubeMusicArtistImage = async (artistRouteId: string) => {
+  if (!artistRouteId.startsWith(YOUTUBE_MUSIC_ARTIST_PREFIX)) return '';
+  const { browseId, routeName } = parseArtistRoute(artistRouteId);
+  if (!routeName) return '';
+
+  const client = await withYouTubeMusicTimeout(getYouTubeMusicClient());
+  if (!client) return '';
+  const result = await withYouTubeMusicTimeout(
+    client.music.search(routeName, { type: 'artist' })
+  );
+  const artists = result?.artists?.contents || [];
+  const byId = browseId
+    ? artists.find((item) =>
+      item.id === browseId || item.author?.channel_id === browseId
+    )
+    : undefined;
+  const byName = browseId
+    ? undefined
+    : artists.find(
+      (item) => normalizeArtistName(item.name || item.title || '') === normalizeArtistName(routeName)
+    );
+  return largestImage(byId || byName || {});
+};
+
+/** Fetch only the artist search result image; home/feed do not need a full profile and track list. */
+export const getYouTubeMusicArtistImage = (
+  artistRouteId: string
+): Promise<string> => {
+  const cached = artistImageRequests.get(artistRouteId);
+  if (cached && cached.expiresAt > Date.now()) return cached.promise;
+
+  const entry = {
+    expiresAt: Number.POSITIVE_INFINITY,
+    promise: loadYouTubeMusicArtistImage(artistRouteId),
+  };
+  artistImageRequests.set(artistRouteId, entry);
+  while (artistImageRequests.size > 100) {
+    const oldest = artistImageRequests.keys().next().value;
+    if (!oldest || oldest === artistRouteId) break;
+    artistImageRequests.delete(oldest);
+  }
+  void entry.promise.then(
+    (imageURL) => {
+      if (artistImageRequests.get(artistRouteId) === entry) {
+        entry.expiresAt = Date.now() + (
+          imageURL ? ARTIST_IMAGE_CACHE_MS : EMPTY_ARTIST_IMAGE_CACHE_MS
+        );
+      }
+    },
+    () => {
+      if (artistImageRequests.get(artistRouteId) === entry) {
+        artistImageRequests.delete(artistRouteId);
+      }
+    }
+  );
   return entry.promise;
 };

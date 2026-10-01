@@ -24,6 +24,7 @@ export type NativeYouTubePlaybackMetadata = {
   artist: string;
   albumTitle?: string;
   artworkUrl?: string;
+  artworkFallbackUrl?: string;
   durationMs?: number;
 };
 
@@ -122,6 +123,9 @@ const metadataRecord = (
   artist: metadata.artist,
   ...(metadata.albumTitle ? { albumTitle: metadata.albumTitle } : {}),
   ...(metadata.artworkUrl ? { artworkUrl: metadata.artworkUrl } : {}),
+  ...(metadata.artworkFallbackUrl
+    ? { artworkFallbackUrl: metadata.artworkFallbackUrl }
+    : {}),
   ...(metadata.durationMs && metadata.durationMs > 0
     ? { durationMs: String(Math.round(metadata.durationMs)) }
     : {}),

@@ -129,6 +129,7 @@ describe('downloadYouTubeStreamNatively', () => {
         artist: 'Artista',
         albumTitle: 'Álbum',
         artworkUrl: 'https://images.example/cover.jpg',
+        artworkFallbackUrl: 'https://images.example/cover-fallback.jpg',
         durationMs: 180123,
       })
     ).resolves.toBe(true);
@@ -141,6 +142,7 @@ describe('downloadYouTubeStreamNatively', () => {
       artist: 'Artista',
       albumTitle: 'Álbum',
       artworkUrl: 'https://images.example/cover.jpg',
+      artworkFallbackUrl: 'https://images.example/cover-fallback.jpg',
       durationMs: '180123',
     });
   });

@@ -8,6 +8,7 @@ public struct OpenfyNowPlayingMetadata: Sendable {
   public let artist: String
   public let albumTitle: String?
   public let artworkURL: String?
+  public let fallbackArtworkURL: String?
   public let durationMs: Double
 
   public init(values: [String: String]) {
@@ -15,6 +16,7 @@ public struct OpenfyNowPlayingMetadata: Sendable {
     artist = values["artist"] ?? ""
     albumTitle = values["albumTitle"]
     artworkURL = values["artworkUrl"]
+    fallbackArtworkURL = values["artworkFallbackUrl"]
     durationMs = Double(values["durationMs"] ?? "") ?? 0
   }
 }
@@ -143,7 +145,10 @@ public final class OpenfyNativeYouTubePlayer {
     }
 
     updateNowPlayingInfo()
-    loadNowPlayingArtwork(from: metadata.artworkURL)
+    loadNowPlayingArtwork(
+      from: metadata.artworkURL,
+      fallback: metadata.fallbackArtworkURL
+    )
     player.play()
   }
 
@@ -325,17 +330,20 @@ public final class OpenfyNativeYouTubePlayer {
       : measured
   }
 
-  private func loadNowPlayingArtwork(from rawURL: String?) {
+  private func loadNowPlayingArtwork(from rawURL: String?, fallback rawFallbackURL: String?) {
     artworkTask?.cancel()
     artworkTask = nil
     nowPlayingArtwork = nil
     artworkLoadToken = nil
 
-    guard
-      let rawURL,
-      let url = URL(string: rawURL),
-      url.isFileURL || url.scheme?.lowercased() == "https"
-    else {
+    let urls = [rawURL, rawFallbackURL].compactMap { rawValue -> URL? in
+      guard let rawValue, let url = URL(string: rawValue),
+        url.isFileURL || url.scheme?.lowercased() == "https" else {
+        return nil
+      }
+      return url
+    }
+    guard !urls.isEmpty else {
       updateNowPlayingInfo()
       return
     }
@@ -343,34 +351,38 @@ public final class OpenfyNativeYouTubePlayer {
     let token = UUID()
     artworkLoadToken = token
     artworkTask = Task { @MainActor [weak self] in
-      do {
-        let data: Data
-        if url.isFileURL {
-          data = try Data(contentsOf: url, options: .mappedIfSafe)
-        } else {
-          let (downloaded, response) = try await URLSession.shared.data(from: url)
+      for url in urls {
+        guard !Task.isCancelled else { return }
+        do {
+          let data: Data
+          if url.isFileURL {
+            data = try Data(contentsOf: url, options: .mappedIfSafe)
+          } else {
+            let (downloaded, response) = try await URLSession.shared.data(from: url)
+            guard
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              downloaded.count <= 15 * 1024 * 1024
+            else { continue }
+            data = downloaded
+          }
+
           guard
-            let http = response as? HTTPURLResponse,
-            (200...299).contains(http.statusCode),
-            downloaded.count <= 15 * 1024 * 1024
-          else { return }
-          data = downloaded
+            data.count <= 15 * 1024 * 1024,
+            let image = UIImage(data: data),
+            let self,
+            self.artworkLoadToken == token
+          else { continue }
+
+          self.nowPlayingArtwork = MPMediaItemArtwork(
+            boundsSize: image.size,
+            requestHandler: { _ in image }
+          )
+          self.updateNowPlayingInfo()
+          return
+        } catch {
+          // Try the catalog URL when a stale or corrupt local cover is selected.
         }
-
-        guard
-          !Task.isCancelled,
-          let self,
-          self.artworkLoadToken == token,
-          let image = UIImage(data: data)
-        else { return }
-
-        self.nowPlayingArtwork = MPMediaItemArtwork(
-          boundsSize: image.size,
-          requestHandler: { _ in image }
-        )
-        self.updateNowPlayingInfo()
-      } catch {
-        // Artwork is optional and must never interrupt playback.
       }
     }
   }

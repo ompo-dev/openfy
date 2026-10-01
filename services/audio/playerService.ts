@@ -12,6 +12,7 @@ import {
 } from 'expo-audio';
 import type { AudioPlayer } from 'expo-audio/build/AudioModule.types';
 import { AppState, Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
 import { getDirectYouTubeMediaHeaders } from './directYouTubeResolver';
 import { prepareLocalAudioForPlayback } from './localAudioRepair';
@@ -35,7 +36,45 @@ export type LockScreenMetadata = {
   artist: string;
   albumTitle?: string;
   artworkUrl?: string;
+  artworkFallbackUrl?: string;
 };
+
+const isRemoteArtwork = (value?: string) => /^https?:\/\//i.test(value || '');
+
+const resolveLockScreenMetadata = async (
+  metadata?: LockScreenMetadata
+): Promise<LockScreenMetadata | undefined> => {
+  if (!metadata) return undefined;
+  const fallbackUrl = isRemoteArtwork(metadata.artworkFallbackUrl)
+    ? metadata.artworkFallbackUrl
+    : undefined;
+
+  if (metadata.artworkUrl?.startsWith('file:')) {
+    const info = await FileSystem.getInfoAsync(metadata.artworkUrl).catch(() => null);
+    if (info?.exists && (info.size === undefined || info.size > 0)) {
+      return metadata;
+    }
+    return {
+      ...metadata,
+      artworkUrl: fallbackUrl,
+      artworkFallbackUrl: undefined,
+    };
+  }
+
+  if (isRemoteArtwork(metadata.artworkUrl)) return metadata;
+  return {
+    ...metadata,
+    artworkUrl: fallbackUrl,
+    artworkFallbackUrl: undefined,
+  };
+};
+
+const toExpoLockScreenMetadata = (metadata: LockScreenMetadata) => ({
+  title: metadata.title,
+  artist: metadata.artist,
+  ...(metadata.albumTitle ? { albumTitle: metadata.albumTitle } : {}),
+  ...(metadata.artworkUrl ? { artworkUrl: metadata.artworkUrl } : {}),
+});
 
 export type PlayerState = {
   isPlaying: boolean;
@@ -635,7 +674,7 @@ export const loadAndPlay = async (
     return loadAndPlayNativeYouTube(
       nativeYouTubeVideoId,
       onStatusUpdate,
-      lockScreenMetadata,
+      await resolveLockScreenMetadata(lockScreenMetadata),
       diagnosticTrack
     );
   }
@@ -646,7 +685,10 @@ export const loadAndPlay = async (
     const callbackForThisPlayer = onStatusUpdate || null;
     await configureAudioSession(diagnosticTrack?.spotifyId);
     if (generation !== loadGeneration) return false;
-    const repair = await prepareLocalAudioForPlayback(uri);
+    const [repair, resolvedLockScreenMetadata] = await Promise.all([
+      prepareLocalAudioForPlayback(uri),
+      resolveLockScreenMetadata(lockScreenMetadata),
+    ]);
     if (generation !== loadGeneration) return false;
     const sourceDescription = describeSource(uri);
     currentSourceKind = sourceDescription.sourceKind;
@@ -692,14 +734,18 @@ export const loadAndPlay = async (
       runRemoteCommand('previous');
     });
 
-    if (lockScreenMetadata) {
+    if (resolvedLockScreenMetadata) {
       try {
-        player.setActiveForLockScreen(true, lockScreenMetadata, {
-          showNextTrack: true,
-          showPreviousTrack: true,
-          showSeekBackward: false,
-          showSeekForward: false,
-        });
+        player.setActiveForLockScreen(
+          true,
+          toExpoLockScreenMetadata(resolvedLockScreenMetadata),
+          {
+            showNextTrack: true,
+            showPreviousTrack: true,
+            showSeekBackward: false,
+            showSeekForward: false,
+          }
+        );
       } catch (error) {
         console.warn('[PlayerService] Lock screen controls unavailable:', error);
       }

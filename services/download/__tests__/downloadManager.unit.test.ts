@@ -95,9 +95,11 @@ describe('queueDownloads', () => {
     jest.requireMock('../../../modules/openfy-youtube').default
       .resolveAndDownloadGoogleVideoAsync = mockNativePlayerAndDownload;
     fileSystemMock.getInfoAsync.mockReset();
-    fileSystemMock.getInfoAsync.mockResolvedValue({
-      exists: true,
-      size: 100000,
+    fileSystemMock.getInfoAsync.mockImplementation(async (path) => {
+      const isManagedCover = String(path).includes('openfy_covers');
+      return isManagedCover
+        ? { exists: false }
+        : { exists: true, size: 100000 };
     });
     fileSystemMock.createDownloadResumable.mockReset();
     fileSystemMock.createDownloadResumable.mockReturnValue({
@@ -239,7 +241,7 @@ describe('queueDownloads', () => {
       albumId: 'album', albumName: 'Real album', duration_ms: 158250,
       localAudioPath: saved.localAudioPath, downloadedAt: saved.downloadedAt,
       imageURL: 'https://images.test/640.jpg', localImagePath: 'file:///hq.jpg',
-      youtubeVideoId: '_MyOuFWnPPY', metadataVersion: 2,
+      youtubeVideoId: '_MyOuFWnPPY', metadataVersion: 3,
     })]);
     expect(fileSystemMock.createDownloadResumable).not.toHaveBeenCalled();
     expect(mockNativePlayerAndDownload).not.toHaveBeenCalled();
@@ -257,7 +259,7 @@ describe('queueDownloads', () => {
     expect(await getDownloadedTracks()).toEqual([]);
   });
 
-  it('keeps existing credits, cover and duration when a metadata response is partial', async () => {
+  it('keeps catalog fields and refreshes a legacy local cover when metadata is partial', async () => {
     const saved = { id: 'track_partial', spotifyId: 'partial-repair', title: 'Song',
       artistName: 'Artist', artists: [{ id: 'artist', name: 'Artist' }],
       albumName: 'Album', imageURL: 'https://images.test/hq.jpg', localImagePath: 'file:///hq.jpg',
@@ -268,10 +270,19 @@ describe('queueDownloads', () => {
       albumArtists: [], imageURL: '', duration_ms: 0, spotifyId: 'partial-repair',
     });
     await repairDownloadedTrackMetadata();
-    expect(await getDownloadedTracks()).toEqual([expect.objectContaining(saved)]);
+    expect(await getDownloadedTracks()).toEqual([expect.objectContaining({
+      ...saved,
+      localImagePath: 'file:///mock_dir/cover.jpg',
+      metadataVersion: 3,
+    })]);
   });
 
   it('rejects an HTML error response as cover art', async () => {
+    fileSystemMock.getInfoAsync.mockImplementation(async (path) =>
+      String(path).endsWith('bad.jpg')
+        ? { exists: false }
+        : { exists: true, size: 100000 }
+    );
     fileSystemMock.downloadAsync.mockResolvedValue({
       uri: 'file:///bad.jpg', status: 200, headers: { 'Content-Type': 'text/html' },
     });

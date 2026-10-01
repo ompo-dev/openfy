@@ -9,8 +9,12 @@ jest.mock('react-native', () => ({
   Platform: { OS: 'web' },
   AppState: { currentState: 'active', addEventListener: jest.fn() },
 }));
+jest.mock('expo-file-system/legacy', () => ({
+  getInfoAsync: jest.fn().mockResolvedValue({ exists: true, size: 1024 }),
+}));
 jest.mock('../localAudioRepair', () => ({ prepareLocalAudioForPlayback: jest.fn().mockResolvedValue(undefined) }));
 import { prepareLocalAudioForPlayback } from '../localAudioRepair';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import {
   clearPreloadedSource,
@@ -508,6 +512,29 @@ describe('playerService fades', () => {
     listeners.get('remotePreviousTrack')?.();
     await flushMicrotasks();
     expect(previous).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the remote lock-screen cover when the downloaded cover file is missing', async () => {
+    (Platform as { OS: string }).OS = 'ios';
+    jest.mocked(FileSystem.getInfoAsync).mockResolvedValueOnce({ exists: false } as never);
+    const player = {
+      ...createPlayer(),
+      setActiveForLockScreen: jest.fn(),
+    };
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+
+    await loadAndPlay('file:///offline.m4a', undefined, {
+      title: 'Faixa',
+      artist: 'Artista',
+      artworkUrl: 'file:///missing-cover.jpg',
+      artworkFallbackUrl: 'https://images.example/cover.jpg',
+    });
+
+    expect(player.setActiveForLockScreen).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ artworkUrl: 'https://images.example/cover.jpg' }),
+      expect.any(Object)
+    );
   });
 
   it('does not recreate a pending preload after entering background', async () => {
