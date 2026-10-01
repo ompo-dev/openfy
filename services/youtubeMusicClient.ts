@@ -52,13 +52,56 @@ export type YouTubeMusicItem = {
   subscribers?: string;
 };
 
+type UnknownRecord = Record<string, unknown>;
+
+const asRecord = (value: unknown): UnknownRecord | null =>
+  value && typeof value === 'object' ? value as UnknownRecord : null;
+
+const asText = (value: unknown): string => {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  const record = asRecord(value);
+  if (!record) return '';
+  if (typeof record.text === 'string') return record.text.trim();
+  if (typeof record.simpleText === 'string') return record.simpleText.trim();
+  if (Array.isArray(record.runs)) {
+    return record.runs
+      .map((run) => asText(asRecord(run)?.text))
+      .filter(Boolean)
+      .join('')
+      .trim();
+  }
+  try {
+    const rendered = String(value);
+    return rendered !== '[object Object]' ? rendered.trim() : '';
+  } catch {
+    return '';
+  }
+};
+
+export const getYouTubeMusicText = asText;
+
 export const getYouTubeMusicThumbnails = (
-  item: Pick<YouTubeMusicItem, 'thumbnail' | 'thumbnails'>
+  item: Pick<YouTubeMusicItem, 'thumbnail' | 'thumbnails'> | unknown
 ) => {
-  const thumbnail = item.thumbnail;
-  if (Array.isArray(thumbnail)) return thumbnail;
-  if (thumbnail && 'contents' in thumbnail) return thumbnail.contents || [];
-  return item.thumbnails || [];
+  const record = asRecord(item);
+  if (!record) return [];
+  const thumbnail = record.thumbnail;
+  const nested = asRecord(thumbnail);
+  const values = Array.isArray(thumbnail)
+    ? thumbnail
+    : Array.isArray(nested?.contents)
+      ? nested.contents
+      : Array.isArray(record.thumbnails)
+        ? record.thumbnails
+        : [];
+  return values.flatMap((value) => {
+    const image = asRecord(value);
+    const url = asText(image?.url);
+    if (!url) return [];
+    const width = Number(image?.width);
+    return [{ url, width: Number.isFinite(width) ? width : 0 }];
+  });
 };
 
 export type YouTubeMusicArtistPage = {

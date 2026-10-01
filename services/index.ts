@@ -143,7 +143,10 @@ export type {
   LibraryTrack,
 } from './library/catalogLibrary';
 
-export { getCachedArtistImage } from './library/artistImageCache';
+export {
+  getCachedArtistImage,
+  rememberCachedArtistImage,
+} from './library/artistImageCache';
 
 export {
   getLocalAlbumId,

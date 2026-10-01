@@ -29,12 +29,14 @@ jest.mock('@hooks', () => ({
 }));
 jest.mock('@services', () => ({
   getCachedArtistImage: jest.fn(),
+  rememberCachedArtistImage: jest.fn(),
   upsertCatalogTracks: jest.fn(),
 }));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 jest.mock('expo-image', () => ({ Image: () => null }));
+jest.mock('expo-router', () => ({ useFocusEffect: jest.fn() }));
 jest.mock('@expo/vector-icons/Ionicons', () => ({
   __esModule: true,
   default: () => null,

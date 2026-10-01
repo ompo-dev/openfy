@@ -162,11 +162,12 @@ describe('playerService fades', () => {
     const second = preloadAudio('file:///second.m4a');
     const third = preloadAudio('file:///third.m4a');
     const fourth = preloadAudio('file:///fourth.m4a');
+    const fifth = preloadAudio('file:///fifth.m4a');
 
     await flushMicrotasks();
     expect(clearPreloadedSource).not.toHaveBeenCalledWith('file:///first.m4a');
     completions.forEach((complete) => complete());
-    await Promise.all([first, second, third, fourth]);
+    await Promise.all([first, second, third, fourth, fifth]);
 
     expect(preload).not.toHaveBeenCalledWith(
       'file:///first.m4a',
@@ -176,6 +177,9 @@ describe('playerService fades', () => {
       preferredForwardBufferDuration: 5,
     });
     expect(preload).toHaveBeenCalledWith('file:///fourth.m4a', {
+      preferredForwardBufferDuration: 5,
+    });
+    expect(preload).toHaveBeenCalledWith('file:///fifth.m4a', {
       preferredForwardBufferDuration: 5,
     });
   });

@@ -4,6 +4,7 @@ import {
   getArtist,
   getArtistAlbums,
   getArtistTopTracks,
+  getCachedArtistSearchSeed,
   getYouTubeMusicArtistImage,
   getYouTubeMusicArtistProfile,
 } from '@api';
@@ -17,6 +18,7 @@ import {
   isTrackParticipantArtist,
   isTrackPrimaryArtist,
   mergeArtistProfileTracks,
+  rememberCachedArtistImage,
 } from '@services';
 import { ArtistScreen } from '../ArtistScreen';
 
@@ -26,10 +28,12 @@ jest.mock('@api', () => ({
   getArtistTopTracks: jest.fn(),
   getYouTubeMusicArtistImage: jest.fn(),
   getYouTubeMusicArtistProfile: jest.fn(),
+  getCachedArtistSearchSeed: jest.fn(),
 }));
 jest.mock('@context', () => ({ usePlayer: jest.fn() }));
 jest.mock('@services', () => ({
   getCachedArtistImage: jest.fn(),
+  rememberCachedArtistImage: jest.fn(),
   getLibraryTracks: jest.fn(),
   getUserProfile: jest.fn(),
   groupLocalAlbums: jest.fn(),
@@ -82,6 +86,8 @@ describe('ArtistScreen', () => {
     jest.mocked(getLibraryTracks).mockResolvedValue([localTrack] as never);
     jest.mocked(getCachedArtistImage).mockResolvedValue('');
     jest.mocked(getYouTubeMusicArtistImage).mockResolvedValue('');
+    jest.mocked(getCachedArtistSearchSeed).mockReturnValue(null);
+    jest.mocked(rememberCachedArtistImage).mockResolvedValue(undefined);
     jest.mocked(getYouTubeMusicArtistProfile).mockRejectedValue(new Error('YTM profile unavailable'));
     jest.mocked(getUserProfile).mockResolvedValue({ recentlyPlayedTracks: [] } as never);
     jest.mocked(groupLocalArtists).mockReturnValue([{
@@ -95,7 +101,12 @@ describe('ArtistScreen', () => {
     jest.mocked(isTrackPrimaryArtist).mockReturnValue(true);
     jest.mocked(isTrackParticipantArtist).mockReturnValue(false);
     jest.mocked(mergeArtistProfileTracks).mockImplementation((value) => ({
-      primaryTracks: value.primaryTracks,
+      primaryTracks: [...value.primaryTracks, ...value.contextualTracks.filter((track) => {
+        const primaryArtist = track.artists?.[0];
+        const matches = primaryArtist?.id === value.artistId ||
+          primaryArtist?.name.toLocaleLowerCase() === value.artistName.toLocaleLowerCase();
+        return matches && !value.primaryTracks.some((primary) => primary.id === track.id);
+      })],
       participationTracks: value.participationTracks,
     }));
     jest.mocked(getArtist).mockRejectedValue(new Error('Spotify profile unavailable'));
@@ -124,5 +135,35 @@ describe('ArtistScreen', () => {
       expect(view.getByTestId('artist-image').props.children).toBe('no-artist-image');
     });
     expect(view.queryByText('https://images.example/cover.jpg')).toBeNull();
+  });
+
+  it('keeps the artist portrait and tracks found in search when profile loading fails', async () => {
+    const artistId = 'ytartist_UCseed~Seed%20artist';
+    const seedTrack = {
+      id: 'yt_abcdefghijk',
+      title: 'Seed track',
+      subtitle: 'Seed artist',
+      imageURL: 'https://images.example/seed-cover.jpg',
+      durationMs: 180_000,
+      artists: [{ id: artistId, name: 'Seed artist' }],
+    };
+    jest.mocked(getCachedArtistSearchSeed).mockReturnValue({
+      artist: {
+        id: artistId,
+        type: 'artist',
+        name: 'Seed artist',
+        imageURL: 'https://images.example/seed-portrait.jpg',
+      },
+      tracks: [seedTrack],
+    } as never);
+    const view = await render(<ArtistScreen artistId={artistId} />);
+
+    await waitFor(() => {
+      expect(view.getByText('Seed artist')).toBeTruthy();
+      expect(view.getByTestId('artist-image').props.children).toBe(
+        'https://images.example/seed-portrait.jpg'
+      );
+      expect(view.getByText('track-count:1')).toBeTruthy();
+    });
   });
 });

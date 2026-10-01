@@ -7,6 +7,7 @@ import { getYouTubeMusicArtistImage } from '@api';
 import { useDetailNavigation } from '@hooks';
 import { getCachedArtistImage, type PersonalizedHomeSnapshot } from '@services';
 import { LoggedPressable } from '../native';
+import { log } from '../../utils/appLogger';
 
 export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
   const { openDetail } = useDetailNavigation();
@@ -14,14 +15,21 @@ export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
 
   React.useEffect(() => {
     let active = true;
-    void Promise.all(home.artists.map(async (artist) => {
-      if (!artist.artistId.startsWith('ytartist_')) return [artist.artistId, ''] as const;
-      const imageURL = await getCachedArtistImage(artist.artistId, () =>
+    home.artists.forEach((artist) => {
+      if (!artist.artistId.startsWith('ytartist_')) return;
+      const finishImageLoad = log.time('home', 'discovery artist image load', {
+        artistId: artist.artistId,
+      });
+      void getCachedArtistImage(artist.artistId, () =>
         getYouTubeMusicArtistImage(artist.artistId)
-      ).catch(() => '');
-      return [artist.artistId, imageURL] as const;
-    })).then((entries) => {
-      if (active) setArtistImages((current) => ({ ...current, ...Object.fromEntries(entries) }));
+      ).then((imageURL) => {
+        if (active && imageURL) {
+          setArtistImages((current) => ({ ...current, [artist.artistId]: imageURL }));
+        }
+        finishImageLoad({ ok: Boolean(imageURL), hasImage: Boolean(imageURL) });
+      }).catch((error) => {
+        finishImageLoad({ ok: false, error: String(error) });
+      });
     });
     return () => {
       active = false;
@@ -46,7 +54,7 @@ export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
             style={styles.artist}
           >
             {artistImages[artist.artistId] ? (
-              <Image source={{ uri: artistImages[artist.artistId] }} contentFit="cover" style={styles.image} />
+              <Image cachePolicy="memory-disk" source={{ uri: artistImages[artist.artistId] }} contentFit="cover" style={styles.image} />
             ) : (
               <View style={[styles.image, styles.fallback]}>
                 <Ionicons name="person" size={26} color="#929292" />

@@ -9,6 +9,7 @@ import {
   preload,
   setAudioModeAsync,
   type AudioStatus,
+  type AudioPlayerOptions,
 } from 'expo-audio';
 import type { AudioPlayer } from 'expo-audio/build/AudioModule.types';
 import { AppState, Platform } from 'react-native';
@@ -164,13 +165,15 @@ let volumeRamp: {
 const diagnostics: AudioDiagnosticEvent[] = [];
 const MAX_DIAGNOSTICS = 30;
 
-const getPlayerOptions = () =>
+const getPlayerOptions = (durationMs?: number): AudioPlayerOptions =>
   Platform.OS === 'web'
     ? { updateInterval: 100 }
     : {
         updateInterval: 500,
         keepAudioSessionActive: true,
-        preferredForwardBufferDuration: Platform.OS === 'ios' ? 30 : 10,
+        preferredForwardBufferDuration: durationMs && durationMs > 0
+          ? Math.min(600, Math.max(10, Math.ceil(durationMs / 1000)))
+          : Platform.OS === 'ios' ? 30 : 10,
       };
 
 const stopVolumeRamp = () => {
@@ -480,7 +483,7 @@ type PreloadEntry = {
 
 const preloadedSources = new Map<string, PreloadEntry>();
 const preloadChains = new Map<string, Promise<void>>();
-const MAX_PRELOADED_SOURCES = 3;
+const MAX_PRELOADED_SOURCES = 4;
 
 const clearPreloadedPayload = async (sourceInput: AudioSourceInput): Promise<void> => {
   try {
@@ -515,7 +518,10 @@ const trimPreloadedSources = () => {
 };
 
 /** Buffer a short lead-in; Expo reuses it when this URI starts playing. */
-export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void> => {
+export const preloadAudio = async (
+  sourceInput: AudioSourceInput,
+  preferredForwardBufferDuration = 5
+): Promise<void> => {
   const source = toAudioSource(sourceInput);
   const uri = source.uri;
   if (parseNativeYouTubePlaybackUri(uri)) return;
@@ -539,7 +545,9 @@ export const preloadAudio = async (sourceInput: AudioSourceInput): Promise<void>
       if (!isAppActive() || preloadedSources.get(uri)?.token !== entry.token || entry.cancelled) return;
       await prepareLocalAudioForPlayback(uri);
       if (!isAppActive() || preloadedSources.get(uri)?.token !== entry.token || entry.cancelled) return;
-      await Promise.resolve(preload(payload as any, { preferredForwardBufferDuration: 5 }));
+      await Promise.resolve(preload(payload as any, {
+        preferredForwardBufferDuration: Math.max(5, preferredForwardBufferDuration),
+      }));
       entry.nativeReady = true;
       if (preloadedSources.get(uri)?.token !== entry.token || entry.cancelled) {
         await clearPreloadedPayload(payload);
@@ -738,7 +746,13 @@ export const loadAndPlay = async (
     }
     if (generation !== loadGeneration) return false;
     preloadedSources.delete(uri);
-    const player = playerInstance || createAudioPlayer(playerSource as any, getPlayerOptions());
+    const playerOptions = getPlayerOptions(diagnosticTrack?.duration_ms);
+    log.player('active track buffer target', {
+      trackId: diagnosticTrack?.spotifyId,
+      durationMs: diagnosticTrack?.duration_ms,
+      preferredForwardBufferDuration: playerOptions.preferredForwardBufferDuration,
+    });
+    const player = playerInstance || createAudioPlayer(playerSource as any, playerOptions);
     if (playerInstance) player.replace(playerSource as any);
     playerInstance = player;
     if (Platform.OS !== 'ios') void enqueuePreloadCleanup(uri, playerSource);

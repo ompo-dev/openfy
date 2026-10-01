@@ -2,7 +2,9 @@ import {
   _setLoggerForTests,
   clearLogBuffer,
   formatLogBuffer,
+  formatPerformanceMetricSummary,
   getLogBuffer,
+  getPerformanceMetricSummary,
   log,
   logConfig,
 } from '../appLogger';
@@ -57,5 +59,20 @@ describe('app logger', () => {
     logConfig.capture = false;
     log.nav('route changed');
     expect(getLogBuffer()).toHaveLength(0);
+  });
+
+  it('summarizes timed operations for settings and copied diagnostics', () => {
+    const finish = log.time('search', 'catalog query');
+    finish({ ok: true });
+    const metrics = getPerformanceMetricSummary();
+
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]).toMatchObject({
+      category: 'search',
+      action: 'catalog query',
+      count: 1,
+      failures: 0,
+    });
+    expect(formatPerformanceMetricSummary(metrics)).toContain('catalog query');
   });
 });

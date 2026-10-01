@@ -3,7 +3,8 @@
  */
 
 import * as React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -73,7 +74,7 @@ const PostHeader = ({
 }) => (
   <View style={styles.postHeader}>
     {author.avatarUrl ? (
-      <Image source={{ uri: author.avatarUrl }} style={styles.authorAvatar} />
+      <Image cachePolicy="memory-disk" source={{ uri: author.avatarUrl }} style={styles.authorAvatar} />
     ) : (
       <View style={[styles.authorAvatar, styles.authorAvatarFallback]}>
         <Ionicons
@@ -259,6 +260,7 @@ const ListeningPartyPost = ({
         <View style={styles.participantStack}>
           {tracks.slice(0, 3).map((track, index) => (
             <Image
+              cachePolicy="memory-disk"
               key={track.spotifyId}
               source={{ uri: track.imageURL }}
               style={[styles.participantAvatar, { marginLeft: index ? -7 : 0 }]}
@@ -290,6 +292,7 @@ const ListeningPartyPost = ({
             <View style={styles.partyCovers}>
               {tracks.map((track, index) => (
                 <Image
+                  cachePolicy="memory-disk"
                   key={track.spotifyId}
                   source={{ uri: track.imageURL }}
                   style={[styles.partyCover, { marginLeft: index ? -16 : 0 }]}
@@ -344,6 +347,7 @@ const LyricPost = ({ author, track }: { author: PostAuthor; track: PlayerTrack }
       <Text style={styles.postTitle}>Uma faixa para redescobrir.</Text>
       <View style={[styles.lyricCard, isPlaying && styles.lyricCardExpanded]}>
         <Image
+          cachePolicy="memory-disk"
           source={{ uri: track.imageURL }}
           style={styles.lyricArtworkBackground}
           blurRadius={22}
@@ -357,6 +361,7 @@ const LyricPost = ({ author, track }: { author: PostAuthor; track: PlayerTrack }
         >
           <View style={styles.lyricTrackRow}>
             <Image
+              cachePolicy="memory-disk"
               source={{ uri: track.imageURL }}
               style={styles.lyricCover}
             />

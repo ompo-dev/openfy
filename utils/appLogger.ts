@@ -28,7 +28,7 @@ const isDevelopment =
   (typeof process === 'undefined' || process.env?.NODE_ENV !== 'test');
 
 let consoleEnabled = isDevelopment;
-export const logConfig = { verbose: false, capture: isDevelopment };
+export const logConfig = { verbose: false, capture: true };
 const ring: LogEntry[] = [];
 const CATEGORY_LABEL: Record<LogCategory, string> = {
   nav: 'NAV',
@@ -169,6 +169,66 @@ export const log = {
 };
 
 export const getLogBuffer = (): ReadonlyArray<LogEntry> => [...ring].reverse();
+
+export type PerformanceMetricSummary = {
+  category: LogCategory;
+  action: string;
+  count: number;
+  failures: number;
+  averageMs: number;
+  p50Ms: number;
+  maxMs: number;
+};
+
+export const getPerformanceMetricSummary = (): PerformanceMetricSummary[] => {
+  const groups = new Map<string, {
+    category: LogCategory;
+    action: string;
+    durations: number[];
+    failures: number;
+  }>();
+  ring.forEach((entry) => {
+    if (!entry.event.endsWith(' finished') || !entry.meta) return;
+    let meta: Record<string, unknown>;
+    try {
+      meta = JSON.parse(entry.meta) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    if (typeof meta.durationMs !== 'number' || !Number.isFinite(meta.durationMs)) return;
+    const action = entry.event.slice(0, -' finished'.length);
+    const key = `${entry.category}:${action}`;
+    const group = groups.get(key) || {
+      category: entry.category,
+      action,
+      durations: [],
+      failures: 0,
+    };
+    group.durations.push(meta.durationMs);
+    if (meta.ok === false) group.failures += 1;
+    groups.set(key, group);
+  });
+  return [...groups.values()].map((group) => {
+    const sorted = [...group.durations].sort((a, b) => a - b);
+    return {
+      category: group.category,
+      action: group.action,
+      count: sorted.length,
+      failures: group.failures,
+      averageMs: Math.round(sorted.reduce((total, duration) => total + duration, 0) / sorted.length),
+      p50Ms: sorted[Math.floor((sorted.length - 1) / 2)],
+      maxMs: sorted[sorted.length - 1],
+    };
+  }).sort((a, b) => b.count - a.count || b.maxMs - a.maxMs);
+};
+
+export const formatPerformanceMetricSummary = (
+  metrics = getPerformanceMetricSummary()
+) => metrics.length
+  ? metrics.map((metric) =>
+      `[${metric.category}] ${metric.action}: n=${metric.count}, média=${metric.averageMs}ms, p50=${metric.p50Ms}ms, max=${metric.maxMs}ms, falhas=${metric.failures}`
+    ).join('\n')
+  : 'Ainda não há métricas de tempo nesta sessão.';
 
 export const clearLogBuffer = () => {
   ring.length = 0;

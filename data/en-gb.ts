@@ -2,13 +2,13 @@ export const EN_GB = {
   header: {
     home: 'Home',
     search: 'Search',
-    library: 'Your Library',
+    library: 'Library',
   },
   router: {
     home: 'Home',
     feed: 'Feed',
     search: 'Search',
-    library: 'Your Library',
+    library: 'Library',
   },
   libraryCategories: {
     album: 'Albums',

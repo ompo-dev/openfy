@@ -10,12 +10,12 @@ import {
   ActivityIndicator,
   Animated,
   Dimensions,
-  ImageBackground,
   Platform,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { ImageBackground } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -191,6 +191,7 @@ export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] })
               ]}
             >
               <ImageBackground
+                cachePolicy="memory-disk"
                 source={{ uri: item.imageUrl }}
                 style={styles.cardImage}
                 imageStyle={styles.imageBorderRadius}

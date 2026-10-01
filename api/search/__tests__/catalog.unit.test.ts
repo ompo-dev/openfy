@@ -1,6 +1,7 @@
 import {
   getYouTubeMusicArtistImage,
   getYouTubeMusicArtistProfile,
+  getCachedArtistSearchSeed,
   searchCatalog,
 } from '../catalog';
 import { getYouTubeMusicClient } from '../../../services/youtubeMusicClient';
@@ -73,6 +74,97 @@ describe('public YouTube Music catalog', () => {
     });
     expect(search).toHaveBeenNthCalledWith(2, 'Faixa', { type: 'song' });
     expect(search).toHaveBeenNthCalledWith(3, 'Faixa', { type: 'artist' });
+  });
+
+  it('fills a missing artist category even when combined search returned tracks', async () => {
+    const search = jest.fn()
+      .mockResolvedValueOnce({ songs: { contents: [{ id: 'abcdefghijk', title: 'Known track' }] } })
+      .mockResolvedValueOnce({ artists: { contents: [{ id: 'UCmissing', name: 'Missing artist' }] } });
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({
+      music: { search },
+    } as never);
+
+    await expect(searchCatalog('fill missing artist category')).resolves.toMatchObject({
+      tracks: [{ title: 'Known track' }],
+      artists: [{ name: 'Missing artist' }],
+    });
+    expect(search).toHaveBeenNthCalledWith(2, 'fill missing artist category', { type: 'artist' });
+  });
+
+  it('normalizes YouTube Music Text objects and ignores malformed artist fields', async () => {
+    const search = jest.fn().mockResolvedValue({
+      songs: { contents: [{
+        id: 'abcdefghijk',
+        title: { toString: () => 'Text track title' },
+        duration: { seconds: '126' },
+        artists: { malformed: true },
+        thumbnail: { contents: [{ url: 'https://images.example/text.jpg', width: '640' }] },
+      }] },
+      artists: { contents: [{
+        id: 'UCtext',
+        name: { toString: () => 'Text artist' },
+      }] },
+    });
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({
+      music: { search },
+    } as never);
+
+    await expect(searchCatalog('Text object normalization')).resolves.toMatchObject({
+      tracks: [{
+        title: 'Text track title',
+        durationMs: 126_000,
+        subtitle: '',
+        imageURL: 'https://images.example/text.jpg',
+      }],
+      artists: [{ id: 'ytartist_UCtext~Text%20artist', name: 'Text artist' }],
+    });
+  });
+
+  it('keeps matching search tracks available as the artist profile seed', async () => {
+    const search = jest.fn().mockResolvedValue({
+      songs: { contents: [{
+        id: 'abcdefghijk',
+        title: 'Seed track',
+        artists: [{ channel_id: 'UCseed', name: 'Seed artist' }],
+      }] },
+      artists: { contents: [{ id: 'UCseed', name: 'Seed artist' }] },
+    });
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({
+      music: { search },
+    } as never);
+
+    const results = await searchCatalog('profile seed preservation');
+    expect(getCachedArtistSearchSeed(results.artists[0].id)).toMatchObject({
+      artist: { name: 'Seed artist' },
+      tracks: [{ id: 'yt_abcdefghijk', title: 'Seed track' }],
+    });
+  });
+
+  it('reports a failed search when both split catalog sources fail', async () => {
+    const search = jest.fn().mockRejectedValue(new Error('temporary transport error'));
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({
+      music: { search },
+    } as never);
+
+    await expect(searchCatalog('all sources reject')).rejects.toThrow('temporary transport error');
+  });
+
+  it('retries just the catalog source that failed and preserves complete results', async () => {
+    const search = jest.fn()
+      .mockResolvedValueOnce({ songs: { contents: [] }, artists: { contents: [] } })
+      .mockRejectedValueOnce(new Error('song source timed out'))
+      .mockResolvedValueOnce({ artists: { contents: [{ id: 'UCretry', name: 'Retry artist' }] } })
+      .mockResolvedValueOnce({ songs: { contents: [{ id: 'abcdefghijk', title: 'Recovered track' }] } });
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({
+      music: { search },
+    } as never);
+
+    await expect(searchCatalog('recover failed catalog source')).resolves.toMatchObject({
+      artists: [{ name: 'Retry artist' }],
+      tracks: [{ title: 'Recovered track' }],
+    });
+    expect(search).toHaveBeenNthCalledWith(4, 'recover failed catalog source', { type: 'song' });
+    expect(search).toHaveBeenCalledTimes(4);
   });
 
   it('retries a transient artist profile request with its original browse id', async () => {

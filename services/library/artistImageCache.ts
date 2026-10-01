@@ -10,6 +10,19 @@ const getArtistCacheId = (artistName: string) =>
 
 const isRemoteImage = (value: string) => /^https?:\/\//i.test(value);
 
+export const rememberCachedArtistImage = async (artistName: string, imageURL: string) => {
+  const id = getArtistCacheId(artistName);
+  if (!id || !isRemoteImage(imageURL)) return;
+  imageCache.set(id, imageURL);
+  missingImageCache.delete(id);
+  try {
+    await AsyncStorage.setItem(
+      `${STORAGE_KEY_PREFIX}${encodeURIComponent(id)}`,
+      imageURL
+    );
+  } catch {}
+};
+
 /** Keeps artist URLs across launches; Expo Image stores the image bytes on disk. */
 export const getCachedArtistImage = async (
   artistName: string,
@@ -42,13 +55,7 @@ export const getCachedArtistImage = async (
       return '';
     }
 
-    imageCache.set(id, imageURL);
-    try {
-      await AsyncStorage.setItem(
-        `${STORAGE_KEY_PREFIX}${encodeURIComponent(id)}`,
-        imageURL
-      );
-    } catch {}
+    await rememberCachedArtistImage(id, imageURL);
     return imageURL;
   })();
 

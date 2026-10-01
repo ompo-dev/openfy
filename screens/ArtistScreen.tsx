@@ -5,6 +5,7 @@ import {
   getArtist,
   getArtistAlbums,
   getArtistTopTracks,
+  getCachedArtistSearchSeed,
   getYouTubeMusicArtistImage,
   getYouTubeMusicArtistProfile,
 } from '@api';
@@ -21,6 +22,7 @@ import {
   isTrackParticipantArtist,
   isTrackPrimaryArtist,
   mergeArtistProfileTracks,
+  rememberCachedArtistImage,
   type LibraryTrack,
 } from '@services';
 import { getSpotifyArtistImage } from '../services/metadata/spotifyMetadata';
@@ -172,6 +174,9 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
   React.useEffect(() => {
     let active = true;
     setArtistError('');
+    const searchSeed = isYouTubeArtist
+      ? getCachedArtistSearchSeed(artistId)
+      : null;
     if (activeArtistId.current !== artistId) {
       activeArtistId.current = artistId;
       setArtist(null);
@@ -179,6 +184,19 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       setParticipationTracks([]);
       setContextualTracks([]);
       setAlbums([]);
+    }
+    if (searchSeed) {
+      setArtist(searchSeed.artist);
+      setTopTracks([]);
+      setContextualTracks(searchSeed.tracks);
+      if (searchSeed.artist.imageURL) {
+        void rememberCachedArtistImage(artistId, searchSeed.artist.imageURL);
+      }
+      log.artist('profile seeded from search results', {
+        artistId,
+        tracks: searchSeed.tracks.length,
+        hasImage: Boolean(searchSeed.artist.imageURL),
+      });
     }
 
     const libraryPromise = getLibraryTracks();
@@ -190,6 +208,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             toHistoryTrackModel(entry.track)
           ),
           ...libraryTracks.map(toTrackModel),
+          ...(searchSeed?.tracks || []),
         ]);
       }
     ).catch(() => {});
@@ -237,7 +256,10 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           ? buildLocalArtistProfile(downloaded, artistId, artistName)
           : null;
         if (!localProfile) return;
-        setArtist(localProfile.artist);
+        setArtist({
+          ...localProfile.artist,
+          imageURL: searchSeed?.artist.imageURL || localProfile.artist.imageURL,
+        });
         setTopTracks(localProfile.topTracks);
         setParticipationTracks(localProfile.participationTracks);
         setAlbums(localProfile.albums);
@@ -255,17 +277,26 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         }).catch(() => {});
       }).catch(() => {});
 
+      const finishProfileLoad = log.time('artist', 'youtube music profile load', {
+        artistId,
+      });
       void getYouTubeMusicArtistProfile(artistId)
         .then(async ({ artist: artistData, tracks }) => {
-          if (!active) return;
-          const imageURL = artistData.imageURL || await getCachedArtistImage(
+          if (!active) {
+            finishProfileLoad({ ok: false, stale: true });
+            return;
+          }
+          const imageURL = artistData.imageURL || searchSeed?.artist.imageURL || await getCachedArtistImage(
             artistId,
             () => getYouTubeMusicArtistImage(artistId)
           );
-          if (!active) return;
+          if (!active) {
+            finishProfileLoad({ ok: false, stale: true });
+            return;
+          }
           setArtist({ ...artistData, imageURL });
           if (artistData.imageURL) {
-            void getCachedArtistImage(artistId, async () => artistData.imageURL);
+            void rememberCachedArtistImage(artistId, artistData.imageURL);
           }
           setTopTracks(tracks);
           setArtistError('');
@@ -274,8 +305,10 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             tracks: tracks.length,
             hasImage: Boolean(imageURL),
           });
+          finishProfileLoad({ ok: true, tracks: tracks.length, hasImage: Boolean(imageURL) });
         })
         .catch(async (error) => {
+          finishProfileLoad({ ok: false, error: String(error) });
           log.error('youtube music artist profile failed', { artistId, error });
           const artistName = getYouTubeMusicArtistRouteName(artistId);
           const downloaded = await libraryPromise.catch(() => []);
@@ -284,7 +317,10 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             ? buildLocalArtistProfile(downloaded, artistId, artistName)
             : null;
           if (localProfile) {
-            setArtist(localProfile.artist);
+            setArtist({
+              ...localProfile.artist,
+              imageURL: searchSeed?.artist.imageURL || localProfile.artist.imageURL,
+            });
             setTopTracks(localProfile.topTracks);
             setParticipationTracks(localProfile.participationTracks);
             setAlbums(localProfile.albums);
@@ -296,6 +332,14 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
                 setArtist((current) => current ? { ...current, imageURL } : current);
               }
             }).catch(() => {});
+          } else if (searchSeed) {
+            setArtist(searchSeed.artist);
+            setTopTracks([]);
+            setArtistError('');
+            log.artist('profile kept search results after remote failure', {
+              artistId,
+              tracks: searchSeed.tracks.length,
+            });
           } else {
             setArtistError('Não foi possível carregar o perfil agora. Verifique a conexão e tente novamente.');
           }

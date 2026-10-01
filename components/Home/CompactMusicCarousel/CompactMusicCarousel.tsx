@@ -8,12 +8,12 @@
 import * as React from 'react';
 import {
   Animated,
-  ImageBackground,
   Platform,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { ImageBackground } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -156,6 +156,7 @@ export const CompactMusicCards = ({
               >
                 {/* Full-bleed Artwork Background */}
                 <ImageBackground
+                  cachePolicy="memory-disk"
                   source={{ uri: item.imageUrl }}
                   style={styles.cardImageBackground}
                   imageStyle={styles.cardImageRadius}

@@ -12,13 +12,13 @@
 import * as React from 'react';
 import {
   Animated,
-  Image,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -314,6 +314,7 @@ export const FriendActivityStatus = ({
                 <View style={styles.avatarContainer}>
                   {item.user.avatarUrl ? (
                     <Image
+                      cachePolicy="memory-disk"
                       source={{ uri: item.user.avatarUrl }}
                       style={styles.avatarImage}
                     />

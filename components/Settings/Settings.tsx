@@ -25,7 +25,15 @@ import {
   type DownloadStorageInfo,
 } from '@services';
 import { AppIcon, LoggedPressable, NativeIconButton } from '../native';
-import { clearLogBuffer, formatLogBuffer, getLogBuffer, log, logConfig } from '../../utils/appLogger';
+import {
+  clearLogBuffer,
+  formatLogBuffer,
+  formatPerformanceMetricSummary,
+  getLogBuffer,
+  getPerformanceMetricSummary,
+  log,
+  logConfig,
+} from '../../utils/appLogger';
 import { formatStorageSize, StorageManagerModal } from './StorageManagerModal';
 
 type LibrarySummary = {
@@ -120,6 +128,17 @@ export const Settings = () => {
   const [checkingUpdate, setCheckingUpdate] = React.useState(false);
   const [captureLogs, setCaptureLogs] = React.useState(logConfig.capture);
   const [verboseLogs, setVerboseLogs] = React.useState(logConfig.verbose);
+  const [performanceMetrics, setPerformanceMetrics] = React.useState(
+    getPerformanceMetricSummary
+  );
+
+  React.useEffect(() => {
+    const timer = setInterval(
+      () => setPerformanceMetrics(getPerformanceMetricSummary()),
+      1_500
+    );
+    return () => clearInterval(timer);
+  }, []);
 
   React.useEffect(() => {
     let active = true;
@@ -188,7 +207,13 @@ export const Settings = () => {
   };
 
   const copyLogs = async () => {
-    const text = formatLogBuffer();
+    const text = [
+      'OPENFY PERFORMANCE METRICS',
+      formatPerformanceMetricSummary(performanceMetrics),
+      '',
+      'OPENFY APP LOGS',
+      formatLogBuffer(),
+    ].join('\n');
     try {
       await Clipboard.setStringAsync(text || 'Nenhum log capturado.');
       Alert.alert('Logs copiados', `${getLogBuffer().length} entradas copiadas.`);
@@ -364,6 +389,26 @@ export const Settings = () => {
             value={verboseLogs}
           />
           <View style={styles.separator} />
+          <View style={styles.metricsBlock}>
+            <Text style={styles.metricsTitle}>
+              Métricas recentes · {performanceMetrics.reduce((total, item) => total + item.count, 0)} medições
+            </Text>
+            {performanceMetrics.length ? performanceMetrics.slice(0, 6).map((metric) => (
+              <View key={`${metric.category}:${metric.action}`} style={styles.metricRow}>
+                <Text numberOfLines={1} style={styles.metricAction}>
+                  {metric.category} · {metric.action}
+                </Text>
+                <Text style={styles.metricValue}>
+                  n={metric.count} · média {metric.averageMs} ms · p50 {metric.p50Ms} ms · máx {metric.maxMs} ms · falhas {metric.failures}
+                </Text>
+              </View>
+            )) : (
+              <Text style={styles.metricValue}>
+                Ative Capturar logs para registrar tempos nesta sessão.
+              </Text>
+            )}
+          </View>
+          <View style={styles.separator} />
           <ActionRow
             detail={`${getLogBuffer().length} eventos`}
             icon="eye"
@@ -520,6 +565,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 11,
   },
+  metricsBlock: { gap: 7, paddingHorizontal: 14, paddingVertical: 12 },
+  metricsTitle: { color: '#FFFFFF', fontFamily: 'SF-Semibold', fontSize: 12 },
+  metricRow: { gap: 2, paddingTop: 4 },
+  metricAction: { color: '#A8A8AD', fontFamily: 'SF-Semibold', fontSize: 11 },
+  metricValue: { color: '#77777D', fontFamily: 'SF-Regular', fontSize: 10, lineHeight: 14 },
   privacyRow: { alignItems: 'center', flexDirection: 'row', gap: 11, padding: 14 },
   privacyText: { color: '#A8A8AD', flex: 1, fontFamily: 'SF-Regular', fontSize: 13, lineHeight: 18 },
   aboutRow: { alignItems: 'center', flexDirection: 'row', minHeight: 54, paddingHorizontal: 14 },

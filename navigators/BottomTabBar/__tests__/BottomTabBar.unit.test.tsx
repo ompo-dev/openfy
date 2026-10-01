@@ -54,6 +54,6 @@ describe('BottomTabBar', () => {
   it('renders the home, feed, and library tabs', () => {
     expect(container.getByText('Home')).toBeTruthy();
     expect(container.getByText('Feed')).toBeTruthy();
-    expect(container.getByText('Your Library')).toBeTruthy();
+    expect(container.getByText('Library')).toBeTruthy();
   });
 });

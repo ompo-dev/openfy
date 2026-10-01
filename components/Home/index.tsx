@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
@@ -19,7 +20,7 @@ import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { useLibrarySelectedCategory, usePlayer, type PlayerTrack } from '@context';
 import { useDetailNavigation, usePersonalizedHome } from '@hooks';
 import {
-  getCachedArtistImage,
+  rememberCachedArtistImage,
   upsertCatalogTracks,
   type PersonalizedHomeTrack,
 } from '@services';
@@ -91,6 +92,18 @@ export const Home = () => {
   const [importVisible, setImportVisible] = React.useState(false);
   const searchGeneration = React.useRef(0);
 
+  useFocusEffect(
+    React.useCallback(() => () => {
+      searchGeneration.current += 1;
+      setQuery('');
+      setResults({ artists: [], tracks: [] });
+      setSearchError('');
+      setSearchLoading(false);
+      Keyboard.dismiss();
+      log.nav('discover search cleared on blur');
+    }, [])
+  );
+
   React.useEffect(() => {
     const cleanQuery = query.trim();
     const request = ++searchGeneration.current;
@@ -100,19 +113,38 @@ export const Home = () => {
       setSearchLoading(false);
       return;
     }
+    if (cleanQuery.length < 2) {
+      setResults({ artists: [], tracks: [] });
+      setSearchError('');
+      setSearchLoading(false);
+      return;
+    }
 
     setSearchLoading(true);
     const timer = setTimeout(() => {
       const startedAt = Date.now();
+      const finishSearch = log.time('search', 'discover query results', {
+        queryLength: cleanQuery.length,
+      });
       log.search('catalog query started', { length: cleanQuery.length });
       void searchCatalog(cleanQuery)
         .then((nextResults) => {
+          finishSearch({
+            ok: true,
+            artists: nextResults.artists.length,
+            tracks: nextResults.tracks.length,
+            stale: request !== searchGeneration.current,
+          });
           if (request === searchGeneration.current) {
             setResults(nextResults);
-            setSearchError('');
-            void Promise.all(nextResults.artists.map((artist) =>
-              getCachedArtistImage(artist.id, async () => artist.imageURL)
-            ));
+            setSearchError(nextResults.partial
+              ? 'Alguns resultados não carregaram. Tente novamente para completar a busca.'
+              : '');
+            nextResults.artists.forEach((artist) => {
+              if (artist.imageURL) {
+                void rememberCachedArtistImage(artist.id, artist.imageURL);
+              }
+            });
             log.search('catalog query completed', {
               durationMs: Date.now() - startedAt,
               artists: nextResults.artists.length,
@@ -121,6 +153,7 @@ export const Home = () => {
           }
         })
         .catch((error: unknown) => {
+          finishSearch({ ok: false, stale: request !== searchGeneration.current });
           if (request === searchGeneration.current) {
             setResults({ artists: [], tracks: [] });
             setSearchError(
@@ -135,7 +168,7 @@ export const Home = () => {
         .finally(() => {
           if (request === searchGeneration.current) setSearchLoading(false);
         });
-    }, 280);
+    }, 450);
 
     return () => {
       clearTimeout(timer);
@@ -201,6 +234,7 @@ export const Home = () => {
   }));
   const hasDiscovery = discoveries.length > 0 || home.artists.length > 0;
   const searching = query.trim().length > 0;
+  const queryTooShort = query.trim().length === 1;
 
   return (
     <View style={styles.container}>
@@ -263,6 +297,9 @@ export const Home = () => {
 
         {searching ? (
           <View style={styles.searchResults}>
+            {queryTooShort ? (
+              <Text style={styles.emptyText}>Digite mais um caractere para pesquisar.</Text>
+            ) : null}
             {searchLoading ? <ActivityIndicator color="#1DB954" style={styles.searchSpinner} /> : null}
             {searchError ? <Text style={styles.errorText}>{searchError}</Text> : null}
             {results.artists.length ? (
@@ -276,7 +313,7 @@ export const Home = () => {
                     style={styles.artistResult}
                   >
                     {artist.imageURL ? (
-                      <Image source={{ uri: artist.imageURL }} contentFit="cover" style={styles.artistImage} />
+                      <Image cachePolicy="memory-disk" source={{ uri: artist.imageURL }} contentFit="cover" style={styles.artistImage} />
                     ) : (
                       <View style={[styles.artistImage, styles.imageFallback]}>
                         <Ionicons name="person" size={22} color="#8E8E93" />
@@ -305,7 +342,7 @@ export const Home = () => {
                         style={styles.trackPressable}
                       >
                         {track.imageURL ? (
-                          <Image source={{ uri: track.imageURL }} contentFit="cover" style={styles.trackImage} />
+                          <Image cachePolicy="memory-disk" source={{ uri: track.imageURL }} contentFit="cover" style={styles.trackImage} />
                         ) : (
                           <View style={[styles.trackImage, styles.imageFallback]}>
                             <Ionicons name="musical-note" size={21} color="#8E8E93" />
@@ -338,7 +375,7 @@ export const Home = () => {
                 })}
               </View>
             ) : null}
-            {!searchLoading && !searchError && !results.artists.length && !results.tracks.length ? (
+            {!queryTooShort && !searchLoading && !searchError && !results.artists.length && !results.tracks.length ? (
               <Text style={styles.emptyText}>Nenhum resultado encontrado.</Text>
             ) : null}
           </View>

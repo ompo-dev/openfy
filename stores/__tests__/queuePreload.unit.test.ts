@@ -75,6 +75,22 @@ const tracks: PlayerTrack[] = [
     imageURL: '',
     duration_ms: 180000,
   },
+  {
+    spotifyId: 'DDDDDDDDDDDDDDDDDDDDDD',
+    title: 'Mais uma',
+    artistName: 'Artista',
+    albumName: 'Álbum',
+    imageURL: '',
+    duration_ms: 180000,
+  },
+  {
+    spotifyId: 'EEEEEEEEEEEEEEEEEEEEEE',
+    title: 'Última',
+    artistName: 'Artista',
+    albumName: 'Álbum',
+    imageURL: '',
+    duration_ms: 180000,
+  },
 ];
 
 const flushAsync = async () => {
@@ -110,14 +126,23 @@ describe('queue preload window', () => {
     });
   });
 
-  it('warms the previous and next tracks, then releases a track that leaves the window', async () => {
+  it('warms a five-track window with forward and backward buffer targets', async () => {
     await usePlayerStore.getState().playWithQueue(tracks, 1, 'library:songs');
     await flushAsync();
 
     expect(preloadAudio).toHaveBeenCalledWith(
+      'https://media.test/Anterior.m4a',
+      45
+    );
+    expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Próxima.m4a', 90);
+    expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Mais uma.m4a', 45);
+
+    await usePlayerStore.getState().playNext();
+    await flushAsync();
+
+    expect(releasePreloadedAudio).not.toHaveBeenCalledWith(
       'https://media.test/Anterior.m4a'
     );
-    expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Próxima.m4a');
 
     await usePlayerStore.getState().playNext();
     await flushAsync();

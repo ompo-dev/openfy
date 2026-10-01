@@ -22,6 +22,7 @@ import {
   type FriendNoteItem,
 } from './FriendActivityStatus';
 import type { CompactTrackItem } from './CompactMusicCarousel';
+import { log } from '../../utils/appLogger';
 
 const NOTE_COLORS = ['#EC4899', '#0EA5E9', '#22C55E', '#F59E0B', '#8B5CF6', '#EF4444'];
 const normalize = (value: string) =>
@@ -98,22 +99,25 @@ export const Feed = () => {
 
   React.useEffect(() => {
     let active = true;
-    void Promise.all(artists.map(async (artist) => {
-      if (artist.id.startsWith('ytartist_')) {
-        const image = await getCachedArtistImage(artist.id, () =>
-          getYouTubeMusicArtistImage(artist.id)
-        ).catch(() => '');
-        return [normalize(artist.name), image] as const;
-      }
-      if (/^[A-Za-z0-9]{22}$/.test(artist.id)) {
-        const image = await getCachedArtistImage(artist.id, () =>
-          getSpotifyArtistImage(artist.id)
-        );
-        return [normalize(artist.name), image] as const;
-      }
-      return [normalize(artist.name), ''] as const;
-    })).then((entries) => {
-      if (active) setArtistImages((current) => ({ ...current, ...Object.fromEntries(entries) }));
+    artists.forEach((artist) => {
+      const key = normalize(artist.name);
+      const finishImageLoad = log.time('home', 'feed artist image load', {
+        artistId: artist.id || undefined,
+        artist: artist.name,
+      });
+      const imageRequest = artist.id.startsWith('ytartist_')
+        ? getCachedArtistImage(artist.id, () => getYouTubeMusicArtistImage(artist.id))
+        : /^[A-Za-z0-9]{22}$/.test(artist.id)
+          ? getCachedArtistImage(artist.id, () => getSpotifyArtistImage(artist.id))
+          : Promise.resolve('');
+      void imageRequest.then((image) => {
+        if (active && image) {
+          setArtistImages((current) => ({ ...current, [key]: image }));
+        }
+        finishImageLoad({ ok: Boolean(image), hasImage: Boolean(image) });
+      }).catch((error) => {
+        finishImageLoad({ ok: false, error: String(error) });
+      });
     });
     return () => {
       active = false;

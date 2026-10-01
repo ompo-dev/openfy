@@ -54,6 +54,7 @@ import type {
   DownloadedTrack,
 } from '../services/download/downloadManager';
 import { getCachedAppSettings } from '../services/settings/appSettings';
+import { log } from '../utils/appLogger';
 
 export type PlayerTrack = TrackCatalogMetadata & {
   spotifyId: string;
@@ -291,23 +292,44 @@ const cacheAudioSource = (track: PlayerTrack, source: AudioSourceInput) => {
 
 const warmTrackAudio = (
   track?: PlayerTrack,
-  isStillNeeded: () => boolean = () => true
+  isStillNeeded: () => boolean = () => true,
+  bufferRatio = 0.25
 ) => {
   if (!track) return;
   if (!isStillNeeded() || !isAppActiveForPreload()) return;
   const cacheKey = getCacheKey(track);
+  const durationSeconds = Math.max(0, track.duration_ms || 0) / 1000;
+  const preferredForwardBufferDuration = durationSeconds
+    ? Math.max(5, Math.round(durationSeconds * bufferRatio))
+    : 5;
   const suppliedSource = getFreshPreloadedSource(track);
   if (suppliedSource) {
-    if (isStillNeeded()) void preloadAudio(suppliedSource);
+    if (isStillNeeded()) {
+      const finishWarmup = log.time('player', 'queue neighbor warmup', {
+        trackId: track.spotifyId,
+        bufferRatio,
+      });
+      void preloadAudio(suppliedSource, preferredForwardBufferDuration).then(
+        () => finishWarmup({ ok: true, source: 'source-cache' }),
+        (error) => finishWarmup({ ok: false, error: String(error) })
+      );
+    }
     return;
   }
   if (activeAudioWarmups.has(cacheKey)) return;
 
+  const finishWarmup = log.time('player', 'queue neighbor warmup', {
+    trackId: track.spotifyId,
+    bufferRatio,
+  });
+  let sourceKind = 'stream';
+  let warmupError: unknown;
   const warmup = (async () => {
     const directSavedSource = await getSavedAudioSource(track);
     if (directSavedSource) {
       cacheAudioSource(track, directSavedSource);
-      if (isStillNeeded()) void preloadAudio(directSavedSource);
+      sourceKind = 'saved-audio';
+      if (isStillNeeded()) await preloadAudio(directSavedSource, preferredForwardBufferDuration);
       return;
     }
 
@@ -315,7 +337,8 @@ const warmTrackAudio = (
     const downloadedSavedSource = await getSavedAudioSource(downloaded);
     if (downloadedSavedSource) {
       cacheAudioSource(track, downloadedSavedSource);
-      if (isStillNeeded()) void preloadAudio(downloadedSavedSource);
+      sourceKind = 'saved-audio';
+      if (isStillNeeded()) await preloadAudio(downloadedSavedSource, preferredForwardBufferDuration);
       return;
     }
 
@@ -325,7 +348,10 @@ const warmTrackAudio = (
     if (
       typeof hasNativeYouTubePlayback === 'function' &&
       hasNativeYouTubePlayback()
-    ) return;
+    ) {
+      sourceKind = 'native-video-id';
+      return;
+    }
 
     if (!isStillNeeded() || !isAppActiveForPreload() || getFreshPreloadedSource(track)) return;
     const resolved = await resolveAudioUrl(
@@ -340,11 +366,25 @@ const warmTrackAudio = (
         ? { uri: resolved.url, headers: resolved.headers }
         : resolved.url;
       cacheAudioSource(track, source);
-      void preloadAudio(source);
+      await preloadAudio(source, preferredForwardBufferDuration);
+    } else {
+      sourceKind = 'unresolved';
     }
   })()
-    .catch(() => {})
-    .finally(() => activeAudioWarmups.delete(cacheKey));
+    .catch((error) => {
+      warmupError = error;
+    })
+    .finally(() => {
+      activeAudioWarmups.delete(cacheKey);
+      finishWarmup({
+        ok: !warmupError && sourceKind !== 'unresolved',
+        source: sourceKind,
+        trackId: track.spotifyId,
+        bufferRatio,
+        preferredForwardBufferDuration,
+        ...(warmupError ? { error: String(warmupError) } : {}),
+      });
+    });
 
   activeAudioWarmups.set(cacheKey, warmup);
 };
@@ -353,15 +393,24 @@ const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
   if (!getCachedAppSettings().preloadNextTrack) return;
   if (Platform.OS !== 'web' && !isAppActiveForPreload()) return;
   const currentTrack = queue[queueIndex];
-  const neighbors = [queue[queueIndex - 1], queue[queueIndex + 1]].filter(
-    (track): track is PlayerTrack => Boolean(track)
-  );
+  const neighbors = [
+    { track: queue[queueIndex + 1], ratio: 0.5, direction: 'next' },
+    { track: queue[queueIndex - 1], ratio: 0.25, direction: 'previous' },
+    { track: queue[queueIndex + 2], ratio: 0.25, direction: 'next-two' },
+    { track: queue[queueIndex - 2], ratio: 0.125, direction: 'previous-two' },
+  ].filter((neighbor): neighbor is {
+    track: PlayerTrack;
+    ratio: number;
+    direction: string;
+  } => Boolean(neighbor.track));
   const retainedKeys = new Set(
-    [currentTrack, ...neighbors].filter(Boolean).map(getCacheKey)
+    [currentTrack, ...neighbors.map(({ track }) => track)]
+      .filter((track): track is PlayerTrack => Boolean(track))
+      .map(getCacheKey)
   );
 
   queuePreloadKeys.clear();
-  neighbors.forEach((track) => queuePreloadKeys.add(getCacheKey(track)));
+  neighbors.forEach(({ track }) => queuePreloadKeys.add(getCacheKey(track)));
 
   warmedAudioSources.forEach(({ source }, cacheKey) => {
     if (!retainedKeys.has(cacheKey)) {
@@ -370,9 +419,18 @@ const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
     }
   });
 
-  neighbors.forEach((track) =>
-    warmTrackAudio(track, () => isAppActiveForPreload() && queuePreloadKeys.has(getCacheKey(track)))
-  );
+  neighbors.forEach(({ track, ratio, direction }) => {
+    log.player('queue preloading target', {
+      direction,
+      trackId: track.spotifyId,
+      bufferRatio: ratio,
+    });
+    warmTrackAudio(
+      track,
+      () => isAppActiveForPreload() && queuePreloadKeys.has(getCacheKey(track)),
+      ratio
+    );
+  });
 };
 
 export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
@@ -401,9 +459,15 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     // 1. ATOMIC GENERATION LOCK 🔒: Increments request counter to cancel any stale in-flight fetches
     const requestId = get().activeRequestId + 1;
+    const finishTransition = log.time('player', 'track transition', {
+      requestId,
+      trackId: track.spotifyId,
+      title: track.title,
+    });
     try {
       beginTrackChange();
     } catch (error) {
+      finishTransition({ ok: false, stage: 'begin-track-change' });
       set({ isLoadingAudio: false, playerState: { ...DEFAULT_STATE, error: String(error) } });
       return;
     }
@@ -529,13 +593,19 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     };
 
     // Execute Audio resolution
+    const finishResolution = log.time('player', 'audio source resolution', {
+      requestId,
+      trackId: track.spotifyId,
+    });
     const streamSource = await resolveAudioPromise.catch((error) => {
       console.warn('[PlayerStore] Source loading failed:', error);
       return null;
     });
+    finishResolution({ ok: Boolean(streamSource), trackId: track.spotifyId });
 
     // RACE CONDITION CHECK: Discard if user clicked another track in the meantime
     if (get().activeRequestId !== requestId) {
+      finishTransition({ ok: false, stale: true, stage: 'source-resolution' });
       console.log(
         `[PlayerStore #${requestId}] Discarding stale playback response for "${track.title}"`
       );
@@ -543,6 +613,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     }
 
     if (!streamSource) {
+      finishTransition({ ok: false, stage: 'source-resolution' });
       console.warn(
         `[PlayerStore #${requestId}] Failed to resolve audio for: "${track.title}"`
       );
@@ -746,18 +817,25 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       }
     };
 
-    const success = await loadAndPlay(
-      streamSource,
-      handleStatusUpdate,
-      {
-        title: track.title,
-        artist: track.artistName,
-        albumTitle: track.albumName,
-        ...getLockScreenArtworkMetadata(track),
-      },
-      0,
-      track
-    );
+    let success = false;
+    try {
+      success = await loadAndPlay(
+        streamSource,
+        handleStatusUpdate,
+        {
+          title: track.title,
+          artist: track.artistName,
+          albumTitle: track.albumName,
+          ...getLockScreenArtworkMetadata(track),
+        },
+        0,
+        track
+      );
+    } catch (error) {
+      finishTransition({ ok: false, stage: 'native-load', error: String(error) });
+      throw error;
+    }
+    finishTransition({ ok: success, stage: 'native-load', trackId: track.spotifyId });
 
     initialLoadInProgress = false;
 
@@ -927,8 +1005,14 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       }
     }
 
+    const finishTransition = log.time('player', 'queue next transition', {
+      fromIndex: queueIndex,
+      toIndex: nextIndex,
+      queueLength: queue.length,
+    });
     set({ queueIndex: nextIndex });
     await playTrack(queue[nextIndex], { setQueue: false });
+    finishTransition({ ok: true, trackId: queue[nextIndex].spotifyId });
   },
 
   playPrevious: async () => {
@@ -937,6 +1021,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     // If already playing for more than 3 seconds, restart current track
     if (playerState.positionMs > 3000) {
+      log.player('queue previous restarted current track', { queueIndex });
       await seekTo(0);
       return;
     }
@@ -947,8 +1032,14 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       prevIndex = queue.length - 1;
     }
 
+    const finishTransition = log.time('player', 'queue previous transition', {
+      fromIndex: queueIndex,
+      toIndex: prevIndex,
+      queueLength: queue.length,
+    });
     set({ queueIndex: prevIndex });
     await playTrack(queue[prevIndex], { setQueue: false });
+    finishTransition({ ok: true, trackId: queue[prevIndex].spotifyId });
   },
 
   addToQueue: (tracks: PlayerTrack[]) => {

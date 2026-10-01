@@ -34,6 +34,7 @@ export {
   getBrowseCategories,
   getYouTubeMusicArtistImage,
   getYouTubeMusicArtistProfile,
+  getCachedArtistSearchSeed,
   searchCatalog,
 } from './search';
 export type { CatalogSearchResults, YouTubeMusicArtistProfile } from './search';
