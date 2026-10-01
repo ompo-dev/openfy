@@ -324,7 +324,7 @@ jobs:
         run: |
           set -e
           APP_PATH="${{ steps.compiled-app.outputs.app_path }}"
-          WIDGET_PATH="$APP_PATH/PlugIns/playerwidget.appex"
+          WIDGET_PATH="$APP_PATH/PlugIns/player-widget.appex"
           if [ ! -d "$WIDGET_PATH" ]; then
             echo "A extensao WidgetKit nao foi embutida em $APP_PATH/PlugIns."
             find "$APP_PATH/PlugIns" -maxdepth 2 -print 2>/dev/null || true
