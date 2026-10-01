@@ -111,7 +111,7 @@ jobs:
           npx expo export --platform all --output-dir dist/ota
           RUNTIME_VERSION="$(node -e "const c=require('./app.config.js').expo; console.log(typeof c.runtimeVersion === 'string' ? c.runtimeVersion : c.version)")"
           test -s dist/ota/metadata.json
-          echo "runtime_version=$RUNTIME_VERSION" >> "$GITHUB_ENV"
+          echo "RUNTIME_VERSION=$RUNTIME_VERSION" >> "$GITHUB_ENV"
 
       - name: Abrir janela OTA por 10 minutos
         env:
