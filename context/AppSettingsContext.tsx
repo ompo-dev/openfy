@@ -1,13 +1,11 @@
 import * as React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 
+import type { AppSettings } from '../services/settings/appSettings';
 import {
-  DEFAULT_APP_SETTINGS,
-  getAppSettings,
-  resetAppSettings,
-  subscribeAppSettings,
-  updateAppSettings,
-  type AppSettings,
-} from '@services';
+  initializeAppSettingsStore,
+  useAppSettingsStore,
+} from '../stores/useAppSettingsStore';
 
 type AppSettingsContextValue = {
   settings: AppSettings;
@@ -19,59 +17,18 @@ type AppSettingsContextValue = {
   resetSettings: () => Promise<void>;
 };
 
-const AppSettingsContext = React.createContext<AppSettingsContextValue | null>(
-  null
-);
-
 export const AppSettingsProvider = ({ children }: { children: React.ReactNode }) => {
-  const [settings, setSettings] = React.useState(DEFAULT_APP_SETTINGS);
-  const [isReady, setIsReady] = React.useState(false);
-
   React.useEffect(() => {
-    let active = true;
-    const unsubscribe = subscribeAppSettings((next) => {
-      if (active) setSettings(next);
-    });
-
-    void getAppSettings().then((next) => {
-      if (!active) return;
-      setSettings(next);
-      setIsReady(true);
-    });
-
-    return () => {
-      active = false;
-      unsubscribe();
-    };
+    void initializeAppSettingsStore();
   }, []);
 
-  const setSetting = React.useCallback(
-    async <Key extends keyof AppSettings>(key: Key, value: AppSettings[Key]) => {
-      await updateAppSettings({ [key]: value });
-    },
-    []
-  );
-
-  const resetSettings = React.useCallback(async () => {
-    await resetAppSettings();
-  }, []);
-
-  const value = React.useMemo(
-    () => ({ settings, isReady, setSetting, resetSettings }),
-    [isReady, resetSettings, setSetting, settings]
-  );
-
-  return (
-    <AppSettingsContext.Provider value={value}>
-      {children}
-    </AppSettingsContext.Provider>
-  );
+  return <>{children}</>;
 };
 
-export const useAppSettings = () => {
-  const value = React.useContext(AppSettingsContext);
-  if (!value) {
-    throw new Error('useAppSettings must be used inside AppSettingsProvider');
-  }
-  return value;
-};
+export const useAppSettings = (): AppSettingsContextValue =>
+  useAppSettingsStore(useShallow((state) => ({
+    settings: state.settings,
+    isReady: state.isReady,
+    setSetting: state.setSetting,
+    resetSettings: state.resetSettings,
+  })));

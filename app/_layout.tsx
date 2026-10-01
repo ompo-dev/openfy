@@ -17,9 +17,11 @@ import {
   UserDataProvider,
 } from '@context';
 import { MiniPlayer, FullPlayer } from '@components';
+import { PlayerWidgetSync } from '../components/Player/PlayerWidgetSync';
 import { registerBackgroundDownloadTask } from '@services';
 import { useOTAUpdates } from '@hooks';
 import { installErrorLogging, log } from '@utils';
+import { usePlayerStore } from '../stores/usePlayerStore';
 
 import 'react-native-reanimated';
 
@@ -37,10 +39,12 @@ function NavigationDiagnostics() {
 }
 
 function PlayerOverlay() {
-  const [fullPlayerVisible, setFullPlayerVisible] = React.useState(false);
+  const fullPlayerVisible = usePlayerStore((state) => state.isFullPlayerVisible);
+  const setFullPlayerVisible = usePlayerStore((state) => state.setIsFullPlayerVisible);
 
   return (
     <>
+      <PlayerWidgetSync />
       <MiniPlayer onPress={() => setFullPlayerVisible(true)} />
       <FullPlayer
         visible={fullPlayerVisible}

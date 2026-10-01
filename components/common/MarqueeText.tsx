@@ -33,6 +33,7 @@ interface MarqueeTextProps {
   containerStyle?: StyleProp<ViewStyle>;
   speed?: number; // pixels per second
   delay?: number; // ms delay before starting
+  endDelay?: number; // ms pause at the end of a left-scrolling loop
   fadeWidth?: number;
   fadeColor?: string; // Kept for callers; native fade is now an alpha mask.
   align?: 'left' | 'center';
@@ -48,6 +49,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
   containerStyle,
   speed = 22,
   delay = 1400,
+  endDelay = 400,
   fadeWidth = 10,
   fadeColor: _fadeColor,
   align = 'left',
@@ -84,7 +86,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
                 isInteraction: false,
                 useNativeDriver: Platform.OS !== 'web',
               }),
-              Animated.delay(400),
+              Animated.delay(endDelay),
               Animated.timing(scrollAnim, {
                 toValue: 0,
                 duration: 0,
@@ -120,7 +122,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
     return () => {
       animation.stop();
     };
-  }, [text, shouldAnimate, measuredTextWidth, containerWidth, speed, delay, fadeWidth, scrollAnim, scrollMode]);
+  }, [text, shouldAnimate, measuredTextWidth, containerWidth, speed, delay, endDelay, fadeWidth, scrollAnim, scrollMode]);
 
   const onContainerLayout = (e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;

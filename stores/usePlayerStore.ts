@@ -78,6 +78,7 @@ export interface PlayerStoreState {
   currentTrack: PlayerTrack | null;
   playerState: PlayerState;
   isPlayerVisible: boolean;
+  isFullPlayerVisible: boolean;
   isLoadingAudio: boolean;
   isLoadingLyrics: boolean;
   lyricsData: LyricsData | null;
@@ -117,6 +118,7 @@ export interface PlayerStoreState {
   toggleShuffle: () => void;
   setRepeatMode: (mode: RepeatMode) => void;
   setIsPlayerVisible: (visible: boolean) => void;
+  setIsFullPlayerVisible: (visible: boolean) => void;
   closePlayer: () => Promise<void>;
   refreshLyrics: () => Promise<void>;
   updateLyricsSegments: (segments: LyricSegment[]) => Promise<boolean>;
@@ -437,6 +439,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   currentTrack: null,
   playerState: DEFAULT_STATE,
   isPlayerVisible: false,
+  isFullPlayerVisible: false,
   isLoadingAudio: false,
   isLoadingLyrics: false,
   lyricsData: null,
@@ -451,6 +454,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
   setIsPlayerVisible: (visible: boolean) => {
     set({ isPlayerVisible: visible });
+  },
+  setIsFullPlayerVisible: (visible: boolean) => {
+    set({ isFullPlayerVisible: visible });
   },
 
   playTrack: async (track: PlayerTrack, options = {}) => {
@@ -1130,6 +1136,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     set({
       currentTrack: null,
       isPlayerVisible: false,
+      isFullPlayerVisible: false,
       lyricsData: null,
       queueSourceId: null,
       playerState: DEFAULT_STATE,

@@ -37,7 +37,13 @@ jest.mock('expo-router', () => ({
   useRouter: () => ({ navigate: mockNavigate, replace: mockReplace }),
   useSegments: () => ['(tabs)', 'library'],
 }));
-jest.mock('@api', () => ({ findArtistIdByName: jest.fn() }));
+jest.mock('@api', () => ({
+  findArtistIdByName: jest.fn(),
+  getYouTubeMusicArtistImage: jest.fn().mockResolvedValue(null),
+}));
+jest.mock('../../../services/metadata/spotifyMetadata', () => ({
+  getSpotifyArtistImage: jest.fn().mockResolvedValue(null),
+}));
 jest.mock('@context', () => ({
   useDownloads: jest.fn(),
   useLibrarySelectedCategory: jest.fn(),
@@ -64,6 +70,7 @@ jest.mock('@services', () => ({
   resolveDirectYouTubeAudio: jest.fn(),
   resolveDirectYouTubeTrack: jest.fn(),
   deleteDownloadedTrack: jest.fn(),
+  getCachedArtistImage: jest.fn().mockResolvedValue(''),
   toDownloadTrackInput: jest.fn((track) => track),
   upsertCatalogTracks: jest.fn(),
 }));
@@ -113,6 +120,7 @@ const sampleTrack = {
 
 const makePlayer = (track = {}) => ({
   currentTrack: { ...sampleTrack, ...track },
+  isPlayerVisible: true,
   playerState: { positionMs: 0, durationMs: 180000, isPlaying: false },
   playTrack: jest.fn().mockResolvedValue(undefined),
   togglePlayPause: jest.fn().mockResolvedValue(undefined),
@@ -235,6 +243,31 @@ describe('FullPlayer artist row and YouTube source', () => {
         { dangerouslySingular: true }
       );
     }
+  });
+
+  it('shows inline lyrics, artist details, and credits in the scrollable player', async () => {
+    const screen = await mountPlayer();
+
+    expect(screen.getByText('Letra')).toBeTruthy();
+    expect(screen.getByText('Sobre o artista')).toBeTruthy();
+    expect(screen.getByText('Créditos')).toBeTruthy();
+    expect(screen.getAllByText('Artista principal').length).toBeGreaterThan(1);
+    expect(screen.getAllByText('Participação').length).toBeGreaterThan(0);
+    expect(screen.queryByText('OPENFY MUSIC')).toBeNull();
+    expect(screen.getByText('A song')).toBeTruthy();
+  });
+
+  it('replaces the title with a sticky mini-player after the player scrolls away', async () => {
+    const screen = await mountPlayer();
+    await fireEvent.scroll(screen.getByTestId('player-scroll-view'), {
+      nativeEvent: {
+        contentOffset: { y: 180 },
+        contentSize: { height: 1800, width: 390 },
+        layoutMeasurement: { height: 700, width: 390 },
+      },
+    });
+
+    expect(screen.getByTestId('mini-player-content')).toBeTruthy();
   });
 
   it('keeps the artist-only pill when lyrics are open', async () => {

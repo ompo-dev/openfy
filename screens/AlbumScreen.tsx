@@ -101,7 +101,7 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
       trackCount={album.tracks.total}
       totalDurationMs={album.duration}
       tracks={album.tracks.items}
-      artists={artists.map(({ id, name }) => ({ id, name }))}
+      artists={artists.map(({ id, name, imageURL }) => ({ id, name, imageURL }))}
       onArtistPress={handleArtistPress}
       onRefresh={refresh}
       refreshing={isRefreshing}

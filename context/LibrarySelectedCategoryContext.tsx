@@ -1,118 +1,64 @@
 import * as React from 'react';
-
-import { Categories } from '@config';
+import type { SetStateAction } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { SharedValue, useSharedValue } from 'react-native-reanimated';
+
+import type { Categories } from '@config';
+import { useLibraryStore, type LibraryView } from '../stores/useLibraryStore';
 
 export type LibrarySelectedCategoryProviderPropsType = {
   children: React.ReactNode;
 };
+export type { LibraryView };
 
-export type LibraryView = 'songs' | 'playlists' | 'albums' | 'artists';
-
-const nextLibraryView: Record<LibraryView, LibraryView> = {
-  songs: 'playlists',
-  playlists: 'albums',
-  albums: 'artists',
-  artists: 'songs',
-};
-
-export const LibrarySelectedCategoryContext = React.createContext<{
-  librarySelectedCategory: Categories;
-  setLibrarySelectedCategory: React.Dispatch<React.SetStateAction<Categories>>;
-  animatedValue: SharedValue<number> | null;
-  librarySearchQuery: string;
-  setLibrarySearchQuery: React.Dispatch<React.SetStateAction<string>>;
-  librarySort: 'recent' | 'title';
-  setLibrarySort: React.Dispatch<React.SetStateAction<'recent' | 'title'>>;
-  toggleLibrarySort: () => void;
-  libraryView: LibraryView;
-  setLibraryView: React.Dispatch<React.SetStateAction<LibraryView>>;
-  toggleLibraryView: () => void;
-  libraryRevision: number;
-  refreshLibrary: () => void;
-}>({
-  librarySelectedCategory: Categories.DOWNLOADED,
-  setLibrarySelectedCategory: () => {},
-  animatedValue: null,
-  librarySearchQuery: '',
-  setLibrarySearchQuery: () => {},
-  librarySort: 'recent',
-  setLibrarySort: () => {},
-  toggleLibrarySort: () => {},
-  libraryView: 'songs',
-  setLibraryView: () => {},
-  toggleLibraryView: () => {},
-  libraryRevision: 0,
-  refreshLibrary: () => {},
-});
+const LibraryAnimationContext = React.createContext<SharedValue<number> | null>(null);
 
 export const LibrarySelectedCategoryProvider = ({
   children,
 }: LibrarySelectedCategoryProviderPropsType) => {
-  const [librarySelectedCategory, setLibrarySelectedCategory] =
-    React.useState<Categories>(Categories.DOWNLOADED);
-  const [librarySearchQuery, setLibrarySearchQuery] = React.useState('');
-  const [librarySort, setLibrarySort] = React.useState<'recent' | 'title'>(
-    'recent'
-  );
-  const [libraryView, setLibraryView] = React.useState<LibraryView>(
-    'songs'
-  );
-  const [libraryRevision, setLibraryRevision] = React.useState(0);
   const animatedValue = useSharedValue(1);
-  const refreshLibrary = React.useCallback(
-    () => setLibraryRevision((revision) => revision + 1),
-    []
-  );
-
   return (
-    <LibrarySelectedCategoryContext.Provider
-      value={{
-        librarySelectedCategory,
-        setLibrarySelectedCategory,
-        animatedValue: animatedValue as SharedValue<number>,
-        librarySearchQuery,
-        setLibrarySearchQuery,
-        librarySort,
-        setLibrarySort,
-        toggleLibrarySort: () =>
-          setLibrarySort((sort) => (sort === 'recent' ? 'title' : 'recent')),
-        libraryView,
-        setLibraryView,
-        toggleLibraryView: () => setLibraryView((view) => nextLibraryView[view]),
-        libraryRevision,
-        refreshLibrary,
-      }}
-    >
+    <LibraryAnimationContext.Provider value={animatedValue}>
       {children}
-    </LibrarySelectedCategoryContext.Provider>
+    </LibraryAnimationContext.Provider>
   );
 };
 
-export const useLibrarySelectedCategory = (): {
+type LibrarySelectedCategoryValue = {
   librarySelectedCategory: Categories;
-  setLibrarySelectedCategory: React.Dispatch<React.SetStateAction<Categories>>;
+  setLibrarySelectedCategory: (value: SetStateAction<Categories>) => void;
   animatedValue: SharedValue<number>;
   librarySearchQuery: string;
-  setLibrarySearchQuery: React.Dispatch<React.SetStateAction<string>>;
+  setLibrarySearchQuery: (value: SetStateAction<string>) => void;
   librarySort: 'recent' | 'title';
-  setLibrarySort: React.Dispatch<React.SetStateAction<'recent' | 'title'>>;
+  setLibrarySort: (value: SetStateAction<'recent' | 'title'>) => void;
   toggleLibrarySort: () => void;
   libraryView: LibraryView;
-  setLibraryView: React.Dispatch<React.SetStateAction<LibraryView>>;
+  setLibraryView: (value: SetStateAction<LibraryView>) => void;
   toggleLibraryView: () => void;
   libraryRevision: number;
   refreshLibrary: () => void;
-} => {
-  const context = React.useContext(LibrarySelectedCategoryContext);
+};
 
-  if (
-    context.animatedValue === null ||
-    !context.librarySelectedCategory ||
-    !context.setLibrarySelectedCategory
-  ) {
-    throw new Error('Failed to access context values');
+export const useLibrarySelectedCategory = (): LibrarySelectedCategoryValue => {
+  const animatedValue = React.useContext(LibraryAnimationContext);
+  const state = useLibraryStore(useShallow((current) => ({
+    librarySelectedCategory: current.librarySelectedCategory,
+    setLibrarySelectedCategory: current.setLibrarySelectedCategory,
+    librarySearchQuery: current.librarySearchQuery,
+    setLibrarySearchQuery: current.setLibrarySearchQuery,
+    librarySort: current.librarySort,
+    setLibrarySort: current.setLibrarySort,
+    toggleLibrarySort: current.toggleLibrarySort,
+    libraryView: current.libraryView,
+    setLibraryView: current.setLibraryView,
+    toggleLibraryView: current.toggleLibraryView,
+    libraryRevision: current.libraryRevision,
+    refreshLibrary: current.refreshLibrary,
+  })));
+
+  if (!animatedValue) {
+    throw new Error('useLibrarySelectedCategory must be used inside its provider');
   }
-
-  return { ...context, animatedValue: context.animatedValue };
+  return { ...state, animatedValue };
 };

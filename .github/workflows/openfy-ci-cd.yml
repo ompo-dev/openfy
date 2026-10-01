@@ -31,6 +31,7 @@ env:
   EXPO_NO_TELEMETRY: "1"
   EXPO_PUBLIC_LOCAL_AUDIO_ONLY: "true"
   EXPO_PUBLIC_SPOTIFY_CLIENT_ID: ${{ vars.EXPO_PUBLIC_SPOTIFY_CLIENT_ID }}
+  IOS_APPLE_TEAM_ID: ${{ vars.IOS_APPLE_TEAM_ID }}
   YOUTUBE_DL_SKIP_DOWNLOAD: "true"
 
 jobs:
@@ -317,6 +318,24 @@ jobs:
           APP_NAME="$(basename "$APP_PATH" .app)"
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Validar widget iOS embutido
+        shell: bash
+        run: |
+          set -e
+          APP_PATH="${{ steps.compiled-app.outputs.app_path }}"
+          WIDGET_PATH="$APP_PATH/PlugIns/playerwidget.appex"
+          if [ ! -d "$WIDGET_PATH" ]; then
+            echo "A extensao WidgetKit nao foi embutida em $APP_PATH/PlugIns."
+            find "$APP_PATH/PlugIns" -maxdepth 2 -print 2>/dev/null || true
+            exit 1
+          fi
+          WIDGET_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$WIDGET_PATH/Info.plist")
+          if [ "$WIDGET_BUNDLE_ID" != "com.openfy.app.playerwidget" ]; then
+            echo "Bundle ID inesperado para o widget: $WIDGET_BUNDLE_ID"
+            exit 1
+          fi
+          echo "Widget iOS validado: $WIDGET_BUNDLE_ID"
 
       - name: Empacotar IPA
         shell: bash

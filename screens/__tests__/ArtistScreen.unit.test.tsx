@@ -46,17 +46,23 @@ jest.mock('@components', () => {
   const React = jest.requireActual('react');
   const { Text, View } = jest.requireActual('react-native');
   return {
-    CollectionDetail: ({ title, tracks, imageURL }: {
+    CollectionDetail: ({ title, tracks, imageURL, extraTrackSections, description, metadata }: {
       title: string;
       tracks: unknown[];
       imageURL: string;
+      extraTrackSections?: Array<{ id: string; tracks: unknown[] }>;
+      description?: string;
+      metadata?: string;
     }) =>
       React.createElement(
         View,
         null,
         React.createElement(Text, null, title),
         React.createElement(Text, { testID: 'artist-image' }, imageURL || 'no-artist-image'),
-        React.createElement(Text, null, `track-count:${tracks.length}`)
+        React.createElement(Text, null, `track-count:${tracks.length}`),
+        React.createElement(Text, null, `participation-count:${extraTrackSections?.find((section) => section.id === 'participations')?.tracks.length || 0}`),
+        React.createElement(Text, { testID: 'artist-description' }, description || '<empty>'),
+        React.createElement(Text, { testID: 'artist-metadata' }, metadata || '<empty>')
       ),
   };
 });
@@ -165,5 +171,28 @@ describe('ArtistScreen', () => {
       );
       expect(view.getByText('track-count:1')).toBeTruthy();
     });
+  });
+
+  it('passes remote catalog tracks and participations without generic profile text', async () => {
+    const artistId = 'ytartist_UCremote~Remote%20artist';
+    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
+      artist: {
+        id: artistId,
+        type: 'artist',
+        name: 'Remote artist',
+        imageURL: 'https://images.example/remote-artist.jpg',
+      },
+      tracks: [{ id: 'primary-track', title: 'Primary', artists: [] }],
+      participationTracks: [{ id: 'guest-track', title: 'Guest', artists: [] }],
+    } as never);
+    const view = await render(<ArtistScreen artistId={artistId} />);
+
+    await waitFor(() => {
+      expect(view.getByText('track-count:1')).toBeTruthy();
+      expect(view.getByText('participation-count:1')).toBeTruthy();
+    });
+    expect(view.getByTestId('artist-description').props.children).toBe('<empty>');
+    expect(view.getByTestId('artist-metadata').props.children).toBe('<empty>');
+    expect(view.queryByText('Artista')).toBeNull();
   });
 });

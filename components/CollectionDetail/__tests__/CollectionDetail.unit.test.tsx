@@ -57,6 +57,14 @@ jest.mock('../../PlaylistMosaic', () => ({ PlaylistMosaic: () => null }));
 jest.mock('../../Home/FriendActivityStatus/NoteBubble', () => ({
   SoundWaveIcon: () => null,
 }));
+jest.mock('../../common/MarqueeText', () => {
+  const React = jest.requireActual<typeof import('react')>('react');
+  const { Text, View } = jest.requireActual<typeof import('react-native')>('react-native');
+  return {
+    MarqueeText: ({ children, text, ...props }: any) =>
+      React.createElement(View, props, React.createElement(Text, null, children || text)),
+  };
+});
 
 const playWithQueue = jest.fn().mockResolvedValue(undefined);
 const togglePlayPause = jest.fn().mockResolvedValue(undefined);
@@ -163,7 +171,7 @@ describe('CollectionDetail', () => {
       )
     );
 
-    fireEvent.press(screen.getByLabelText('Abrir artista Artista sem id'));
+    fireEvent.press(screen.getAllByLabelText('Abrir artista Artista sem id')[0]);
     expect(onArtistPress).toHaveBeenCalledWith('', 'Artista sem id');
   });
 
@@ -192,11 +200,69 @@ describe('CollectionDetail', () => {
       onEditPress,
     });
 
-    expect(screen.queryByLabelText('Abrir artista Artista sem id')).toBeNull();
+    const artistLabels = screen.getAllByLabelText('Abrir artista Artista sem id');
+    expect(artistLabels).toHaveLength(1);
+    expect(artistLabels[0].props.accessibilityRole).toBe('link');
     expect(screen.queryByLabelText('Compartilhar')).toBeNull();
     fireEvent.press(screen.getByLabelText('Editar playlist'));
 
     expect(onEditPress).toHaveBeenCalledTimes(1);
     expect(onArtistPress).not.toHaveBeenCalled();
+  });
+
+  it('shows the complete artist portrait and omits generic profile copy', async () => {
+    const screen = await renderCollection({
+      kind: 'artist',
+      title: 'Yago Oproprio',
+      imageURL: 'https://images.example/yago.jpg',
+      description: '',
+      metadata: '',
+    });
+
+    expect(screen.getByTestId('collection-artwork').props.contentFit).toBe('contain');
+    expect(screen.queryByText('Artista')).toBeNull();
+    expect(screen.queryByText('Músicas, álbuns e singles de Yago Oproprio.')).toBeNull();
+  });
+
+  it('lists every credited artist from the collection and removes add and overflow actions', async () => {
+    const screen = await renderCollection({
+      tracks: [
+        { id: 'one', title: 'Faixa 1', subtitle: 'Principal, Participação' },
+        { id: 'two', title: 'Faixa 2', subtitle: 'Principal, Outra participação' },
+      ],
+      metadata: 'EP · 4 músicas · 12 min',
+    });
+
+    expect(screen.getByText('EP · 4 músicas · 12 min')).toBeTruthy();
+    expect(screen.queryByLabelText('Adicionar músicas à playlist')).toBeNull();
+    expect(screen.queryByLabelText('Mais opções')).toBeNull();
+    fireEvent.press(screen.getByLabelText('Ver 3 artistas'));
+    expect(screen.getAllByText('Principal').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Participação').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Outra participação').length).toBeGreaterThan(0);
+  });
+
+  it('loads remaining remote playlist pages when the full artist list is requested', async () => {
+    const resolveTracksForPlayback = jest.fn().mockResolvedValue([
+      ...tracks,
+      {
+        id: 'track-three',
+        title: 'Faixa de outra página',
+        subtitle: 'Artista da página seguinte',
+      },
+    ]);
+    const screen = await renderCollection({
+      kind: 'playlist',
+      trackCount: 4,
+      resolveTracksForPlayback,
+    });
+
+    fireEvent.press(screen.getByLabelText('Ver 2 artistas'));
+    await waitFor(() => expect(resolveTracksForPlayback).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(
+        screen.getAllByLabelText('Abrir artista Artista da página seguinte')
+      ).toHaveLength(2)
+    );
   });
 });

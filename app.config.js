@@ -23,6 +23,9 @@ module.exports = {
     ios: {
       bundleIdentifier: 'com.openfy.app',
       buildNumber: process.env.IOS_BUILD_NUMBER || '1',
+      entitlements: {
+        'com.apple.security.application-groups': ['group.com.openfy.app'],
+      },
       infoPlist: {
         UIBackgroundModes: ['audio'],
         NSAppTransportSecurity: {
@@ -60,6 +63,7 @@ module.exports = {
     },
     plugins: [
       'expo-router',
+      '@bacons/apple-targets',
       'expo-asset',
       [
         'expo-audio',

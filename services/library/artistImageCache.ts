@@ -1,9 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 
 const STORAGE_KEY_PREFIX = 'openfy_artist_image_verified_v2:';
-const imageCache = new Map<string, string>();
-const missingImageCache = new Map<string, number>();
-const pendingImageLoads = new Map<string, Promise<string>>();
+const IMAGE_CACHE_TTL_MS = 6 * 60 * 60_000;
+const MISSING_IMAGE_CACHE_TTL_MS = 60_000;
+const imageCache = createAsyncResourceCache<string>({
+  name: 'artist-image',
+  category: 'artist',
+  maxEntries: 250,
+  ttlFor: (imageURL) => imageURL ? IMAGE_CACHE_TTL_MS : MISSING_IMAGE_CACHE_TTL_MS,
+});
 
 const getArtistCacheId = (artistName: string) =>
   artistName.trim().toLocaleLowerCase();
@@ -13,8 +19,7 @@ const isRemoteImage = (value: string) => /^https?:\/\//i.test(value);
 export const rememberCachedArtistImage = async (artistName: string, imageURL: string) => {
   const id = getArtistCacheId(artistName);
   if (!id || !isRemoteImage(imageURL)) return;
-  imageCache.set(id, imageURL);
-  missingImageCache.delete(id);
+  imageCache.set(id, imageURL, IMAGE_CACHE_TTL_MS);
   try {
     await AsyncStorage.setItem(
       `${STORAGE_KEY_PREFIX}${encodeURIComponent(id)}`,
@@ -31,38 +36,21 @@ export const getCachedArtistImage = async (
   const id = getArtistCacheId(artistName);
   if (!id) return '';
 
-  const cached = imageCache.get(id);
-  if (cached) return cached;
-  if (Date.now() - (missingImageCache.get(id) || 0) < 60_000) return '';
-
-  const pending = pendingImageLoads.get(id);
-  if (pending) return pending;
-
-  const request = (async () => {
+  return imageCache.getOrLoad(id, async () => {
     try {
       const stored = await AsyncStorage.getItem(
         `${STORAGE_KEY_PREFIX}${encodeURIComponent(id)}`
       );
-      if (stored && isRemoteImage(stored)) {
-        imageCache.set(id, stored);
-        return stored;
-      }
+      if (stored && isRemoteImage(stored)) return stored;
     } catch {}
 
     const imageURL = await loadImage().catch(() => '') || '';
-    if (!isRemoteImage(imageURL)) {
-      missingImageCache.set(id, Date.now());
-      return '';
-    }
+    if (!isRemoteImage(imageURL)) return '';
 
     await rememberCachedArtistImage(id, imageURL);
     return imageURL;
-  })();
-
-  pendingImageLoads.set(id, request);
-  try {
-    return await request;
-  } finally {
-    pendingImageLoads.delete(id);
-  }
+  }, IMAGE_CACHE_TTL_MS);
 };
+
+/** Clears only the process cache; persisted artist artwork remains intact. */
+export const _clearArtistImageMemoryCacheForTests = () => imageCache.clear();

@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { executeCommand } from '../../src/application/commandBus';
 
 export type LocalPlaylist = {
   id: string;
@@ -72,9 +73,14 @@ export const getLocalPlaylist = async (
   return playlists.find((playlist) => playlist.id === id) || null;
 };
 
-export const upsertLocalPlaylist = async (
+export const upsertLocalPlaylist = (
   input: LocalPlaylistInput
-): Promise<LocalPlaylist> => {
+): Promise<LocalPlaylist> => executeCommand({
+  name: 'playlist.upsert',
+  category: 'playlist',
+  idempotencyKey: `${input.sourcePlatform}:${input.sourceId}:${JSON.stringify(input)}`,
+  successTtlMs: 0,
+  execute: async () => {
   const id = `local_${input.sourcePlatform}_${input.sourceId}`;
   let saved!: LocalPlaylist;
   const operation = storageMutation.then(async () => {
@@ -110,7 +116,8 @@ export const upsertLocalPlaylist = async (
   storageMutation = operation.catch(() => {});
   await operation;
   return saved;
-};
+  },
+});
 
 export const createLocalPlaylist = (
   title: string,
@@ -124,10 +131,15 @@ export const createLocalPlaylist = (
     trackIds: [],
   });
 
-export const updateLocalPlaylist = async (
+export const updateLocalPlaylist = (
   playlistId: string,
   update: LocalPlaylistUpdate
-): Promise<LocalPlaylist | null> => {
+): Promise<LocalPlaylist | null> => executeCommand({
+  name: 'playlist.update',
+  category: 'playlist',
+  idempotencyKey: `${playlistId}:${JSON.stringify(Object.entries(update).sort(([a], [b]) => a.localeCompare(b)))}`,
+  successTtlMs: 0,
+  execute: async () => {
   let saved: LocalPlaylist | null = null;
   const operation = storageMutation.then(async () => {
     const playlists = await getLocalPlaylists();
@@ -167,12 +179,18 @@ export const updateLocalPlaylist = async (
   storageMutation = operation.catch(() => {});
   await operation;
   return saved;
-};
+  },
+});
 
-export const addTracksToLocalPlaylist = async (
+export const addTracksToLocalPlaylist = (
   playlistId: string,
   trackIds: string[]
-): Promise<LocalPlaylist | null> => {
+): Promise<LocalPlaylist | null> => executeCommand({
+  name: 'playlist.tracks.add',
+  category: 'playlist',
+  idempotencyKey: `${playlistId}:${uniqueNonEmpty(trackIds).join(',')}`,
+  successTtlMs: 0,
+  execute: async () => {
   let saved: LocalPlaylist | null = null;
   const operation = storageMutation.then(async () => {
     const playlists = await getLocalPlaylists();
@@ -195,12 +213,18 @@ export const addTracksToLocalPlaylist = async (
   storageMutation = operation.catch(() => {});
   await operation;
   return saved;
-};
+  },
+});
 
-export const removeTracksFromLocalPlaylist = async (
+export const removeTracksFromLocalPlaylist = (
   playlistId: string,
   trackIds: string[]
-): Promise<LocalPlaylist | null> => {
+): Promise<LocalPlaylist | null> => executeCommand({
+  name: 'playlist.tracks.remove',
+  category: 'playlist',
+  idempotencyKey: `${playlistId}:${uniqueNonEmpty(trackIds).sort().join(',')}`,
+  successTtlMs: 0,
+  execute: async () => {
   const removed = new Set(trackIds);
   let saved: LocalPlaylist | null = null;
   const operation = storageMutation.then(async () => {
@@ -224,9 +248,16 @@ export const removeTracksFromLocalPlaylist = async (
   storageMutation = operation.catch(() => {});
   await operation;
   return saved;
-};
+  },
+});
 
-export const deleteLocalPlaylist = async (playlistId: string): Promise<void> => {
+export const deleteLocalPlaylist = (playlistId: string): Promise<void> =>
+  executeCommand({
+  name: 'playlist.delete',
+  category: 'playlist',
+  idempotencyKey: playlistId,
+  successTtlMs: 0,
+  execute: async () => {
   const operation = storageMutation.then(async () => {
     const playlists = await getLocalPlaylists();
     await AsyncStorage.setItem(
@@ -236,11 +267,17 @@ export const deleteLocalPlaylist = async (playlistId: string): Promise<void> => 
   });
   storageMutation = operation.catch(() => {});
   await operation;
-};
+  },
+});
 
-export const removeTrackFromLocalPlaylists = async (
+export const removeTrackFromLocalPlaylists = (
   trackId: string
-): Promise<void> => {
+): Promise<void> => executeCommand({
+  name: 'playlist.track.detach',
+  category: 'playlist',
+  idempotencyKey: trackId,
+  successTtlMs: 0,
+  execute: async () => {
   const operation = storageMutation.then(async () => {
     const playlists = await getLocalPlaylists();
     const next = playlists.map((playlist) => ({
@@ -254,4 +291,5 @@ export const removeTrackFromLocalPlaylists = async (
   });
   storageMutation = operation.catch(() => {});
   await operation;
-};
+  },
+});

@@ -1,14 +1,15 @@
 import * as React from 'react';
 import {
-  Alert,
   FlatList,
   Keyboard,
+  Modal,
   RefreshControl,
   Share,
   StyleSheet,
   Text,
   TextInput,
   View,
+  ScrollView,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,6 +25,11 @@ import { formatCollectionMeta, log } from '@utils';
 import { GlassSurface, LoggedPressable, NativeIconButton } from '../native';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
+import { MarqueeText } from '../common/MarqueeText';
+import { findArtistIdByName, getYouTubeMusicArtistImage } from '@api';
+import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
+import { getCachedArtistImage } from '@services';
+import { useDetailNavigation } from '@hooks';
 
 type CollectionTrack = TrackModel & {
   localAudioPath?: string;
@@ -50,7 +56,7 @@ export type CollectionDetailProps = {
   trackCount?: number;
   totalDurationMs?: number;
   tracks: CollectionTrack[];
-  artists?: { id: string; name: string }[];
+  artists?: { id: string; name: string; imageURL?: string }[];
   onAddTracksPress?: () => void | Promise<void>;
   onArtistPress?: (artistId: string, artistName: string) => void | Promise<void>;
   onDeletePress?: () => void | Promise<void>;
@@ -156,11 +162,19 @@ export const CollectionDetail = ({
   refreshing = false,
 }: CollectionDetailProps) => {
   const router = useRouter();
+  const { openDetail } = useDetailNavigation();
   const segments = useSegments();
   const insets = useSafeAreaInsets();
   const [sortAscending, setSortAscending] = React.useState(false);
   const [isSearchOpen, setIsSearchOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
+  const [isArtistListVisible, setIsArtistListVisible] = React.useState(false);
+  const [isLoadingAllArtists, setIsLoadingAllArtists] = React.useState(false);
+  const [resolvedArtistTracks, setResolvedArtistTracks] = React.useState<{
+    collectionId: string;
+    tracks: CollectionTrack[];
+  } | null>(null);
+  const [artistImages, setArtistImages] = React.useState<Record<string, string>>({});
   const { downloads, enqueueDownloads } = useDownloads();
   const {
     addToQueue,
@@ -212,6 +226,75 @@ export const CollectionDetail = ({
         .filter((section) => section.tracks.length > 0),
     [extraTrackSections, normalizedSearchQuery]
   );
+  const allArtistTracks =
+    resolvedArtistTracks?.collectionId === collectionId
+      ? resolvedArtistTracks.tracks
+      : tracks;
+  const collectionArtists = React.useMemo(() => {
+    const byKey = new Map<string, { id: string; name: string; imageURL?: string }>();
+    const addArtist = (artist: { id?: string; name?: string; imageURL?: string }) => {
+      const name = artist.name?.trim();
+      if (!name) return;
+      const id = artist.id?.trim() || '';
+      const key = (id || name).toLocaleLowerCase();
+      const previous = byKey.get(key);
+      byKey.set(key, {
+        id: id || previous?.id || '',
+        name: previous?.name || name,
+        imageURL: artist.imageURL || previous?.imageURL,
+      });
+    };
+    artists?.forEach(addArtist);
+    [...allArtistTracks, ...extraTrackSections.flatMap((section) => section.tracks)].forEach((track) =>
+      getTrackArtists(track).forEach(addArtist)
+    );
+    return [...byKey.values()];
+  }, [allArtistTracks, artists, extraTrackSections]);
+
+  React.useEffect(() => {
+    let active = true;
+    const unresolved = collectionArtists.filter((artist) => artist.id && !artist.imageURL && !artistImages[artist.id]);
+    if (!unresolved.length) return;
+    void Promise.all(unresolved.map(async (artist) => {
+      const key = artist.id;
+      const imageURL = await getCachedArtistImage(key, () => {
+        if (artist.id.startsWith('ytartist_')) return getYouTubeMusicArtistImage(artist.id);
+        if (/^[A-Za-z0-9]{22}$/.test(artist.id)) return getSpotifyArtistImage(artist.id);
+        return Promise.resolve(null);
+      });
+      return [key, imageURL] as const;
+    })).then((results) => {
+      if (active) setArtistImages((current) => ({
+        ...current,
+        ...Object.fromEntries(results.filter(([, url]) => Boolean(url))),
+      }));
+    });
+    return () => { active = false; };
+  }, [artistImages, collectionArtists]);
+
+  const handleCollectionArtistPress = React.useCallback(async (artist: { id: string; name: string }) => {
+    if (onArtistPress) {
+      await onArtistPress(artist.id, artist.name);
+      return;
+    }
+    const routeId = artist.id.startsWith('ytartist_') || artist.id.startsWith('local_artist_')
+      ? artist.id
+      : artist.id && /^[A-Za-z0-9]{22}$/.test(artist.id)
+        ? artist.id
+        : (await findArtistIdByName(artist.name)) || `ytartist_name_${encodeURIComponent(artist.name)}`;
+    openDetail('artist', routeId);
+  }, [onArtistPress, openDetail]);
+
+  const openArtistList = React.useCallback(() => {
+    setIsArtistListVisible(true);
+    if (isLoadingAllArtists || kind !== 'playlist' || !resolveTracksForPlayback || !trackCount || tracks.length >= trackCount) return;
+    setIsLoadingAllArtists(true);
+    log.ui('load complete playlist artist credits', { collectionId, loaded: tracks.length, total: trackCount });
+    void resolveTracksForPlayback()
+      .then((allTracks) => setResolvedArtistTracks({ collectionId, tracks: allTracks }))
+      .catch((error) => log.error('load playlist artist credits failed', { collectionId, error }))
+      .finally(() => setIsLoadingAllArtists(false));
+  }, [collectionId, isLoadingAllArtists, kind, resolveTracksForPlayback, trackCount, tracks.length]);
 
   const playTrackList = React.useCallback(
     async (
@@ -494,10 +577,11 @@ export const CollectionDetail = ({
               <PlaylistMosaic imageURLs={imageURLs} style={styles.heroArtwork} />
             ) : imageURL ? (
               <Image
+                testID={kind === 'artist' ? 'collection-artwork' : undefined}
                 cachePolicy="memory-disk"
                 source={{ uri: imageURL }}
-                style={styles.heroArtwork}
-                contentFit="cover"
+                style={[styles.heroArtwork, kind === 'artist' && styles.artistHeroArtwork]}
+                contentFit={kind === 'artist' ? 'contain' : 'cover'}
               />
             ) : kind === 'artist' ? (
               <View style={styles.artistHeroFallback}>
@@ -572,28 +656,51 @@ export const CollectionDetail = ({
                 )}
               </GlassSurface>
             </View>
-            <View style={styles.heroCopy}>
-              <Text style={styles.collectionTitle}>{title}</Text>
-              {artists?.length ? (
-                <View style={styles.artistLinks}>
-                  {artists.map((artist, index) => (
-                    <LoggedPressable
-                      key={artist.id}
-                      accessibilityLabel={`Abrir artista ${artist.name}`}
-                      onPress={() => void onArtistPress?.(artist.id, artist.name)}
-                      disabled={!onArtistPress}
-                    >
-                      <Text style={styles.artistName}>
-                        {artist.name}{index < artists.length - 1 ? ' · ' : ''}
-                      </Text>
-                    </LoggedPressable>
-                  ))}
+            <View style={[styles.heroCopy, kind !== 'artist' && styles.collectionHeroCopy, kind === 'artist' && styles.artistHeroCopy]}>
+              <Text style={[styles.collectionTitle, kind === 'artist' && styles.artistCollectionTitle]}>{title}</Text>
+              {kind !== 'artist' && collectionArtists.length ? (
+                <View style={styles.collectionArtistsRow}>
+                  <LoggedPressable
+                    accessibilityLabel={`Ver ${collectionArtists.length} artistas`}
+                    onPress={openArtistList}
+                    style={styles.artistAvatarStack}
+                  >
+                    {collectionArtists.slice(0, 4).map((artist, index) => {
+                      const uri = artist.imageURL || artistImages[artist.id || artist.name];
+                      return (
+                        <View key={`${artist.id}-${artist.name}`} style={[styles.artistAvatar, index > 0 && styles.artistAvatarOverlap, { zIndex: 4 - index }]}>
+                          {uri ? <Image source={{ uri }} cachePolicy="memory-disk" contentFit="cover" style={styles.artistAvatarImage} /> : <Ionicons name="person" size={15} color="#DDD" />}
+                        </View>
+                      );
+                    })}
+                  </LoggedPressable>
+                  <MarqueeText
+                    text={collectionArtists.map((artist) => artist.name).join(' · ')}
+                    style={styles.artistName}
+                    containerStyle={styles.collectionArtistMarquee}
+                    speed={24}
+                    delay={2000}
+                    endDelay={2000}
+                    fadeWidth={8}
+                    scrollMode="left"
+                  >
+                    {collectionArtists.map((artist, index) => (
+                      <React.Fragment key={`${artist.id}-${artist.name}`}>
+                        {index > 0 ? ' · ' : null}
+                        <Text
+                          accessibilityRole="link"
+                          accessibilityLabel={`Abrir artista ${artist.name}`}
+                          onPress={() => void handleCollectionArtistPress(artist)}
+                        >{artist.name}</Text>
+                      </React.Fragment>
+                    ))}
+                  </MarqueeText>
                 </View>
               ) : null}
-              <Text style={styles.metadata}>{metadata}</Text>
+              {metadata ? <Text style={[styles.metadata, kind !== 'artist' && styles.collectionMetadata]}>{metadata}</Text> : null}
               {description ? <Text style={styles.description}>{description}</Text> : null}
             </View>
-            <View style={styles.actionRow}>
+            <View style={[styles.actionRow, kind !== 'artist' && styles.collectionActionRow]}>
               <NativeIconButton
                 systemImage="shuffle"
                 iconName="shuffle"
@@ -603,14 +710,16 @@ export const CollectionDetail = ({
                 onPress={() => void handleShufflePlay()}
               />
               <GlassSurface glass="regular" isInteractive style={styles.actionPill}>
-                <LoggedPressable
-                  accessibilityLabel={onAddTracksPress ? 'Adicionar músicas à playlist' : 'Adicionar faixas à fila'}
-                  onPress={() => void handleAdd()}
-                  style={styles.pillAction}
-                >
-                  <Ionicons name="add" size={22} color="#FFFFFF" />
-                </LoggedPressable>
-                <View style={styles.pillDivider} />
+                {kind === 'artist' ? (
+                  <>
+                    <LoggedPressable
+                      accessibilityLabel={onAddTracksPress ? 'Adicionar músicas à playlist' : 'Adicionar faixas à fila'}
+                      onPress={() => void handleAdd()}
+                      style={styles.pillAction}
+                    ><Ionicons name="add" size={22} color="#FFFFFF" /></LoggedPressable>
+                    <View style={styles.pillDivider} />
+                  </>
+                ) : null}
                 <LoggedPressable
                   accessibilityLabel={
                     collectionDownloadState === 'completed'
@@ -649,24 +758,12 @@ export const CollectionDetail = ({
                     color="#FFFFFF"
                   />
                 </LoggedPressable>
-                <View style={styles.pillDivider} />
-                <LoggedPressable
-                  accessibilityLabel={onDeletePress ? 'Excluir playlist' : 'Mais opções'}
-                  onPress={() => {
-                    if (onDeletePress) {
-                      void onDeletePress();
-                      return;
-                    }
-                    Alert.alert(title, 'Opções da coleção em breve.');
-                  }}
-                  style={styles.pillAction}
-                >
-                  <Ionicons
-                    name={onDeletePress ? 'trash-outline' : 'ellipsis-horizontal'}
-                    size={22}
-                    color="#FFFFFF"
-                  />
-                </LoggedPressable>
+                {onDeletePress ? <>
+                  <View style={styles.pillDivider} />
+                  <LoggedPressable accessibilityLabel="Excluir playlist" onPress={() => void onDeletePress()} style={styles.pillAction}>
+                    <Ionicons name="trash-outline" size={21} color="#FFFFFF" />
+                  </LoggedPressable>
+                </> : null}
               </GlassSurface>
               <NativeIconButton
                 systemImage={isCollectionPlaying ? 'pause.fill' : 'play.fill'}
@@ -716,6 +813,44 @@ export const CollectionDetail = ({
           )
         }
       />
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setIsArtistListVisible(false)}
+        transparent
+        visible={isArtistListVisible}
+      >
+        <View style={styles.artistModalBackdrop}>
+          <GlassSurface glass="thick" style={styles.artistModal}>
+            <View style={styles.artistModalHeader}>
+              <Text style={styles.artistModalTitle}>Artistas</Text>
+              <LoggedPressable accessibilityLabel="Fechar artistas" onPress={() => setIsArtistListVisible(false)} style={styles.artistModalClose}>
+                <Ionicons name="close" size={22} color="#FFF" />
+              </LoggedPressable>
+            </View>
+            {isLoadingAllArtists ? <Text style={styles.artistModalLoading}>Carregando créditos da playlist…</Text> : null}
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {collectionArtists.map((artist) => {
+                const uri = artist.imageURL || artistImages[artist.id || artist.name];
+                return (
+                  <LoggedPressable
+                    key={`artist-modal-${artist.id}-${artist.name}`}
+                    accessibilityLabel={`Abrir artista ${artist.name}`}
+                    onPress={() => {
+                      setIsArtistListVisible(false);
+                      void handleCollectionArtistPress(artist);
+                    }}
+                    style={styles.artistModalRow}
+                  >
+                    {uri ? <Image source={{ uri }} cachePolicy="memory-disk" contentFit="cover" style={styles.artistModalImage} /> : <View style={[styles.artistModalImage, styles.artistModalFallback]}><Ionicons name="person" size={20} color="#DDD" /></View>}
+                    <Text numberOfLines={1} style={styles.artistModalName}>{artist.name}</Text>
+                    <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.55)" />
+                  </LoggedPressable>
+                );
+              })}
+            </ScrollView>
+          </GlassSurface>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -724,6 +859,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#101010' },
   hero: { backgroundColor: '#101010', minHeight: 426, paddingHorizontal: 14, justifyContent: 'space-between', overflow: 'hidden' },
   heroArtwork: { ...(StyleSheet.absoluteFill as any), opacity: 0.9 },
+  artistHeroArtwork: { opacity: 1 },
   artistHeroFallback: { ...(StyleSheet.absoluteFill as any), alignItems: 'center', backgroundColor: '#242424', justifyContent: 'center' },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   topTools: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 999, minHeight: 42, paddingHorizontal: 14, paddingVertical: 10 },
@@ -732,12 +868,23 @@ const styles = StyleSheet.create({
   toolDivider: { width: StyleSheet.hairlineWidth, height: 20, backgroundColor: 'rgba(255,255,255,0.28)' },
   searchInput: { color: '#FFFFFF', flex: 1, fontFamily: 'SF-Regular', fontSize: 14, height: 22, padding: 0 },
   heroCopy: { alignItems: 'center', paddingHorizontal: 8, marginTop: 'auto' },
+  collectionHeroCopy: { alignItems: 'flex-start', alignSelf: 'stretch', paddingHorizontal: 8 },
+  artistHeroCopy: { alignItems: 'flex-start', alignSelf: 'stretch', paddingHorizontal: 8 },
   collectionTitle: { color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 28, lineHeight: 33, textAlign: 'center' },
+  collectionArtistsRow: { alignItems: 'center', flexDirection: 'row', gap: 9, marginTop: 8, width: '100%' },
+  artistAvatarStack: { alignItems: 'center', flexDirection: 'row', flexShrink: 0, paddingRight: 3 },
+  artistAvatar: { alignItems: 'center', backgroundColor: '#383838', borderColor: 'rgba(255,255,255,0.4)', borderRadius: 16, borderWidth: 1, height: 32, justifyContent: 'center', overflow: 'hidden', width: 32 },
+  artistAvatarOverlap: { marginLeft: -9 },
+  artistAvatarImage: { height: '100%', width: '100%' },
+  collectionArtistMarquee: { flex: 1, minWidth: 0 },
+  collectionMetadata: { textAlign: 'left', marginTop: 7 },
+  artistCollectionTitle: { textAlign: 'left' },
   artistLinks: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 5 },
   artistName: { color: '#D8C09A', fontFamily: 'SF-Bold', fontSize: 15, textAlign: 'center' },
   metadata: { color: 'rgba(255,255,255,0.78)', fontFamily: 'SF-Semibold', fontSize: 12, marginTop: 8, textAlign: 'center' },
   description: { color: 'rgba(255,255,255,0.7)', fontFamily: 'SF-Regular', fontSize: 13, lineHeight: 19, marginTop: 16, textAlign: 'center' },
   actionRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 22 },
+  collectionActionRow: { marginTop: 16 },
   contentTopSpacer: { height: 18 },
   actionPill: { alignItems: 'center', borderRadius: 999, flexDirection: 'row', minHeight: 46, paddingHorizontal: 6 },
   pillAction: { alignItems: 'center', height: 42, justifyContent: 'center', width: 43 },
@@ -757,4 +904,14 @@ const styles = StyleSheet.create({
   sectionTitle: { color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 18, paddingBottom: 8, paddingHorizontal: 16 },
   extraSection: { paddingTop: 20 },
   listFooter: { paddingTop: 18 },
+  artistModalBackdrop: { backgroundColor: 'rgba(0,0,0,0.56)', flex: 1, justifyContent: 'flex-end' },
+  artistModal: { borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '72%', minHeight: 300, paddingBottom: 30, paddingHorizontal: 18, paddingTop: 16 },
+  artistModalHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  artistModalTitle: { color: '#FFF', fontFamily: 'SF-Bold', fontSize: 20 },
+  artistModalLoading: { color: 'rgba(255,255,255,0.62)', fontFamily: 'SF-Regular', fontSize: 12, paddingBottom: 8 },
+  artistModalClose: { alignItems: 'center', height: 40, justifyContent: 'center', width: 40 },
+  artistModalRow: { alignItems: 'center', borderBottomColor: 'rgba(255,255,255,0.1)', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 12, minHeight: 64, paddingVertical: 8 },
+  artistModalImage: { borderRadius: 24, height: 46, width: 46 },
+  artistModalFallback: { alignItems: 'center', backgroundColor: '#343434', justifyContent: 'center' },
+  artistModalName: { color: '#FFF', flex: 1, fontFamily: 'SF-Semibold', fontSize: 15 },
 });

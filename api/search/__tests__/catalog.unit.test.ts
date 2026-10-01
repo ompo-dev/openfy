@@ -197,7 +197,7 @@ describe('public YouTube Music catalog', () => {
 
     expect(getArtist).toHaveBeenNthCalledWith(1, 'stale');
     expect(getArtist).toHaveBeenNthCalledWith(2, 'stale');
-    expect(search).not.toHaveBeenCalled();
+    expect(search).toHaveBeenCalledWith('Pedro Qualy', { type: 'song' });
     expect(profile.artist).toMatchObject({
       name: 'Pedro Qualy',
       imageURL: 'https://images.example/profile.jpg',
@@ -239,6 +239,65 @@ describe('public YouTube Music catalog', () => {
     expect(search).toHaveBeenCalledWith('Pedro Qualy', { type: 'artist' });
     expect(getArtist).toHaveBeenNthCalledWith(3, 'UCartist');
     expect(profile.artist).toMatchObject({ name: 'Pedro Qualy' });
+  });
+
+  it('supplements incomplete artist pages and separates featured tracks from participations', async () => {
+    const page = {
+      header: {
+        title: 'Yago Oproprio',
+        thumbnail: { contents: [{ url: 'https://images.example/yago.jpg', width: 800 }] },
+      },
+      sections: [{ contents: [{
+        id: 'abcdefghijk',
+        title: 'Only track on profile page',
+        item_type: 'song',
+        artists: [{ channel_id: 'UCyago', name: 'Yago Oproprio' }],
+      }] }],
+    };
+    const search = jest.fn().mockResolvedValue({
+      songs: { contents: [
+        {
+          id: 'abcdefghijk',
+          title: 'Only track on profile page',
+          artists: [{ channel_id: 'UCyago', name: 'Yago Oproprio' }],
+        },
+        {
+          id: 'lmnopqrstuv',
+          title: 'More songs found in search',
+          artists: [{ channel_id: 'UCyago', name: 'Yago Oproprio' }],
+        },
+        {
+          id: '12345678901',
+          title: 'Yago as a guest',
+          artists: [
+            { channel_id: 'UCmain', name: 'Main artist' },
+            { channel_id: 'UCyago', name: 'Yago Oproprio' },
+          ],
+        },
+        {
+          id: 'zyxwvutsrqp',
+          title: 'Unrelated result',
+          artists: [{ channel_id: 'UCother', name: 'Other artist' }],
+        },
+      ] },
+    });
+    const getArtist = jest.fn().mockResolvedValue(page);
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({
+      music: { search, getArtist },
+    } as never);
+
+    const profile = await getYouTubeMusicArtistProfile(
+      'ytartist_UCyago~Yago%20Oproprio'
+    );
+
+    expect(search).toHaveBeenCalledWith('Yago Oproprio', { type: 'song' });
+    expect(profile.tracks.map((track) => track.title)).toEqual([
+      'Only track on profile page',
+      'More songs found in search',
+    ]);
+    expect(profile.participationTracks.map((track) => track.title)).toEqual([
+      'Yago as a guest',
+    ]);
   });
 
   it('gets the matching artist image without loading a full profile or using a fan result', async () => {

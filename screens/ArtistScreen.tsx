@@ -281,7 +281,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         artistId,
       });
       void getYouTubeMusicArtistProfile(artistId)
-        .then(async ({ artist: artistData, tracks }) => {
+        .then(async ({ artist: artistData, tracks, participationTracks: remoteParticipations = [] }) => {
           if (!active) {
             finishProfileLoad({ ok: false, stale: true });
             return;
@@ -299,13 +299,20 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             void rememberCachedArtistImage(artistId, artistData.imageURL);
           }
           setTopTracks(tracks);
+          setParticipationTracks(remoteParticipations);
           setArtistError('');
           log.artist('profile loaded', {
             artistId,
             tracks: tracks.length,
+            participations: remoteParticipations.length,
             hasImage: Boolean(imageURL),
           });
-          finishProfileLoad({ ok: true, tracks: tracks.length, hasImage: Boolean(imageURL) });
+          finishProfileLoad({
+            ok: true,
+            tracks: tracks.length,
+            participations: remoteParticipations.length,
+            hasImage: Boolean(imageURL),
+          });
         })
         .catch(async (error) => {
           finishProfileLoad({ ok: false, error: String(error) });
@@ -491,15 +498,9 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     );
   }
 
-  const metadata = [
-    'Artista',
-    artist.followers ? `${artist.followers.toLocaleString('pt-BR')} seguidores` : '',
-  ]
-    .filter(Boolean)
-    .join(' • ');
-  const description = artist.genres?.length
-    ? `${artist.name} · ${artist.genres.slice(0, 3).join(' · ')}.`
-    : `Músicas, álbuns e singles de ${artist.name}.`;
+  const metadata = artist.followers
+    ? `${artist.followers.toLocaleString('pt-BR')} seguidores`
+    : '';
 
   return (
     <CollectionDetail
@@ -507,7 +508,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       collectionId={artist.id}
       title={artist.name}
       imageURL={artist.imageURL}
-      description={description}
+      description=""
       metadata={metadata}
       tracks={mergedTracks.primaryTracks}
       disableTrackArtistLinks
