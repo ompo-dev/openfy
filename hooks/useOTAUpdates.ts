@@ -1,9 +1,10 @@
 import * as React from 'react';
-import { AppState, AppStateStatus, Platform } from 'react-native';
+import { Alert, AppState, AppStateStatus, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { getAppSettings } from '@services';
 import { log } from '../utils/appLogger';
+import { prepareTemporaryOTAUpdate } from '../services/updates/temporaryOTA';
 
 const MIN_UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -22,6 +23,8 @@ const canUseUpdates = () =>
 
 export type OTAUpdateCheckResult =
   | { status: 'disabled' }
+  | { status: 'window-inactive' }
+  | { status: 'restart-required'; expiresAt: string }
   | { status: 'up-to-date' }
   | { status: 'downloaded'; rollback?: boolean }
   | { status: 'download-failed' }
@@ -65,6 +68,17 @@ export const checkForOTAUpdateNow = async (
   log.updates('check started', { source, ...updateContext() });
 
   try {
+    const temporaryUpdate = await prepareTemporaryOTAUpdate(source);
+    if (temporaryUpdate.status === 'inactive') {
+      return { status: 'window-inactive' };
+    }
+    if (temporaryUpdate.status === 'incompatible') {
+      return { status: 'not-applicable', reason: temporaryUpdate.reason };
+    }
+    if (temporaryUpdate.status === 'restart-required') {
+      return { status: 'restart-required', expiresAt: temporaryUpdate.expiresAt };
+    }
+
     const update = await Updates.checkForUpdateAsync();
     log.updates('check completed', {
       source,
@@ -138,10 +152,41 @@ export function useOTAUpdates(options: UpdateCheckerOptions = {}) {
   const getNow = options.getNow ?? Date.now;
   const lastCheckAtRef = React.useRef(getNow());
   const inFlightRef = React.useRef<Promise<void> | null>(null);
+  const pointerCheckRef = React.useRef<Promise<void> | null>(null);
+  const promptedRunIdRef = React.useRef<number | null>(null);
   const activeRef = React.useRef(AppState.currentState === 'active');
 
   React.useEffect(() => {
     if (!canCheckForUpdates()) return;
+
+    const discoverTemporaryUpdate = () => {
+      if (!activeRef.current || pointerCheckRef.current) return;
+      const check = (async () => {
+        try {
+          const settings = await getAppSettings();
+          if (!settings.automaticUpdates || !activeRef.current) return;
+          const result = await prepareTemporaryOTAUpdate('automatic');
+          if (
+            result.status === 'restart-required' &&
+            promptedRunIdRef.current !== result.runId
+          ) {
+            promptedRunIdRef.current = result.runId;
+            Alert.alert(
+              'Atualização do Openfy pronta',
+              'Feche o app completamente e abra novamente enquanto a janela do CI estiver ativa.'
+            );
+          }
+        } catch (error) {
+          log.error('automatic temporary OTA discovery failed', error);
+        }
+      })().finally(() => {
+        if (pointerCheckRef.current === check) pointerCheckRef.current = null;
+      });
+      pointerCheckRef.current = check;
+    };
+
+    discoverTemporaryUpdate();
+    const pointerInterval = setInterval(discoverTemporaryUpdate, 60_000);
 
     const runUpdateCheck = () => {
       const now = getNow();
@@ -176,12 +221,14 @@ export function useOTAUpdates(options: UpdateCheckerOptions = {}) {
       (nextState: AppStateStatus) => {
         activeRef.current = nextState === 'active';
         if (nextState === 'active') {
+          discoverTemporaryUpdate();
           runUpdateCheck();
         }
       }
     );
 
     return () => {
+      clearInterval(pointerInterval);
       subscription.remove();
     };
   }, [canCheckForUpdates, getNow]);

@@ -13,6 +13,7 @@ module.exports = {
     updates: {
       enabled: true,
       url: 'https://u.expo.dev/33b0281a-b127-47fe-ab16-e94caf272493',
+      disableAntiBrickingMeasures: true,
       checkAutomatically: 'ON_LOAD',
       fallbackToCacheTimeout: 0,
       useEmbeddedUpdate: true,

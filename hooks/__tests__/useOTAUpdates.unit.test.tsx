@@ -3,6 +3,7 @@ import TestRenderer, { act } from 'react-test-renderer';
 import { AppState, Platform } from 'react-native';
 import * as Updates from 'expo-updates';
 import { checkForOTAUpdateNow } from '../useOTAUpdates';
+import { prepareTemporaryOTAUpdate } from '../../services/updates/temporaryOTA';
 
 const mockListeners = new Set<(state: string) => void>();
 const mockRemove = jest.fn();
@@ -21,6 +22,10 @@ jest.mock('expo-updates', () => ({
   channel: 'production',
   runtimeVersion: '1.0.0',
   updateId: 'current-update',
+}));
+
+jest.mock('../../services/updates/temporaryOTA', () => ({
+  prepareTemporaryOTAUpdate: jest.fn(),
 }));
 
 const flushPromises = () => act(async () => {});
@@ -80,6 +85,11 @@ describe('useOTAUpdates', () => {
       isNew: true,
       isRollBackToEmbedded: false,
     } as Awaited<ReturnType<typeof Updates.fetchUpdateAsync>>);
+    jest.mocked(prepareTemporaryOTAUpdate).mockResolvedValue({
+      status: 'ready',
+      runId: 1,
+      expiresAt: '2026-10-01T20:00:00.000Z',
+    });
     ({ useOTAUpdates } = require('../useOTAUpdates'));
   });
 
@@ -220,6 +230,29 @@ describe('useOTAUpdates', () => {
     await expect(checkForOTAUpdateNow()).resolves.toEqual({
       status: 'download-failed',
     });
+  });
+
+  it('requires a cold restart when a new temporary CI endpoint is discovered', async () => {
+    jest.mocked(prepareTemporaryOTAUpdate).mockResolvedValue({
+      status: 'restart-required',
+      runId: 2,
+      expiresAt: '2026-10-01T20:00:00.000Z',
+    });
+
+    await expect(checkForOTAUpdateNow()).resolves.toEqual({
+      status: 'restart-required',
+      expiresAt: '2026-10-01T20:00:00.000Z',
+    });
+    expect(Updates.checkForUpdateAsync).not.toHaveBeenCalled();
+  });
+
+  it('does not query Expo when the temporary CI window is closed', async () => {
+    jest.mocked(prepareTemporaryOTAUpdate).mockResolvedValue({ status: 'inactive' });
+
+    await expect(checkForOTAUpdateNow()).resolves.toEqual({
+      status: 'window-inactive',
+    });
+    expect(Updates.checkForUpdateAsync).not.toHaveBeenCalled();
   });
 
   it('returns the native OTA failure stage and code for manual checks', async () => {

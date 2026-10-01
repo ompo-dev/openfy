@@ -59,6 +59,8 @@ export {
 export type { CatalogMapping } from './audio/catalogMappingCache';
 
 export { refreshHomeTracks } from './home/homeTrackRefresh';
+export { prepareTemporaryOTAUpdate } from './updates/temporaryOTA';
+export type { TemporaryOTAResult } from './updates/temporaryOTA';
 export type { HomeTrackSeed, RefreshedHomeTrack } from './home/homeTrackRefresh';
 export {
   buildPersonalizedHome,

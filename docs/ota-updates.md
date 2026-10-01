@@ -1,40 +1,49 @@
 # OTA updates
 
-Openfy uses `expo-updates` with EAS Update for JavaScript, UI, and asset updates.
-The phone keeps all music/download logic local; this is only an app bundle delivery
-channel and is not an Openfy API.
+Openfy publishes JavaScript and static asset updates directly from GitHub Actions,
+without an Expo account or `EXPO_TOKEN`.
 
-## How it ships
+## CI window
 
-- Native builds read updates from `https://u.expo.dev/33b0281a-b127-47fe-ab16-e94caf272493`.
-- The configured channel is `production`.
-- The runtime policy is `appVersion`, so OTA updates apply to installed builds with
-  the same `expo.version`.
-- The app checks on launch and also fetches opportunistically when returning to the
-  foreground after one hour. It never calls `reloadAsync`, so music playback is not
-  interrupted; a fetched update is used on the next cold launch.
+After validation, `Openfy CI/CD` exports the iOS and Android bundles, serves the
+Expo Updates protocol from its GitHub runner, and exposes that runner through a
+temporary Cloudflare Quick Tunnel. GitHub publishes the tunnel URL, runtime, and
+expiry in the `ota-window` release asset `openfy-ota-pointer.json`. The server
+stays available for 10 minutes after that pointer is published; CI then marks the
+pointer inactive and stops both processes. The pointer is polled by the app while
+it is open, and is also checked when the app launches or returns to the foreground.
 
-## GitHub automation
+The stable pointer is hosted as a GitHub Release asset. The app only accepts HTTPS
+manifest URLs under `*.trycloudflare.com`, the expected Expo Updates path, the
+installed runtime version, and an unexpired window. The server only returns iOS or
+Android files that were part of that run's Expo export.
 
-The `Openfy CI/CD` workflow validates the app on every push to `main`, publishes
-OTA when `EXPO_TOKEN` is configured, and generates IPA/APK artifacts on push.
-Manual dispatch also generates IPA/APK by default. OTA publishes with:
-Unit tests run in the same workflow but do not block IPA/APK artifact generation.
+## Installing an update
 
-```sh
-eas update --channel production --environment production --auto --non-interactive
-```
+The native URL override is experimental in `expo-updates`. The first installation
+after this change must use the new IPA once; earlier installed builds cannot gain
+the native override support through JavaScript alone. When CI publishes an active
+window, the app prepares its temporary URL and asks to be fully closed and opened
+again. On that next launch, `expo-updates` checks the temporary server and loads
+the matching bundle. Later JavaScript-only pushes do not require another IPA.
 
-GitHub needs a repository secret named `EXPO_TOKEN` from the Expo account that owns
-the EAS project. If the secret is missing, the workflow exits successfully with a
-warning and does not publish an OTA update.
+Updates only apply to a matching runtime version. Native modules, permissions,
+entitlements, or other native changes still require a new IPA/APK. The workflow
+continues generating those artifacts as before.
 
-## When a new IPA/APK is still required
+## Important limitations
 
-OTA cannot change native code, native modules, entitlements, permissions, bundle
-identifiers, Info.plist, AndroidManifest, or dependency changes that include native
-code. For those changes, build and install a new IPA/APK, then OTA can cover later
-JavaScript and asset fixes for that app version.
+Expo requires `disableAntiBrickingMeasures` for runtime URL overrides and warns
+against using this experimental API in production. With it enabled, Expo cannot
+automatically roll back a bad downloaded update to the embedded bundle; recovery
+may require reinstalling an IPA. Keep a known-good IPA available.
 
-The native playback fixes use `expo.version` 1.0.1. Devices on runtime 1.0.0
-must install that IPA/APK first; an OTA bundle cannot install the Swift patch.
+Cloudflare Quick Tunnels need no account or domain, but Cloudflare describes them
+as for testing and development, with no uptime guarantee. Their random public URL
+expires when the CI process stops, and anyone who learns the URL can access the
+temporary server. This workflow is intended for this personal sideload/update
+flow, not for general distribution.
+
+References: [Expo runtime override and recovery warning](https://docs.expo.dev/eas-update/override/),
+[Expo Updates protocol](https://docs.expo.dev/technical-specs/expo-updates-1/),
+[Cloudflare Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/).

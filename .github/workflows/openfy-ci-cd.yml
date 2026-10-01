@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_ota:
-        description: Publicar OTA no canal production
+        description: Abrir uma janela temporaria para atualizar o app
         required: true
         default: true
         type: boolean
@@ -76,8 +76,10 @@ jobs:
         run: npm ci --legacy-peer-deps
 
       - name: Rodar testes
-        continue-on-error: true
         run: npm test -- --runInBand --silent
+
+      - name: Validar servidor OTA temporario
+        run: node --test scripts/__tests__/temporary-expo-update-server.test.mjs
 
   publicar-ota:
     needs:
@@ -87,61 +89,105 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
-      contents: read
-    env:
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      contents: write
     steps:
-      - name: Verificar token da Expo
-        id: expo-token
-        shell: bash
-        run: |
-          if [ -z "$EXPO_TOKEN" ]; then
-            echo "::warning::EXPO_TOKEN nao configurado; OTA nao sera publicado nesta execucao."
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Baixar projeto
-        if: steps.expo-token.outputs.publish == 'true'
         uses: actions/checkout@v6
 
       - name: Configurar Node.js
-        if: steps.expo-token.outputs.publish == 'true'
         uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
-      - name: Configurar EAS
-        if: steps.expo-token.outputs.publish == 'true'
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
       - name: Instalar dependencias
-        if: steps.expo-token.outputs.publish == 'true'
         run: npm ci --legacy-peer-deps
 
-      - name: Garantir canal OTA production
-        if: steps.expo-token.outputs.publish == 'true'
+      - name: Exportar bundle Expo para OTA
         shell: bash
         run: |
-          if eas channel:view production >/dev/null 2>&1; then
-            echo "Canal OTA production ja existe."
+          set -euo pipefail
+          npx expo config --type public --json > "$RUNNER_TEMP/expo-config.json"
+          npx expo export --platform all --output-dir dist/ota
+          RUNTIME_VERSION="$(node -e "const c=require('./app.config.js').expo; console.log(typeof c.runtimeVersion === 'string' ? c.runtimeVersion : c.version)")"
+          test -s dist/ota/metadata.json
+          echo "runtime_version=$RUNTIME_VERSION" >> "$GITHUB_ENV"
+
+      - name: Abrir janela OTA por 10 minutos
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          OTA_DIR="$RUNNER_TEMP/openfy-ota"
+          mkdir -p "$OTA_DIR"
+          curl --fail --location --silent --show-error \
+            "https://github.com/cloudflare/cloudflared/releases/download/2026.9.3/cloudflared-linux-amd64" \
+            --output "$OTA_DIR/cloudflared"
+          echo "77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2  $OTA_DIR/cloudflared" | sha256sum --check
+          chmod +x "$OTA_DIR/cloudflared"
+
+          node scripts/temporary-expo-update-server.mjs \
+            --directory dist/ota \
+            --runtime-version "$RUNTIME_VERSION" \
+            --expo-config "$RUNNER_TEMP/expo-config.json" \
+            --port 8787 > "$OTA_DIR/server.log" 2>&1 &
+          SERVER_PID=$!
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8787/health >/dev/null; then break; fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then cat "$OTA_DIR/server.log"; exit 1; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8787/health >/dev/null
+
+          "$OTA_DIR/cloudflared" tunnel --no-autoupdate --url http://127.0.0.1:8787 \
+            > "$OTA_DIR/cloudflared.log" 2>&1 &
+          TUNNEL_PID=$!
+          PUBLIC_TUNNEL_URL=""
+          for attempt in $(seq 1 60); do
+            PUBLIC_TUNNEL_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$OTA_DIR/cloudflared.log" | head -1 || true)"
+            if [ -n "$PUBLIC_TUNNEL_URL" ] && curl --fail --silent "$PUBLIC_TUNNEL_URL/health" >/dev/null; then break; fi
+            if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then cat "$OTA_DIR/cloudflared.log"; exit 1; fi
+            sleep 1
+          done
+          if [ -z "$PUBLIC_TUNNEL_URL" ]; then cat "$OTA_DIR/cloudflared.log"; exit 1; fi
+          curl --fail --silent "$PUBLIC_TUNNEL_URL/health" >/dev/null
+
+          POINTER="$OTA_DIR/openfy-ota-pointer.json"
+          node scripts/write-temporary-ota-pointer.mjs \
+            --output "$POINTER" \
+            --active true \
+            --update-url "$PUBLIC_TUNNEL_URL/api/manifest" \
+            --runtime-version "$RUNTIME_VERSION" \
+            --run-id "${{ github.run_id }}" \
+            --commit-sha "${{ github.sha }}" \
+            --duration-seconds 605
+          TAG=ota-window
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$POINTER" --clobber
           else
-            eas channel:create production production --non-interactive
+            gh release create "$TAG" "$POINTER" \
+              --target "${{ github.sha }}" \
+              --title "Openfy temporary OTA pointer" \
+              --notes "Updated by CI; the Expo Updates server is temporary." \
+              --latest=false
           fi
 
-      - name: Publicar update no canal production
-        if: steps.expo-token.outputs.publish == 'true'
-        run: |
-          eas update \
-            --channel production \
-            --environment production \
-            --auto \
-            --non-interactive
+          deactivate_pointer() {
+            node scripts/write-temporary-ota-pointer.mjs --output "$POINTER" --active false || true
+            gh release upload "$TAG" "$POINTER" --clobber || true
+            kill "$TUNNEL_PID" "$SERVER_PID" 2>/dev/null || true
+          }
+          trap deactivate_pointer EXIT INT TERM
+          echo "Temporary OTA endpoint active for commit $GITHUB_SHA until the CI window closes."
+          for second in $(seq 1 600); do
+            if ! kill -0 "$TUNNEL_PID" 2>/dev/null || ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "The temporary OTA server or tunnel stopped before the window ended."
+              exit 1
+            fi
+            sleep 1
+          done
 
   validar-audio-local:
     needs: validar

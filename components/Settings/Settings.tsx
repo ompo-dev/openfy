@@ -171,6 +171,14 @@ export const Settings = () => {
       case 'disabled':
         setUpdateStatus('Disponível apenas no app instalado.');
         break;
+      case 'window-inactive':
+        setUpdateStatus('Nenhuma janela temporária de atualização do CI está ativa.');
+        break;
+      case 'restart-required':
+        setUpdateStatus(
+          `Servidor pronto até ${new Date(result.expiresAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}. Feche o app completamente e abra novamente.`
+        );
+        break;
       case 'up-to-date':
         setUpdateStatus('Você já está na versão mais recente.');
         break;
@@ -334,7 +342,7 @@ export const Settings = () => {
 
         <Section title="ATUALIZAÇÕES">
           <SettingRow
-            description="Procura uma nova versão quando você volta ao app."
+            description="Detecta a janela temporária publicada pelo CI e avisa quando for preciso reabrir o app."
             icon="download"
             label="Verificar ao voltar ao app"
             onValueChange={change('automaticUpdates')}
