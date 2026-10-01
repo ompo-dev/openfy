@@ -5,7 +5,7 @@ module.exports = (config) => ({
   displayName: 'Openfy Music',
   bundleIdentifier: '.playerwidget',
   deploymentTarget: '17.0',
-  frameworks: ['SwiftUI', 'WidgetKit', 'AppIntents'],
+  frameworks: ['SwiftUI', 'WidgetKit'],
   entitlements: {
     'com.apple.security.application-groups':
       config.ios.entitlements['com.apple.security.application-groups'],

@@ -1,4 +1,3 @@
-import AppIntents
 import SwiftUI
 import UIKit
 import WidgetKit
@@ -100,7 +99,7 @@ private struct OpenfyProvider: TimelineProvider {
     let isPlaying = (values["isPlaying"] as? Int ?? 0) == 1
     let savedPosition = values["positionMs"] as? Double ?? 0
     let duration = values["durationMs"] as? Double ?? 1
-    let updatedAt = (values["updatedAt"] as? Double).map(Date.init(timeIntervalSince1970:)) ?? now.timeIntervalSince1970
+    let updatedAt = values["updatedAt"] as? Double ?? now.timeIntervalSince1970
     let positionNow = min(duration, max(0, savedPosition + (isPlaying ? (now.timeIntervalSince1970 - updatedAt) * 1000 : 0)))
     let title = values["title"] as? String ?? "Openfy Music"
     let artists = values["artists"] as? String ?? "Toque para começar"
@@ -240,15 +239,18 @@ private struct OpenfyPlayerWidgetView: View {
 
   private var controls: some View {
     HStack(spacing: 22) {
-      Button(intent: PlayerWidgetActionIntent(action: "previous")) {
+      Link(destination: URL(string: "openfy://widget/previous")!) {
         Image(systemName: "backward.end.fill")
       }
-      Button(intent: PlayerWidgetActionIntent(action: "play-pause")) {
+      .accessibilityLabel("Faixa anterior")
+      Link(destination: URL(string: "openfy://widget/play-pause")!) {
         Image(systemName: entry.isPlaying ? "pause.fill" : "play.fill")
       }
-      Button(intent: PlayerWidgetActionIntent(action: "next")) {
+      .accessibilityLabel(entry.isPlaying ? "Pausar" : "Tocar")
+      Link(destination: URL(string: "openfy://widget/next")!) {
         Image(systemName: "forward.end.fill")
       }
+      .accessibilityLabel("Próxima faixa")
     }
     .font(.system(size: 18, weight: .semibold))
     .tint(.white)

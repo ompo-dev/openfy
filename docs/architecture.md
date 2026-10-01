@@ -37,7 +37,7 @@ Os logs consultáveis em Configurações devem permitir relacionar início/fim, 
 
 O WidgetKit é uma extensão nativa, isolada do processo React Native. O app publica um snapshot enxuto no App Group `group.com.openfy.app`; a extensão lê faixa, artistas, progresso e linha da letra sem consultar APIs nem controlar uma segunda instância de áudio. As mudanças de linha são preparadas em entradas futuras da timeline em vez de solicitar recarga a cada segundo.
 
-Os intents dos controles abrem a rota interna `openfy://widget/...`, que despacha as ações para o player local e para a fila Zustand. WidgetKit é iOS 17+ neste alvo. Por ser um novo target assinado e uma nova entitlement de App Group, a primeira instalação exige um build nativo/EAS e o App Group precisa estar habilitado no identificador Apple; OTA atualiza apenas o JavaScript e não instala a extensão.
+Os controles usam links profundos para abrir a rota interna `openfy://widget/...`, que despacha as ações para o player local e para a fila Zustand. WidgetKit é iOS 17+ neste alvo. Por ser um novo target assinado e uma nova entitlement de App Group, a primeira instalação exige um build nativo/EAS e o App Group precisa estar habilitado no identificador Apple; OTA atualiza apenas o JavaScript e não instala a extensão.
 
 ## Verificação
 
