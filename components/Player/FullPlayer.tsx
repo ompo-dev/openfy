@@ -30,6 +30,7 @@ import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import {
   findArtistIdByName,
+  getYouTubeMusicArtistBiography,
   getYouTubeMusicArtistImage,
 } from '@api';
 import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
@@ -63,6 +64,7 @@ import { LyricSyncEditor } from './LyricSyncEditor';
 import { MarqueeText } from '../common/MarqueeText';
 import { SwipeableArtwork } from './SwipeableArtwork';
 import { MiniPlayer } from './MiniPlayer';
+import { SkeletonImage } from '../common/SkeletonImage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COVER_SIZE = Math.min(SCREEN_WIDTH - 64, 340);
@@ -290,7 +292,11 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [isPlaylistPickerVisible, setIsPlaylistPickerVisible] =
     React.useState(false);
   const [isPlayerScrolled, setIsPlayerScrolled] = React.useState(false);
+  const [controlsBottomOffset, setControlsBottomOffset] = React.useState<number | null>(null);
   const [primaryArtistImage, setPrimaryArtistImage] = React.useState('');
+  const [artistImages, setArtistImages] = React.useState<Record<string, string>>({});
+  const [primaryArtistBiography, setPrimaryArtistBiography] = React.useState('');
+  const [isBiographyExpanded, setIsBiographyExpanded] = React.useState(false);
 
   const lyricsListRef = React.useRef<FlatList>(null);
   const playerScrollRef = React.useRef<ScrollView>(null);
@@ -357,6 +363,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   React.useEffect(() => {
     let active = true;
     setPrimaryArtistImage('');
+    setArtistImages({});
     if (!primaryArtist) return;
     const key = primaryArtist.id || primaryArtist.name;
     void getCachedArtistImage(key, async () => {
@@ -373,6 +380,45 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     });
     return () => { active = false; };
   }, [currentTrackKey, primaryArtist, primaryArtist?.id, primaryArtist?.name]);
+
+  const primaryArtistId = primaryArtist?.id || '';
+  const primaryArtistName = primaryArtist?.name || '';
+
+  React.useEffect(() => {
+    let active = true;
+    setPrimaryArtistBiography('');
+    setIsBiographyExpanded(false);
+    if (!visible || !primaryArtistName) return;
+    const routeId = primaryArtistId.startsWith('ytartist_')
+      ? primaryArtistId
+      : `ytartist_name_${encodeURIComponent(primaryArtistName)}`;
+    void getYouTubeMusicArtistBiography(routeId).then((description) => {
+      if (active) setPrimaryArtistBiography(description);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [currentTrackKey, primaryArtistId, primaryArtistName, visible]);
+
+  React.useEffect(() => {
+    let active = true;
+    if (!visible) return () => { active = false; };
+    const loadImages = async () => {
+      await Promise.all(artistLinks.map(async (artist) => {
+        const key = artist.id || artist.name;
+        const imageURL = await getCachedArtistImage(key, async () => {
+          if (artist.id.startsWith('ytartist_')) return getYouTubeMusicArtistImage(artist.id);
+          if (/^[A-Za-z0-9]{22}$/.test(artist.id)) return getSpotifyArtistImage(artist.id);
+          const spotifyId = await findArtistIdByName(artist.name);
+          if (spotifyId) return getSpotifyArtistImage(spotifyId);
+          return getYouTubeMusicArtistImage(`ytartist_name_${encodeURIComponent(artist.name)}`);
+        });
+        if (active && imageURL) {
+          setArtistImages((current) => ({ ...current, [key]: imageURL }));
+        }
+      }));
+    };
+    void loadImages().catch(() => {});
+    return () => { active = false; };
+  }, [currentTrackKey, artistLinks, visible]);
 
   const handleArtistPress = React.useCallback(
     async (artistId: string, artistName: string) => {
@@ -557,22 +603,28 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
   const lyricPreview = React.useMemo(() => {
     if (lyricTimeline.length) {
-      const start = Math.max(0, activeLineIndex - 1);
+      const currentMs = playerState.positionMs;
+      let start = lyricTimeline.findIndex((line) =>
+        line.kind === 'lyric' && currentMs >= line.startTimeMs && currentMs < line.endTimeMs
+      );
+      if (start < 0) {
+        start = lyricTimeline.findIndex((line) => line.kind === 'lyric' && line.endTimeMs > currentMs);
+      }
+      if (start < 0) start = lyricTimeline.findIndex((line) => line.kind === 'lyric');
       return lyricTimeline
-        .slice(start, start + 3)
-        .map((line, index) => ({
-          text: line.kind === 'lyric' ? line.text : '',
-          active: start + index === activeLineIndex,
-        }))
-        .filter((line) => line.text);
+        .slice(Math.max(0, start))
+        .flatMap((line, offset) => line.kind === 'lyric'
+          ? [{ text: line.text, active: Math.max(0, start) + offset === activeLineIndex }]
+          : [])
+        .slice(0, 2);
     }
     return (lyricsData?.plainLyrics || '')
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
-      .slice(0, 3)
+      .slice(0, 2)
       .map((text, index) => ({ text, active: index === 0 }));
-  }, [activeLineIndex, lyricTimeline, lyricsData?.plainLyrics]);
+  }, [activeLineIndex, lyricTimeline, lyricsData?.plainLyrics, playerState.positionMs]);
 
   React.useEffect(() => {
     if (!isLyricsEditing || !playerState.isPlaying || activeLineIndex < 0) {
@@ -1246,7 +1298,11 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               style={styles.playerScroll}
               contentContainerStyle={styles.playerScrollContent}
               keyboardShouldPersistTaps="handled"
-              onScroll={(event) => setIsPlayerScrolled(event.nativeEvent.contentOffset.y > 160)}
+              onScroll={(event) => {
+                const canShowMiniPlayer = controlsBottomOffset !== null &&
+                  event.nativeEvent.contentOffset.y >= controlsBottomOffset;
+                setIsPlayerScrolled(canShowMiniPlayer);
+              }}
               scrollEventThrottle={100}
               showsVerticalScrollIndicator={false}
             >
@@ -1278,7 +1334,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               />
 
               <View style={styles.lyricPreview}>
-                <Text style={styles.lyricPreviewLabel}>Letra</Text>
                 {lyricPreview.length ? lyricPreview.map((line, index) => (
                   <Text
                     key={`${currentTrackKey}-preview-${index}`}
@@ -1348,7 +1403,14 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             )}
 
             {!isLyricsEditing ? (
-              <View style={styles.controlsRow}>
+              <View
+                testID="player-controls-row"
+                style={styles.controlsRow}
+                onLayout={(event) => {
+                  const { y, height } = event.nativeEvent.layout;
+                  setControlsBottomOffset(y + height);
+                }}
+              >
                 <PlayerGlassButton
                   accessibilityLabel={isCurrentTrackDownloading ? `Baixando ${currentDownloadProgress}%` : isCurrentTrackDownloaded ? 'Excluir download' : 'Baixar música'}
                   disabled={isCurrentTrackDownloading || isDownloadMutationPending}
@@ -1380,13 +1442,30 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 onPress={() => primaryArtist && void handleArtistPress(primaryArtist.id, primaryArtist.name)}
                 style={styles.primaryArtistCard}
               >
-                {primaryArtistImage ? <Image source={{ uri: primaryArtistImage }} cachePolicy="memory-disk" contentFit="cover" style={styles.primaryArtistImage} /> : <View style={[styles.primaryArtistImage, styles.primaryArtistFallback]}><Ionicons name="person" size={24} color="#DDD" /></View>}
+                {primaryArtistImage ? <SkeletonImage source={{ uri: primaryArtistImage }} cachePolicy="memory-disk" contentFit="cover" style={styles.primaryArtistImage} /> : <View style={[styles.primaryArtistImage, styles.primaryArtistFallback]}><Ionicons name="person" size={24} color="#DDD" /></View>}
                 <View style={styles.primaryArtistCopy}>
                   <Text style={styles.artistRole}>Artista principal</Text>
                   <Text numberOfLines={1} style={styles.primaryArtistName}>{primaryArtist?.name || 'Artista não identificado'}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.6)" />
               </LoggedPressable>
+              {primaryArtistBiography ? (
+                <View style={styles.artistBiography}>
+                  <Text numberOfLines={isBiographyExpanded ? undefined : 4} style={styles.artistBiographyText}>
+                    {primaryArtistBiography}
+                  </Text>
+                  {primaryArtistBiography.length > 220 ? (
+                    <LoggedPressable
+                      accessibilityRole="button"
+                      accessibilityLabel={isBiographyExpanded ? 'Mostrar menos sobre o artista' : 'Mostrar mais sobre o artista'}
+                      onPress={() => setIsBiographyExpanded((expanded) => !expanded)}
+                      style={styles.biographyToggle}
+                    >
+                      <Text style={styles.biographyToggleText}>{isBiographyExpanded ? 'Mostrar menos' : 'Mostrar mais'}</Text>
+                    </LoggedPressable>
+                  ) : null}
+                </View>
+              ) : null}
 
               <Text style={[styles.artistDetailsHeading, styles.creditsHeading]}>Créditos</Text>
               {artistLinks.map((artist, index) => (
@@ -1396,6 +1475,18 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   onPress={() => void handleArtistPress(artist.id, artist.name)}
                   style={styles.creditRow}
                 >
+                  {artistImages[artist.id || artist.name] ? (
+                    <SkeletonImage
+                      source={{ uri: artistImages[artist.id || artist.name] }}
+                      cachePolicy="memory-disk"
+                      contentFit="cover"
+                      style={styles.creditAvatar}
+                    />
+                  ) : (
+                    <View style={[styles.creditAvatar, styles.primaryArtistFallback]}>
+                      <Ionicons name="person" size={17} color="#DDD" />
+                    </View>
+                  )}
                   <View style={styles.creditCopy}>
                     <Text numberOfLines={1} style={styles.creditName}>{artist.name}</Text>
                     <Text style={styles.creditRole}>{index === 0 ? 'Artista principal' : 'Participação'}</Text>
@@ -1749,7 +1840,6 @@ const styles = StyleSheet.create({
   },
   trackTitleMarquee: { maxWidth: '100%' },
   lyricPreview: { alignSelf: 'stretch', paddingHorizontal: 8, width: '100%' },
-  lyricPreviewLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: '700', marginBottom: 5, textTransform: 'uppercase' },
   lyricPreviewText: { color: 'rgba(255,255,255,0.58)', fontSize: 15, lineHeight: 21, textAlign: 'left' },
   lyricPreviewActive: { color: '#FFFFFF', fontWeight: '700' },
   lyricPreviewPlaceholder: { color: 'rgba(255,255,255,0.5)', fontSize: 14, lineHeight: 20 },
@@ -1761,8 +1851,13 @@ const styles = StyleSheet.create({
   primaryArtistCopy: { flex: 1, gap: 4 },
   artistRole: { color: 'rgba(255,255,255,0.58)', fontSize: 12 },
   primaryArtistName: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  artistBiography: { paddingHorizontal: 12, paddingTop: 12 },
+  artistBiographyText: { color: 'rgba(255,255,255,0.72)', fontSize: 14, lineHeight: 20 },
+  biographyToggle: { alignSelf: 'flex-start', paddingTop: 6 },
+  biographyToggleText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   creditsHeading: { marginBottom: 4, marginTop: 22 },
-  creditRow: { alignItems: 'center', borderBottomColor: 'rgba(255,255,255,0.1)', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', minHeight: 58, paddingHorizontal: 4 },
+  creditRow: { alignItems: 'center', borderBottomColor: 'rgba(255,255,255,0.1)', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 11, minHeight: 58, paddingHorizontal: 4 },
+  creditAvatar: { alignItems: 'center', backgroundColor: '#3A3A3A', borderRadius: 18, height: 36, justifyContent: 'center', overflow: 'hidden', width: 36 },
   creditCopy: { flex: 1, gap: 3 },
   creditName: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
   creditRole: { color: 'rgba(255,255,255,0.58)', fontSize: 12 },

@@ -6,6 +6,7 @@ import {
   getArtistAlbums,
   getArtistTopTracks,
   getCachedArtistSearchSeed,
+  getYouTubeMusicArtistBiography,
   getYouTubeMusicArtistImage,
   getYouTubeMusicArtistProfile,
 } from '@api';
@@ -286,7 +287,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             finishProfileLoad({ ok: false, stale: true });
             return;
           }
-          const imageURL = artistData.imageURL || searchSeed?.artist.imageURL || await getCachedArtistImage(
+          const imageURL = searchSeed?.artist.imageURL || artistData.imageURL || await getYouTubeMusicArtistImage(artistId).catch(() => '') || await getCachedArtistImage(
             artistId,
             () => getYouTubeMusicArtistImage(artistId)
           );
@@ -294,9 +295,11 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             finishProfileLoad({ ok: false, stale: true });
             return;
           }
-          setArtist({ ...artistData, imageURL });
-          if (artistData.imageURL) {
-            void rememberCachedArtistImage(artistId, artistData.imageURL);
+          const description = artistData.description || await getYouTubeMusicArtistBiography(artistId);
+          if (!active) return;
+          setArtist({ ...artistData, imageURL, description });
+          if (imageURL) {
+            void rememberCachedArtistImage(artistId, imageURL);
           }
           setTopTracks(tracks);
           setParticipationTracks(remoteParticipations);
@@ -361,15 +364,16 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
 
     const artistRequest = getArtist(artistId)
       .then((artistData) => {
-        if (!active) return;
+        if (!active) return undefined;
         setArtist(artistData);
         setArtistError('');
         log.artist('profile loaded', { artistId, source: 'spotify', hasImage: Boolean(artistData.imageURL) });
+        return artistData;
       })
       .catch(async (error) => {
         log.error('spotify artist profile failed', { artistId, error });
         const downloaded = await libraryPromise.catch(() => []);
-        if (!active) return;
+        if (!active) return null;
         const localProfile = buildLocalArtistProfile(downloaded, artistId, artistId);
         if (localProfile) {
           setArtist(localProfile.artist);
@@ -390,6 +394,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         } else {
           setArtistError('Não foi possível carregar o perfil deste artista. Tente novamente.');
         }
+        return null;
       });
 
     const tracksRequest = getArtistTopTracks(artistId)
@@ -427,13 +432,44 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       })
       .catch((error) => console.error('Failed to get artist top tracks:', error));
 
+    const catalogRequest = artistRequest.then(async (artistData) => {
+      if (!active || !artistData) return;
+      const routeId = `ytartist_name_${encodeURIComponent(artistData.name)}`;
+      try {
+        const profile = await getYouTubeMusicArtistProfile(routeId);
+        if (!active) return;
+        setArtist((current) => current
+          ? { ...current, description: current.description || profile.artist.description }
+          : current
+        );
+        setTopTracks((current) => {
+          const byId = new Map([...profile.tracks, ...current].map((track) => [track.id, track]));
+          return [...byId.values()];
+        });
+        setParticipationTracks((current) => {
+          const byId = new Map([...profile.participationTracks, ...current].map((track) => [track.id, track]));
+          return [...byId.values()];
+        });
+        log.artist('youtube music catalog merged into spotify artist profile', {
+          artistId,
+          catalogTracks: profile.tracks.length,
+          catalogParticipations: profile.participationTracks.length,
+        });
+      } catch (error) {
+        log.artist('youtube music catalog unavailable for spotify artist', {
+          artistId,
+          error: String(error),
+        });
+      }
+    });
+
     const albumsRequest = getArtistAlbums(artistId, 'album,single', 20)
       .then((albumData) => {
         if (active) setAlbums(albumData);
       })
       .catch((error) => console.error('Failed to get artist albums:', error));
 
-    void Promise.allSettled([artistRequest, tracksRequest, albumsRequest]).finally(() => {
+    void Promise.allSettled([artistRequest, tracksRequest, catalogRequest, albumsRequest]).finally(() => {
       if (active) setIsRefreshing(false);
     });
 

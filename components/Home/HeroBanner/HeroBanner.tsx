@@ -15,13 +15,13 @@ import {
   Text,
   View,
 } from 'react-native';
-import { ImageBackground } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useLibrarySelectedCategory, usePlayer } from '@context';
 import { upsertCatalogTracks } from '@services';
 import { GlassSurface, LoggedPressable } from '../../native';
+import { SkeletonImage } from '../../common/SkeletonImage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = Math.min(SCREEN_WIDTH - 52, 335); // Less wide, nicely centered
@@ -190,12 +190,14 @@ export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] })
                 },
               ]}
             >
-              <ImageBackground
-                cachePolicy="memory-disk"
-                source={{ uri: item.imageUrl }}
-                style={styles.cardImage}
-                imageStyle={styles.imageBorderRadius}
-              >
+              <View style={styles.cardImage}>
+                <SkeletonImage
+                  cachePolicy="memory-disk"
+                  priority="high"
+                  source={{ uri: item.imageUrl }}
+                  contentFit="cover"
+                  style={StyleSheet.absoluteFill}
+                />
                 {/* Dark gradient overlay */}
                 <LinearGradient
                   colors={['rgba(0,0,0,0.45)', 'transparent', 'rgba(0,0,0,0.92)']}
@@ -257,7 +259,7 @@ export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] })
                     </LoggedPressable>
                   </View>
                 </LinearGradient>
-              </ImageBackground>
+              </View>
             </Animated.View>
           );
         })}
@@ -325,9 +327,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     justifyContent: 'flex-end',
-  },
-  imageBorderRadius: {
-    borderRadius: 22,
   },
   gradientOverlay: {
     ...(StyleSheet.absoluteFill as any),

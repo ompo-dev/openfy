@@ -5,6 +5,7 @@ import {
   getArtistAlbums,
   getArtistTopTracks,
   getCachedArtistSearchSeed,
+  getYouTubeMusicArtistBiography,
   getYouTubeMusicArtistImage,
   getYouTubeMusicArtistProfile,
 } from '@api';
@@ -27,6 +28,7 @@ jest.mock('@api', () => ({
   getArtistAlbums: jest.fn(),
   getArtistTopTracks: jest.fn(),
   getYouTubeMusicArtistImage: jest.fn(),
+  getYouTubeMusicArtistBiography: jest.fn().mockResolvedValue(''),
   getYouTubeMusicArtistProfile: jest.fn(),
   getCachedArtistSearchSeed: jest.fn(),
 }));
@@ -92,6 +94,7 @@ describe('ArtistScreen', () => {
     jest.mocked(getLibraryTracks).mockResolvedValue([localTrack] as never);
     jest.mocked(getCachedArtistImage).mockResolvedValue('');
     jest.mocked(getYouTubeMusicArtistImage).mockResolvedValue('');
+    jest.mocked(getYouTubeMusicArtistBiography).mockResolvedValue('');
     jest.mocked(getCachedArtistSearchSeed).mockReturnValue(null);
     jest.mocked(rememberCachedArtistImage).mockResolvedValue(undefined);
     jest.mocked(getYouTubeMusicArtistProfile).mockRejectedValue(new Error('YTM profile unavailable'));

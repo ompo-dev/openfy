@@ -10,7 +10,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -31,6 +30,7 @@ import { HeroBanner, type FeaturedItem } from './HeroBanner/HeroBanner';
 import { CatalogHome } from './CatalogHome';
 import { ImportModal } from '../ImportModal';
 import { LoggedPressable } from '../native';
+import { SkeletonImage } from '../common/SkeletonImage';
 import { log } from '../../utils/appLogger';
 
 export { FriendActivityStatus } from './FriendActivityStatus';
@@ -239,6 +239,8 @@ export const Home = () => {
   return (
     <View style={styles.container}>
       <ScrollView
+        alwaysBounceVertical
+        bounces
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.content, { paddingTop: top + 8 }]}
@@ -246,6 +248,7 @@ export const Home = () => {
           <RefreshControl
             tintColor="#FFFFFF"
             colors={['#1DB954']}
+            progressViewOffset={top + 8}
             refreshing={isRefreshing}
             onRefresh={refresh}
           />
@@ -313,7 +316,7 @@ export const Home = () => {
                     style={styles.artistResult}
                   >
                     {artist.imageURL ? (
-                      <Image cachePolicy="memory-disk" source={{ uri: artist.imageURL }} contentFit="cover" style={styles.artistImage} />
+                      <SkeletonImage cachePolicy="memory-disk" priority="high" source={{ uri: artist.imageURL }} contentFit="cover" style={styles.artistImage} />
                     ) : (
                       <View style={[styles.artistImage, styles.imageFallback]}>
                         <Ionicons name="person" size={22} color="#8E8E93" />
@@ -342,7 +345,7 @@ export const Home = () => {
                         style={styles.trackPressable}
                       >
                         {track.imageURL ? (
-                          <Image cachePolicy="memory-disk" source={{ uri: track.imageURL }} contentFit="cover" style={styles.trackImage} />
+                          <SkeletonImage cachePolicy="memory-disk" priority="high" source={{ uri: track.imageURL }} contentFit="cover" style={styles.trackImage} />
                         ) : (
                           <View style={[styles.trackImage, styles.imageFallback]}>
                             <Ionicons name="musical-note" size={21} color="#8E8E93" />

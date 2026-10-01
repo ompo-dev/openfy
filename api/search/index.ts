@@ -1,6 +1,7 @@
 export { getBrowseCategories } from './browseCategories';
 export {
   getYouTubeMusicArtistImage,
+  getYouTubeMusicArtistBiography,
   getYouTubeMusicArtistProfile,
   getCachedArtistSearchSeed,
   searchCatalog,

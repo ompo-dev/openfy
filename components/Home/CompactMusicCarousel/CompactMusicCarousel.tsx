@@ -13,13 +13,13 @@ import {
   Text,
   View,
 } from 'react-native';
-import { ImageBackground } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
 import { LoggedPressable } from '../../native';
 import { MarqueeText } from '../../common/MarqueeText';
+import { SkeletonImage } from '../../common/SkeletonImage';
 
 export interface CompactTrackItem {
   id: string;
@@ -155,12 +155,14 @@ export const CompactMusicCards = ({
                 accessibilityLabel={`Tocar ${item.title} de ${item.artist}`}
               >
                 {/* Full-bleed Artwork Background */}
-                <ImageBackground
-                  cachePolicy="memory-disk"
-                  source={{ uri: item.imageUrl }}
-                  style={styles.cardImageBackground}
-                  imageStyle={styles.cardImageRadius}
-                >
+                <View style={styles.cardImageBackground}>
+                  <SkeletonImage
+                    cachePolicy="memory-disk"
+                    priority="high"
+                    source={{ uri: item.imageUrl }}
+                    contentFit="cover"
+                    style={StyleSheet.absoluteFill}
+                  />
                   <LinearGradient
                     colors={[
                       'rgba(0,0,0,0.2)',
@@ -207,7 +209,7 @@ export const CompactMusicCards = ({
                       </View>
                     </View>
                   </LinearGradient>
-                </ImageBackground>
+                </View>
               </LoggedPressable>
             </Animated.View>
           );
@@ -263,9 +265,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     justifyContent: 'space-between',
-  },
-  cardImageRadius: {
-    borderRadius: 18,
   },
   gradientOverlay: {
     ...(StyleSheet.absoluteFill as any),

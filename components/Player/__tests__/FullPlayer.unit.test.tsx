@@ -39,6 +39,7 @@ jest.mock('expo-router', () => ({
 }));
 jest.mock('@api', () => ({
   findArtistIdByName: jest.fn(),
+  getYouTubeMusicArtistBiography: jest.fn().mockResolvedValue(''),
   getYouTubeMusicArtistImage: jest.fn().mockResolvedValue(null),
 }));
 jest.mock('../../../services/metadata/spotifyMetadata', () => ({
@@ -248,7 +249,7 @@ describe('FullPlayer artist row and YouTube source', () => {
   it('shows inline lyrics, artist details, and credits in the scrollable player', async () => {
     const screen = await mountPlayer();
 
-    expect(screen.getByText('Letra')).toBeTruthy();
+    expect(screen.queryByText('Letra')).toBeNull();
     expect(screen.getByText('Sobre o artista')).toBeTruthy();
     expect(screen.getByText('Créditos')).toBeTruthy();
     expect(screen.getAllByText('Artista principal').length).toBeGreaterThan(1);
@@ -259,9 +260,20 @@ describe('FullPlayer artist row and YouTube source', () => {
 
   it('replaces the title with a sticky mini-player after the player scrolls away', async () => {
     const screen = await mountPlayer();
+    await fireEvent(screen.getByTestId('player-controls-row'), 'layout', {
+      nativeEvent: { layout: { y: 900, height: 100, width: 390, x: 0 } },
+    });
     await fireEvent.scroll(screen.getByTestId('player-scroll-view'), {
       nativeEvent: {
-        contentOffset: { y: 180 },
+        contentOffset: { y: 200 },
+        contentSize: { height: 1800, width: 390 },
+        layoutMeasurement: { height: 700, width: 390 },
+      },
+    });
+    expect(screen.queryByTestId('mini-player-content')).toBeNull();
+    await fireEvent.scroll(screen.getByTestId('player-scroll-view'), {
+      nativeEvent: {
+        contentOffset: { y: 1000 },
         contentSize: { height: 1800, width: 390 },
         layoutMeasurement: { height: 700, width: 390 },
       },

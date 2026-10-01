@@ -3,6 +3,7 @@ export type ArtistModel = {
   id: string;
   name: string;
   imageURL: string;
+  description?: string;
   genres?: string[];
   followers?: number;
 };

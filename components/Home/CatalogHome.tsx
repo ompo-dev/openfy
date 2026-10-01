@@ -1,6 +1,5 @@
 import * as React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
 import { getYouTubeMusicArtistImage } from '@api';
@@ -8,6 +7,7 @@ import { useDetailNavigation } from '@hooks';
 import { getCachedArtistImage, type PersonalizedHomeSnapshot } from '@services';
 import { LoggedPressable } from '../native';
 import { log } from '../../utils/appLogger';
+import { SkeletonImage } from '../common/SkeletonImage';
 
 export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
   const { openDetail } = useDetailNavigation();
@@ -54,7 +54,7 @@ export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
             style={styles.artist}
           >
             {artistImages[artist.artistId] ? (
-              <Image cachePolicy="memory-disk" source={{ uri: artistImages[artist.artistId] }} contentFit="cover" style={styles.image} />
+              <SkeletonImage cachePolicy="memory-disk" priority="high" source={{ uri: artistImages[artist.artistId] }} contentFit="cover" style={styles.image} />
             ) : (
               <View style={[styles.image, styles.fallback]}>
                 <Ionicons name="person" size={26} color="#929292" />

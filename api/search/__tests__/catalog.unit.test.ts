@@ -300,6 +300,48 @@ describe('public YouTube Music catalog', () => {
     ]);
   });
 
+  it('loads complete artist song shelves and their continuation pages', async () => {
+    const secondPage = {
+      items: [{
+        id: 'lmnopqrstuv',
+        title: 'Guest appearance',
+        artists: [
+          { channel_id: 'UCmain', name: 'Main artist' },
+          { channel_id: 'UCcatalog', name: 'Catalog artist' },
+        ],
+      }],
+      has_continuation: false,
+    };
+    const firstPage = {
+      items: [{
+        id: 'abcdefghijk',
+        title: 'Catalog single',
+        artists: [{ channel_id: 'UCcatalog', name: 'Catalog artist' }],
+      }],
+      has_continuation: true,
+      getContinuation: jest.fn().mockResolvedValue(secondPage),
+    };
+    const search = jest.fn().mockResolvedValue({ songs: { contents: [] } });
+    const getArtist = jest.fn().mockResolvedValue({
+      header: { title: 'Catalog artist' },
+      sections: [],
+      getAllSongs: jest.fn().mockResolvedValue({ playlist_id: 'VLcatalog' }),
+    });
+    const getPlaylist = jest.fn().mockResolvedValue(firstPage);
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({
+      music: { search, getArtist, getPlaylist },
+    } as never);
+
+    const profile = await getYouTubeMusicArtistProfile(
+      'ytartist_UCcatalog~Catalog%20artist'
+    );
+
+    expect(getPlaylist).toHaveBeenCalledWith('VLcatalog');
+    expect(firstPage.getContinuation).toHaveBeenCalledTimes(1);
+    expect(profile.tracks.map((track) => track.title)).toEqual(['Catalog single']);
+    expect(profile.participationTracks.map((track) => track.title)).toEqual(['Guest appearance']);
+  });
+
   it('gets the matching artist image without loading a full profile or using a fan result', async () => {
     const search = jest.fn().mockResolvedValue({
       artists: { contents: [

@@ -11,7 +11,6 @@ import {
   View,
   ScrollView,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Href, useRouter, useSegments } from 'expo-router';
@@ -26,6 +25,7 @@ import { GlassSurface, LoggedPressable, NativeIconButton } from '../native';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
 import { MarqueeText } from '../common/MarqueeText';
+import { SkeletonImage } from '../common/SkeletonImage';
 import { findArtistIdByName, getYouTubeMusicArtistImage } from '@api';
 import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
 import { getCachedArtistImage } from '@services';
@@ -459,8 +459,9 @@ export const CollectionDetail = ({
         >
           {kind === 'playlist' || kind === 'artist' ? (
             item.imageURL ? (
-              <Image
+              <SkeletonImage
                 cachePolicy="memory-disk"
+                priority="high"
                 source={{ uri: item.imageURL }}
                 style={styles.trackArtwork}
               />
@@ -576,9 +577,10 @@ export const CollectionDetail = ({
             {kind === 'playlist' && imageURLs?.length ? (
               <PlaylistMosaic imageURLs={imageURLs} style={styles.heroArtwork} />
             ) : imageURL ? (
-              <Image
+              <SkeletonImage
                 testID={kind === 'artist' ? 'collection-artwork' : undefined}
                 cachePolicy="memory-disk"
+                priority="high"
                 source={{ uri: imageURL }}
                 style={[styles.heroArtwork, kind === 'artist' && styles.artistHeroArtwork]}
                 contentFit={kind === 'artist' ? 'contain' : 'cover'}
@@ -669,7 +671,7 @@ export const CollectionDetail = ({
                       const uri = artist.imageURL || artistImages[artist.id || artist.name];
                       return (
                         <View key={`${artist.id}-${artist.name}`} style={[styles.artistAvatar, index > 0 && styles.artistAvatarOverlap, { zIndex: 4 - index }]}>
-                          {uri ? <Image source={{ uri }} cachePolicy="memory-disk" contentFit="cover" style={styles.artistAvatarImage} /> : <Ionicons name="person" size={15} color="#DDD" />}
+                          {uri ? <SkeletonImage source={{ uri }} cachePolicy="memory-disk" contentFit="cover" style={styles.artistAvatarImage} /> : <Ionicons name="person" size={15} color="#DDD" />}
                         </View>
                       );
                     })}
@@ -710,10 +712,10 @@ export const CollectionDetail = ({
                 onPress={() => void handleShufflePlay()}
               />
               <GlassSurface glass="regular" isInteractive style={styles.actionPill}>
-                {kind === 'artist' ? (
+                {kind === 'playlist' && onAddTracksPress ? (
                   <>
                     <LoggedPressable
-                      accessibilityLabel={onAddTracksPress ? 'Adicionar músicas à playlist' : 'Adicionar faixas à fila'}
+                      accessibilityLabel="Adicionar músicas à playlist"
                       onPress={() => void handleAdd()}
                       style={styles.pillAction}
                     ><Ionicons name="add" size={22} color="#FFFFFF" /></LoggedPressable>
@@ -841,7 +843,7 @@ export const CollectionDetail = ({
                     }}
                     style={styles.artistModalRow}
                   >
-                    {uri ? <Image source={{ uri }} cachePolicy="memory-disk" contentFit="cover" style={styles.artistModalImage} /> : <View style={[styles.artistModalImage, styles.artistModalFallback]}><Ionicons name="person" size={20} color="#DDD" /></View>}
+                    {uri ? <SkeletonImage source={{ uri }} cachePolicy="memory-disk" contentFit="cover" style={styles.artistModalImage} /> : <View style={[styles.artistModalImage, styles.artistModalFallback]}><Ionicons name="person" size={20} color="#DDD" /></View>}
                     <Text numberOfLines={1} style={styles.artistModalName}>{artist.name}</Text>
                     <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.55)" />
                   </LoggedPressable>

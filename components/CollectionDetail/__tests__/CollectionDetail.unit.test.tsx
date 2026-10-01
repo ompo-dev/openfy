@@ -211,17 +211,32 @@ describe('CollectionDetail', () => {
   });
 
   it('shows the complete artist portrait and omits generic profile copy', async () => {
+    const onAddTracksPress = jest.fn();
     const screen = await renderCollection({
       kind: 'artist',
       title: 'Yago Oproprio',
       imageURL: 'https://images.example/yago.jpg',
       description: '',
       metadata: '',
+      onAddTracksPress,
     });
 
     expect(screen.getByTestId('collection-artwork').props.contentFit).toBe('contain');
     expect(screen.queryByText('Artista')).toBeNull();
     expect(screen.queryByText('Músicas, álbuns e singles de Yago Oproprio.')).toBeNull();
+    expect(screen.queryByLabelText('Adicionar músicas à playlist')).toBeNull();
+    expect(onAddTracksPress).not.toHaveBeenCalled();
+  });
+
+  it('keeps the add-tracks action available on an editable playlist', async () => {
+    const onAddTracksPress = jest.fn().mockResolvedValue(undefined);
+    const screen = await renderCollection({
+      kind: 'playlist',
+      onAddTracksPress,
+    });
+
+    fireEvent.press(screen.getByLabelText('Adicionar músicas à playlist'));
+    await waitFor(() => expect(onAddTracksPress).toHaveBeenCalledTimes(1));
   });
 
   it('lists every credited artist from the collection and removes add and overflow actions', async () => {

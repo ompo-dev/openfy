@@ -18,7 +18,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -28,6 +27,7 @@ import { MyNoteModal, MyNote } from './MyNoteModal';
 import { FriendNoteSheet } from './FriendNoteSheet';
 import { NoteBubble } from './NoteBubble';
 import { resolveNoteTailTuning } from './noteTailTuning';
+import { SkeletonImage } from '../../common/SkeletonImage';
 import type { NoteTailTuning, NoteTailTuningById } from './noteTailTuning';
 
 export type { NoteTailTuning, NoteTailTuningById } from './noteTailTuning';
@@ -313,9 +313,10 @@ export const FriendActivityStatus = ({
                 {/* Stable circular avatar */}
                 <View style={styles.avatarContainer}>
                   {item.user.avatarUrl ? (
-                    <Image
+                    <SkeletonImage
                       cachePolicy="memory-disk"
                       source={{ uri: item.user.avatarUrl }}
+                      contentFit="cover"
                       style={styles.avatarImage}
                     />
                   ) : (

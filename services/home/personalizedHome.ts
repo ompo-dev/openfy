@@ -4,8 +4,8 @@ import type { UserProfile } from '../recommendation/recommendationEngine';
 import type { LibraryTrack } from '../library/catalogLibrary';
 import type { LocalPlaylist } from '../library/localPlaylistManager';
 import {
+  getBestYouTubeMusicThumbnail,
   getYouTubeMusicClient,
-  getYouTubeMusicThumbnails,
   toYouTubeMusicArtistRouteId,
   type YouTubeMusicItem,
 } from '../youtubeMusicClient';
@@ -80,7 +80,7 @@ export const EMPTY_PERSONALIZED_HOME: PersonalizedHomeSnapshot = {
   tracksById: new Map(),
 };
 
-const DISCOVERY_CACHE_KEY = 'openfy_home_discoveries_v3';
+const DISCOVERY_CACHE_KEY = 'openfy_home_discoveries_v4';
 const DISCOVERY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const DISCOVERY_REQUEST_TIMEOUT_MS = 9_000;
 let discoveryCacheGeneration = 0;
@@ -440,8 +440,7 @@ const searchYouTubeMusic = async (
         }) || [];
         const artistNames = artists.map((artist) => artist.name);
         if (!artistNames.length) artistNames.push(seed.name);
-        const imageURL = [...(item.thumbnails || [])]
-          .sort((first, second) => (second.width || 0) - (first.width || 0))[0]?.url || '';
+        const imageURL = getBestYouTubeMusicThumbnail(item);
         return [{
           id: `discovery_yt_${videoId}`,
           spotifyId: `yt_${videoId}`,
@@ -486,8 +485,7 @@ const queueItemToHomeTrack = (
     }))
     .filter((artist) => artist.name);
   const artistName = artists.map((artist) => artist.name).join(', ') || fallbackArtist;
-  const imageURL = [...getYouTubeMusicThumbnails(item)]
-    .sort((first, second) => (second.width || 0) - (first.width || 0))[0]?.url || '';
+  const imageURL = getBestYouTubeMusicThumbnail(item);
   return {
     id: `discovery_yt_${videoId}`,
     spotifyId: `yt_${videoId}`,

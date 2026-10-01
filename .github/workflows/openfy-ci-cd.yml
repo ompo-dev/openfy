@@ -124,6 +124,16 @@ jobs:
         if: steps.expo-token.outputs.publish == 'true'
         run: npm ci --legacy-peer-deps
 
+      - name: Garantir canal OTA production
+        if: steps.expo-token.outputs.publish == 'true'
+        shell: bash
+        run: |
+          if eas channel:view production >/dev/null 2>&1; then
+            echo "Canal OTA production ja existe."
+          else
+            eas channel:create production production --non-interactive
+          fi
+
       - name: Publicar update no canal production
         if: steps.expo-token.outputs.publish == 'true'
         run: |

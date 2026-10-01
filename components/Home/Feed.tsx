@@ -177,12 +177,15 @@ export const Feed = () => {
   return (
     <View style={styles.container}>
       <ScrollView
+        alwaysBounceVertical
+        bounces
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.content, { paddingTop: top + 12 }]}
         refreshControl={
           <RefreshControl
             tintColor="#FFFFFF"
             colors={['#1DB954']}
+            progressViewOffset={top + 8}
             refreshing={isRefreshing}
             onRefresh={refresh}
           />

@@ -30,7 +30,7 @@ export default function TabLayout() {
         name="library"
         contentStyle={{ backgroundColor: '#121212' }}
       >
-        <Label>Your Library</Label>
+        <Label>Biblioteca</Label>
         <Icon sf={{ default: 'books.vertical', selected: 'books.vertical.fill' }} />
       </NativeTabs.Trigger>
     </NativeTabs>

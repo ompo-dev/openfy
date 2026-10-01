@@ -99,17 +99,44 @@ export const getYouTubeMusicThumbnails = (
     const image = asRecord(value);
     const url = asText(image?.url);
     if (!url) return [];
-    const width = Number(image?.width);
+    const encodedWidth = url.match(/=w(\d+)-h\d+/)?.[1];
+    const width = Number(image?.width ?? encodedWidth);
     return [{ url, width: Number.isFinite(width) ? width : 0 }];
   });
+};
+
+export const getBestYouTubeMusicThumbnail = (
+  item: Pick<YouTubeMusicItem, 'thumbnail' | 'thumbnails'> | unknown,
+  preferredSize = 720
+) => {
+  const source = [...getYouTubeMusicThumbnails(item)]
+    .sort((first, second) => second.width - first.width)
+    .find((thumbnail) => thumbnail.url)?.url;
+  if (!source) return '';
+  return source.replace(/=w\d+-h\d+([^/?]*)$/, `=w${preferredSize}-h${preferredSize}$1`);
 };
 
 export type YouTubeMusicArtistPage = {
   header?: {
     title?: { toString(): string };
     thumbnail?: YouTubeMusicItem['thumbnail'];
+    description?: { toString(): string };
   };
-  sections?: { title?: { toString(): string }; contents?: YouTubeMusicItem[] }[];
+  sections?: {
+    title?: { toString(): string };
+    header?: { title?: { toString(): string } };
+    contents?: YouTubeMusicItem[];
+  }[];
+  getAllSongs?: () => Promise<{
+    playlist_id?: string;
+    contents?: YouTubeMusicItem[];
+  }>;
+};
+
+export type YouTubeMusicPlaylistPage = {
+  items?: YouTubeMusicItem[];
+  has_continuation?: boolean;
+  getContinuation?: () => Promise<YouTubeMusicPlaylistPage>;
 };
 
 export type YouTubeMusicClient = {
@@ -122,11 +149,16 @@ export type YouTubeMusicClient = {
       artists?: { contents?: YouTubeMusicItem[] };
     }>;
     getArtist: (artistId: string) => Promise<YouTubeMusicArtistPage>;
+    getPlaylist: (playlistId: string) => Promise<YouTubeMusicPlaylistPage>;
+    getAlbum: (albumId: string) => Promise<{ contents?: YouTubeMusicItem[] }>;
     getUpNext: (
       videoId: string,
       automix?: boolean
     ) => Promise<{ contents?: YouTubeMusicItem[] }>;
   };
+  getChannel?: (channelId: string) => Promise<{
+    getAbout: () => Promise<unknown>;
+  }>;
 };
 
 let clientPromise: Promise<YouTubeMusicClient> | null = null;

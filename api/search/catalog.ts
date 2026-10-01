@@ -1,13 +1,15 @@
 import type { ArtistModel, TrackModel } from '@models';
 import {
+  getBestYouTubeMusicThumbnail,
   getYouTubeMusicClient,
-  getYouTubeMusicThumbnails,
   toYouTubeMusicArtistRouteId,
   YOUTUBE_MUSIC_ARTIST_PREFIX,
   getYouTubeMusicArtistRouteName,
   getYouTubeMusicText,
   withYouTubeMusicTimeout,
+  type YouTubeMusicClient,
   type YouTubeMusicItem,
+  type YouTubeMusicPlaylistPage,
 } from '../../services/youtubeMusicClient';
 import { log } from '../../utils/appLogger';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
@@ -82,13 +84,94 @@ const parseArtistRoute = (artistRouteId: string) => {
 };
 
 const largestImage = (item: YouTubeMusicItem | unknown, preferredSize?: number) =>
-  [...getYouTubeMusicThumbnails(item)]
-    .sort((first, second) => (second.width || 0) - (first.width || 0))
-    .find((image) => image.url)?.url
-    ?.replace(/=w\d+-h\d+(.*)$/, (size, suffix: string) => {
-      if (!preferredSize) return size;
-      return `=w${preferredSize}-h${preferredSize}${suffix}`;
-    }) || '';
+  getBestYouTubeMusicThumbnail(item, preferredSize || 720);
+
+const artistBiographyCache = createAsyncResourceCache<string>({
+  name: 'youtube artist biography',
+  category: 'artist',
+  maxEntries: 100,
+  ttlFor: (description) => description ? 6 * 60 * 60_000 : 60_000,
+});
+
+const loadChannelBiography = async (client: Awaited<ReturnType<typeof getYouTubeMusicClient>>, channelId: string) => {
+  if (!client.getChannel) return '';
+  const channel = await withYouTubeMusicTimeout(client.getChannel(channelId), 5_000);
+  if (!channel) return '';
+  const about = await withYouTubeMusicTimeout(channel.getAbout(), 5_000);
+  if (!about) return '';
+  const aboutData = asRecord(about);
+  const metadata = asRecord(aboutData.metadata);
+  return (asString(aboutData.description) || asString(metadata.description))
+    .replace(/\s+/g, ' ')
+    .slice(0, 1_200);
+};
+
+export const getYouTubeMusicArtistBiography = (artistRouteId: string) =>
+  artistBiographyCache.getOrLoad(artistRouteId, async () => {
+    if (!artistRouteId.startsWith(YOUTUBE_MUSIC_ARTIST_PREFIX)) return '';
+    const client = await withYouTubeMusicTimeout(getYouTubeMusicClient());
+    if (!client) return '';
+    let { browseId, routeName } = parseArtistRoute(artistRouteId);
+    const existingBio = browseId
+      ? await loadChannelBiography(client, browseId).catch(() => '')
+      : '';
+    if (existingBio) return existingBio;
+    if (!browseId && routeName) {
+      const result = await withYouTubeMusicTimeout(client.music.search(routeName, { type: 'artist' }));
+      const candidates = asArray(asRecord(result?.artists).contents) as YouTubeMusicItem[];
+      const match = candidates.find((item) =>
+        normalizeArtistName(asString(asRecord(item).name) || asString(asRecord(item).title)) === normalizeArtistName(routeName)
+      );
+      const data = asRecord(match);
+      const author = asRecord(data.author);
+      browseId = asString(data.id) || asString(author.channel_id) || asString(author.id);
+    } else if (routeName) {
+      const result = await withYouTubeMusicTimeout(client.music.search(routeName, { type: 'artist' }));
+      const candidates = asArray(asRecord(result?.artists).contents) as YouTubeMusicItem[];
+      const match = candidates.find((item) =>
+        normalizeArtistName(asString(asRecord(item).name) || asString(asRecord(item).title)) === normalizeArtistName(routeName)
+      );
+      const data = asRecord(match);
+      const author = asRecord(data.author);
+      const resolvedId = asString(data.id) || asString(author.channel_id) || asString(author.id);
+      if (resolvedId && resolvedId !== browseId) browseId = resolvedId;
+    }
+    return browseId ? loadChannelBiography(client, browseId) : '';
+  }, 6 * 60 * 60_000);
+
+const loadArtistTopSongs = async (
+  client: Awaited<ReturnType<typeof getYouTubeMusicClient>>,
+  artistPage: Awaited<ReturnType<NonNullable<YouTubeMusicClient['music']['getArtist']>>>
+) => {
+  if (!artistPage.getAllSongs) return [] as YouTubeMusicItem[];
+  try {
+    const shelf = await withYouTubeMusicTimeout(artistPage.getAllSongs(), 6_000);
+    if (!shelf) return [];
+    const items = [...asArray(asRecord(shelf).contents) as YouTubeMusicItem[]];
+    const playlistId = asString(asRecord(shelf).playlist_id);
+    if (!playlistId) return items;
+
+    const firstPage = await withYouTubeMusicTimeout(client.music.getPlaylist(playlistId), 6_000);
+    if (!firstPage) return items;
+    let page: YouTubeMusicPlaylistPage = firstPage;
+    const seenPageItems = new Set<string>();
+    for (let pageIndex = 0; pageIndex < 3 && items.length < 240; pageIndex += 1) {
+      const pageItems = asArray(asRecord(page).items) as YouTubeMusicItem[];
+      const pageKey = pageItems.map((item) => asString(asRecord(item).id)).join(',');
+      if (!pageItems.length || seenPageItems.has(pageKey)) break;
+      seenPageItems.add(pageKey);
+      items.push(...pageItems);
+      if (!asRecord(page).has_continuation || !page.getContinuation) break;
+      const next: YouTubeMusicPlaylistPage | null = await withYouTubeMusicTimeout(page.getContinuation(), 4_000);
+      if (!next) break;
+      page = next;
+    }
+    return items;
+  } catch (error) {
+    log.artist('complete artist song shelf unavailable', { error });
+    return [];
+  }
+};
 
 const toTrackModel = (item: YouTubeMusicItem): TrackModel | null => {
   const data = asRecord(item);
@@ -444,7 +527,7 @@ const loadYouTubeMusicArtistProfile = async (
     title: asString(header.title),
     thumbnail: header.thumbnail as YouTubeMusicItem['thumbnail'],
   };
-  const songItems = asArray(page.sections)
+  const profileSongItems = asArray(page.sections)
     .flatMap((section) => asArray(asRecord(section).contents))
     .filter((value) => {
       const item = asRecord(value);
@@ -452,14 +535,17 @@ const loadYouTubeMusicArtistProfile = async (
         validVideoId(asString(item.id) || asString(item.video_id));
     }) as YouTubeMusicItem[];
   const name = asString(headerItem.title) || routeName || 'Artista';
-  const searchedSongs = await (initialSongSearch || searchArtistSongs(name));
+  const [searchedSongs, completeSongShelf] = await Promise.all([
+    initialSongSearch || searchArtistSongs(name),
+    loadArtistTopSongs(client, page),
+  ]);
   const matchingArtistCredit = (item: YouTubeMusicItem) =>
     artistReferences(item).some((artist) =>
       artist.id === browseId || normalizeArtistName(artist.name) === normalizeArtistName(name)
     );
   const matchingSearchedSongs = searchedSongs.filter(matchingArtistCredit);
   const pageAndCatalogSongs = new Map<string, YouTubeMusicItem>();
-  for (const item of [...songItems, ...matchingSearchedSongs]) {
+  for (const item of [...profileSongItems, ...completeSongShelf, ...matchingSearchedSongs]) {
     const data = asRecord(item);
     const id = asString(data.id) || asString(data.video_id);
     if (validVideoId(id) && !pageAndCatalogSongs.has(id)) {
@@ -480,21 +566,29 @@ const loadYouTubeMusicArtistProfile = async (
   }
   finishSongCatalog({
     ok: true,
-    profileTracks: songItems.length,
+    profileTracks: profileSongItems.length + completeSongShelf.length,
     catalogTracks: matchingSearchedSongs.length,
     uniqueTracks: tracks.length + participationTracks.length,
     participations: participationTracks.length,
   });
+
+  const profileImageRoute = toYouTubeMusicArtistRouteId(browseId, name);
+  const [description, profilePortrait] = await Promise.all([
+    asString(header.description) || loadChannelBiography(client, browseId).catch(() => ''),
+    loadYouTubeMusicArtistImage(profileImageRoute).catch(() => ''),
+  ]);
 
   return {
     artist: {
       type: 'artist',
       id: artistRouteId,
       name,
-      imageURL:
+      imageURL: profilePortrait || (
         !routeName || normalizeArtistName(name) === normalizeArtistName(routeName)
-          ? largestImage(headerItem)
-          : '',
+          ? largestImage(headerItem, 1_000)
+          : ''
+      ),
+      ...(description ? { description } : {}),
     },
     tracks,
     participationTracks,
