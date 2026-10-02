@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  KeyboardAvoidingView,
   Linking,
   Modal,
   Platform,
@@ -22,6 +23,7 @@ import {
   View,
   Dimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
@@ -247,6 +249,7 @@ function PlayerGlassButton({
 }
 
 export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
+  const insets = useSafeAreaInsets();
   const { openDetail } = useDetailNavigation();
   const { clearCompletedDownloads, downloads, enqueueDownloads } =
     useDownloads();
@@ -348,7 +351,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const canGoPrevious = !!previousTrack;
   const canGoNext = !!nextTrack;
   const artworkIsLoading =
-    !!playerState.isBuffering || isArtworkNavigationPending;
+    (!!playerState.isBuffering && !playerState.isPlaying) ||
+    isArtworkNavigationPending;
 
   const artistLinks = React.useMemo(() => {
     if (!currentTrack) return [];
@@ -588,6 +592,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     playerScrollRef.current?.scrollTo({ y: 0, animated: false });
     setIsPlayerScrolled(false);
   }, [currentTrackKey]);
+
+  React.useLayoutEffect(() => {
+    if (!visible) return;
+    playerScrollRef.current?.scrollTo({ y: 0, animated: false });
+    setIsPlayerScrolled(false);
+  }, [visible]);
 
   // This includes silent parts as music-note blocks, so gaps never inherit
   // the previous lyric as their active line.
@@ -1094,7 +1104,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       onRequestClose={onClose}
     >
       <GestureHandlerRootView style={styles.gestureRoot}>
-        <View style={styles.container}>
+        <View style={[styles.container, { paddingBottom: Math.max(24, insets.bottom) }]}>
           {artworkUrl ? (
             <Image
               cachePolicy="memory-disk"
@@ -1298,7 +1308,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               ref={playerScrollRef}
               testID="player-scroll-view"
               style={styles.playerScroll}
-              contentContainerStyle={styles.playerScrollContent}
+              contentContainerStyle={[
+                styles.playerScrollContent,
+                { paddingBottom: Math.max(136, insets.bottom + 112) },
+              ]}
               keyboardShouldPersistTaps="handled"
               onScroll={(event) => {
                 const canShowMiniPlayer = controlsBottomOffset !== null &&
@@ -1425,7 +1438,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   <Ionicons name="play-back" size={32} color={canGoPrevious ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} />
                 </PlayerGlassButton>
                 <PlayerGlassButton accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'} glass="thick" onPress={togglePlayPause} style={styles.playPauseCircle} tintColor="rgba(255,255,255,0.92)">
-                  {playerState.isBuffering ? <MaterialCommunityIcons name="loading" size={34} color="#FFFFFF" /> : <Ionicons name={playerState.isPlaying ? 'pause' : 'play'} size={34} color="#FFFFFF" style={!playerState.isPlaying ? { marginLeft: 3 } : undefined} />}
+                  {playerState.isBuffering && !playerState.isPlaying ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name={playerState.isPlaying ? 'pause' : 'play'} size={34} color="#FFFFFF" style={!playerState.isPlaying ? { marginLeft: 3 } : undefined} />}
                 </PlayerGlassButton>
                 <PlayerGlassButton accessibilityLabel="Próxima faixa" disabled={!canGoNext} onPress={playNext} style={styles.seekControlBtn}>
                   <Ionicons name="play-forward" size={32} color={canGoNext ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} />
@@ -1653,72 +1666,79 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             animationType="fade"
             onRequestClose={() => setIsEditModalVisible(false)}
           >
-            <Pressable
-              style={styles.modalOverlay}
-              onPress={() => setIsEditModalVisible(false)}
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
+              style={styles.editKeyboardAvoidingView}
             >
               <Pressable
-                style={styles.editModalContainer}
-                onPress={(e) => e.stopPropagation()}
+                style={[styles.modalOverlay, styles.editModalOverlay]}
+                onPress={() => setIsEditModalVisible(false)}
               >
-                <GlassSurface glass="thick" style={styles.editModalCard}>
-                  <View style={styles.editModalHeader}>
-                    <View style={styles.youtubeCircleBadge}>
-                      <Ionicons name="logo-youtube" size={28} color="#FF0000" />
+                <Pressable
+                  style={styles.editModalContainer}
+                  onPress={(e) => e.stopPropagation()}
+                >
+                  <GlassSurface glass="thick" style={styles.editModalCard}>
+                    <View style={styles.editModalHeader}>
+                      <View style={styles.youtubeCircleBadge}>
+                        <Ionicons name="logo-youtube" size={28} color="#FF0000" />
+                      </View>
+                      <Text style={styles.editModalTitle}>
+                        Editar Link do YouTube
+                      </Text>
+                      <Text style={styles.editModalSubtitle}>
+                        Altere o link do vídeo para atualizar instantaneamente o
+                        áudio e a reprodução desta música.
+                      </Text>
                     </View>
-                    <Text style={styles.editModalTitle}>
-                      Editar Link do YouTube
-                    </Text>
-                    <Text style={styles.editModalSubtitle}>
-                      Altere o link do vídeo para atualizar instantaneamente o
-                      áudio e a reprodução desta música.
-                    </Text>
-                  </View>
 
-                  <View style={styles.inputWrapper}>
-                    <Ionicons
-                      name="link"
-                      size={18}
-                      color="rgba(255,255,255,0.6)"
-                      style={styles.inputIcon}
-                    />
-                    <TextInput
-                      value={customLinkInput}
-                      onChangeText={setCustomLinkInput}
-                      placeholder="https://www.youtube.com/watch?v=..."
-                      placeholderTextColor="rgba(255,255,255,0.4)"
-                      style={styles.textInput}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      selectTextOnFocus
-                    />
-                  </View>
+                    <View style={styles.inputWrapper}>
+                      <Ionicons
+                        name="link"
+                        size={18}
+                        color="rgba(255,255,255,0.6)"
+                        style={styles.inputIcon}
+                      />
+                      <TextInput
+                        value={customLinkInput}
+                        onChangeText={setCustomLinkInput}
+                        placeholder="https://www.youtube.com/watch?v=..."
+                        placeholderTextColor="rgba(255,255,255,0.4)"
+                        style={styles.textInput}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        selectTextOnFocus
+                        returnKeyType="done"
+                      />
+                    </View>
 
-                  <View style={styles.modalButtonRow}>
-                    <LoggedPressable
-                      style={styles.modalCancelBtn}
-                      onPress={() => setIsEditModalVisible(false)}
-                    >
-                      <Text style={styles.modalCancelBtnText}>Cancelar</Text>
-                    </LoggedPressable>
+                    <View style={styles.modalButtonRow}>
+                      <LoggedPressable
+                        style={styles.modalCancelBtn}
+                        onPress={() => setIsEditModalVisible(false)}
+                      >
+                        <Text style={styles.modalCancelBtnText}>Cancelar</Text>
+                      </LoggedPressable>
 
-                    <LoggedPressable
-                      style={styles.modalConfirmBtn}
-                      onPress={handleConfirmEditLink}
-                      disabled={isUpdatingAudio}
-                    >
-                      {isUpdatingAudio ? (
-                        <ActivityIndicator size="small" color="#000000" />
-                      ) : (
-                        <Text style={styles.modalConfirmBtnText}>
-                          Atualizar Áudio
-                        </Text>
-                      )}
-                    </LoggedPressable>
-                  </View>
-                </GlassSurface>
+                      <LoggedPressable
+                        style={styles.modalConfirmBtn}
+                        onPress={handleConfirmEditLink}
+                        disabled={isUpdatingAudio}
+                      >
+                        {isUpdatingAudio ? (
+                          <ActivityIndicator size="small" color="#000000" />
+                        ) : (
+                          <Text style={styles.modalConfirmBtnText}>
+                            Atualizar Áudio
+                          </Text>
+                        )}
+                      </LoggedPressable>
+                    </View>
+                  </GlassSurface>
+                </Pressable>
               </Pressable>
-            </Pressable>
+            </KeyboardAvoidingView>
           </Modal>
         </View>
       </GestureHandlerRootView>
@@ -2062,6 +2082,8 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     alignItems: 'center',
   },
+  editKeyboardAvoidingView: { flex: 1, justifyContent: 'flex-end' },
+  editModalOverlay: { justifyContent: 'flex-end', paddingBottom: 8 },
   actionSheetWrapper: {
     width: '100%',
     maxWidth: 480,
@@ -2135,7 +2157,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 440,
     paddingHorizontal: 16,
-    paddingBottom: Platform.OS === 'ios' ? 44 : 28,
+    paddingBottom: 12,
   },
   editModalCard: {
     borderRadius: 28,

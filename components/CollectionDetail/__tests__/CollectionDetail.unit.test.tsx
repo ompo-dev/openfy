@@ -19,6 +19,19 @@ jest.mock('@context', () => ({
   usePlayer: jest.fn(),
 }));
 
+jest.mock('@api', () => ({
+  findArtistIdByName: jest.fn().mockResolvedValue(null),
+  getYouTubeMusicArtistImage: jest.fn().mockResolvedValue(null),
+}));
+
+jest.mock('@services', () => ({
+  getCachedArtistImage: jest.fn().mockResolvedValue(''),
+}));
+
+jest.mock('../../../services/metadata/spotifyMetadata', () => ({
+  getSpotifyArtistImage: jest.fn().mockResolvedValue(null),
+}));
+
 jest.mock('expo-image', () => {
   const React = jest.requireActual<typeof import('react')>('react');
   const { View } = jest.requireActual<typeof import('react-native')>('react-native');
@@ -255,6 +268,20 @@ describe('CollectionDetail', () => {
     expect(screen.getAllByText('Principal').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Participação').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Outra participação').length).toBeGreaterThan(0);
+  });
+
+  it('does not render collection tracks without a valid artist credit', async () => {
+    const screen = await renderCollection({
+      tracks: [
+        { id: 'credited', title: 'Com artista', subtitle: 'Artista válido' },
+        { id: 'uncredited', title: 'Sem artista', subtitle: '' },
+        { id: 'placeholder', title: 'Crédito genérico', subtitle: 'Artista desconhecido' },
+      ],
+    });
+
+    expect(screen.getByText('Com artista')).toBeTruthy();
+    expect(screen.queryByText('Sem artista')).toBeNull();
+    expect(screen.queryByText('Crédito genérico')).toBeNull();
   });
 
   it('loads remaining remote playlist pages when the full artist list is requested', async () => {

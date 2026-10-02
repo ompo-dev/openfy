@@ -152,6 +152,45 @@ describe('queue preload window', () => {
     );
   });
 
+  it('warms the same five-track window in the stable shuffled order', async () => {
+    const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
+    const shuffledTracks = tracks.map((track, index) => ({
+      ...track,
+      spotifyId: `shuffle-${index}`,
+      title: `Embaralhada-${index}`,
+    }));
+
+    await usePlayerStore
+      .getState()
+      .playWithQueue(shuffledTracks, 0, 'playlist:shuffle-preload', { shuffle: true });
+    await flushAsync();
+
+    const shuffledQueue = [...usePlayerStore.getState().queue];
+    expect(preloadAudio).toHaveBeenCalledWith(
+      `https://media.test/${shuffledQueue[1].title}.m4a`,
+      90
+    );
+    expect(preloadAudio).toHaveBeenCalledWith(
+      `https://media.test/${shuffledQueue[2].title}.m4a`,
+      45
+    );
+
+    await usePlayerStore.getState().playNext();
+    await flushAsync();
+    expect(preloadAudio).toHaveBeenCalledWith(
+      `https://media.test/${shuffledQueue[3].title}.m4a`,
+      45
+    );
+
+    await usePlayerStore.getState().playNext();
+    await flushAsync();
+    expect(preloadAudio).toHaveBeenCalledWith(
+      `https://media.test/${shuffledQueue[4].title}.m4a`,
+      45
+    );
+    randomSpy.mockRestore();
+  });
+
   it('does not start a second download for a track already saved in the web library', async () => {
     const savedUrl = 'https://media.test/Atual.m4a';
     (getDownloadedTrack as jest.Mock).mockResolvedValue({

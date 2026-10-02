@@ -104,6 +104,23 @@ const getTrackArtists = (track: CollectionTrack) => {
     .filter((artist) => artist.name);
 };
 
+const hasTrackArtistCredit = (track: CollectionTrack) =>
+  getTrackArtists(track).some(({ name }) => {
+    const normalized = name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLocaleLowerCase();
+    return normalized.length > 0 && ![
+      'artista',
+      'artista desconhecido',
+      'artista nao identificado',
+      'desconhecido',
+      'unknown',
+      'unknown artist',
+    ].includes(normalized);
+  });
+
 const trackMatchesSearch = (track: CollectionTrack, query: string) => {
   if (!query) return true;
   const searchable = [
@@ -175,6 +192,8 @@ export const CollectionDetail = ({
     tracks: CollectionTrack[];
   } | null>(null);
   const [artistImages, setArtistImages] = React.useState<Record<string, string>>({});
+  const attemptedArtistImages = React.useRef(new Set<string>());
+  const isMountedRef = React.useRef(true);
   const { downloads, enqueueDownloads } = useDownloads();
   const {
     addToQueue,
@@ -208,7 +227,7 @@ export const CollectionDetail = ({
   const normalizedSearchQuery = normalizeSearchValue(searchQuery);
   const visibleTracks = React.useMemo(() => {
     const filtered = tracks.filter((track) =>
-      trackMatchesSearch(track, normalizedSearchQuery)
+      hasTrackArtistCredit(track) && trackMatchesSearch(track, normalizedSearchQuery)
     );
     return sortAscending
       ? [...filtered].sort((first, second) => first.title.localeCompare(second.title))
@@ -252,27 +271,65 @@ export const CollectionDetail = ({
   }, [allArtistTracks, artists, extraTrackSections]);
 
   React.useEffect(() => {
-    let active = true;
-    const unresolved = collectionArtists.filter((artist) => artist.id && !artist.imageURL && !artistImages[artist.name]);
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const prioritizedArtists = isArtistListVisible
+      ? collectionArtists
+      : collectionArtists.slice(0, 4);
+    const unresolved = prioritizedArtists.filter((artist) =>
+      !artist.imageURL &&
+      !artistImages[artist.name] &&
+      !artistImages[artist.id] &&
+      !attemptedArtistImages.current.has(artist.id || artist.name.toLocaleLowerCase())
+    );
     if (!unresolved.length) return;
-    void Promise.all(unresolved.map(async (artist) => {
-      const spotifyId = /^[A-Za-z0-9]{22}$/.test(artist.id)
-        ? artist.id
-        : await findArtistIdByName(artist.name);
-      const imageURL = await getCachedArtistImage(artist.name, () => {
-        if (spotifyId) return getSpotifyArtistImage(spotifyId);
-        if (artist.id.startsWith('ytartist_')) return getYouTubeMusicArtistImage(artist.id);
-        return Promise.resolve(null);
-      }, [artist.id, ...(spotifyId ? [spotifyId] : [])]);
-      return [artist.name, imageURL] as const;
-    })).then((results) => {
-      if (active) setArtistImages((current) => ({
-        ...current,
-        ...Object.fromEntries(results.filter(([, url]) => Boolean(url))),
-      }));
+    unresolved.forEach((artist) =>
+      attemptedArtistImages.current.add(artist.id || artist.name.toLocaleLowerCase())
+    );
+    void (async () => {
+      const results: [string, string, string][] = [];
+      for (let index = 0; index < unresolved.length; index += 4) {
+        const batch = await Promise.all(unresolved.slice(index, index + 4).map(async (artist) => {
+          const spotifyId = /^[A-Za-z0-9]{22}$/.test(artist.id)
+            ? artist.id
+            : await findArtistIdByName(artist.name);
+          const imageURL = await getCachedArtistImage(artist.name, async () => {
+            if (spotifyId) {
+              const spotifyImage = await getSpotifyArtistImage(spotifyId);
+              if (spotifyImage) return spotifyImage;
+            }
+            const routeId = artist.id.startsWith('ytartist_')
+              ? artist.id
+              : `ytartist_name_${encodeURIComponent(artist.name)}`;
+            return getYouTubeMusicArtistImage(routeId);
+          }, [artist.id, ...(spotifyId ? [spotifyId] : [])]);
+          return [artist.name, artist.id, imageURL] as [string, string, string];
+        }));
+        results.push(...batch);
+      }
+      const successfulResults = results.filter(([, , imageURL]) => Boolean(imageURL));
+      if (isMountedRef.current && successfulResults.length) {
+        setArtistImages((current) => {
+          const next = { ...current };
+          successfulResults.forEach(([name, id, imageURL]) => {
+            next[name] = imageURL;
+            if (id) next[id] = imageURL;
+          });
+          return next;
+        });
+      }
+    })().catch((error) => {
+      unresolved.forEach((artist) =>
+        attemptedArtistImages.current.delete(artist.id || artist.name.toLocaleLowerCase())
+      );
+      log.error('load collection artist images failed', { collectionId, error });
     });
-    return () => { active = false; };
-  }, [artistImages, collectionArtists]);
+  }, [artistImages, collectionArtists, collectionId, isArtistListVisible]);
 
   const handleCollectionArtistPress = React.useCallback(async (artist: { id: string; name: string }) => {
     if (onArtistPress) {
@@ -682,7 +739,7 @@ export const CollectionDetail = ({
                     text={collectionArtists.map((artist) => artist.name).join(' · ')}
                     style={styles.artistName}
                     containerStyle={styles.collectionArtistMarquee}
-                    speed={24}
+                    speed={28}
                     delay={2000}
                     endDelay={2000}
                     fadeWidth={8}
@@ -824,7 +881,7 @@ export const CollectionDetail = ({
         visible={isArtistListVisible}
       >
         <View style={styles.artistModalBackdrop}>
-          <GlassSurface glass="thick" style={styles.artistModal}>
+          <View style={[styles.artistModal, { paddingBottom: Math.max(24, insets.bottom + 12) }]}>
             <View style={styles.artistModalHeader}>
               <Text style={styles.artistModalTitle}>Artistas</Text>
               <LoggedPressable accessibilityLabel="Fechar artistas" onPress={() => setIsArtistListVisible(false)} style={styles.artistModalClose}>
@@ -852,7 +909,7 @@ export const CollectionDetail = ({
                 );
               })}
             </ScrollView>
-          </GlassSurface>
+          </View>
         </View>
       </Modal>
     </View>
@@ -875,16 +932,16 @@ const styles = StyleSheet.create({
   collectionHeroCopy: { alignItems: 'flex-start', alignSelf: 'stretch', paddingHorizontal: 8 },
   artistHeroCopy: { alignItems: 'flex-start', alignSelf: 'stretch', paddingHorizontal: 8 },
   collectionTitle: { color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 28, lineHeight: 33, textAlign: 'center' },
-  collectionArtistsRow: { alignItems: 'center', flexDirection: 'row', gap: 9, marginTop: 8, width: '100%' },
+  collectionArtistsRow: { alignItems: 'center', flexDirection: 'row', gap: 7, marginTop: 8, width: '100%' },
   artistAvatarStack: { alignItems: 'center', flexDirection: 'row', flexShrink: 0, paddingRight: 3 },
-  artistAvatar: { alignItems: 'center', backgroundColor: '#383838', borderColor: 'rgba(255,255,255,0.4)', borderRadius: 16, borderWidth: 1, height: 32, justifyContent: 'center', overflow: 'hidden', width: 32 },
-  artistAvatarOverlap: { marginLeft: -9 },
+  artistAvatar: { alignItems: 'center', backgroundColor: '#383838', borderColor: 'rgba(255,255,255,0.4)', borderRadius: 13, borderWidth: 1, height: 26, justifyContent: 'center', overflow: 'hidden', width: 26 },
+  artistAvatarOverlap: { marginLeft: -7 },
   artistAvatarImage: { height: '100%', width: '100%' },
   collectionArtistMarquee: { flex: 1, minWidth: 0 },
   collectionMetadata: { textAlign: 'left', marginTop: 7 },
   artistCollectionTitle: { textAlign: 'left' },
   artistLinks: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 5 },
-  artistName: { color: '#D8C09A', fontFamily: 'SF-Bold', fontSize: 15, textAlign: 'center' },
+  artistName: { color: '#D8C09A', fontFamily: 'SF-Bold', fontSize: 15, textAlign: 'left' },
   metadata: { color: 'rgba(255,255,255,0.78)', fontFamily: 'SF-Semibold', fontSize: 12, marginTop: 8, textAlign: 'center' },
   description: { color: 'rgba(255,255,255,0.7)', fontFamily: 'SF-Regular', fontSize: 13, lineHeight: 19, marginTop: 16, textAlign: 'center' },
   actionRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 22 },
@@ -908,8 +965,8 @@ const styles = StyleSheet.create({
   sectionTitle: { color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 18, paddingBottom: 8, paddingHorizontal: 16 },
   extraSection: { paddingTop: 20 },
   listFooter: { paddingTop: 18 },
-  artistModalBackdrop: { backgroundColor: 'rgba(0,0,0,0.56)', flex: 1, justifyContent: 'flex-end' },
-  artistModal: { borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '72%', minHeight: 300, paddingBottom: 30, paddingHorizontal: 18, paddingTop: 16 },
+  artistModalBackdrop: { backgroundColor: 'rgba(0,0,0,0.72)', flex: 1, justifyContent: 'flex-end' },
+  artistModal: { backgroundColor: '#171717', borderColor: 'rgba(255,255,255,0.12)', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: StyleSheet.hairlineWidth, elevation: 24, maxHeight: '78%', minHeight: 300, paddingHorizontal: 18, paddingTop: 16 },
   artistModalHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   artistModalTitle: { color: '#FFF', fontFamily: 'SF-Bold', fontSize: 20 },
   artistModalLoading: { color: 'rgba(255,255,255,0.62)', fontFamily: 'SF-Regular', fontSize: 12, paddingBottom: 8 },

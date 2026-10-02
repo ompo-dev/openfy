@@ -282,6 +282,26 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(screen.getByTestId('mini-player-content')).toBeTruthy();
   });
 
+  it('resets the sticky mini-player when the full player is reopened', async () => {
+    const screen = await mountPlayer();
+    await fireEvent(screen.getByTestId('player-controls-row'), 'layout', {
+      nativeEvent: { layout: { y: 900, height: 100, width: 390, x: 0 } },
+    });
+    await fireEvent.scroll(screen.getByTestId('player-scroll-view'), {
+      nativeEvent: {
+        contentOffset: { y: 1000 },
+        contentSize: { height: 1800, width: 390 },
+        layoutMeasurement: { height: 700, width: 390 },
+      },
+    });
+    expect(screen.getByTestId('mini-player-content')).toBeTruthy();
+
+    await screen.rerender(<FullPlayer visible={false} onClose={jest.fn()} />);
+    await screen.rerender(<FullPlayer visible onClose={jest.fn()} />);
+
+    expect(screen.queryByTestId('mini-player-content')).toBeNull();
+  });
+
   it('keeps the artist-only pill when lyrics are open', async () => {
     const screen = await mountPlayer({ youtubeVideoId: 'aaaaaaaaaaa' });
     await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
@@ -734,6 +754,23 @@ describe('FullPlayer artist row and YouTube source', () => {
     await render(<FullPlayer visible onClose={jest.fn()} />);
 
     expect(getLastArtworkProps().loading).toBe(true);
+  });
+
+  it('keeps pause controls and artwork responsive when audio is playing during a buffer report', async () => {
+    jest.mocked(usePlayer).mockReturnValue({
+      ...makePlayer(),
+      playerState: {
+        positionMs: 12_000,
+        durationMs: 180_000,
+        isPlaying: true,
+        isBuffering: true,
+      },
+    } as any);
+
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+
+    expect(screen.getByLabelText('Pausar')).toBeTruthy();
+    expect(getLastArtworkProps().loading).toBe(false);
   });
 
   it('uses the shown previous artwork index for swipes even after the restart window', async () => {

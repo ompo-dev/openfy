@@ -15,6 +15,28 @@ import { CollectionDetail } from '../CollectionDetail';
 import { PlaylistEditorModal } from './PlaylistEditorModal';
 import { PlaylistTrackPickerModal } from './PlaylistTrackPickerModal';
 
+const hasArtistCredit = (track: LibraryTrack) => {
+  const names = [
+    ...(track.artists || []).map((artist) => artist.name),
+    ...track.artistName.split(/\s*(?:,|&|feat\.?|ft\.?|·)\s*/i),
+  ];
+  return names.some((value) => {
+    const name = value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLocaleLowerCase();
+    return name.length > 0 && ![
+      'artista',
+      'artista desconhecido',
+      'artista nao identificado',
+      'desconhecido',
+      'unknown',
+      'unknown artist',
+    ].includes(name);
+  });
+};
+
 export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
   const router = useRouter();
   const { refreshLibrary } = useLibrarySelectedCategory();
@@ -38,7 +60,10 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
       localPlaylist
         ? localPlaylist.trackIds
             .map((trackId) => downloadedById.get(trackId))
-            .filter((track): track is LibraryTrack => Boolean(track))
+            .filter(
+              (track): track is LibraryTrack =>
+                track !== undefined && hasArtistCredit(track)
+            )
         : []
     );
   }, [playlistId]);
@@ -113,20 +138,13 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
         title={playlist.title}
         imageURL={imageURL}
         imageURLs={[...new Set(imageURLs)].slice(0, 4)}
-        description={
-          playlist.description ||
-          (playlist.sourcePlatform === 'local'
-            ? 'Playlist criada no Openfy.'
-            : `Playlist importada do ${
-                playlist.sourcePlatform === 'spotify' ? 'Spotify' : 'YouTube'
-              }.`)
-        }
+        description={playlist.description}
         createdAt={playlist.createdAt}
         onAddTracksPress={() => setIsPickerVisible(true)}
         onDeletePress={confirmDelete}
         onEditPress={() => setIsEditorVisible(true)}
         disableTrackArtistLinks
-        trackCount={playlist.trackIds.length}
+        trackCount={tracks.length}
         tracks={collectionTracks}
       />
       <PlaylistEditorModal
