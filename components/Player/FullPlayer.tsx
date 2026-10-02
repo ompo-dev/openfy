@@ -1104,7 +1104,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       onRequestClose={onClose}
     >
       <GestureHandlerRootView style={styles.gestureRoot}>
-        <View style={[styles.container, { paddingBottom: Math.max(24, insets.bottom) }]}>
+        <View style={styles.container}>
           {artworkUrl ? (
             <Image
               cachePolicy="memory-disk"
@@ -1310,8 +1310,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               style={styles.playerScroll}
               contentContainerStyle={[
                 styles.playerScrollContent,
-                { paddingBottom: Math.max(136, insets.bottom + 112) },
+                { paddingBottom: Math.max(24, insets.bottom + 20) },
               ]}
+              contentInsetAdjustmentBehavior="never"
               keyboardShouldPersistTaps="handled"
               onScroll={(event) => {
                 const canShowMiniPlayer = controlsBottomOffset !== null &&
@@ -1755,7 +1756,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 24,
     paddingTop: Platform.OS === 'ios' ? 12 : 20,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+    paddingBottom: 0,
     justifyContent: 'flex-start',
   },
   backgroundCover: {

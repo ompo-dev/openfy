@@ -248,7 +248,10 @@ describe('FullPlayer artist row and YouTube source', () => {
 
   it('shows inline lyrics, artist details, and credits in the scrollable player', async () => {
     const screen = await mountPlayer();
+    const playerScroll = screen.getByTestId('player-scroll-view');
 
+    expect(playerScroll.props.contentInsetAdjustmentBehavior).toBe('never');
+    expect(playerScroll.props.contentContainerStyle[1].paddingBottom).toEqual(expect.any(Number));
     expect(screen.queryByText('Letra')).toBeNull();
     expect(screen.getByText('Sobre o artista')).toBeTruthy();
     expect(screen.getByText('Créditos')).toBeTruthy();

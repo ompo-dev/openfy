@@ -223,7 +223,7 @@ describe('CollectionDetail', () => {
     expect(onArtistPress).not.toHaveBeenCalled();
   });
 
-  it('shows the complete artist portrait and omits generic profile copy', async () => {
+  it('fills the artist hero with its portrait and omits generic profile copy', async () => {
     const onAddTracksPress = jest.fn();
     const screen = await renderCollection({
       kind: 'artist',
@@ -234,7 +234,7 @@ describe('CollectionDetail', () => {
       onAddTracksPress,
     });
 
-    expect(screen.getByTestId('collection-artwork').props.contentFit).toBe('contain');
+    expect(screen.getByTestId('collection-artwork').props.contentFit).toBe('cover');
     expect(screen.queryByText('Artista')).toBeNull();
     expect(screen.queryByText('Músicas, álbuns e singles de Yago Oproprio.')).toBeNull();
     expect(screen.queryByLabelText('Adicionar músicas à playlist')).toBeNull();

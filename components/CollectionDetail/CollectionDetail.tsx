@@ -642,7 +642,7 @@ export const CollectionDetail = ({
                 priority="high"
                 source={{ uri: imageURL }}
                 style={[styles.heroArtwork, kind === 'artist' && styles.artistHeroArtwork]}
-                contentFit={kind === 'artist' ? 'contain' : 'cover'}
+                contentFit="cover"
               />
             ) : kind === 'artist' ? (
               <View style={styles.artistHeroFallback}>
@@ -881,7 +881,7 @@ export const CollectionDetail = ({
         visible={isArtistListVisible}
       >
         <View style={styles.artistModalBackdrop}>
-          <View style={[styles.artistModal, { paddingBottom: Math.max(24, insets.bottom + 12) }]}>
+          <View style={styles.artistModal}>
             <View style={styles.artistModalHeader}>
               <Text style={styles.artistModalTitle}>Artistas</Text>
               <LoggedPressable accessibilityLabel="Fechar artistas" onPress={() => setIsArtistListVisible(false)} style={styles.artistModalClose}>
@@ -889,7 +889,13 @@ export const CollectionDetail = ({
               </LoggedPressable>
             </View>
             {isLoadingAllArtists ? <Text style={styles.artistModalLoading}>Carregando créditos da playlist…</Text> : null}
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView
+              contentContainerStyle={{ paddingBottom: Math.max(24, insets.bottom + 12) }}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              style={styles.artistModalScroll}
+              testID="collection-artists-scroll-view"
+            >
               {collectionArtists.map((artist) => {
                 const uri = artist.imageURL || artistImages[artist.name] || artistImages[artist.id];
                 return (
@@ -966,7 +972,8 @@ const styles = StyleSheet.create({
   extraSection: { paddingTop: 20 },
   listFooter: { paddingTop: 18 },
   artistModalBackdrop: { backgroundColor: 'rgba(0,0,0,0.72)', flex: 1, justifyContent: 'flex-end' },
-  artistModal: { backgroundColor: '#171717', borderColor: 'rgba(255,255,255,0.12)', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: StyleSheet.hairlineWidth, elevation: 24, maxHeight: '78%', minHeight: 300, paddingHorizontal: 18, paddingTop: 16 },
+  artistModal: { backgroundColor: '#171717', borderColor: 'rgba(255,255,255,0.12)', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: StyleSheet.hairlineWidth, elevation: 24, flexShrink: 1, maxHeight: '88%', minHeight: 260, paddingHorizontal: 18, paddingTop: 16 },
+  artistModalScroll: { flex: 1, minHeight: 0 },
   artistModalHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   artistModalTitle: { color: '#FFF', fontFamily: 'SF-Bold', fontSize: 20 },
   artistModalLoading: { color: 'rgba(255,255,255,0.62)', fontFamily: 'SF-Regular', fontSize: 12, paddingBottom: 8 },
