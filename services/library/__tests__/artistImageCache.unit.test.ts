@@ -54,4 +54,17 @@ describe('getCachedArtistImage', () => {
     expect(spotifyLookup).toHaveBeenCalledTimes(1);
     expect(repeatedLookup).not.toHaveBeenCalled();
   });
+
+  it('keeps distinct YouTube artist identities separate when their names match', async () => {
+    const firstLookup = jest.fn().mockResolvedValue('https://images.test/channel-one.jpg');
+    const secondLookup = jest.fn().mockResolvedValue('https://images.test/channel-two.jpg');
+
+    await expect(getCachedArtistImage('Artista', firstLookup, ['ytartist_channel-one']))
+      .resolves.toBe('https://images.test/channel-one.jpg');
+    await expect(getCachedArtistImage('Artista', secondLookup, ['ytartist_channel-two']))
+      .resolves.toBe('https://images.test/channel-two.jpg');
+
+    expect(firstLookup).toHaveBeenCalledTimes(1);
+    expect(secondLookup).toHaveBeenCalledTimes(1);
+  });
 });

@@ -573,9 +573,12 @@ const loadYouTubeMusicArtistProfile = async (
   });
 
   const profileImageRoute = toYouTubeMusicArtistRouteId(browseId, name);
+  const headerPortrait = largestImage(headerItem, 1_000);
   const [description, profilePortrait] = await Promise.all([
     asString(header.description) || loadChannelBiography(client, browseId).catch(() => ''),
-    loadYouTubeMusicArtistImage(profileImageRoute).catch(() => ''),
+    headerPortrait
+      ? Promise.resolve(headerPortrait)
+      : loadYouTubeMusicArtistImage(profileImageRoute).catch(() => ''),
   ]);
 
   return {

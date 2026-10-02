@@ -371,15 +371,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     if (!primaryArtist) return;
     const key = primaryArtist.name;
     void (async () => {
-      const spotifyId = /^[A-Za-z0-9]{22}$/.test(primaryArtist.id)
-        ? primaryArtist.id
-        : await findArtistIdByName(primaryArtist.name);
+      const spotifyId = /^[A-Za-z0-9]{22}$/.test(primaryArtist.id) ? primaryArtist.id : '';
       const imageURL = await getCachedArtistImage(key, () => spotifyId
         ? getSpotifyArtistImage(spotifyId)
         : primaryArtist.id.startsWith('ytartist_')
           ? getYouTubeMusicArtistImage(primaryArtist.id)
           : getYouTubeMusicArtistImage(`ytartist_name_${encodeURIComponent(primaryArtist.name)}`),
-      [primaryArtist.id, ...(spotifyId ? [spotifyId] : [])]);
+      [primaryArtist.id]);
       if (active) setPrimaryArtistImage(imageURL);
     })().catch(() => {});
     return () => { active = false; };
@@ -408,15 +406,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     const loadImages = async () => {
       await Promise.all(artistLinks.map(async (artist) => {
         const key = artist.name;
-        const spotifyId = /^[A-Za-z0-9]{22}$/.test(artist.id)
-          ? artist.id
-          : await findArtistIdByName(artist.name);
+        const spotifyId = /^[A-Za-z0-9]{22}$/.test(artist.id) ? artist.id : '';
         const imageURL = await getCachedArtistImage(key, () => spotifyId
           ? getSpotifyArtistImage(spotifyId)
           : artist.id.startsWith('ytartist_')
             ? getYouTubeMusicArtistImage(artist.id)
             : getYouTubeMusicArtistImage(`ytartist_name_${encodeURIComponent(artist.name)}`),
-        [artist.id, ...(spotifyId ? [spotifyId] : [])]);
+        [artist.id]);
         if (active && imageURL) {
           setArtistImages((current) => ({ ...current, [key]: imageURL }));
         }

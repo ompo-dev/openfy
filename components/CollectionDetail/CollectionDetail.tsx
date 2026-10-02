@@ -186,6 +186,7 @@ export const CollectionDetail = ({
   const [isSearchOpen, setIsSearchOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [isArtistListVisible, setIsArtistListVisible] = React.useState(false);
+  const [artistImageLoadLimit, setArtistImageLoadLimit] = React.useState(8);
   const [isLoadingAllArtists, setIsLoadingAllArtists] = React.useState(false);
   const [resolvedArtistTracks, setResolvedArtistTracks] = React.useState<{
     collectionId: string;
@@ -278,9 +279,10 @@ export const CollectionDetail = ({
   }, []);
 
   React.useEffect(() => {
-    const prioritizedArtists = isArtistListVisible
-      ? collectionArtists
-      : collectionArtists.slice(0, 4);
+    const prioritizedArtists = collectionArtists.slice(
+      0,
+      isArtistListVisible ? artistImageLoadLimit : 4
+    );
     const unresolved = prioritizedArtists.filter((artist) =>
       !artist.imageURL &&
       !artistImages[artist.name] &&
@@ -292,12 +294,9 @@ export const CollectionDetail = ({
       attemptedArtistImages.current.add(artist.id || artist.name.toLocaleLowerCase())
     );
     void (async () => {
-      const results: [string, string, string][] = [];
       for (let index = 0; index < unresolved.length; index += 4) {
         const batch = await Promise.all(unresolved.slice(index, index + 4).map(async (artist) => {
-          const spotifyId = /^[A-Za-z0-9]{22}$/.test(artist.id)
-            ? artist.id
-            : await findArtistIdByName(artist.name);
+          const spotifyId = /^[A-Za-z0-9]{22}$/.test(artist.id) ? artist.id : '';
           const imageURL = await getCachedArtistImage(artist.name, async () => {
             if (spotifyId) {
               const spotifyImage = await getSpotifyArtistImage(spotifyId);
@@ -307,21 +306,20 @@ export const CollectionDetail = ({
               ? artist.id
               : `ytartist_name_${encodeURIComponent(artist.name)}`;
             return getYouTubeMusicArtistImage(routeId);
-          }, [artist.id, ...(spotifyId ? [spotifyId] : [])]);
+          }, [artist.id]);
           return [artist.name, artist.id, imageURL] as [string, string, string];
         }));
-        results.push(...batch);
-      }
-      const successfulResults = results.filter(([, , imageURL]) => Boolean(imageURL));
-      if (isMountedRef.current && successfulResults.length) {
-        setArtistImages((current) => {
-          const next = { ...current };
-          successfulResults.forEach(([name, id, imageURL]) => {
-            next[name] = imageURL;
-            if (id) next[id] = imageURL;
+        const successfulResults = batch.filter(([, , imageURL]) => Boolean(imageURL));
+        if (isMountedRef.current && successfulResults.length) {
+          setArtistImages((current) => {
+            const next = { ...current };
+            successfulResults.forEach(([name, id, imageURL]) => {
+              next[name] = imageURL;
+              if (id) next[id] = imageURL;
+            });
+            return next;
           });
-          return next;
-        });
+        }
       }
     })().catch((error) => {
       unresolved.forEach((artist) =>
@@ -329,7 +327,7 @@ export const CollectionDetail = ({
       );
       log.error('load collection artist images failed', { collectionId, error });
     });
-  }, [artistImages, collectionArtists, collectionId, isArtistListVisible]);
+  }, [artistImageLoadLimit, artistImages, collectionArtists, collectionId, isArtistListVisible]);
 
   const handleCollectionArtistPress = React.useCallback(async (artist: { id: string; name: string }) => {
     if (onArtistPress) {
@@ -345,6 +343,7 @@ export const CollectionDetail = ({
   }, [onArtistPress, openDetail]);
 
   const openArtistList = React.useCallback(() => {
+    setArtistImageLoadLimit(8);
     setIsArtistListVisible(true);
     if (isLoadingAllArtists || kind !== 'playlist' || !resolveTracksForPlayback || !trackCount || tracks.length >= trackCount) return;
     setIsLoadingAllArtists(true);
@@ -892,6 +891,15 @@ export const CollectionDetail = ({
             <ScrollView
               contentContainerStyle={{ paddingBottom: Math.max(24, insets.bottom + 12) }}
               keyboardShouldPersistTaps="handled"
+              onScroll={(event) => {
+                const { contentOffset, layoutMeasurement } = event.nativeEvent;
+                const visibleLimit = Math.min(
+                  collectionArtists.length,
+                  Math.ceil((contentOffset.y + layoutMeasurement.height) / 64) + 4
+                );
+                setArtistImageLoadLimit((current) => Math.max(current, visibleLimit));
+              }}
+              scrollEventThrottle={200}
               showsVerticalScrollIndicator={false}
               style={styles.artistModalScroll}
               testID="collection-artists-scroll-view"

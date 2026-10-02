@@ -2,9 +2,9 @@ const validDuration = (value?: number): number =>
   Number.isFinite(value) && (value || 0) > 0 ? Math.round(value!) : 0;
 
 /**
- * Media containers occasionally expose a broken timeline (commonly exactly
- * twice the catalog duration). Prefer the canonical duration only when the
- * drift is too large to be ordinary encoder padding.
+ * Media containers occasionally expose a duplicated timeline, commonly at
+ * exactly twice the catalog duration. Do not replace valid stream durations
+ * merely because a YouTube match differs from the catalog recording.
  */
 export const reconcilePlaybackDurationMs = (
   reportedDurationMs?: number,
@@ -15,8 +15,8 @@ export const reconcilePlaybackDurationMs = (
   if (!canonical) return reported;
   if (!reported) return canonical;
 
-  const toleranceMs = Math.max(3_000, canonical * 0.08);
-  return Math.abs(reported - canonical) > toleranceMs ? canonical : reported;
+  const ratio = reported / canonical;
+  return ratio >= 1.8 && ratio <= 2.2 ? canonical : reported;
 };
 
 export const clampPlaybackPositionMs = (

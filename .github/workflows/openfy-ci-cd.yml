@@ -242,12 +242,20 @@ jobs:
             scripts/check-youtube-retry.swift -o "$RUNNER_TEMP/check-youtube-retry"
           "$RUNNER_TEMP/check-youtube-retry"
 
+      - name: Validar duracao real do stream de audio
+        run: |
+          xcrun swiftc -parse-as-library \
+            modules/openfy-youtube/ios/YouTubePlaybackDurationPolicy.swift \
+            scripts/check-youtube-playback-duration.swift -o "$RUNNER_TEMP/check-youtube-playback-duration"
+          "$RUNNER_TEMP/check-youtube-playback-duration"
+
       - name: Validar player nativo de streaming
         run: |
           xcrun swiftc -typecheck -parse-as-library \
             -target arm64-apple-ios16.4 \
             -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
             modules/openfy-youtube/ios/YouTubeRequestRetry.swift \
+            modules/openfy-youtube/ios/YouTubePlaybackDurationPolicy.swift \
             modules/openfy-youtube/ios/YouTubeStreamDescriptor.swift \
             modules/openfy-youtube/ios/YouTubeHTTPRangeClient.swift \
             modules/openfy-youtube/ios/OpenfyAssetResourceLoader.swift \

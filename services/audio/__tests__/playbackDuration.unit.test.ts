@@ -12,6 +12,10 @@ describe('playback duration reconciliation', () => {
     expect(reconcilePlaybackDurationMs(181_200, 180_000)).toBe(181_200);
   });
 
+  it('keeps a different stream duration instead of forcing the catalog length', () => {
+    expect(reconcilePlaybackDurationMs(184_000, 140_727)).toBe(184_000);
+  });
+
   it('falls back to whichever valid duration exists and clamps position', () => {
     expect(reconcilePlaybackDurationMs(0, 180_000)).toBe(180_000);
     expect(reconcilePlaybackDurationMs(182_000, 0)).toBe(182_000);

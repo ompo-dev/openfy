@@ -24,6 +24,8 @@ const uniqueCacheIds = (artistName: string, aliases: string[] = []) =>
   [...new Set([artistName, ...aliases].map(getArtistCacheId).filter(Boolean))];
 const getSpotifyArtistAlias = (aliases: string[]) =>
   aliases.find((alias) => /^[A-Za-z0-9]{22}$/.test(alias)) || '';
+const getYouTubeArtistAlias = (aliases: string[]) =>
+  aliases.find((alias) => alias.startsWith('ytartist_')) || '';
 
 export const rememberCachedArtistImage = async (
   artistName: string,
@@ -35,14 +37,25 @@ export const rememberCachedArtistImage = async (
   const cacheIds = uniqueCacheIds(artistName, aliases);
   cacheIds.forEach((cacheId) => imageCache.set(cacheId, imageURL, IMAGE_CACHE_TTL_MS));
   const spotifyArtistId = getSpotifyArtistAlias(aliases);
+  const youtubeArtistId = getYouTubeArtistAlias(aliases);
   if (spotifyArtistId) {
     imageCache.set(`spotify:${spotifyArtistId}`, imageURL, IMAGE_CACHE_TTL_MS);
   }
+  if (youtubeArtistId) {
+    imageCache.set(`youtube:${youtubeArtistId}`, imageURL, IMAGE_CACHE_TTL_MS);
+  }
   try {
-    await AsyncStorage.multiSet(cacheIds.map((cacheId) => [
+    const entries = cacheIds.map((cacheId) => [
       `${STORAGE_KEY_PREFIX}${encodeURIComponent(cacheId)}`,
       imageURL,
-    ]));
+    ] as [string, string]);
+    if (youtubeArtistId) {
+      entries.push([
+        `${STORAGE_KEY_PREFIX}${encodeURIComponent(`youtube:${youtubeArtistId}`)}`,
+        imageURL,
+      ]);
+    }
+    await AsyncStorage.multiSet(entries);
   } catch {}
 };
 
@@ -56,8 +69,17 @@ export const getCachedArtistImage = async (
   if (!id) return '';
   const cacheIds = uniqueCacheIds(artistName, aliases);
   const spotifyArtistId = getSpotifyArtistAlias(aliases);
-  const cacheKey = spotifyArtistId ? `spotify:${spotifyArtistId}` : id;
-  const storageIds = spotifyArtistId ? [spotifyArtistId] : cacheIds;
+  const youtubeArtistId = getYouTubeArtistAlias(aliases);
+  const cacheKey = spotifyArtistId
+    ? `spotify:${spotifyArtistId}`
+    : youtubeArtistId
+      ? `youtube:${youtubeArtistId}`
+      : id;
+  const storageIds = spotifyArtistId
+    ? [spotifyArtistId]
+    : youtubeArtistId
+      ? [`youtube:${youtubeArtistId}`, youtubeArtistId]
+      : cacheIds;
 
   return imageCache.getOrLoad(cacheKey, async () => {
     try {

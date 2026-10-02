@@ -32,12 +32,12 @@ public final class OpenfyNativeYouTubePlayer {
   private var itemStatusObserver: NSKeyValueObservation?
   private var timeControlStatusObserver: NSKeyValueObservation?
   private var playbackEndObserver: NSObjectProtocol?
-  private var playbackBoundaryObserver: Any?
   private var nowPlayingMetadata: OpenfyNowPlayingMetadata?
   private var nowPlayingArtwork: MPMediaItemArtwork?
   private var artworkTask: Task<Void, Never>?
   private var artworkLoadToken: UUID?
-  private var expectedDurationSeconds = 0.0
+  private var streamDurationSeconds = 0.0
+  private var catalogDurationSeconds = 0.0
   private var didJustFinish = false
 
   public var onPlaybackEnded: (() -> Void)?
@@ -57,10 +57,8 @@ public final class OpenfyNativeYouTubePlayer {
     stop()
     didJustFinish = false
     nowPlayingMetadata = metadata
-    expectedDurationSeconds = max(
-      0,
-      (metadata.durationMs > 0 ? metadata.durationMs : descriptor.durationMs) / 1000.0
-    )
+    streamDurationSeconds = descriptor.durationMs / 1000.0
+    catalogDurationSeconds = metadata.durationMs / 1000.0
 
     let audioSession = AVAudioSession.sharedInstance()
     try audioSession.setCategory(.playback, mode: .default)
@@ -86,22 +84,6 @@ public final class OpenfyNativeYouTubePlayer {
     let player = AVPlayer(playerItem: item)
     player.automaticallyWaitsToMinimizeStalling = true
     self.player = player
-
-    if expectedDurationSeconds > 0 {
-      let expectedEnd = CMTime(
-        seconds: expectedDurationSeconds,
-        preferredTimescale: 600
-      )
-      item.forwardPlaybackEndTime = expectedEnd
-      playbackBoundaryObserver = player.addBoundaryTimeObserver(
-        forTimes: [NSValue(time: expectedEnd)],
-        queue: .main
-      ) { [weak self] in
-        Task { @MainActor [weak self] in
-          self?.finishPlaybackIfNeeded()
-        }
-      }
-    }
 
     playbackEndObserver = NotificationCenter.default.addObserver(
       forName: .AVPlayerItemDidPlayToEndTime,
@@ -181,10 +163,6 @@ public final class OpenfyNativeYouTubePlayer {
       NotificationCenter.default.removeObserver(playbackEndObserver)
       self.playbackEndObserver = nil
     }
-    if let playbackBoundaryObserver, let player {
-      player.removeTimeObserver(playbackBoundaryObserver)
-      self.playbackBoundaryObserver = nil
-    }
     player?.pause()
     player?.replaceCurrentItem(with: nil)
     resourceLoader?.cancelAll()
@@ -192,7 +170,8 @@ public final class OpenfyNativeYouTubePlayer {
     resourceLoader = nil
     didJustFinish = false
     nowPlayingMetadata = nil
-    expectedDurationSeconds = 0
+    streamDurationSeconds = 0
+    catalogDurationSeconds = 0
     artworkLoadToken = nil
     artworkTask?.cancel()
     artworkTask = nil
@@ -215,15 +194,8 @@ public final class OpenfyNativeYouTubePlayer {
     let posSec = CMTimeGetSeconds(player.currentTime())
     let durationSeconds = resolvedDurationSeconds(for: item)
     let safePositionSeconds = posSec.isFinite ? max(0, posSec) : 0
-    if durationSeconds > 0,
-      safePositionSeconds >= durationSeconds,
-      !didJustFinish {
-      finishPlaybackIfNeeded()
-    }
     let isPlaying = player.timeControlStatus == .playing
-    let positionMs = durationSeconds > 0
-      ? min(safePositionSeconds, durationSeconds) * 1000.0
-      : safePositionSeconds * 1000.0
+    let positionMs = safePositionSeconds * 1000.0
     let durationMs = durationSeconds * 1000.0
 
     var dict: [String: Any] = [
@@ -286,7 +258,7 @@ public final class OpenfyNativeYouTubePlayer {
     let rawPosition = CMTimeGetSeconds(player.currentTime())
     let duration = resolvedDurationSeconds(for: item)
     let position = rawPosition.isFinite
-      ? (duration > 0 ? min(max(0, rawPosition), duration) : max(0, rawPosition))
+      ? max(0, rawPosition)
       : 0
     var info: [String: Any] = [
       MPMediaItemPropertyTitle: metadata.title,
@@ -318,16 +290,11 @@ public final class OpenfyNativeYouTubePlayer {
 
   private func resolvedDurationSeconds(for item: AVPlayerItem) -> Double {
     let measured = CMTimeGetSeconds(item.duration)
-    guard expectedDurationSeconds > 0 else {
-      return measured.isFinite && measured > 0 ? measured : 0
-    }
-    guard measured.isFinite && measured > 0 else {
-      return expectedDurationSeconds
-    }
-    let tolerance = max(3, expectedDurationSeconds * 0.08)
-    return abs(measured - expectedDurationSeconds) > tolerance
-      ? expectedDurationSeconds
-      : measured
+    return YouTubePlaybackDurationPolicy.resolveSeconds(
+      measuredSeconds: measured,
+      streamDurationMs: streamDurationSeconds * 1000,
+      catalogDurationMs: catalogDurationSeconds * 1000
+    )
   }
 
   private func loadNowPlayingArtwork(from rawURL: String?, fallback rawFallbackURL: String?) {

@@ -2,44 +2,57 @@ import * as React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { findArtistIdByName, getYouTubeMusicArtistImage } from '@api';
+import { getYouTubeMusicArtistImage } from '@api';
 import { useDetailNavigation } from '@hooks';
 import { getCachedArtistImage, type PersonalizedHomeSnapshot } from '@services';
 import { LoggedPressable } from '../native';
 import { log } from '../../utils/appLogger';
 import { SkeletonImage } from '../common/SkeletonImage';
-import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
 
 export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
   const { openDetail } = useDetailNavigation();
   const [artistImages, setArtistImages] = React.useState<Record<string, string>>({});
+  const [artistImageLoadState, setArtistImageLoadState] = React.useState({ key: '', limit: 8 });
+  const requestedArtistImages = React.useRef(new Set<string>());
+  const isMountedRef = React.useRef(true);
+  const artistListKey = home.artists.map((artist) => artist.artistId).join('|');
+  const artistImageLoadLimit = artistImageLoadState.key === artistListKey
+    ? artistImageLoadState.limit
+    : 8;
+
+  React.useEffect(() => () => {
+    isMountedRef.current = false;
+  }, []);
 
   React.useEffect(() => {
-    let active = true;
-    home.artists.forEach((artist) => {
+    const unresolvedArtists = home.artists.slice(0, artistImageLoadLimit).filter((artist) =>
+      artist.artistId.startsWith('ytartist_') &&
+      !artistImages[artist.artistId] &&
+      !requestedArtistImages.current.has(artist.artistId)
+    );
+    unresolvedArtists.forEach((artist) => {
+      requestedArtistImages.current.add(artist.artistId);
+    });
+    unresolvedArtists.forEach((artist) => {
       if (!artist.artistId.startsWith('ytartist_')) return;
       const finishImageLoad = log.time('home', 'discovery artist image load', {
         artistId: artist.artistId,
       });
-      void (async () => {
-        const spotifyId = await findArtistIdByName(artist.title);
-        return getCachedArtistImage(artist.title, () => spotifyId
-          ? getSpotifyArtistImage(spotifyId)
-          : getYouTubeMusicArtistImage(artist.artistId),
-        [artist.artistId, ...(spotifyId ? [spotifyId] : [])]);
-      })().then((imageURL) => {
-        if (active && imageURL) {
+      void getCachedArtistImage(
+        artist.title,
+        () => getYouTubeMusicArtistImage(artist.artistId),
+        [artist.artistId]
+      ).then((imageURL) => {
+        if (isMountedRef.current && imageURL) {
           setArtistImages((current) => ({ ...current, [artist.artistId]: imageURL }));
         }
         finishImageLoad({ ok: Boolean(imageURL), hasImage: Boolean(imageURL) });
       }).catch((error) => {
+        requestedArtistImages.current.delete(artist.artistId);
         finishImageLoad({ ok: false, error: String(error) });
       });
     });
-    return () => {
-      active = false;
-    };
-  }, [home.artists]);
+  }, [artistImageLoadLimit, artistImages, home.artists]);
 
   if (!home.artists.length) return null;
 
@@ -48,6 +61,20 @@ export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
       <Text style={styles.title}>Artistas para descobrir</Text>
       <ScrollView
         horizontal
+        onScroll={(event) => {
+          const { contentOffset, layoutMeasurement } = event.nativeEvent;
+          const visibleLimit = Math.min(
+            home.artists.length,
+            Math.ceil((contentOffset.x + layoutMeasurement.width) / 92) + 4
+          );
+          setArtistImageLoadState((current) => ({
+            key: artistListKey,
+            limit: current.key === artistListKey
+              ? Math.max(current.limit, visibleLimit)
+              : Math.max(8, visibleLimit),
+          }));
+        }}
+        scrollEventThrottle={200}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.items}
       >

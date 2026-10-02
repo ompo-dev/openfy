@@ -198,6 +198,7 @@ describe('public YouTube Music catalog', () => {
     expect(getArtist).toHaveBeenNthCalledWith(1, 'stale');
     expect(getArtist).toHaveBeenNthCalledWith(2, 'stale');
     expect(search).toHaveBeenCalledWith('Pedro Qualy', { type: 'song' });
+    expect(search).not.toHaveBeenCalledWith('Pedro Qualy', { type: 'artist' });
     expect(profile.artist).toMatchObject({
       name: 'Pedro Qualy',
       imageURL: 'https://images.example/profile.jpg',
