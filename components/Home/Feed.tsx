@@ -9,12 +9,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { getYouTubeMusicArtistImage } from '@api';
+import { getArtistCatalogImage } from '@api';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { useUserData, type PlayerTrack } from '@context';
 import { usePersonalizedHome } from '@hooks';
 import { getCachedArtistImage, type PersonalizedHomeTrack } from '@services';
-import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
 
 import { ListeningFeed } from './ListeningFeed';
 import {
@@ -106,12 +105,8 @@ export const Feed = () => {
         artist: artist.name,
       });
       const imageRequest = (async () => {
-        const spotifyId = /^[A-Za-z0-9]{22}$/.test(artist.id) ? artist.id : '';
-        return getCachedArtistImage(artist.name, () => spotifyId
-          ? getSpotifyArtistImage(spotifyId)
-          : artist.id.startsWith('ytartist_')
-            ? getYouTubeMusicArtistImage(artist.id)
-            : getYouTubeMusicArtistImage(`ytartist_name_${encodeURIComponent(artist.name)}`),
+        return getCachedArtistImage(artist.name, () =>
+          getArtistCatalogImage(artist.id, artist.name),
         [artist.id]);
       })();
       void imageRequest.then((image) => {

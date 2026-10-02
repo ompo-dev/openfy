@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 
-const STORAGE_KEY_PREFIX = 'openfy_artist_image_verified_v2:';
+const STORAGE_KEY_PREFIX = 'openfy_artist_image_verified_v3:';
 const IMAGE_CACHE_TTL_MS = 6 * 60 * 60_000;
 const MISSING_IMAGE_CACHE_TTL_MS = 60_000;
 const imageCache = createAsyncResourceCache<string>({

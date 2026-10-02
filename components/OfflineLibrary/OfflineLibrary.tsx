@@ -13,7 +13,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { Swipeable } from 'react-native-gesture-handler';
-import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
+import { getArtistCatalogImage } from '@api';
 
 import {
   deleteDownloadedTrack,
@@ -34,6 +34,7 @@ import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { LoggedPressable } from '../native';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
+import { log } from '../../utils/appLogger';
 
 const toPlayerTrack = (track: LibraryTrack) => ({
   ...track,
@@ -52,8 +53,11 @@ export const OfflineLibrary = () => {
   const [tracks, setTracks] = React.useState<LibraryTrack[]>([]);
   const [playlists, setPlaylists] = React.useState<LocalPlaylist[]>([]);
   const [artistImageURLs, setArtistImageURLs] = React.useState<Record<string, string>>({});
+  const [artistImageLoadLimit, setArtistImageLoadLimit] = React.useState(12);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const requestedArtistImages = React.useRef(new Set<string>());
+  const artistImageQueue = React.useRef<Promise<void>>(Promise.resolve());
+  const isMountedRef = React.useRef(true);
   const libraryLoadRef = React.useRef<Promise<void> | null>(null);
   const metadataRepairRef = React.useRef(false);
   const { playWithQueue, currentTrack, playerState } = usePlayer();
@@ -198,41 +202,11 @@ export const OfflineLibrary = () => {
   const localAlbums = React.useMemo(() => groupLocalAlbums(tracks), [tracks]);
   const localArtists = React.useMemo(() => groupLocalArtists(tracks), [tracks]);
   React.useEffect(() => {
-    const artistsToLoad = localArtists.filter(
-      (artist) =>
-        Boolean(artist.spotifyArtistId && /^[A-Za-z0-9]{22}$/.test(artist.spotifyArtistId)) &&
-        !requestedArtistImages.current.has(artist.id)
-    );
-    if (artistsToLoad.length === 0) return;
-
-    let active = true;
-    void Promise.all(
-      artistsToLoad.map(async (artist) => ({
-        id: artist.id,
-        imageURL: await getCachedArtistImage(artist.title, () =>
-          getSpotifyArtistImage(artist.spotifyArtistId!),
-          [artist.id, artist.spotifyArtistId!]
-        ),
-      }))
-    ).then((images) => {
-      if (!active) return;
-      const resolvedImages = images.filter(
-        (image): image is { id: string; imageURL: string } => Boolean(image.imageURL)
-      );
-      if (resolvedImages.length === 0) return;
-      images.forEach((image) => requestedArtistImages.current.add(image.id));
-      setArtistImageURLs((current) => ({
-        ...current,
-        ...Object.fromEntries(
-          resolvedImages.map((image) => [image.id, image.imageURL])
-        ),
-      }));
-    });
-
+    isMountedRef.current = true;
     return () => {
-      active = false;
+      isMountedRef.current = false;
     };
-  }, [localArtists]);
+  }, []);
   const visibleCollections = React.useMemo(() => {
     const collections = libraryView === 'albums' ? localAlbums : localArtists;
     const filtered = normalizedQuery
@@ -246,6 +220,45 @@ export const OfflineLibrary = () => {
       ? [...filtered].sort((first, second) => first.title.localeCompare(second.title))
       : filtered;
   }, [librarySort, libraryView, localAlbums, localArtists, normalizedQuery]);
+  const artistsForImageLoad = React.useMemo(() => {
+    if (libraryView !== 'artists') return [];
+    const visibleIds = new Set(visibleCollections.slice(0, artistImageLoadLimit).map((item) => item.id));
+    return localArtists.filter((artist) => visibleIds.has(artist.id));
+  }, [artistImageLoadLimit, libraryView, localArtists, visibleCollections]);
+
+  React.useEffect(() => {
+    const artistsToLoad = artistsForImageLoad.filter(
+      (artist) => artist.title && !requestedArtistImages.current.has(artist.id)
+    );
+    if (artistsToLoad.length === 0) return;
+
+    artistsToLoad.forEach((artist) => requestedArtistImages.current.add(artist.id));
+    artistImageQueue.current = artistImageQueue.current.then(async () => {
+      for (let index = 0; index < artistsToLoad.length; index += 4) {
+        const images = await Promise.all(artistsToLoad.slice(index, index + 4).map(async (artist) => ({
+          id: artist.id,
+          imageURL: await getCachedArtistImage(
+            artist.title,
+            () => getArtistCatalogImage(artist.spotifyArtistId || artist.id, artist.title),
+            [artist.id, artist.spotifyArtistId || '']
+          ),
+        })));
+        if (!isMountedRef.current) return;
+        const resolvedImages = images.filter(
+          (image): image is { id: string; imageURL: string } => Boolean(image.imageURL)
+        );
+        if (resolvedImages.length) {
+          setArtistImageURLs((current) => ({
+            ...current,
+            ...Object.fromEntries(resolvedImages.map((image) => [image.id, image.imageURL])),
+          }));
+        }
+      }
+    }).catch((error) => {
+      artistsToLoad.forEach((artist) => requestedArtistImages.current.delete(artist.id));
+      log.error('load library artist images failed', { error: String(error) });
+    });
+  }, [artistsForImageLoad]);
 
   const renderTrack = ({ item, index }: { item: LibraryTrack; index: number }) => {
     const isCurrentTrack = currentTrack?.spotifyId === item.spotifyId;
@@ -491,6 +504,12 @@ export const OfflineLibrary = () => {
           data={visibleCollections}
           renderItem={renderCollection}
           keyExtractor={(item) => item.id}
+          onEndReached={() => {
+            if (libraryView === 'artists') {
+              setArtistImageLoadLimit((current) => Math.min(localArtists.length, current + 12));
+            }
+          }}
+          onEndReachedThreshold={0.4}
           contentContainerStyle={[
             styles.list,
             visibleCollections.length === 0 && styles.listEmpty,

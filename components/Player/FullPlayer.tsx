@@ -32,8 +32,8 @@ import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import {
   findArtistIdByName,
+  getArtistCatalogImage,
   getYouTubeMusicArtistBiography,
-  getYouTubeMusicArtistImage,
 } from '@api';
 import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
 import { useDetailNavigation } from '@hooks';
@@ -59,7 +59,6 @@ import {
   toDownloadTrackInput,
   upsertCatalogTracks,
 } from '@services';
-import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
 import { GlassSurface, LoggedPressable } from '../native';
 import { TrackPlaylistPickerModal } from '../LocalPlaylist/TrackPlaylistPickerModal';
 import { LyricSyncEditor } from './LyricSyncEditor';
@@ -371,12 +370,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     if (!primaryArtist) return;
     const key = primaryArtist.name;
     void (async () => {
-      const spotifyId = /^[A-Za-z0-9]{22}$/.test(primaryArtist.id) ? primaryArtist.id : '';
-      const imageURL = await getCachedArtistImage(key, () => spotifyId
-        ? getSpotifyArtistImage(spotifyId)
-        : primaryArtist.id.startsWith('ytartist_')
-          ? getYouTubeMusicArtistImage(primaryArtist.id)
-          : getYouTubeMusicArtistImage(`ytartist_name_${encodeURIComponent(primaryArtist.name)}`),
+      const imageURL = await getCachedArtistImage(key, () =>
+        getArtistCatalogImage(primaryArtist.id, primaryArtist.name),
       [primaryArtist.id]);
       if (active) setPrimaryArtistImage(imageURL);
     })().catch(() => {});
@@ -406,12 +401,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     const loadImages = async () => {
       await Promise.all(artistLinks.map(async (artist) => {
         const key = artist.name;
-        const spotifyId = /^[A-Za-z0-9]{22}$/.test(artist.id) ? artist.id : '';
-        const imageURL = await getCachedArtistImage(key, () => spotifyId
-          ? getSpotifyArtistImage(spotifyId)
-          : artist.id.startsWith('ytartist_')
-            ? getYouTubeMusicArtistImage(artist.id)
-            : getYouTubeMusicArtistImage(`ytartist_name_${encodeURIComponent(artist.name)}`),
+        const imageURL = await getCachedArtistImage(key, () =>
+          getArtistCatalogImage(artist.id, artist.name),
         [artist.id]);
         if (active && imageURL) {
           setArtistImages((current) => ({ ...current, [key]: imageURL }));

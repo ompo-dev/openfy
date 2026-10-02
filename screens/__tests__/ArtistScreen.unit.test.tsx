@@ -27,6 +27,7 @@ import { ArtistScreen } from '../ArtistScreen';
 jest.mock('@api', () => ({
   findArtistIdByName: jest.fn(),
   getArtist: jest.fn(),
+  getArtistCatalogImage: jest.fn().mockResolvedValue(''),
   getArtistDiscography: jest.fn(),
   getArtistTopTracks: jest.fn(),
   getYouTubeMusicArtistImage: jest.fn(),
@@ -240,5 +241,65 @@ describe('ArtistScreen', () => {
     expect(view.getByText('Artista Real')).toBeTruthy();
     expect(getYouTubeMusicArtistProfile).not.toHaveBeenCalled();
     expect(getArtistDiscography).toHaveBeenCalledWith(spotifyArtistId);
+  });
+
+  it('falls back to the public YouTube Music catalog when Spotify has no session', async () => {
+    const artistId = 'ytartist_UCpedro~Pedro%20Qualy';
+    const spotifyArtistId = '1234567890123456789012';
+    jest.mocked(findArtistIdByName).mockResolvedValue(spotifyArtistId);
+    jest.mocked(getArtist).mockResolvedValue(null as never);
+    jest.mocked(getArtistTopTracks).mockResolvedValue([] as never);
+    jest.mocked(getArtistDiscography).mockRejectedValue(new Error('Spotify session missing'));
+    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
+      artist: {
+        id: artistId,
+        type: 'artist',
+        name: 'Pedro Qualy',
+        imageURL: 'https://images.example/pedro.jpg',
+      },
+      tracks: [
+        { id: 'yt_first', title: 'Tarôs', artists: [{ name: 'Pedro Qualy' }] },
+        { id: 'yt_second', title: 'Papel de Parede', artists: [{ name: 'Pedro Qualy' }] },
+      ],
+      participationTracks: [{ id: 'yt_feature', title: 'Participação', artists: [{ name: 'Other' }, { name: 'Pedro Qualy' }] }],
+    } as never);
+
+    const view = await render(<ArtistScreen artistId={artistId} />);
+
+    await waitFor(() => {
+      expect(view.getByText('track-count:2')).toBeTruthy();
+      expect(view.getByText('participation-count:1')).toBeTruthy();
+    });
+    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(artistId);
+  });
+
+  it('supplements a Spotify-id local profile with the public artist catalog', async () => {
+    const spotifyArtistId = '1234567890123456789012';
+    jest.mocked(groupLocalArtists).mockReturnValue([{
+      id: `spotify:${spotifyArtistId}`,
+      spotifyArtistId,
+      title: 'Artista existente',
+      imageURL: '',
+      tracks: [localTrack],
+    }] as never);
+    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
+      artist: {
+        id: 'ytartist_UCartist~Artista%20existente',
+        type: 'artist',
+        name: 'Artista existente',
+        imageURL: 'https://images.example/artist.jpg',
+      },
+      tracks: [{ id: 'yt_full_catalog', title: 'Faixa fora da biblioteca' }],
+      participationTracks: [],
+    } as never);
+
+    const view = await render(<ArtistScreen artistId={spotifyArtistId} />);
+
+    await waitFor(() => {
+      expect(view.getByText('track-count:2')).toBeTruthy();
+    });
+    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
+      'ytartist_name_Artista%20existente'
+    );
   });
 });

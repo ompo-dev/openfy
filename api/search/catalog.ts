@@ -13,6 +13,7 @@ import {
 } from '../../services/youtubeMusicClient';
 import { log } from '../../utils/appLogger';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
+import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
 
 export type CatalogSearchResults = {
   artists: ArtistModel[];
@@ -194,7 +195,7 @@ const toTrackModel = (item: YouTubeMusicItem): TrackModel | null => {
     id: `yt_${videoId}`,
     title,
     subtitle: artists.map((artist) => artist.name).join(', '),
-    imageURL: largestImage(item, 720),
+    imageURL: largestImage(item, 720) || largestImage(album, 720),
     albumName: asString(album.name) || 'YouTube Music',
     albumId: asString(album.id) || undefined,
     youtubeVideoId: videoId,
@@ -629,8 +630,19 @@ const loadYouTubeMusicArtistImage = async (artistRouteId: string) => {
 
   const client = await withYouTubeMusicTimeout(getYouTubeMusicClient());
   if (!client) return '';
+  if (browseId && client.music.getArtist) {
+    try {
+      const page = await withYouTubeMusicTimeout(client.music.getArtist(browseId), 6_000);
+      const header = asRecord(asRecord(page).header);
+      const image = largestImage({ thumbnail: header.thumbnail });
+      if (image) return image;
+    } catch (error) {
+      log.artist('catalog image profile lookup failed', { browseId, error });
+    }
+  }
   const result = await withYouTubeMusicTimeout(
-    client.music.search(routeName, { type: 'artist' })
+    client.music.search(routeName, { type: 'artist' }),
+    6_000
   );
   const artists = asArray(asRecord(result?.artists).contents) as YouTubeMusicItem[];
   const idOf = (item: unknown) => {
@@ -645,11 +657,9 @@ const loadYouTubeMusicArtistImage = async (artistRouteId: string) => {
   const byId = browseId
     ? artists.find((item) => idOf(item) === browseId)
     : undefined;
-  const byName = browseId
-    ? undefined
-    : artists.find(
-      (item) => normalizeArtistName(nameOf(item)) === normalizeArtistName(routeName)
-    );
+  const byName = artists.find(
+    (item) => normalizeArtistName(nameOf(item)) === normalizeArtistName(routeName)
+  );
   return largestImage(byId || byName || {});
 };
 
@@ -661,3 +671,30 @@ export const getYouTubeMusicArtistImage = (
   () => loadYouTubeMusicArtistImage(artistRouteId),
   ARTIST_IMAGE_CACHE_MS
 );
+
+/** Use YouTube Music artwork consistently, falling back to Spotify's public page. */
+export const getArtistCatalogImage = async (
+  artistId: string,
+  artistName: string
+): Promise<string> => {
+  const name = artistName.trim();
+  if (!name) {
+    return /^[A-Za-z0-9]{22}$/.test(artistId)
+      ? (await getSpotifyArtistImage(artistId).catch(() => null)) || ''
+      : '';
+  }
+
+  const isYouTubeRoute = artistId.startsWith(YOUTUBE_MUSIC_ARTIST_PREFIX);
+  const youtubeChannelId = !isYouTubeRoute && artistId.startsWith('UC')
+    ? artistId
+    : undefined;
+  const routeId = isYouTubeRoute
+    ? artistId
+    : toYouTubeMusicArtistRouteId(youtubeChannelId, name);
+  const youtubeImage = await getYouTubeMusicArtistImage(routeId).catch(() => '');
+  if (youtubeImage) return youtubeImage;
+
+  return /^[A-Za-z0-9]{22}$/.test(artistId)
+    ? (await getSpotifyArtistImage(artistId).catch(() => null)) || ''
+    : '';
+};

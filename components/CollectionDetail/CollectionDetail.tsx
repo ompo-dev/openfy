@@ -26,8 +26,7 @@ import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
 import { MarqueeText } from '../common/MarqueeText';
 import { SkeletonImage } from '../common/SkeletonImage';
-import { findArtistIdByName, getYouTubeMusicArtistImage } from '@api';
-import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
+import { findArtistIdByName, getArtistCatalogImage } from '@api';
 import { getCachedArtistImage } from '@services';
 import { useDetailNavigation } from '@hooks';
 
@@ -296,17 +295,11 @@ export const CollectionDetail = ({
     void (async () => {
       for (let index = 0; index < unresolved.length; index += 4) {
         const batch = await Promise.all(unresolved.slice(index, index + 4).map(async (artist) => {
-          const spotifyId = /^[A-Za-z0-9]{22}$/.test(artist.id) ? artist.id : '';
-          const imageURL = await getCachedArtistImage(artist.name, async () => {
-            if (spotifyId) {
-              const spotifyImage = await getSpotifyArtistImage(spotifyId);
-              if (spotifyImage) return spotifyImage;
-            }
-            const routeId = artist.id.startsWith('ytartist_')
-              ? artist.id
-              : `ytartist_name_${encodeURIComponent(artist.name)}`;
-            return getYouTubeMusicArtistImage(routeId);
-          }, [artist.id]);
+          const imageURL = await getCachedArtistImage(
+            artist.name,
+            () => getArtistCatalogImage(artist.id, artist.name),
+            [artist.id]
+          );
           return [artist.name, artist.id, imageURL] as [string, string, string];
         }));
         const successfulResults = batch.filter(([, , imageURL]) => Boolean(imageURL));

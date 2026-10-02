@@ -33,6 +33,7 @@ export {
 
 export {
   getBrowseCategories,
+  getArtistCatalogImage,
   getYouTubeMusicArtistImage,
   getYouTubeMusicArtistBiography,
   getYouTubeMusicArtistProfile,
