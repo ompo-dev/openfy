@@ -44,6 +44,7 @@ export type LibraryTrack = CatalogTrack & {
 
 const STORAGE_KEY = 'openfy_catalog_tracks_v1';
 let storageMutation = Promise.resolve();
+let libraryTracksRequest: Promise<LibraryTrack[]> | null = null;
 
 const sourcePlatformFrom = (
   track: Pick<CatalogTrackInput, 'spotifyId' | 'youtubeVideoId' | 'sourcePlatform'>
@@ -213,7 +214,7 @@ export const removeCatalogTracks = async (
 export const removeCatalogTrack = (spotifyId: string): Promise<number> =>
   removeCatalogTracks([spotifyId]);
 
-export const getLibraryTracks = async (): Promise<LibraryTrack[]> => {
+const loadLibraryTracks = async (): Promise<LibraryTrack[]> => {
   const [catalogTracks, downloadedTracks] = await Promise.all([
     getCatalogTracks(),
     getDownloadedTracks(),
@@ -276,6 +277,16 @@ export const getLibraryTracks = async (): Promise<LibraryTrack[]> => {
   return [...mergedCatalog, ...downloadedOnly].sort((first, second) =>
     first.addedAt.localeCompare(second.addedAt)
   );
+};
+
+export const getLibraryTracks = (): Promise<LibraryTrack[]> => {
+  if (libraryTracksRequest) return libraryTracksRequest;
+
+  libraryTracksRequest = loadLibraryTracks()
+    .finally(() => {
+      libraryTracksRequest = null;
+    });
+  return libraryTracksRequest;
 };
 
 export const toDownloadTrackInput = (

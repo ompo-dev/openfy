@@ -1,10 +1,22 @@
 import { PlaylistModel, TrackModel } from '@models';
 import { PlaylistItemResponseType, PlaylistResponseType } from '@config';
 import { parseFromPlaylistItemsToTracks, parseToPlaylist } from '@utils';
+import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 
 import { BASE_URL, spotifyGet } from '../config';
 
-export const getPlaylist = async (
+const playlistCache = createAsyncResourceCache<PlaylistModel>({
+  name: 'spotify playlist',
+  category: 'network',
+  maxEntries: 40,
+});
+const playlistItemsCache = createAsyncResourceCache<TrackModel[]>({
+  name: 'spotify playlist page',
+  category: 'network',
+  maxEntries: 120,
+});
+
+const loadPlaylist = async (
   playlistId: string
 ): Promise<PlaylistModel> => {
   try {
@@ -19,7 +31,10 @@ export const getPlaylist = async (
   }
 };
 
-export const getPlaylistItems = async ({
+export const getPlaylist = (playlistId: string): Promise<PlaylistModel> =>
+  playlistCache.getOrLoad(playlistId, () => loadPlaylist(playlistId), 15 * 60_000);
+
+const loadPlaylistItems = async ({
   playlistId,
   fields = 'items.track(id,name,artists(id,name),album(name,images(url)),duration_ms,explicit)',
   limit,
@@ -47,4 +62,24 @@ export const getPlaylistItems = async ({
     console.error(`Error fetching playlist with an ID: ${playlistId}`, error);
     throw error;
   }
+};
+
+export const getPlaylistItems = (input: {
+  playlistId: string;
+  fields?: string;
+  limit: number;
+  offset: number;
+}): Promise<TrackModel[]> => {
+  const fields = input.fields || 'items.track(id,name,artists(id,name),album(name,images(url)),duration_ms,explicit)';
+  const key = `${input.playlistId}:${input.limit}:${input.offset}:${fields}`;
+  return playlistItemsCache.getOrLoad(
+    key,
+    () => loadPlaylistItems({ ...input, fields }),
+    10 * 60_000
+  );
+};
+
+export const _clearPlaylistCachesForTests = () => {
+  playlistCache.clear();
+  playlistItemsCache.clear();
 };

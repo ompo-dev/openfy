@@ -3,6 +3,7 @@ import {
   FlatList,
   Keyboard,
   Modal,
+  Platform,
   RefreshControl,
   Share,
   StyleSheet,
@@ -668,7 +669,11 @@ export const CollectionDetail = ({
         data={visibleTracks}
         keyExtractor={(item) => item.id}
         renderItem={renderTrack}
-        initialNumToRender={kind === 'artist' ? ARTIST_TRACKS_PAGE_SIZE : undefined}
+        initialNumToRender={kind === 'artist' ? ARTIST_TRACKS_PAGE_SIZE : 12}
+        maxToRenderPerBatch={10}
+        updateCellsBatchingPeriod={32}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS !== 'web'}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.6}
         contentContainerStyle={{ paddingBottom: BOTTOM_NAVIGATION_HEIGHT + 112 }}

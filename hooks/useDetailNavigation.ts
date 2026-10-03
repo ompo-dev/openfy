@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Href, usePathname, useRouter, useSegments } from 'expo-router';
+import { prefetchDetail } from '../services/navigation/detailPrefetch';
 
 export type DetailRouteType =
   | 'album'
@@ -45,6 +46,8 @@ export const useDetailNavigation = () => {
       if (pathname === href) {
         return;
       }
+
+      prefetchDetail(type, id);
 
       // Keep the current detail in the tab stack so the native back gesture
       // returns to the artist/playlist that opened the next detail.

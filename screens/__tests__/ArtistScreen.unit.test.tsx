@@ -295,7 +295,7 @@ describe('ArtistScreen', () => {
     });
     expect(view.getByText('Artista Real')).toBeTruthy();
     expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
-      'ytartist_name_Artista%20Real'
+      'ytartist_~Artista%20Real'
     );
     expect(getArtistDiscography).toHaveBeenCalledWith(spotifyArtistId);
   });
@@ -340,7 +340,7 @@ describe('ArtistScreen', () => {
       expect(view.getByText('track-count:64')).toBeTruthy();
     });
     expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
-      'ytartist_name_Ebony'
+      'ytartist_~Ebony'
     );
   });
 
@@ -371,7 +371,9 @@ describe('ArtistScreen', () => {
       expect(view.getByText('track-count:2')).toBeTruthy();
       expect(view.getByText('participation-count:1')).toBeTruthy();
     });
-    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(artistId);
+    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
+      'ytartist_~Pedro%20Qualy'
+    );
   });
 
   it('supplements a Spotify-id local profile with the public artist catalog', async () => {
@@ -400,7 +402,7 @@ describe('ArtistScreen', () => {
       expect(view.getByText('track-count:2')).toBeTruthy();
     });
     expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
-      'ytartist_name_Artista%20existente'
+      'ytartist_~Artista%20existente'
     );
   });
 });

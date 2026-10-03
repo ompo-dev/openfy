@@ -38,7 +38,7 @@ export type TrackPropsType = {
   duration_ms?: number;
 };
 
-export const Track = ({
+export const Track = React.memo(({
   type,
   title,
   subtitle,
@@ -263,4 +263,6 @@ export const Track = ({
       </Pressable>
     </View>
   );
-};
+});
+
+Track.displayName = 'Track';

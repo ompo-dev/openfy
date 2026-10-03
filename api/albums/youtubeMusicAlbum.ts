@@ -7,6 +7,7 @@ import {
   type YouTubeMusicItem,
 } from '../../services/youtubeMusicClient';
 import { toYouTubeMusicTrackModel } from '../search/catalog';
+import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 
 export type YouTubeMusicAlbum = {
   id: string;
@@ -49,7 +50,13 @@ const normalizeArtistName = (value: string) => value
 export const isYouTubeMusicAlbumId = (value: string) =>
   value.startsWith(YOUTUBE_MUSIC_ALBUM_PREFIX);
 
-export const getYouTubeMusicAlbum = async (
+const youtubeAlbumCache = createAsyncResourceCache<YouTubeMusicAlbum>({
+  name: 'youtube music album',
+  category: 'network',
+  maxEntries: 40,
+});
+
+const loadYouTubeMusicAlbum = async (
   routeId: string
 ): Promise<YouTubeMusicAlbum> => {
   if (!isYouTubeMusicAlbumId(routeId)) throw new Error('Álbum do YouTube Music inválido.');
@@ -115,3 +122,10 @@ export const getYouTubeMusicAlbum = async (
     artists: [...artists.values()],
   };
 };
+
+export const getYouTubeMusicAlbum = (routeId: string): Promise<YouTubeMusicAlbum> =>
+  youtubeAlbumCache.getOrLoad(
+    routeId,
+    () => loadYouTubeMusicAlbum(routeId),
+    30 * 60_000
+  );
