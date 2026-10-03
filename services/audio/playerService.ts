@@ -151,7 +151,8 @@ let nativeYouTubeState: PlayerState = DEFAULT_STATE;
 let nativeYouTubeStatusCallback: ((state: PlayerState) => void) | null = null;
 let nativeStopPromise = Promise.resolve();
 let loadGeneration = 0;
-let isSeeking = false;
+let pendingSeek: { positionMs: number; generation: number } | null = null;
+let seekOperation: Promise<void> | null = null;
 let remoteCommandInFlight = false;
 let remotePlaybackHandlers: RemotePlaybackHandlers = {};
 let currentSourceKind: AudioDiagnosticEvent['sourceKind'] = 'none';
@@ -299,6 +300,7 @@ const runRemoteCommand = (command: keyof RemotePlaybackHandlers): void => {
 /** Invalidate pending loads immediately when a different track is selected. */
 export const beginTrackChange = (): void => {
   loadGeneration++;
+  pendingSeek = null;
   stopVolumeRamp();
   void stopNativeYouTubeEngine();
   // Silence the engine before touching listeners: a listener cleanup failure
@@ -895,27 +897,39 @@ export const pause = async (source = 'unspecified'): Promise<void> => {
 /**
  * Seek to position in milliseconds.
  */
-export const seekTo = async (positionMs: number): Promise<void> => {
-  if (nativeYouTubeActive) {
-    await seekNativeYouTubePlayback(positionMs);
-    nativeYouTubeState = {
-      ...nativeYouTubeState,
-      positionMs: Math.max(0, positionMs),
-      didJustFinish: false,
-    };
-    nativeYouTubeStatusCallback?.(nativeYouTubeState);
-    return;
-  }
-  if (!playerInstance || isSeeking) return;
-  isSeeking = true;
-  try {
-    const targetSec = Math.max(0, positionMs / 1000);
-    await playerInstance.seekTo(targetSec);
-  } catch {
-    // suppress rapid seek interruptions
-  } finally {
-    isSeeking = false;
-  }
+export const seekTo = (positionMs: number): Promise<void> => {
+  pendingSeek = { positionMs: Math.max(0, positionMs), generation: loadGeneration };
+  if (seekOperation) return seekOperation;
+
+  // Keep the latest finger position while the native engine finishes a seek.
+  // Dropping it leaves lyric scrubbing on an earlier line after release.
+  seekOperation = (async () => {
+    while (pendingSeek) {
+      const target = pendingSeek;
+      pendingSeek = null;
+      if (target.generation !== loadGeneration) continue;
+      try {
+        if (nativeYouTubeActive) {
+          await seekNativeYouTubePlayback(target.positionMs);
+          if (target.generation !== loadGeneration || !nativeYouTubeActive) continue;
+          nativeYouTubeState = {
+            ...nativeYouTubeState,
+            positionMs: target.positionMs,
+            didJustFinish: false,
+          };
+          nativeYouTubeStatusCallback?.(nativeYouTubeState);
+        } else {
+          await playerInstance?.seekTo(target.positionMs / 1000);
+        }
+      } catch {
+        // A newer target remains queued if the interrupted seek was rejected.
+      }
+    }
+  })().finally(() => {
+    seekOperation = null;
+    if (pendingSeek?.generation === loadGeneration) void seekTo(pendingSeek.positionMs);
+  });
+  return seekOperation;
 };
 
 /**
@@ -923,6 +937,7 @@ export const seekTo = async (positionMs: number): Promise<void> => {
  */
 export const unload = async (): Promise<void> => {
   loadGeneration++;
+  pendingSeek = null;
   try {
     disposeCurrentPlayer();
     releaseAllPreloadedAudio();

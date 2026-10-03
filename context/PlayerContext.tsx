@@ -6,7 +6,8 @@
 
 import * as React from 'react';
 import { AppState } from 'react-native';
-import { usePlayerStore, PlayerTrack } from '../stores/usePlayerStore';
+import { useShallow } from 'zustand/react/shallow';
+import { usePlayerStore, type PlayerStoreState } from '../stores/usePlayerStore';
 import {
   clampPlaybackPositionMs,
   getAudioDiagnosticsSnapshot,
@@ -22,64 +23,13 @@ const PLAYER_POSITION_SYNC_THRESHOLD_MS = 250;
 
 export { PlayerTrack } from '../stores/usePlayerStore';
 
-export const usePlayer = () => {
-  const currentTrack = usePlayerStore((s) => s.currentTrack);
-  const queue = usePlayerStore((s) => s.queue);
-  const queueIndex = usePlayerStore((s) => s.queueIndex);
-  const queueSourceId = usePlayerStore((s) => s.queueSourceId);
-  const playerState = usePlayerStore((s) => s.playerState);
-  const isPlayerVisible = usePlayerStore((s) => s.isPlayerVisible);
-  const lyricsData = usePlayerStore((s) => s.lyricsData);
-  const isLoadingLyrics = usePlayerStore((s) => s.isLoadingLyrics);
-  const isLoadingAudio = usePlayerStore((s) => s.isLoadingAudio);
-  const isShuffle = usePlayerStore((s) => s.isShuffle);
-  const repeatMode = usePlayerStore((s) => s.repeatMode);
+const selectPlayer = (state: PlayerStoreState) => state;
 
-  const playTrack = usePlayerStore((s) => s.playTrack);
-  const playWithQueue = usePlayerStore((s) => s.playWithQueue);
-  const playDownloadedTrack = usePlayerStore((s) => s.playDownloadedTrack);
-  const togglePlayPause = usePlayerStore((s) => s.togglePlayPause);
-  const seekToPosition = usePlayerStore((s) => s.seekToPosition);
-  const playQueueIndex = usePlayerStore((s) => s.playQueueIndex);
-  const playNext = usePlayerStore((s) => s.playNext);
-  const playPrevious = usePlayerStore((s) => s.playPrevious);
-  const addToQueue = usePlayerStore((s) => s.addToQueue);
-  const clearQueue = usePlayerStore((s) => s.clearQueue);
-  const toggleShuffle = usePlayerStore((s) => s.toggleShuffle);
-  const setRepeatMode = usePlayerStore((s) => s.setRepeatMode);
-  const closePlayer = usePlayerStore((s) => s.closePlayer);
-  const refreshLyrics = usePlayerStore((s) => s.refreshLyrics);
-  const updateLyricsSegments = usePlayerStore((s) => s.updateLyricsSegments);
-
-  return {
-    currentTrack,
-    queue,
-    queueIndex,
-    queueSourceId,
-    playerState,
-    isPlayerVisible,
-    lyricsData,
-    isLoadingLyrics,
-    isLoadingAudio,
-    isShuffle,
-    repeatMode,
-    playTrack,
-    playWithQueue,
-    playDownloadedTrack,
-    togglePlayPause,
-    seekToPosition,
-    playQueueIndex,
-    playNext,
-    playPrevious,
-    addToQueue,
-    clearQueue,
-    toggleShuffle,
-    setRepeatMode,
-    closePlayer,
-    refreshLyrics,
-    updateLyricsSegments,
-  };
-};
+// Screens that only need commands or play/pause state must not subscribe to
+// the playback clock. The default remains available for timed player views.
+export const usePlayer = <T = PlayerStoreState,>(
+  selector: (state: PlayerStoreState) => T = selectPlayer as (state: PlayerStoreState) => T
+): T => usePlayerStore(useShallow(selector));
 
 export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
   React.useEffect(() => {

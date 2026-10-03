@@ -1112,12 +1112,12 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   },
 
   togglePlayPause: async (source = 'player-control') => {
-    if (get().isLoadingAudio) return;
     const { currentTrack, playTrack } = get();
 
     // Always read real-time state from playerService (not Zustand state which can be stale)
     // This ensures pause works from any screen: banners, carrossel, etc.
     const realState = getStatus();
+    if (get().isLoadingAudio && !realState.isLoaded && !realState.isPlaying) return;
 
     if (
       useConnectivityStore.getState().status === 'offline' &&

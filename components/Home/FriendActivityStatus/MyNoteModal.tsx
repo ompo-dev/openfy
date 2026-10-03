@@ -275,7 +275,11 @@ export const MyNoteModal = ({
   onSave,
   onDelete,
 }: MyNoteModalProps) => {
-  const { playTrack, currentTrack, playerState, togglePlayPause } = usePlayer();
+  const { playTrack, currentTrack, isPlaying } = usePlayer((state) => ({
+    playTrack: state.playTrack,
+    currentTrack: state.currentTrack,
+    isPlaying: state.playerState.isPlaying,
+  }));
 
   const [isPublishedView, setIsPublishedView] = React.useState(false);
   const [activeBottomSection, setActiveBottomSection] = React.useState<'none' | 'colorPicker'>('none');
@@ -399,7 +403,7 @@ export const MyNoteModal = ({
     const isPlayingThisNote =
       !!currentNote.songSpotifyId &&
       currentTrack?.spotifyId === currentNote.songSpotifyId &&
-      playerState.isPlaying;
+      isPlaying;
 
     return (
       <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>

@@ -79,7 +79,11 @@ export const FriendActivityStatus = ({
   tailTuning,
   tailTuningByNoteId,
 }: FriendActivityStatusProps) => {
-  const { playTrack, currentTrack, playerState } = usePlayer();
+  const { playTrack, currentTrack, isPlaying } = usePlayer((state) => ({
+    playTrack: state.playTrack,
+    currentTrack: state.currentTrack,
+    isPlaying: state.playerState.isPlaying,
+  }));
 
   // Each note has its own native-driven spring so drag inertia travels through
   // the row instead of rotating every bubble at the same instant.
@@ -254,7 +258,7 @@ export const FriendActivityStatus = ({
           const isThisSongPlaying =
             !!item.note.spotifyId &&
             currentTrack?.spotifyId === item.note.spotifyId &&
-            playerState.isPlaying;
+            isPlaying;
           const noteTailTuning = getTailTuning(item.id);
 
           const isCurrentUser = item.user.isCurrentUser;
@@ -275,7 +279,7 @@ export const FriendActivityStatus = ({
               showWave =
                 !!myNote.songSpotifyId &&
                 currentTrack?.spotifyId === myNote.songSpotifyId &&
-                playerState.isPlaying;
+                isPlaying;
             } else {
               bubbleColor = DEFAULT_BUBBLE_COLOR;
               noteTitle = 'Deixe uma nota...';

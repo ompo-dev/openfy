@@ -22,7 +22,7 @@ export const YourFavourites = ({
   items: FavouriteItem[];
   title?: string;
 }) => {
-  const { playWithQueue } = usePlayer();
+  const { playWithQueue } = usePlayer((state) => ({ playWithQueue: state.playWithQueue }));
 
   if (!items.length) return null;
 

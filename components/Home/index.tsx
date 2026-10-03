@@ -77,7 +77,7 @@ const artistNames = (artist: ArtistModel) => artist.genres?.slice(0, 2).join(' Â
 export const Home = () => {
   const { top } = useSafeAreaInsets();
   const { home, isLoading, isRefreshing, refresh } = usePersonalizedHome();
-  const { playTrack } = usePlayer();
+  const { playTrack } = usePlayer((state) => ({ playTrack: state.playTrack }));
   const { refreshLibrary } = useLibrarySelectedCategory();
   const { openDetail } = useDetailNavigation();
   const [query, setQuery] = React.useState('');

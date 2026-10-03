@@ -95,7 +95,7 @@ describe('MarqueeText', () => {
     );
     expect(timing).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ isInteraction: false, toValue: -215 })
+      expect.objectContaining({ isInteraction: false, toValue: -200 })
     );
     expect(timing).toHaveBeenCalledWith(
       expect.anything(),

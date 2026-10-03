@@ -106,7 +106,7 @@ const PostHeader = ({
 );
 
 const PostActions = ({ track }: { track: PlayerTrack }) => {
-  const { addToQueue } = usePlayer();
+  const { addToQueue } = usePlayer((state) => ({ addToQueue: state.addToQueue }));
   const { refreshLibrary } = useLibrarySelectedCategory();
   const [liked, setLiked] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
@@ -237,13 +237,18 @@ const ListeningPartyPost = ({
   author: PostAuthor;
   tracks: PlayerTrack[];
 }) => {
-  const { currentTrack, playerState, playWithQueue, togglePlayPause } =
-    usePlayer();
+  const { currentTrack, isPlaying, playWithQueue, togglePlayPause } =
+    usePlayer((state) => ({
+      currentTrack: state.currentTrack,
+      isPlaying: state.playerState.isPlaying,
+      playWithQueue: state.playWithQueue,
+      togglePlayPause: state.togglePlayPause,
+    }));
   if (!tracks.length) return null;
   const partyHasCurrentTrack = tracks.some(
     (track) => track.spotifyId === currentTrack?.spotifyId
   );
-  const partyIsPlaying = partyHasCurrentTrack && playerState.isPlaying;
+  const partyIsPlaying = partyHasCurrentTrack && isPlaying;
 
   const handleJoin = () => {
     if (partyHasCurrentTrack) {
@@ -331,9 +336,14 @@ const ListeningPartyPost = ({
 };
 
 const LyricPost = ({ author, track }: { author: PostAuthor; track: PlayerTrack }) => {
-  const { currentTrack, playerState, playTrack, togglePlayPause } = usePlayer();
+  const { currentTrack, playerIsPlaying, playTrack, togglePlayPause } = usePlayer((state) => ({
+    currentTrack: state.currentTrack,
+    playerIsPlaying: state.playerState.isPlaying,
+    playTrack: state.playTrack,
+    togglePlayPause: state.togglePlayPause,
+  }));
   const isCurrentTrack = currentTrack?.spotifyId === track.spotifyId;
-  const isPlaying = isCurrentTrack && playerState.isPlaying;
+  const isPlaying = isCurrentTrack && playerIsPlaying;
 
   const handlePlay = () => {
     if (isCurrentTrack) {

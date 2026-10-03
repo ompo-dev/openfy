@@ -1,7 +1,8 @@
 import * as React from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { Animated, Easing, Platform, StyleSheet, Text, View } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { GestureDetector } from 'react-native-gesture-handler';
+import { useLyricScrubGesture } from '../../common/useLyricScrubGesture';
 
 export interface NoteLyricSegment {
   text: string;
@@ -27,7 +28,6 @@ interface NoteLyricBlocksProps {
 const SCRUB_LINE_HEIGHT = 28;
 const BLOCK_TRANSITION_DISTANCE = 54;
 const SCRUB_SIDE_LINES = 3;
-const MIN_VERTICAL_DRAG_PX = 8;
 
 const clamp = (value: number, maximum: number) =>
   Math.max(0, Math.min(value, maximum));
@@ -137,23 +137,14 @@ export const NoteLyricBlocks = ({
     onScrubEnd?.();
   }, [blockTransition, onScrubEnd]);
 
-  const lyricPanGesture = React.useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(!isTimelineScrubbing)
-        .activeOffsetY([-MIN_VERTICAL_DRAG_PX, MIN_VERTICAL_DRAG_PX])
-        .shouldCancelWhenOutside(false)
-        .runOnJS(true)
-        .onStart(startScrubbing)
-        .onUpdate((event) => {
-          selectIndexRef.current(
-            startIndexRef.current -
-              Math.round(event.translationY / SCRUB_LINE_HEIGHT)
-          );
-        })
-        .onFinalize(stopScrubbing),
-    [isTimelineScrubbing, startScrubbing, stopScrubbing]
-  );
+  const lyricPanGesture = useLyricScrubGesture({
+    enabled: !isTimelineScrubbing,
+    onStart: startScrubbing,
+    onDrag: (translationY) => selectIndexRef.current(
+      startIndexRef.current - Math.round(translationY / SCRUB_LINE_HEIGHT)
+    ),
+    onEnd: stopScrubbing,
+  });
 
   if (segments.length === 0) return <NoteLyricInline style={style} />;
 

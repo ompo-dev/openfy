@@ -51,7 +51,12 @@ export type FeaturedItem = {
   isSaved?: boolean;
 };
 export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] }) => {
-  const { currentTrack, playerState, playWithQueue, togglePlayPause } = usePlayer();
+  const { currentTrack, isPlaying, playWithQueue, togglePlayPause } = usePlayer((state) => ({
+    currentTrack: state.currentTrack,
+    isPlaying: state.playerState.isPlaying,
+    playWithQueue: state.playWithQueue,
+    togglePlayPause: state.togglePlayPause,
+  }));
   const { refreshLibrary } = useLibrarySelectedCategory();
   const [addingId, setAddingId] = React.useState<string | null>(null);
   const [addedIds, setAddedIds] = React.useState<Record<string, boolean>>(() =>
@@ -157,7 +162,7 @@ export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] })
       >
         {featuredItems.map((item, index) => {
           const isCurrentPlaying =
-            currentTrack?.spotifyId === item.spotifyId && playerState.isPlaying;
+            currentTrack?.spotifyId === item.spotifyId && isPlaying;
           const isAdded = addedIds[item.id];
           const isAdding = addingId === item.id;
 

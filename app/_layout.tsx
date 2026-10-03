@@ -47,10 +47,10 @@ function PlayerOverlay() {
     <>
       <PlayerWidgetSync />
       <MiniPlayer onPress={() => setFullPlayerVisible(true)} />
-      <FullPlayer
-        visible={fullPlayerVisible}
+      {fullPlayerVisible ? <FullPlayer
+        visible
         onClose={() => setFullPlayerVisible(false)}
-      />
+      /> : null}
     </>
   );
 }

@@ -105,7 +105,7 @@ const playerValue = (overrides = {}) => ({
   currentTrack: null,
   isLoadingAudio: false,
   isShuffle: false,
-  playerState: { isPlaying: false },
+  isPlaying: false,
   playWithQueue,
   queueSourceId: null,
   togglePlayPause,
@@ -192,7 +192,7 @@ describe('CollectionDetail', () => {
     jest.mocked(usePlayer).mockReturnValue(
       playerValue({
         isShuffle: true,
-        playerState: { isPlaying: true },
+        isPlaying: true,
         queueSourceId: 'album:album-test',
       }) as any
     );

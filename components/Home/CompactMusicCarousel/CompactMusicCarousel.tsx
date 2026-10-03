@@ -68,7 +68,12 @@ export const CompactMusicCards = ({
 }: {
   tracks: CompactTrackItem[];
 }) => {
-  const { currentTrack, playWithQueue, playerState, togglePlayPause } = usePlayer();
+  const { currentTrack, playWithQueue, isPlaying: playerIsPlaying, togglePlayPause } = usePlayer((state) => ({
+    currentTrack: state.currentTrack,
+    isPlaying: state.playerState.isPlaying,
+    playWithQueue: state.playWithQueue,
+    togglePlayPause: state.togglePlayPause,
+  }));
   const scrollX = React.useRef(new Animated.Value(0)).current;
 
   const queue = React.useMemo(
@@ -120,7 +125,7 @@ export const CompactMusicCards = ({
     >
       {tracks.map((item, index) => {
           const isPlaying =
-            currentTrack?.spotifyId === item.spotifyId && playerState.isPlaying;
+            currentTrack?.spotifyId === item.spotifyId && playerIsPlaying;
 
           // Physics scroll inertia animation
           const inputRange = [

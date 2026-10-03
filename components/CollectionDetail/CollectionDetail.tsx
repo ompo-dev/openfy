@@ -205,12 +205,22 @@ export const CollectionDetail = ({
     currentTrack,
     isLoadingAudio,
     isShuffle,
-    playerState,
+    isPlaying,
     playWithQueue,
     queueSourceId,
     togglePlayPause,
     toggleShuffle,
-  } = usePlayer();
+  } = usePlayer((state) => ({
+    addToQueue: state.addToQueue,
+    currentTrack: state.currentTrack,
+    isLoadingAudio: state.isLoadingAudio,
+    isShuffle: state.isShuffle,
+    isPlaying: state.playerState.isPlaying,
+    playWithQueue: state.playWithQueue,
+    queueSourceId: state.queueSourceId,
+    togglePlayPause: state.togglePlayPause,
+    toggleShuffle: state.toggleShuffle,
+  }));
   const downloadsById = React.useMemo(
     () => new Map(downloads.map((download) => [download.spotifyId, download])),
     [downloads]
@@ -221,7 +231,7 @@ export const CollectionDetail = ({
       queueSourceId?.startsWith(`${collectionPlaybackId}:`)
   );
   const isCollectionPlaying =
-    isCollectionPlayback && (playerState.isPlaying || isLoadingAudio);
+    isCollectionPlayback && (isPlaying || isLoadingAudio);
   const isCollectionShuffleActive = isCollectionPlayback && isShuffle;
   const metadata = metadataProp || formatCollectionMeta({
     createdAt,
@@ -551,7 +561,7 @@ export const CollectionDetail = ({
           )}
           <View style={styles.trackCopy}>
             <View style={styles.trackTitleRow}>
-              {active && playerState.isPlaying ? (
+              {active && isPlaying ? (
                 <SoundWaveIcon color="#1ED760" size={15} />
               ) : null}
               <Text numberOfLines={1} style={[styles.trackTitle, active && styles.trackTitleActive]}>
@@ -616,7 +626,7 @@ export const CollectionDetail = ({
       handleDownloadTrack,
       onArtistPress,
       playTrackList,
-      playerState.isPlaying,
+      isPlaying,
     ]
   );
   const renderTrack = React.useCallback(

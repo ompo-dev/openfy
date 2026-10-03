@@ -20,8 +20,6 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import MaskedView from '@react-native-masked-view/masked-view';
 import { useAppIsActive } from '../../hooks/useAppIsActive';
 
 interface MarqueeTextProps {
@@ -59,6 +57,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
   active = true,
 }) => {
   void _fadeColor;
+  void fadeWidth;
   const [containerWidth, setContainerWidth] = React.useState(0);
   const [measuredTextWidth, setMeasuredTextWidth] = React.useState(0);
   const isAppActive = useAppIsActive();
@@ -73,7 +72,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
       return;
     }
 
-    const distance = measuredTextWidth - containerWidth + fadeWidth * 1.5;
+    const distance = measuredTextWidth - containerWidth;
     const duration = Math.max(1800, (distance / speed) * 1000);
 
     const animation =
@@ -140,7 +139,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
     }
   };
 
-  const isCenter = align === 'center';
+  const isCenter = align === 'center' && measuredTextWidth > 0;
 
   const animatedText = (
     <Animated.View
@@ -151,7 +150,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
         justifyContent: isOverflowing ? 'flex-start' : isCenter ? 'center' : 'flex-start',
         alignItems: 'center',
         alignSelf: 'flex-start',
-        width: isOverflowing ? measuredTextWidth : '100%',
+        width: Math.max(containerWidth, measuredTextWidth) || '100%',
       }}
     >
       {interactiveContent ? (
@@ -185,12 +184,6 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
           justifyContent: isCenter && !isOverflowing ? 'center' : 'flex-start',
         },
         containerStyle,
-        isOverflowing && Platform.OS === 'web'
-          ? ({
-              maskImage: `linear-gradient(to right, transparent 0px, black ${fadeWidth}px, black calc(100% - ${fadeWidth}px), transparent 100%)`,
-              WebkitMaskImage: `linear-gradient(to right, transparent 0px, black ${fadeWidth}px, black calc(100% - ${fadeWidth}px), transparent 100%)`,
-            } as any)
-          : undefined,
       ]}
     >
       {/* Hidden full text measurement layer without width restrictions */}
@@ -200,36 +193,23 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
         importantForAccessibility="no-hide-descendants"
         style={[styles.measureContainer, { pointerEvents: 'none' }]}
       >
-        <Text
+        {interactiveContent ? (
+          <View
+            testID={testID ? `${testID}-measure-content` : undefined}
+            onLayout={onMeasureLayout}
+            style={styles.interactiveContent}
+          >{interactiveContent}</View>
+        ) : <Text
           testID={testID ? `${testID}-measure-text` : undefined}
           onLayout={onMeasureLayout}
           numberOfLines={1}
           style={[styles.text, style, styles.measureText]}
         >
           {text}
-        </Text>
+        </Text>}
       </View>
 
-      {isOverflowing && Platform.OS !== 'web' ? (
-        <MaskedView
-          style={styles.nativeMask}
-          maskElement={
-            <View style={styles.nativeMask}>
-              <LinearGradient
-                colors={['transparent', '#000000', '#000000', 'transparent']}
-                locations={[0, 0.08, 0.92, 1]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={StyleSheet.absoluteFill}
-              />
-            </View>
-          }
-        >
-          {animatedText}
-        </MaskedView>
-      ) : (
-        animatedText
-      )}
+      {animatedText}
     </View>
   );
 };
@@ -245,7 +225,9 @@ const styles = StyleSheet.create({
     opacity: 0,
     top: -9999,
     left: 0,
+    width: 10000,
     flexDirection: 'row',
+    alignItems: 'flex-start',
   },
   measureText: {
     flexShrink: 0,
@@ -254,6 +236,5 @@ const styles = StyleSheet.create({
   text: {
     flexShrink: 0,
   },
-  nativeMask: { alignSelf: 'stretch' },
-  interactiveContent: { alignItems: 'center', flexDirection: 'row' },
+  interactiveContent: { alignItems: 'center', flexDirection: 'row', flexShrink: 0 },
 });

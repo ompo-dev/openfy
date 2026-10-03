@@ -56,7 +56,11 @@ export const Track = ({
   const { width } = useApplicationDimensions();
   const maxWidth = width - 150;
   const isPlaylist = type === 'playlist';
-  const { playTrack, currentTrack, playerState } = usePlayer();
+  const { playTrack, currentTrack, isPlaying: playerIsPlaying } = usePlayer((state) => ({
+    playTrack: state.playTrack,
+    currentTrack: state.currentTrack,
+    isPlaying: state.playerState.isPlaying,
+  }));
   const isOffline = useConnectivityStore((state) => state.status === 'offline');
 
   const [isDownloaded, setIsDownloaded] = React.useState(isDownloadedProp);
@@ -66,7 +70,7 @@ export const Track = ({
   const isCurrentlyPlaying =
     trackId !== undefined &&
     currentTrack?.spotifyId === trackId &&
-    playerState.isPlaying;
+    playerIsPlaying;
 
   // Handle play: if downloaded play local, else try stream
   const handlePlay = async () => {

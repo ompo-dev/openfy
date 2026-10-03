@@ -15,6 +15,7 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withTiming,
+  type SharedValue,
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -34,6 +35,8 @@ export type SwipeableArtworkProps = {
   size: number;
   viewportWidth?: number;
   gap?: number;
+  progress?: SharedValue<number>;
+  scrollGesture?: ReturnType<typeof Gesture.Native>;
   canGoPrevious: boolean;
   canGoNext: boolean;
   onPrevious: ArtworkCallback;
@@ -50,7 +53,11 @@ export type SwipeableArtworkProps = {
 type ArtworkTileProps = {
   uri?: string | null;
   size: number;
-  gapAfter?: number;
+  offset: number;
+  viewportWidth: number;
+  gap: number;
+  progress: SharedValue<number>;
+  available?: boolean;
   fallbackSource?: ImageSourcePropType;
   testID?: string;
 };
@@ -63,7 +70,11 @@ const normalizeArtworkSource = (
 const ArtworkTile = ({
   uri,
   size,
-  gapAfter = 0,
+  offset,
+  viewportWidth,
+  gap,
+  progress,
+  available = true,
   fallbackSource,
   testID,
 }: ArtworkTileProps) => {
@@ -76,17 +87,32 @@ const ArtworkTile = ({
   React.useEffect(() => {
     setFailedUri(null);
   }, [uri]);
+  const motionStyle = useAnimatedStyle(() => {
+    const position = offset + progress.value;
+    const distance = Math.min(1, Math.abs(position));
+    return {
+      zIndex: 3 - Math.round(distance * 2),
+      transform: [
+        { translateX: position * (size + gap) },
+        { perspective: 900 },
+        { rotateY: `${-Math.max(-1, Math.min(1, position)) * 12}deg` },
+        { scale: 1 - distance * 0.14 },
+      ],
+    };
+  });
 
   return (
-    <View
+    <Animated.View
       style={[
         styles.tile,
         {
           width: size,
           height: size,
-          marginRight: gapAfter,
-          borderRadius: Math.max(16, Math.min(24, size * 0.07)),
+          left: (viewportWidth - size) / 2,
+          opacity: available ? 1 : 0,
+          borderRadius: Math.min(16, size * 0.05),
         },
+        motionStyle,
       ]}
     >
       {source ? (
@@ -109,7 +135,7 @@ const ArtworkTile = ({
           />
         </View>
       )}
-    </View>
+    </Animated.View>
   );
 };
 
@@ -121,6 +147,8 @@ export const SwipeableArtwork = ({
   size,
   viewportWidth = size,
   gap = 0,
+  progress: suppliedProgress,
+  scrollGesture,
   canGoPrevious,
   canGoNext,
   onPrevious,
@@ -133,7 +161,8 @@ export const SwipeableArtwork = ({
   testID = 'swipeable-artwork',
   style,
 }: SwipeableArtworkProps) => {
-  const dragX = useSharedValue(0);
+  const internalProgress = useSharedValue(0);
+  const dragX = suppliedProgress || internalProgress;
   const uiLocked = useSharedValue(false);
   const gateRef = React.useRef(createSwipeCallbackGate());
   const latestCallbacksRef = React.useRef({ onPrevious, onNext });
@@ -170,8 +199,8 @@ export const SwipeableArtwork = ({
   );
 
   const panGesture = React.useMemo(
-    () =>
-      Gesture.Pan()
+    () => {
+      const pan = Gesture.Pan()
         .activeOffsetX([-12, 12])
         .failOffsetY([-18, 18])
         .onBegin(() => {
@@ -184,10 +213,10 @@ export const SwipeableArtwork = ({
 
           dragX.value = clampArtworkDrag(
             event.translationX,
-            size,
+            size + gap,
             canGoPrevious,
             canGoNext
-          );
+          ) / (size + gap);
         })
         .onEnd((event) => {
           if (uiLocked.value) {
@@ -211,7 +240,7 @@ export const SwipeableArtwork = ({
 
           uiLocked.value = true;
           dragX.value = withTiming(
-            direction === 'previous' ? size + gap : -(size + gap),
+            direction === 'previous' ? 1 : -1,
             {
               duration: 160,
             },
@@ -229,14 +258,11 @@ export const SwipeableArtwork = ({
           if (!uiLocked.value) {
             dragX.value = withTiming(0, { duration: 180 });
           }
-        }),
-    [canGoNext, canGoPrevious, dragX, gap, runSwipeCallback, size, uiLocked]
-  );
-
-  const restingOffset = (viewportWidth - size) / 2 - (size + gap);
-  const trackStyle = useAnimatedStyle(
-    () => ({ transform: [{ translateX: restingOffset + dragX.value }] }),
-    [restingOffset]
+        });
+      if (scrollGesture) pan.blocksExternalGesture(scrollGesture);
+      return pan;
+    },
+    [canGoNext, canGoPrevious, dragX, gap, runSwipeCallback, scrollGesture, size, uiLocked]
   );
 
   return (
@@ -248,7 +274,6 @@ export const SwipeableArtwork = ({
         {
           width: viewportWidth,
           height: size,
-          borderRadius: Math.max(16, Math.min(24, size * 0.07)),
         },
         style,
       ]}
@@ -256,33 +281,45 @@ export const SwipeableArtwork = ({
     >
       <GestureDetector gesture={panGesture}>
         <Animated.View
+          collapsable={false}
           style={[
             styles.track,
             {
-              width: size * 3 + gap * 2,
+              width: viewportWidth,
               height: size,
             },
-            trackStyle,
           ]}
           testID={`${testID}-track`}
         >
           <ArtworkTile
             uri={canGoPrevious ? previousArtworkUri : null}
             size={size}
-            gapAfter={gap}
+            offset={-1}
+            viewportWidth={viewportWidth}
+            gap={gap}
+            progress={dragX}
+            available={canGoPrevious}
             fallbackSource={canGoPrevious ? previousFallbackSource : undefined}
             testID={`${testID}-previous`}
           />
           <ArtworkTile
             uri={artworkUri}
             size={size}
-            gapAfter={gap}
+            offset={0}
+            viewportWidth={viewportWidth}
+            gap={gap}
+            progress={dragX}
             fallbackSource={fallbackSource}
             testID={`${testID}-current`}
           />
           <ArtworkTile
             uri={canGoNext ? nextArtworkUri : null}
             size={size}
+            offset={1}
+            viewportWidth={viewportWidth}
+            gap={gap}
+            progress={dragX}
+            available={canGoNext}
             fallbackSource={canGoNext ? nextFallbackSource : undefined}
             testID={`${testID}-next`}
           />
@@ -304,13 +341,14 @@ export const SwipeableArtwork = ({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
     overflow: 'hidden',
   },
   track: {
-    flexDirection: 'row',
+    position: 'relative',
   },
   tile: {
+    position: 'absolute',
+    top: 0,
     overflow: 'hidden',
   },
   image: {

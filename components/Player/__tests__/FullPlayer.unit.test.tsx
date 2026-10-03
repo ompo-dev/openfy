@@ -63,8 +63,11 @@ jest.mock('react-native-gesture-handler', () => {
     };
     Object.assign(gesture, {
       activateAfterLongPress: link('activateAfterLongPress'),
+      activeOffsetY: link('activeOffsetY'),
+      blocksExternalGesture: link('blocksExternalGesture'),
       enabled: link('enabled'),
       maxDuration: link('maxDuration'),
+      maxDistance: link('maxDistance'),
       onEnd: link('onEnd'),
       onFinalize: link('onFinalize'),
       onStart: link('onStart'),
@@ -76,6 +79,7 @@ jest.mock('react-native-gesture-handler', () => {
   };
   return {
     Gesture: {
+      Native: jest.fn(createGesture),
       Pan: jest.fn(createGesture),
       Race: jest.fn((...gestures: unknown[]) => ({ gestures })),
       Tap: jest.fn(createGesture),
@@ -251,11 +255,9 @@ describe('FullPlayer artist row and YouTube source', () => {
   it('keeps all artist links in one marquee and opens each artist', async () => {
     const screen = await mountPlayer({ youtubeVideoId: 'aaaaaaaaaaa' });
     expect(screen.getAllByTestId('player-artists')).toHaveLength(1);
-    expect(
-      screen.getByTestId('player-artists-measure-text', {
-        includeHiddenElements: true,
-      }).props.children
-    ).toBe('First Artist · Second Artist · Third Artist');
+    expect(screen.getByTestId('player-artists-measure-content', {
+      includeHiddenElements: true,
+    })).toBeTruthy();
     for (const artist of sampleTrack.artists) {
       expect(screen.getByLabelText(`Abrir artista ${artist.name}`)).toBeTruthy();
     }
@@ -328,16 +330,22 @@ describe('FullPlayer artist row and YouTube source', () => {
         ],
       },
     } as any);
-    await render(<FullPlayer visible onClose={jest.fn()} />);
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
     const pan = (Gesture.Pan as jest.Mock).mock.results.at(-1)?.value as Record<string, any>;
 
-    expect(pan.activateAfterLongPressValue).toBe(250);
+    expect(pan.activeOffsetYValue).toEqual([-8, 8]);
+    expect(pan.blocksExternalGestureValue).toBe(
+      (Gesture.Native as jest.Mock).mock.results.at(-1)?.value
+    );
     expect(pan.enabledValue).toBe(true);
     expect(pan.shouldCancelWhenOutsideValue).toBe(false);
     await act(async () => {
       pan.onStartValue();
-      pan.onUpdateValue({ translationY: -28 });
-      pan.onUpdateValue({ translationY: 28 });
+      pan.onUpdateValue({ translationY: -21 });
+    });
+    expect(screen.getByTestId('player-lyric-scrub-stack')).toBeTruthy();
+    await act(async () => {
+      pan.onUpdateValue({ translationY: 21 });
       pan.onFinalizeValue();
     });
 
@@ -345,6 +353,7 @@ describe('FullPlayer artist row and YouTube source', () => {
       20000,
       0,
     ]);
+    expect(screen.queryByTestId('player-lyric-scrub-stack')).toBeNull();
   });
 
   it('opens the full lyrics on a short tap of the preview', async () => {
@@ -483,11 +492,9 @@ describe('FullPlayer artist row and YouTube source', () => {
     const screen = await mountPlayer({ youtubeVideoId: 'aaaaaaaaaaa' });
     await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
     expect(screen.getAllByTestId('player-artists')).toHaveLength(1);
-    expect(
-      screen.getByTestId('player-artists-measure-text', {
-        includeHiddenElements: true,
-      }).props.children
-    ).toBe('First Artist · Second Artist · Third Artist');
+    expect(screen.getByTestId('player-artists-measure-content', {
+      includeHiddenElements: true,
+    })).toBeTruthy();
   });
 
   it('keeps synced lyrics visible across playback updates on a bounded native list', async () => {

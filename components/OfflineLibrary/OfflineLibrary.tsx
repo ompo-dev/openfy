@@ -61,7 +61,11 @@ export const OfflineLibrary = () => {
   const isMountedRef = React.useRef(true);
   const libraryLoadRef = React.useRef<Promise<void> | null>(null);
   const metadataRepairRef = React.useRef(false);
-  const { playWithQueue, currentTrack, playerState } = usePlayer();
+  const { playWithQueue, currentTrack, isPlaying: playerIsPlaying } = usePlayer((state) => ({
+    playWithQueue: state.playWithQueue,
+    currentTrack: state.currentTrack,
+    isPlaying: state.playerState.isPlaying,
+  }));
   const {
     cancelDownload,
     clearCompletedDownloads,
@@ -263,7 +267,7 @@ export const OfflineLibrary = () => {
 
   const renderTrack = ({ item, index }: { item: LibraryTrack; index: number }) => {
     const isCurrentTrack = currentTrack?.spotifyId === item.spotifyId;
-    const isPlaying = isCurrentTrack && playerState.isPlaying;
+    const isPlaying = isCurrentTrack && playerIsPlaying;
     const download = downloadsById.get(item.spotifyId);
     const isDownloading =
       download?.status === 'queued' ||

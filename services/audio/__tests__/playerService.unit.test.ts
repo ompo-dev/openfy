@@ -34,6 +34,7 @@ import {
   loadAndPlay,
   beginTrackChange,
   play,
+  seekTo,
   preloadAudio,
   recordAudioDiagnostic,
   releasePreloadedAudio,
@@ -52,6 +53,7 @@ const createPlayer = () => ({
   },
   volume: 1,
   play: jest.fn(),
+  seekTo: jest.fn().mockResolvedValue(undefined),
   pause: jest.fn(),
   addListener: jest.fn(),
   remove: jest.fn(),
@@ -66,6 +68,39 @@ const flushMicrotasks = async () => {
 };
 
 describe('playerService fades', () => {
+  it('applies the last lyric scrub target after an in-flight seek completes', async () => {
+    const player = createPlayer();
+    let finishFirst!: () => void;
+    player.seekTo.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishFirst = resolve;
+    }));
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+    await loadAndPlay('file:///current.m4a');
+    const first = seekTo(10_000);
+    const middle = seekTo(20_000);
+    const last = seekTo(30_000);
+    expect(player.seekTo.mock.calls).toEqual([[10]]);
+    finishFirst();
+    await Promise.all([first, middle, last]);
+    expect(player.seekTo.mock.calls).toEqual([[10], [30]]);
+  });
+
+  it('does not apply a queued lyric seek to a replacement track', async () => {
+    const player = createPlayer();
+    let finishFirst!: () => void;
+    player.seekTo.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishFirst = resolve;
+    }));
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+    await loadAndPlay('file:///current.m4a');
+    const first = seekTo(10_000);
+    void seekTo(30_000);
+    beginTrackChange();
+    finishFirst();
+    await first;
+    expect(player.seekTo.mock.calls).toEqual([[10]]);
+  });
+
   it('waits for local container repair before creating or preloading a player', async () => {
     (Platform as { OS: string }).OS = 'ios';
     const uri = 'file:///downloaded.m4a';

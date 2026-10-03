@@ -51,13 +51,13 @@ export const PlayerWidgetSync = () => {
   const positionRef = React.useRef(playerState.positionMs);
   positionRef.current = playerState.positionMs;
 
-  const lyricTimeline = JSON.stringify(
+  const lyricTimeline = React.useMemo(() => JSON.stringify(
     (lyricsData?.segments || []).map((line) => ({
       text: line.text,
       startTimeMs: line.startTimeMs,
       endTimeMs: line.endTimeMs,
     }))
-  );
+  ), [lyricsData?.segments]);
   const lyricLines = React.useMemo(
     () => getCurrentLyricLines([], lyricsData?.plainLyrics, 0),
     [lyricsData?.plainLyrics]
@@ -77,7 +77,7 @@ export const PlayerWidgetSync = () => {
     : null;
   const snapshotRef = React.useRef(snapshot);
   snapshotRef.current = snapshot;
-  const signature = JSON.stringify({
+  const signature = React.useMemo(() => JSON.stringify({
     id: currentTrack?.spotifyId,
     title: currentTrack?.title,
     artists: currentTrack?.artistName,
@@ -86,7 +86,7 @@ export const PlayerWidgetSync = () => {
     isPlaying: playerState.isPlaying,
     lyricTimeline,
     lyricLines,
-  });
+  }), [currentTrack, durationMs, playerState.isPlaying, lyricTimeline, lyricLines]);
 
   React.useEffect(() => {
     if (Platform.OS !== 'ios') return;

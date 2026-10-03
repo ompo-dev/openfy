@@ -12,7 +12,7 @@ import {
   getYouTubeMusicArtistProfile,
 } from '@api';
 import { CollectionDetail } from '@components';
-import { usePlayer } from '@context';
+import { usePlayer, type PlayerTrack } from '@context';
 import { ArtistModel, LibraryItemModel, TrackModel } from '@models';
 import { Shapes, Sizes } from '@config';
 import { useDetailNavigation } from '@hooks';
@@ -65,7 +65,7 @@ const toHistoryTrackModel = (
 });
 
 const toCurrentTrackModel = (
-  track: NonNullable<ReturnType<typeof usePlayer>['currentTrack']>
+  track: PlayerTrack
 ): TrackModel => ({
   id: track.spotifyId,
   title: track.title,
@@ -175,7 +175,7 @@ const buildLocalArtistProfile = (
 
 export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
   const { openDetail } = useDetailNavigation();
-  const { currentTrack } = usePlayer();
+  const { currentTrack } = usePlayer((state) => ({ currentTrack: state.currentTrack }));
   const [artist, setArtist] = React.useState<ArtistModel | null>(null);
   const [topTracks, setTopTracks] = React.useState<TrackModel[]>([]);
   const [participationTracks, setParticipationTracks] = React.useState<TrackModel[]>([]);

@@ -9,6 +9,7 @@ import * as React from 'react';
 import {
   ActionSheetIOS,
   ActivityIndicator,
+  Animated,
   Alert,
   FlatList,
   KeyboardAvoidingView,
@@ -24,7 +25,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
+import { useSharedValue } from 'react-native-reanimated';
 import {
   Gesture,
   GestureDetector,
@@ -67,7 +68,9 @@ import { GlassSurface, LoggedPressable } from '../native';
 import { TrackPlaylistPickerModal } from '../LocalPlaylist/TrackPlaylistPickerModal';
 import { LyricSyncEditor } from './LyricSyncEditor';
 import { MarqueeText } from '../common/MarqueeText';
+import { useLyricScrubGesture } from '../common/useLyricScrubGesture';
 import { SwipeableArtwork } from './SwipeableArtwork';
+import { ArtworkBackground } from './ArtworkBackground';
 import { MiniPlayer } from './MiniPlayer';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
@@ -76,6 +79,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COVER_SIZE = Math.min(Math.max(208, SCREEN_WIDTH * 0.64), 340);
 const COVER_VIEWPORT_WIDTH = SCREEN_WIDTH;
 const COVER_GAP = 12;
+const PREVIEW_SCRUB_LINE_HEIGHT = 21;
 
 type FullPlayerProps = {
   visible: boolean;
@@ -256,6 +260,7 @@ function PlayerGlassButton({
 
 export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const insets = useSafeAreaInsets();
+  const artworkProgress = useSharedValue(0);
   const isOffline = useConnectivityStore((state) => state.status === 'offline');
   const { openDetail } = useDetailNavigation();
   const { clearCompletedDownloads, downloads, enqueueDownloads } =
@@ -307,6 +312,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [isBiographyExpanded, setIsBiographyExpanded] = React.useState(false);
   const [previewCurrentLineCount, setPreviewCurrentLineCount] = React.useState(0);
   const [scrubbedLyricTimelineIndex, setScrubbedLyricTimelineIndex] = React.useState<number | null>(null);
+  const [isPreviewScrubbing, setIsPreviewScrubbing] = React.useState(false);
+  const previewDragOffset = React.useRef(new Animated.Value(0)).current;
+  const previewScrubbingRef = React.useRef(false);
+  const playerScrollGesture = React.useMemo(() => Gesture.Native(), []);
 
   const lyricsListRef = React.useRef<FlatList>(null);
   const playerScrollRef = React.useRef<ScrollView>(null);
@@ -316,7 +325,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const manualLyricsFollowTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewGestureStartPositionRef = React.useRef(0);
   const previewLineIndicesRef = React.useRef<number[]>([]);
-  const previewGestureDidMoveRef = React.useRef(false);
   const activePreviewPositionRef = React.useRef(0);
   const lastPreviewSeekTimelineIndexRef = React.useRef<number | null>(null);
   const lyricsListDraggingRef = React.useRef(false);
@@ -455,7 +463,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   );
 
   const renderArtistPill = () => (
-    <GlassSurface glass="regular" isInteractive style={styles.lyricsTrackPill}>
+    <GlassSurface glass="regular" style={styles.lyricsTrackPill}>
       <MarqueeText
         testID="player-artists"
         text={artistLinks.map((artist) => artist.name).join(' · ')}
@@ -465,13 +473,14 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               <Text style={styles.lyricsTrackPillText} accessible={false}> · </Text>
             ) : null}
             <Pressable
+              style={styles.artistLink}
               accessibilityRole="link"
               accessibilityLabel={`Abrir artista ${artist.name}`}
               hitSlop={{ top: 14, bottom: 14, left: 5, right: 5 }}
               pressRetentionOffset={{ top: 20, bottom: 20, left: 10, right: 10 }}
               onPress={() => void handleArtistPress(artist.id, artist.name)}
             >
-              <Text style={styles.lyricsTrackPillText} accessible={false}>
+              <Text style={styles.lyricsTrackPillText} numberOfLines={1} accessible={false}>
                 {artist.name}
               </Text>
             </Pressable>
@@ -602,13 +611,16 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     draftLyricSegmentsRef.current = [];
     setSelectedLyricTarget({ kind: 'lyric', index: 0 });
     setScrubbedLyricTimelineIndex(null);
+    previewScrubbingRef.current = false;
+    setIsPreviewScrubbing(false);
+    previewDragOffset.setValue(0);
     manualLyricsFollowUntilRef.current = 0;
     lyricsListDraggingRef.current = false;
     if (manualLyricsFollowTimerRef.current) {
       clearTimeout(manualLyricsFollowTimerRef.current);
       manualLyricsFollowTimerRef.current = null;
     }
-  }, [currentTrackKey]);
+  }, [currentTrackKey, previewDragOffset]);
 
   React.useEffect(() => {
     playerScrollRef.current?.scrollTo({ y: 0, animated: false });
@@ -747,6 +759,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       clearTimeout(manualLyricsFollowTimerRef.current);
     }
     manualLyricsFollowTimerRef.current = setTimeout(() => {
+      if (previewScrubbingRef.current) return;
       manualLyricsFollowUntilRef.current = 0;
       manualLyricsFollowTimerRef.current = null;
       lyricsListDraggingRef.current = false;
@@ -806,8 +819,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     shouldScrollLyricsOnOpenRef.current = true;
     setShowLyricsFull(true);
   }, []);
-  const openLyricsViewRef = React.useRef(openLyricsView);
-  openLyricsViewRef.current = openLyricsView;
 
   const toggleLyricsView = () => {
     if (showLyricsFull) {
@@ -818,14 +829,14 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     openLyricsView();
   };
 
-  const lyricPreviewGesture = React.useMemo(() => {
-    const pan = Gesture.Pan()
-      .enabled(lyricTimelineIndices.length > 1)
-      .activateAfterLongPress(250)
-      .shouldCancelWhenOutside(false)
-      .runOnJS(true)
-      .onStart(() => {
-        previewGestureDidMoveRef.current = false;
+  const lyricPreviewGesture = useLyricScrubGesture({
+    enabled: lyricTimelineIndices.length > 1,
+    scrollGesture: playerScrollGesture,
+    onPress: openLyricsView,
+    onStart: () => {
+        previewScrubbingRef.current = true;
+        setIsPreviewScrubbing(true);
+        pauseLyricsAutoFollowRef.current();
         const scrubbedIndex = scrubbedLyricTimelineIndexRef.current;
         const scrubbedPosition = scrubbedIndex === null
           ? -1
@@ -837,40 +848,34 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
         previewGestureStartPositionRef.current = position;
         lastPreviewSeekTimelineIndexRef.current = timelineIndex ?? null;
         if (timelineIndex !== undefined) setScrubbedLyricTimelineIndex(timelineIndex);
-      })
-      .onUpdate((event) => {
-        if (Math.abs(event.translationY) > 8) {
-          if (!previewGestureDidMoveRef.current) {
-            pauseLyricsAutoFollowRef.current();
-          }
-          previewGestureDidMoveRef.current = true;
-        }
+    },
+    onDrag: (translationY) => {
         const lineIndices = previewLineIndicesRef.current;
         if (lineIndices.length < 2) return;
         const start = previewGestureStartPositionRef.current;
         const position = Math.max(0, Math.min(
           lineIndices.length - 1,
-          start + Math.round(-event.translationY / 28)
+          start + Math.round(-translationY / PREVIEW_SCRUB_LINE_HEIGHT)
         ));
+        previewDragOffset.setValue(
+          translationY + (position - start) * PREVIEW_SCRUB_LINE_HEIGHT
+        );
+        pauseLyricsAutoFollowRef.current();
         const timelineIndex = lineIndices[position];
         const line = lyricTimelineRef.current[timelineIndex];
         if (!line || lastPreviewSeekTimelineIndexRef.current === timelineIndex) return;
         lastPreviewSeekTimelineIndexRef.current = timelineIndex;
         setScrubbedLyricTimelineIndex(timelineIndex);
-        pauseLyricsAutoFollowRef.current();
         void seekToPositionRef.current(line.startTimeMs);
-      })
-      .onFinalize(() => {
-        if (previewGestureDidMoveRef.current) pauseLyricsAutoFollowRef.current();
-      });
-    const tap = Gesture.Tap()
-      .maxDuration(220)
-      .onEnd((_event, succeeded) => {
-        if (succeeded) openLyricsViewRef.current();
-      });
-
-    return Gesture.Race(pan, tap);
-  }, [lyricTimelineIndices.length]);
+    },
+    onEnd: () => {
+      if (!previewScrubbingRef.current) return;
+      previewScrubbingRef.current = false;
+      setIsPreviewScrubbing(false);
+      previewDragOffset.setValue(0);
+      pauseLyricsAutoFollowRef.current();
+    },
+  });
 
   const handleOpenYoutubeMenu = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -1000,6 +1005,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       setIsUpdatingAudio(false);
     }
   };
+
+  const handleArtworkPrevious = React.useCallback(() => {
+    if (canGoPrevious) void playQueueIndex(previousQueueIndex);
+  }, [canGoPrevious, playQueueIndex, previousQueueIndex]);
+  const handleArtworkNext = React.useCallback(() => {
+    if (canGoNext) void playQueueIndex(nextQueueIndex);
+  }, [canGoNext, nextQueueIndex, playQueueIndex]);
 
   if (!currentTrack) return null;
 
@@ -1235,16 +1247,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     await seekToPosition(startTimeMs);
   };
 
-  const handleArtworkPrevious = () => {
-    if (!canGoPrevious) return;
-    void playQueueIndex(previousQueueIndex);
-  };
-
-  const handleArtworkNext = () => {
-    if (!canGoNext) return;
-    void playQueueIndex(nextQueueIndex);
-  };
-
   return (
     <Modal
       visible={visible}
@@ -1254,15 +1256,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     >
       <GestureHandlerRootView style={styles.gestureRoot}>
         <View style={styles.container}>
-          {artworkUrl ? (
-            <Image
-              cachePolicy="memory-disk"
-              source={{ uri: artworkUrl }}
-              style={styles.backgroundCover}
-              blurRadius={28}
-              contentFit="cover"
-            />
-          ) : null}
+          <ArtworkBackground current={artworkUrl}
+            previous={getTrackArtworkUri(previousTrack)}
+            next={getTrackArtworkUri(nextTrack)} progress={artworkProgress} />
           <View style={[styles.backgroundScrim, { pointerEvents: 'none' }]} />
           {/* Grab Handle Header */}
           <View style={styles.topGrabRow}>
@@ -1465,6 +1461,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               )}
             </LyricsViewport>
           ) : (
+            <GestureDetector gesture={playerScrollGesture}>
             <ScrollView
               ref={playerScrollRef}
               testID="player-scroll-view"
@@ -1486,7 +1483,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             <View style={styles.mainPlayerSection}>
               {/* Floating Cover Art */}
               <SwipeableArtwork
-                key={currentTrackKey}
                 trackKey={currentTrackKey}
                 artworkUri={artworkUrl}
                 previousArtworkUri={getTrackArtworkUri(previousTrack)}
@@ -1494,6 +1490,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 size={COVER_SIZE}
                 viewportWidth={COVER_VIEWPORT_WIDTH}
                 gap={COVER_GAP}
+                progress={artworkProgress}
+                scrollGesture={playerScrollGesture}
                 canGoPrevious={canGoPrevious}
                 canGoNext={canGoNext}
                 onPrevious={handleArtworkPrevious}
@@ -1514,6 +1512,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
               <GestureDetector gesture={lyricPreviewGesture}>
                 <View
+                  collapsable={false}
                   accessible
                   accessibilityRole="button"
                   accessibilityLabel="Abrir letra completa"
@@ -1521,7 +1520,29 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   onAccessibilityTap={openLyricsView}
                   style={styles.lyricPreview}
                 >
-                  {lyricPreview.length ? (
+                  {isPreviewScrubbing ? (
+                    <Animated.View
+                      pointerEvents="none"
+                      testID="player-lyric-scrub-stack"
+                      style={[styles.lyricScrubStack, {
+                        transform: [{ translateY: Animated.add(previewDragOffset, -2 * PREVIEW_SCRUB_LINE_HEIGHT) }],
+                      }]}
+                    >
+                      {[-2, -1, 0, 1, 2, 3].map((offset) => {
+                        const selected = lyricTimelineIndices.indexOf(scrubbedLyricTimelineIndex ?? -1);
+                        const line = lyricTimeline[lyricTimelineIndices[selected + offset]];
+                        return (
+                          <Text
+                            key={offset}
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
+                            style={[styles.lyricScrubRow, styles.lyricPreviewText,
+                              offset === 0 && styles.lyricPreviewActive]}
+                          >{line?.text || ' '}</Text>
+                        );
+                      })}
+                    </Animated.View>
+                  ) : lyricPreview.length ? (
                     <>
                       <Text
                         testID="player-lyric-preview-current"
@@ -1698,6 +1719,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               ))}
             </View>
             </ScrollView>
+            </GestureDetector>
           )}
 
           {showLyricsFull ? (
@@ -2005,8 +2027,8 @@ const styles = StyleSheet.create({
     width: '100%',
     zIndex: 1,
   },
-  playerScroll: { flex: 1, minHeight: 0 },
-  playerScrollContent: { paddingBottom: Platform.OS === 'ios' ? 136 : 96 },
+  playerScroll: { flex: 1, minHeight: 0, marginHorizontal: -24 },
+  playerScrollContent: { paddingHorizontal: 24, paddingBottom: Platform.OS === 'ios' ? 136 : 96 },
   lyricsPlaybackBar: { paddingBottom: Platform.OS === 'ios' ? 24 : 14 },
   mainPlayerSection: {
     alignItems: 'center',
@@ -2017,12 +2039,6 @@ const styles = StyleSheet.create({
   coverContainer: {
     width: COVER_VIEWPORT_WIDTH,
     height: COVER_SIZE,
-    borderRadius: 24,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.45,
-    shadowRadius: 28,
-    elevation: 16,
     marginBottom: 18,
   },
   cover: {
@@ -2049,6 +2065,8 @@ const styles = StyleSheet.create({
   },
   trackTitleMarquee: { maxWidth: '100%' },
   lyricPreview: { alignSelf: 'stretch', height: 42, justifyContent: 'center', overflow: 'hidden', paddingHorizontal: 8, width: '100%' },
+  lyricScrubStack: { position: 'absolute', top: 0, left: 8, right: 8 },
+  lyricScrubRow: { height: PREVIEW_SCRUB_LINE_HEIGHT },
   lyricPreviewText: { color: 'rgba(255,255,255,0.58)', fontSize: 15, lineHeight: 21, textAlign: 'left' },
   lyricPreviewNext: { color: 'rgba(255,255,255,0.48)', fontSize: 13, lineHeight: 18, textAlign: 'left' },
   lyricPreviewActive: { color: '#FFFFFF', fontWeight: '700' },
@@ -2189,7 +2207,9 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '600',
+    lineHeight: 20,
   },
+  artistLink: { flexShrink: 0 },
   lyricsTrackPillMarquee: { width: '100%' },
   progressContainer: {
     width: '100%',
