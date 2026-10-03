@@ -25,7 +25,7 @@ import { formatCollectionMeta, log } from '@utils';
 import { GlassSurface, LoggedPressable, NativeIconButton } from '../native';
 import { DownloadActionIcon } from '../native/DownloadActionIcon';
 import { PlaylistMosaic } from '../PlaylistMosaic';
-import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
+import { TrackRow } from '../common/TrackRow';
 import { MarqueeText } from '../common/MarqueeText';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { findArtistIdByName, getArtistCatalogImage } from '@api';
@@ -561,84 +561,19 @@ export const CollectionDetail = ({
         rowArtists.length && onArtistPress && !disableTrackArtistLinks
       );
       return (
-        <LoggedPressable
-          accessibilityLabel={`Tocar ${item.title}`}
+        <TrackRow
+          title={item.title}
+          subtitle={item.subtitle}
+          imageURL={item.localImagePath || item.imageURL}
+          trackNumber={kind === 'album' ? index + 1 : undefined}
+          active={active}
+          playing={isPlaying}
+          downloadState={downloadState}
           onPress={() => void playTrackList(sourceTracks, index, sourceId)}
-          style={[styles.trackRow, active && isPlaying && styles.trackRowActive]}
-        >
-          {kind === 'playlist' || kind === 'artist' ? (
-            item.imageURL ? (
-              <SkeletonImage
-                cachePolicy="memory-disk"
-                priority="high"
-                source={{ uri: item.imageURL }}
-                style={styles.trackArtwork}
-              />
-            ) : (
-              <View style={[styles.trackArtwork, styles.artworkFallback]}>
-                <Ionicons name="musical-note" size={18} color="#9A9A9A" />
-              </View>
-            )
-          ) : (
-            <Text style={styles.trackNumber}>{index + 1}</Text>
-          )}
-          <View style={styles.trackCopy}>
-            <View style={styles.trackTitleRow}>
-              {active && isPlaying ? (
-                <SoundWaveIcon color="#1ED760" size={15} />
-              ) : null}
-              <Text numberOfLines={1} style={[styles.trackTitle, active && styles.trackTitleActive]}>
-                {item.title}
-              </Text>
-            </View>
-            {shouldLinkArtists ? (
-              <View style={styles.trackArtistLinks}>
-                {rowArtists.map((artist, artistIndex) => (
-                  <LoggedPressable
-                    key={`${artist.id || artist.name}-${artistIndex}`}
-                    accessibilityLabel={`Abrir artista ${artist.name}`}
-                    onPress={(event) => {
-                      event.stopPropagation();
-                      void onArtistPress?.(artist.id, artist.name);
-                    }}
-                  >
-                    <Text numberOfLines={1} style={styles.trackSubtitle}>
-                      {artist.name}
-                      {artistIndex < rowArtists.length - 1 ? ', ' : ''}
-                    </Text>
-                  </LoggedPressable>
-                ))}
-              </View>
-            ) : (
-              <Text numberOfLines={1} style={styles.trackSubtitle}>
-                {item.subtitle}
-              </Text>
-            )}
-          </View>
-          <LoggedPressable
-            accessibilityLabel={
-              downloadState === 'completed'
-                ? `${item.title} está baixada`
-                : `Baixar ${item.title}`
-            }
-            disabled={downloadState !== 'idle'}
-            onPress={(event) => {
-              event.stopPropagation();
-              handleDownloadTrack(item);
-            }}
-            style={styles.trackAction}
-          >
-            {downloadState === 'idle' ? (
-              <DownloadActionIcon size={19} color="#CACACA" />
-            ) : (
-              <Ionicons
-                name={downloadState === 'completed' ? 'checkmark-circle' : 'time-outline'}
-                size={19}
-                color={downloadState === 'completed' ? '#1ED760' : '#CACACA'}
-              />
-            )}
-          </LoggedPressable>
-        </LoggedPressable>
+          onDownload={() => handleDownloadTrack(item)}
+          artists={shouldLinkArtists ? rowArtists : undefined}
+          onArtistPress={shouldLinkArtists ? onArtistPress : undefined}
+        />
       );
     },
     [
@@ -1043,18 +978,6 @@ const styles = StyleSheet.create({
   actionPill: { alignItems: 'center', borderRadius: 999, flexDirection: 'row', minHeight: 46, paddingHorizontal: 6 },
   pillAction: { alignItems: 'center', height: 42, justifyContent: 'center', width: 43 },
   pillDivider: { backgroundColor: 'rgba(255,255,255,0.2)', height: 22, width: StyleSheet.hairlineWidth },
-  trackRow: { alignItems: 'center', flexDirection: 'row', gap: 11, minHeight: 64, paddingHorizontal: 16, paddingVertical: 8 },
-  trackRowActive: { backgroundColor: 'rgba(255,255,255,0.085)' },
-  trackArtwork: { borderRadius: 3, height: 42, width: 42 },
-  artworkFallback: { alignItems: 'center', backgroundColor: '#292929', justifyContent: 'center' },
-  trackNumber: { color: 'rgba(255,255,255,0.68)', fontFamily: 'SF-Regular', fontSize: 13, textAlign: 'center', width: 22 },
-  trackCopy: { flex: 1, gap: 3 },
-  trackTitleRow: { alignItems: 'center', flexDirection: 'row', gap: 7 },
-  trackArtistLinks: { flexDirection: 'row', flexWrap: 'wrap' },
-  trackTitle: { color: '#FFFFFF', flexShrink: 1, fontFamily: 'SF-Semibold', fontSize: 14 },
-  trackTitleActive: { color: '#1ED760' },
-  trackSubtitle: { color: 'rgba(255,255,255,0.58)', fontFamily: 'SF-Regular', fontSize: 12 },
-  trackAction: { alignItems: 'center', height: 42, justifyContent: 'center', width: 38 },
   empty: { color: 'rgba(255,255,255,0.6)', fontFamily: 'SF-Regular', padding: 32, textAlign: 'center' },
   sectionTitle: { color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 18, paddingBottom: 8, paddingHorizontal: 16 },
   extraSection: { paddingTop: 20 },

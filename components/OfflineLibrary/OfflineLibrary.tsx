@@ -32,9 +32,8 @@ import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
 import { useDetailNavigation } from '@hooks';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { LoggedPressable } from '../native';
-import { DownloadActionIcon } from '../native/DownloadActionIcon';
 import { PlaylistMosaic } from '../PlaylistMosaic';
-import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
+import { TrackRow } from '../common/TrackRow';
 import { log } from '../../utils/appLogger';
 
 const toPlayerTrack = (track: LibraryTrack) => ({
@@ -308,63 +307,16 @@ export const OfflineLibrary = () => {
     const isComplete = item.isDownloaded || download?.status === 'completed';
 
     const row = (
-      <LoggedPressable
-        style={[styles.trackItem, isPlaying && styles.trackItemActive]}
+      <TrackRow
+        title={item.title}
+        subtitle={item.artistName}
+        imageURL={item.localImagePath || item.imageURL}
+        active={isCurrentTrack}
+        playing={isPlaying}
+        downloadState={isComplete ? 'completed' : isDownloading ? 'active' : 'idle'}
         onPress={() => void handlePlay(index)}
-        accessibilityLabel={`Tocar ${item.title}`}
-      >
-        <View style={styles.trackContent}>
-          {item.localImagePath || item.imageURL ? (
-            <Image
-              cachePolicy="memory-disk"
-              source={{ uri: item.localImagePath || item.imageURL }}
-              style={styles.cover}
-            />
-          ) : (
-            <View style={[styles.cover, styles.coverFallback]}>
-              <Ionicons name="musical-note" size={22} color="#888" />
-            </View>
-          )}
-
-          <View style={styles.info}>
-            <View style={styles.titleRow}>
-              {isPlaying ? <SoundWaveIcon color="#1DB954" size={15} /> : null}
-              <Text
-                style={[styles.title, isCurrentTrack && styles.titleActive]}
-                numberOfLines={1}
-              >
-                {item.title}
-              </Text>
-            </View>
-            <Text style={styles.artist} numberOfLines={1}>
-              {item.artistName}
-            </Text>
-          </View>
-
-          <LoggedPressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              isComplete
-                ? `${item.title} está baixada`
-                : `Baixar ${item.title}`
-            }
-            disabled={isComplete || isDownloading}
-            onPress={(event) => {
-              event.stopPropagation();
-              handleDownload(item);
-            }}
-            style={styles.actionButton}
-          >
-            {isComplete ? (
-              <Ionicons name="checkmark-circle" size={21} color="#1DB954" />
-            ) : isDownloading ? (
-              <Ionicons name="time-outline" size={21} color="#B8B8B8" />
-            ) : (
-              <DownloadActionIcon size={21} color="#B8B8B8" />
-            )}
-          </LoggedPressable>
-        </View>
-      </LoggedPressable>
+        onDownload={() => handleDownload(item)}
+      />
     );
 
     return (
@@ -519,6 +471,7 @@ export const OfflineLibrary = () => {
           keyExtractor={(item) => item.spotifyId}
           contentContainerStyle={[
             styles.list,
+            styles.songList,
             visibleTracks.length === 0 && styles.listEmpty,
           ]}
           ListEmptyComponent={noResults}
@@ -574,23 +527,8 @@ const styles = StyleSheet.create({
   listEmpty: {
     flexGrow: 1,
   },
-  trackItem: {
-    borderRadius: 8,
-  },
-  trackItemActive: {
-    backgroundColor: 'rgba(255,255,255,0.085)',
-  },
-  trackContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 62,
-    paddingVertical: 9,
-    gap: 10,
-  },
-  cover: {
-    width: 44,
-    height: 44,
-    borderRadius: 4,
+  songList: {
+    paddingHorizontal: 0,
   },
   collectionCover: {
     width: 62,
@@ -602,37 +540,6 @@ const styles = StyleSheet.create({
   },
   coverFallback: {
     backgroundColor: '#282828',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  info: {
-    flex: 1,
-    gap: 3,
-  },
-  titleRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 7,
-  },
-  title: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontFamily: 'SF-Semibold',
-    fontWeight: '600',
-    flexShrink: 1,
-  },
-  titleActive: {
-    color: '#1DB954',
-  },
-  artist: {
-    color: 'rgba(255, 255, 255, 0.65)',
-    fontSize: 12,
-    fontFamily: 'SF-Regular',
-    flex: 1,
-  },
-  actionButton: {
-    width: 42,
-    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },

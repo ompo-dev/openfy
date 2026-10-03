@@ -1,6 +1,6 @@
 import * as React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import { ActionSheetIOS, Alert, Linking, Platform } from 'react-native';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
+import { ActionSheetIOS, Alert, Linking, Platform, StyleSheet } from 'react-native';
 import { Gesture } from 'react-native-gesture-handler';
 import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
 import { findArtistIdByName } from '@api';
@@ -118,6 +118,10 @@ jest.mock('../../native', () => {
   return { GlassSurface: View, LoggedPressable: Pressable };
 });
 jest.mock('../LyricSyncEditor', () => ({ LyricSyncEditor: () => null }));
+jest.mock('@expo/ui/swift-ui', () => {
+  const { View, Text } = require('react-native');
+  return { Host: View, VStack: View, Text };
+});
 jest.mock('@react-native-masked-view/masked-view', () => {
   return require('react-native').View;
 });
@@ -495,6 +499,64 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(screen.getByTestId('player-artists-measure-content', {
       includeHiddenElements: true,
     })).toBeTruthy();
+  });
+
+  it('keeps one media area and places artist details after the controls in both modes', async () => {
+    const screen = await mountPlayer();
+    const mediaStyle = StyleSheet.flatten(screen.getByTestId('player-media-section').props.style);
+    const verifyOrder = () => {
+      const scroll = screen.getByTestId('player-scroll-view');
+      expect(within(scroll).getByTestId('player-controls-row')).toBeTruthy();
+      expect(within(scroll).getByTestId('player-artist-details')).toBeTruthy();
+      const tree = JSON.stringify(screen.toJSON());
+      expect(tree.indexOf('player-controls-row')).toBeLessThan(tree.indexOf('player-artist-details'));
+      expect(screen.getAllByTestId('player-controls-row')).toHaveLength(1);
+      expect(StyleSheet.flatten(screen.getByTestId('player-media-section').props.style).height).toBe(mediaStyle.height);
+    };
+    verifyOrder();
+    await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
+    verifyOrder();
+    expect(screen.getByText('Créditos')).toBeTruthy();
+    const pillStyle = StyleSheet.flatten(screen.getByTestId('player-artists-pill').props.style);
+    const artworkStyle = StyleSheet.flatten(screen.getByLabelText('Fechar letras sincronizadas').props.style);
+    expect(pillStyle.paddingHorizontal).toBeGreaterThan(artworkStyle.left + artworkStyle.width);
+    expect(artworkStyle.position).toBe('absolute');
+    expect(pillStyle.paddingLeft).toBeUndefined();
+    expect(pillStyle.paddingRight).toBeUndefined();
+    await fireEvent.press(screen.getByLabelText('Fechar letras sincronizadas'));
+    verifyOrder();
+  });
+
+  it('unblurs inactive lyrics while scrolling and restores the blur after idle', async () => {
+    jest.useFakeTimers();
+    try {
+      jest.mocked(usePlayer).mockReturnValue({
+        ...makePlayer(),
+        playerState: { positionMs: 1000, durationMs: 20000, isPlaying: true },
+        lyricsData: {
+          segments: [
+            { index: 0, startTimeMs: 0, endTimeMs: 10000, text: 'Current line' },
+            { index: 1, startTimeMs: 10000, endTimeMs: 20000, text: 'Next line' },
+          ],
+        },
+      } as any);
+      const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+      await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
+      const blurRadii = () => ['Current line', 'Next line'].map((text) =>
+        screen.getByText(text).props.modifiers.find((modifier: { $type: string }) => modifier.$type === 'blur').radius
+      );
+      expect(blurRadii()).toEqual([0, 3]);
+      await fireEvent(screen.getByTestId('player-synced-lyrics'), 'scrollBeginDrag');
+      expect(blurRadii()).toEqual([0, 0]);
+      await fireEvent(screen.getByTestId('player-synced-lyrics'), 'scrollEndDrag', {
+        nativeEvent: { velocity: { y: 0 } },
+      });
+      await act(async () => { jest.advanceTimersByTime(2501); });
+      expect(blurRadii()).toEqual([0, 3]);
+      await screen.unmount();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('keeps synced lyrics visible across playback updates on a bounded native list', async () => {
