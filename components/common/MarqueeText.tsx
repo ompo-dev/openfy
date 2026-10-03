@@ -29,6 +29,7 @@ interface MarqueeTextProps {
   text: string;
   testID?: string;
   children?: React.ReactNode;
+  interactiveContent?: React.ReactNode;
   style?: StyleProp<TextStyle>;
   containerStyle?: StyleProp<ViewStyle>;
   speed?: number; // pixels per second
@@ -45,6 +46,7 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
   text,
   testID,
   children,
+  interactiveContent,
   style,
   containerStyle,
   speed = 22,
@@ -152,17 +154,23 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
         width: isOverflowing ? measuredTextWidth : '100%',
       }}
     >
-      <Text
-        testID={testID ? `${testID}-text` : undefined}
-        numberOfLines={1}
-        style={[
-          styles.text,
-          style,
-          !isOverflowing && { textAlign: isCenter ? 'center' : 'left' },
-        ]}
-      >
-        {children ?? text}
-      </Text>
+      {interactiveContent ? (
+        <View style={styles.interactiveContent}>
+          {interactiveContent}
+        </View>
+      ) : (
+        <Text
+          testID={testID ? `${testID}-text` : undefined}
+          numberOfLines={1}
+          style={[
+            styles.text,
+            style,
+            !isOverflowing && { textAlign: isCenter ? 'center' : 'left' },
+          ]}
+        >
+          {children ?? text}
+        </Text>
+      )}
     </Animated.View>
   );
 
@@ -247,4 +255,5 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   nativeMask: { alignSelf: 'stretch' },
+  interactiveContent: { alignItems: 'center', flexDirection: 'row' },
 });

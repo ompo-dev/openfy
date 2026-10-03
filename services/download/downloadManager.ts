@@ -1400,7 +1400,7 @@ const downloadTrackInternal = async (
     }
 
     try {
-      const repair = await repairLocalAudioFile(localAudioPath);
+      const repair = await repairLocalAudioFile(localAudioPath, { force: true });
       recordDownloadDiagnostic(track.spotifyId, 'audio.container.normalized', repair || { available: false });
     } catch (error) {
       recordDownloadDiagnostic(track.spotifyId, 'audio.container.repair_deferred', { error: String(error) });

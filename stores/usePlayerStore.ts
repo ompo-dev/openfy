@@ -58,6 +58,7 @@ import { getCachedAppSettings } from '../services/settings/appSettings';
 import { log } from '../utils/appLogger';
 import { useConnectivityStore } from './useConnectivityStore';
 import { showOfflineActionMessage } from '../services/network/offlineFeedback';
+import { prefetchTrackArtistData } from '../services/library/artistProfilePrefetch';
 
 export type PlayerTrack = TrackCatalogMetadata & {
   spotifyId: string;
@@ -110,7 +111,7 @@ export interface PlayerStoreState {
     options?: { shuffle?: boolean }
   ) => Promise<void>;
   playDownloadedTrack: (track: DownloadedTrack) => Promise<void>;
-  togglePlayPause: () => Promise<void>;
+  togglePlayPause: (source?: string) => Promise<void>;
   seekToPosition: (ms: number) => Promise<void>;
   playQueueIndex: (index: number) => Promise<void>;
   playNext: () => Promise<void>;
@@ -657,6 +658,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           }
         : {}),
     });
+    prefetchTrackArtistData(track);
     // 2. CONCURRENT AUDIO STREAM RESOLUTION & PERSISTENT CACHE
     const resolveAudioPromise = (async (): Promise<AudioSourceInput | null> => {
       const directSavedSource = await getSavedAudioSource(track);
@@ -961,7 +963,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           ...getLockScreenArtworkMetadata(track),
         },
         0,
-        track
+        track,
+        { trackChangeAlreadyBegun: true }
       );
     } catch (error) {
       finishTransition({ ok: false, stage: 'native-load', error: String(error) });
@@ -1088,7 +1091,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     await get().playTrack(playerTrack);
   },
 
-  togglePlayPause: async () => {
+  togglePlayPause: async (source = 'player-control') => {
     if (get().isLoadingAudio) return;
     const { currentTrack, playTrack } = get();
 
@@ -1120,7 +1123,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     }
 
     if (realState.isPlaying) {
-      await pause();
+      await pause(`toggle:${source}`);
       // Sync Zustand state immediately so UI reflects change
       set((s) => ({ playerState: { ...s.playerState, isPlaying: false } }));
     } else {

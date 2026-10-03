@@ -2,6 +2,7 @@ import * as React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { ActionSheetIOS, Alert, Linking, Platform } from 'react-native';
 import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
+import { findArtistIdByName } from '@api';
 import {
   deleteDownloadedTrack,
   getCatalogMapping,
@@ -224,17 +225,14 @@ describe('FullPlayer artist row and YouTube source', () => {
   it('keeps all artist links in one marquee and opens each artist', async () => {
     const screen = await mountPlayer({ youtubeVideoId: 'aaaaaaaaaaa' });
     expect(screen.getAllByTestId('player-artists')).toHaveLength(1);
-    expect(screen.getByTestId('player-artists-text').props.numberOfLines).toBe(
-      1
-    );
     expect(
       screen.getByTestId('player-artists-measure-text', {
         includeHiddenElements: true,
       }).props.children
     ).toBe('First Artist · Second Artist · Third Artist');
-    expect(
-      screen.getByText('First Artist · Second Artist · Third Artist')
-    ).toBeTruthy();
+    for (const artist of sampleTrack.artists) {
+      expect(screen.getByLabelText(`Abrir artista ${artist.name}`)).toBeTruthy();
+    }
     for (const artist of sampleTrack.artists) {
       await fireEvent.press(
         screen.getByLabelText(`Abrir artista ${artist.name}`)
@@ -261,30 +259,104 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(screen.getByText('A song')).toBeTruthy();
   });
 
-  it('shows the next inline lyric only when both lines fit on one line', async () => {
+  it('keeps a fixed lyric preview height and truncates the next line to one line', async () => {
     jest.mocked(usePlayer).mockReturnValue({
       ...makePlayer(),
       lyricsData: {
         segments: [
           { index: 0, startTimeMs: 0, endTimeMs: 10000, text: 'Current short line' },
-          { index: 1, startTimeMs: 10000, endTimeMs: 20000, text: 'Next short line' },
+          { index: 1, startTimeMs: 10000, endTimeMs: 20000, text: 'A very long next lyric that must be ellipsized rather than changing the preview height' },
         ],
       },
     } as any);
     const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
     const currentLine = screen.getByTestId('player-lyric-preview-current');
-    const nextLineMeasure = screen.getByTestId('player-lyric-preview-next-measure');
 
     expect(screen.queryByTestId('player-lyric-preview-next')).toBeNull();
+    expect(screen.getByTestId('player-lyric-preview').props.style).toMatchObject({ height: 42 });
     await fireEvent(currentLine, 'textLayout', {
       nativeEvent: { lines: [{ text: 'Current short line' }] },
     });
-    await fireEvent(nextLineMeasure, 'textLayout', {
-      nativeEvent: { lines: [{ text: 'Next short line' }] },
+    expect(screen.getByTestId('player-lyric-preview-next').props).toMatchObject({
+      numberOfLines: 1,
+      ellipsizeMode: 'tail',
     });
-    expect(screen.getByTestId('player-lyric-preview-next')).toBeTruthy();
-    await fireEvent.press(screen.getByLabelText('Abrir letra completa'));
+    await fireEvent(
+      screen.getByLabelText('Abrir letra completa'),
+      'accessibilityTap'
+    );
     expect(screen.getByTestId('player-synced-lyrics')).toBeTruthy();
+  });
+
+  it('captures a drag on the lyric preview and seeks through the song', async () => {
+    const seekToPosition = jest.fn().mockResolvedValue(undefined);
+    jest.mocked(usePlayer).mockReturnValue({
+      ...makePlayer(),
+      seekToPosition,
+      lyricsData: {
+        segments: [
+          { index: 0, startTimeMs: 0, endTimeMs: 10000, text: 'First lyric' },
+          { index: 1, startTimeMs: 10000, endTimeMs: 20000, text: 'Second lyric' },
+          { index: 2, startTimeMs: 20000, endTimeMs: 30000, text: 'Third lyric' },
+        ],
+      },
+    } as any);
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+    const preview = screen.getByLabelText('Abrir letra completa');
+    const gesture = { dx: 0, dy: 0, vx: 0, vy: 0, moveX: 0, moveY: 0, x0: 0, y0: 0 };
+    const startTouchHistory = {
+      indexOfSingleActiveTouch: 0,
+      mostRecentTimeStamp: 1,
+      numberActiveTouches: 1,
+      touchBank: [{
+        touchActive: true,
+        currentTimeStamp: 1,
+        currentPageX: 0,
+        currentPageY: 100,
+        previousPageX: 0,
+        previousPageY: 100,
+      }],
+    };
+
+    expect(preview.props.onStartShouldSetResponderCapture({
+      nativeEvent: { touches: [{}] },
+      touchHistory: startTouchHistory,
+    })).toBe(true);
+    await act(async () => {
+      preview.props.onResponderGrant({ touchHistory: startTouchHistory }, gesture);
+      preview.props.onResponderMove({
+        touchHistory: {
+          ...startTouchHistory,
+          mostRecentTimeStamp: 2,
+          touchBank: [{
+            ...startTouchHistory.touchBank[0],
+            currentTimeStamp: 2,
+            currentPageY: 64,
+          }],
+        },
+      }, { ...gesture, dy: -36 });
+    });
+
+    expect(seekToPosition).toHaveBeenCalledWith(10000);
+  });
+
+  it('shows two upcoming timed lyrics as inactive before the first line starts', async () => {
+    jest.mocked(usePlayer).mockReturnValue({
+      ...makePlayer(),
+      lyricsData: {
+        segments: [
+          { index: 0, startTimeMs: 1000, endTimeMs: 10000, text: 'First upcoming line' },
+          { index: 1, startTimeMs: 10000, endTimeMs: 20000, text: 'Second upcoming line' },
+        ],
+      },
+    } as any);
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+
+    expect(screen.getByTestId('player-lyric-preview-current').props.children).toBe('First upcoming line');
+    expect(screen.getByTestId('player-lyric-preview-next').props.children).toBe('Second upcoming line');
+    expect(screen.getByTestId('player-lyric-preview-current').props.style).not.toContainEqual(
+      expect.objectContaining({ fontWeight: '700' })
+    );
   });
 
   it('hides the next inline lyric when the current lyric wraps', async () => {
@@ -301,11 +373,38 @@ describe('FullPlayer artist row and YouTube source', () => {
     await fireEvent(screen.getByTestId('player-lyric-preview-current'), 'textLayout', {
       nativeEvent: { lines: [{ text: 'Current lyric' }, { text: 'wraps across lines' }] },
     });
-    await fireEvent(screen.getByTestId('player-lyric-preview-next-measure'), 'textLayout', {
-      nativeEvent: { lines: [{ text: 'Next short line' }] },
+    expect(screen.queryByTestId('player-lyric-preview-next')).toBeNull();
+  });
+
+  it('opens the canonical artist profile for downloaded tracks when a Spotify artist id is available', async () => {
+    const spotifyArtistId = '1234567890123456789012';
+    const screen = await mountPlayer({
+      localAudioPath: 'file:///music/downloaded.m4a',
+      artists: [{ id: spotifyArtistId, name: 'Ebony' }],
     });
 
-    expect(screen.queryByTestId('player-lyric-preview-next')).toBeNull();
+    await fireEvent.press(screen.getByLabelText('Abrir artista Ebony'));
+
+    expect(mockNavigate).toHaveBeenLastCalledWith(
+      `/(tabs)/library/artist/${spotifyArtistId}`,
+      { dangerouslySingular: true }
+    );
+  });
+
+  it('resolves YouTube Music artist aliases to the canonical Spotify profile', async () => {
+    const spotifyArtistId = '1234567890123456789012';
+    jest.mocked(findArtistIdByName).mockResolvedValue(spotifyArtistId);
+    const screen = await mountPlayer({
+      youtubeVideoId: 'aaaaaaaaaaa',
+      artists: [{ id: 'ytartist_name_Ebony', name: 'Ebony' }],
+    });
+
+    await fireEvent.press(screen.getByLabelText('Abrir artista Ebony'));
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenLastCalledWith(
+      `/(tabs)/library/artist/${spotifyArtistId}`,
+      { dangerouslySingular: true }
+    ));
   });
 
   it('replaces the title with a sticky mini-player after the player scrolls away', async () => {

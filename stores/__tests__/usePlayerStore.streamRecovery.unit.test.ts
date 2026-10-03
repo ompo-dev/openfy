@@ -124,7 +124,8 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       expect.any(Function),
       expect.objectContaining({ title: sampleTrack.title }),
       0,
-      sampleTrack
+      sampleTrack,
+      { trackChangeAlreadyBegun: true }
     );
     expect(resolveAudioUrl).not.toHaveBeenCalled();
   });
@@ -407,7 +408,8 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       expect.any(Function),
       expect.any(Object),
       expect.any(Number),
-      cachedTrack
+      cachedTrack,
+      { trackChangeAlreadyBegun: true }
     );
   });
 
@@ -485,7 +487,8 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       expect.any(Function),
       expect.objectContaining({ title: 'Nova' }),
       0,
-      secondTrack
+      secondTrack,
+      { trackChangeAlreadyBegun: true }
     );
   });
 });

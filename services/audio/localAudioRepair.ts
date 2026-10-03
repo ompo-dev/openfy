@@ -6,13 +6,23 @@ type RepairModule = {
 };
 
 const pending = new Map<string, Promise<LocalAudioRepairResult | null>>();
+const completed = new Map<string, LocalAudioRepairResult>();
+const MAX_COMPLETED_REPAIRS = 200;
 
 /** Safe to call after a completed download, or before opening an existing file. */
 export const repairLocalAudioFile = (
-  uri: string
+  uri: string,
+  options: { force?: boolean } = {}
 ): Promise<LocalAudioRepairResult | null> => {
   if (Platform.OS !== 'ios' || !/^file:\/\//i.test(uri)) {
     return Promise.resolve(null);
+  }
+  if (options.force) completed.delete(uri);
+  const cached = completed.get(uri);
+  if (cached) {
+    completed.delete(uri);
+    completed.set(uri, cached);
+    return Promise.resolve(cached);
   }
   const existing = pending.get(uri);
   if (existing) return existing;
@@ -30,9 +40,24 @@ export const repairLocalAudioFile = (
 
   const operation = Promise.resolve()
     .then(() => nativeModule.repairLocalAudioAsync(uri))
+    .then((result) => {
+      completed.delete(uri);
+      completed.set(uri, result);
+      while (completed.size > MAX_COMPLETED_REPAIRS) {
+        const oldest = completed.keys().next().value;
+        if (oldest === undefined) break;
+        completed.delete(oldest);
+      }
+      return result;
+    })
     .finally(() => pending.delete(uri));
   pending.set(uri, operation);
   return operation;
+};
+
+export const _clearLocalAudioRepairCacheForTests = () => {
+  completed.clear();
+  pending.clear();
 };
 
 export const prepareLocalAudioForPlayback = async (

@@ -1,5 +1,9 @@
 import { Platform } from 'react-native';
-import { prepareLocalAudioForPlayback, repairLocalAudioFile } from '../localAudioRepair';
+import {
+  _clearLocalAudioRepairCacheForTests,
+  prepareLocalAudioForPlayback,
+  repairLocalAudioFile,
+} from '../localAudioRepair';
 
 const mockRepair = jest.fn();
 jest.mock('../../../modules/openfy-local-audio', () => ({
@@ -8,7 +12,11 @@ jest.mock('../../../modules/openfy-local-audio', () => ({
 
 describe('local audio repair bridge', () => {
   const original = Platform.OS;
-  beforeEach(() => { Platform.OS = 'ios'; mockRepair.mockReset(); });
+  beforeEach(() => {
+    Platform.OS = 'ios';
+    mockRepair.mockReset();
+    _clearLocalAudioRepairCacheForTests();
+  });
   afterEach(() => { Platform.OS = original; jest.restoreAllMocks(); });
 
   it('does not send remote streams or other platforms to the iOS repairer', async () => {
@@ -34,6 +42,19 @@ describe('local audio repair bridge', () => {
     mockRepair.mockRejectedValueOnce(new Error('validation failed')).mockResolvedValue({ repaired: false });
     await expect(prepareLocalAudioForPlayback('file:///keep.m4a')).resolves.toBeNull();
     await expect(repairLocalAudioFile('file:///keep.m4a')).resolves.toMatchObject({ repaired: false });
+    expect(mockRepair).toHaveBeenCalledTimes(2);
+  });
+
+  it('reuses successful repair results and refreshes them after a redownload', async () => {
+    mockRepair.mockResolvedValue({ uri: 'file:///cached.m4a', repaired: false });
+
+    await expect(prepareLocalAudioForPlayback('file:///cached.m4a'))
+      .resolves.toMatchObject({ repaired: false });
+    await expect(prepareLocalAudioForPlayback('file:///cached.m4a'))
+      .resolves.toMatchObject({ repaired: false });
+    expect(mockRepair).toHaveBeenCalledTimes(1);
+
+    await repairLocalAudioFile('file:///cached.m4a', { force: true });
     expect(mockRepair).toHaveBeenCalledTimes(2);
   });
 

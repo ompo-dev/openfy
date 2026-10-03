@@ -6,7 +6,13 @@ import { createAsyncResourceCache } from '../../src/application/asyncResourceCac
 
 import { BASE_URL, spotifyGet } from '../config';
 
-export const getArtist = async (artistId: string): Promise<ArtistModel> => {
+const artistProfileCache = createAsyncResourceCache<ArtistModel>({
+  name: 'spotify artist profile',
+  category: 'artist',
+  maxEntries: 24,
+});
+
+const loadArtist = async (artistId: string): Promise<ArtistModel> => {
   try {
     const response = await spotifyGet<ArtistResponseType>(
       `${BASE_URL}/artists/${artistId}`
@@ -22,6 +28,14 @@ export const getArtist = async (artistId: string): Promise<ArtistModel> => {
     throw error;
   }
 };
+
+export const getArtist = (artistId: string): Promise<ArtistModel> =>
+  artistProfileCache.getOrLoad(artistId, () => loadArtist(artistId), 30 * 60_000);
+
+export const discardPrefetchedArtistProfile = (artistId: string) =>
+  artistProfileCache.delete(artistId);
+
+export const _clearArtistProfileCacheForTests = () => artistProfileCache.clear();
 
 type ArtistSearchResponse = {
   artists?: {

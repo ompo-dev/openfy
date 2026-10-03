@@ -62,10 +62,10 @@ export const mergeArtistProfileTracks = ({
   );
 
   return {
-    primaryTracks: uniqueTracks([...contextualPrimary, ...primaryTracks]),
+    primaryTracks: uniqueTracks([...primaryTracks, ...contextualPrimary]),
     participationTracks: uniqueTracks([
-      ...contextualParticipations,
       ...participationTracks,
+      ...contextualParticipations,
     ]),
   };
 };

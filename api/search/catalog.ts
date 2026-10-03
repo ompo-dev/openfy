@@ -614,6 +614,9 @@ export const getYouTubeMusicArtistProfile = (
   ARTIST_PROFILE_CACHE_MS
 );
 
+export const discardPrefetchedYouTubeMusicArtistProfile = (artistRouteId: string) =>
+  artistProfileCache.delete(artistRouteId);
+
 const ARTIST_IMAGE_CACHE_MS = 6 * 60 * 60 * 1000;
 const EMPTY_ARTIST_IMAGE_CACHE_MS = 30 * 1000;
 const artistImageRequests = createAsyncResourceCache<string>({

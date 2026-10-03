@@ -273,7 +273,8 @@ describe('queue preload window', () => {
       expect.any(Function),
       expect.any(Object),
       0,
-      tracks[1]
+      tracks[1],
+      { trackChangeAlreadyBegun: true }
     );
     expect(downloadTrack).not.toHaveBeenCalled();
   });
@@ -293,7 +294,8 @@ describe('queue preload window', () => {
       expect.any(Function),
       expect.any(Object),
       0,
-      tracks[1]
+      tracks[1],
+      { trackChangeAlreadyBegun: true }
     );
   });
 
@@ -313,7 +315,8 @@ describe('queue preload window', () => {
       expect.any(Function),
       expect.any(Object),
       0,
-      savedTrack
+      savedTrack,
+      { trackChangeAlreadyBegun: true }
     );
   });
 
@@ -344,7 +347,8 @@ describe('queue preload window', () => {
       expect.any(Function),
       expect.any(Object),
       0,
-      catalogTrack
+      catalogTrack,
+      { trackChangeAlreadyBegun: true }
     );
   });
 
@@ -380,7 +384,8 @@ describe('queue preload window', () => {
       expect.any(Function),
       expect.any(Object),
       0,
-      secondTrack
+      secondTrack,
+      { trackChangeAlreadyBegun: true }
     );
   });
 

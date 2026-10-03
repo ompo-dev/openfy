@@ -573,11 +573,14 @@ const loadAndPlayNativeYouTube = async (
   videoId: string,
   onStatusUpdate: ((state: PlayerState) => void) | undefined,
   lockScreenMetadata: LockScreenMetadata | undefined,
-  diagnosticTrack: PlaybackDiagnosticTrack | undefined
+  diagnosticTrack: PlaybackDiagnosticTrack | undefined,
+  trackChangeAlreadyBegun: boolean,
+  generation: number
 ): Promise<boolean> => {
-  const generation = loadGeneration + 1;
+  const expectedGeneration = loadGeneration + (trackChangeAlreadyBegun ? 0 : 1);
+  if (generation !== expectedGeneration) return false;
   try {
-    beginTrackChange();
+    if (!trackChangeAlreadyBegun) beginTrackChange();
     // Native playback owns MPRemoteCommandCenter and Now Playing. Release any
     // dormant Expo player so one tap cannot be delivered to both engines.
     disposeCurrentPlayer();
@@ -690,22 +693,30 @@ export const loadAndPlay = async (
   onStatusUpdate?: (state: PlayerState) => void,
   lockScreenMetadata?: LockScreenMetadata,
   fadeInDurationMs = 0,
-  diagnosticTrack?: PlaybackDiagnosticTrack
+  diagnosticTrack?: PlaybackDiagnosticTrack,
+  options: { trackChangeAlreadyBegun?: boolean } = {}
 ): Promise<boolean> => {
+  const trackChangeAlreadyBegun = options.trackChangeAlreadyBegun === true;
+  const generation = loadGeneration + (trackChangeAlreadyBegun ? 0 : 1);
   const source = toAudioSource(sourceInput);
   const uri = source.uri;
   const nativeYouTubeVideoId = parseNativeYouTubePlaybackUri(uri);
   if (nativeYouTubeVideoId) {
+    const resolvedMetadata = await resolveLockScreenMetadata(lockScreenMetadata);
+    if (
+      generation !== loadGeneration + (trackChangeAlreadyBegun ? 0 : 1)
+    ) return false;
     return loadAndPlayNativeYouTube(
       nativeYouTubeVideoId,
       onStatusUpdate,
-      await resolveLockScreenMetadata(lockScreenMetadata),
-      diagnosticTrack
+      resolvedMetadata,
+      diagnosticTrack,
+      trackChangeAlreadyBegun,
+      generation
     );
   }
-  const generation = loadGeneration + 1;
   try {
-    beginTrackChange();
+    if (!trackChangeAlreadyBegun) beginTrackChange();
 
     const callbackForThisPlayer = onStatusUpdate || null;
     await configureAudioSession(diagnosticTrack?.spotifyId);
@@ -860,18 +871,18 @@ export const play = async (): Promise<void> => {
 /**
  * Pause playback.
  */
-export const pause = async (): Promise<void> => {
+export const pause = async (source = 'unspecified'): Promise<void> => {
   if (nativeYouTubeActive) {
     await pauseNativeYouTubePlayback();
     nativeYouTubeState = { ...nativeYouTubeState, isPlaying: false };
     nativeYouTubeStatusCallback?.(nativeYouTubeState);
-    recordAudioDiagnostic('native-pause-called');
+    recordAudioDiagnostic('native-pause-called', source);
     return;
   }
   if (!playerInstance) return;
   try {
     playerInstance.pause();
-    recordAudioDiagnostic('pause-called');
+    recordAudioDiagnostic('pause-called', source);
     if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       const audioElements = document.querySelectorAll('audio');
       audioElements.forEach((el) => el.pause());

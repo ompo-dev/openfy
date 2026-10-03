@@ -1,4 +1,5 @@
 import { TrackModel } from '@models';
+import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 import { BASE_URL, spotifyGet } from '../config';
 
 type ArtistTopTracksResponse = {
@@ -12,9 +13,15 @@ type ArtistTopTracksResponse = {
   }[];
 };
 
-export const getArtistTopTracks = async (
+const artistTopTracksCache = createAsyncResourceCache<TrackModel[]>({
+  name: 'spotify artist top tracks',
+  category: 'artist',
+  maxEntries: 24,
+});
+
+const loadArtistTopTracks = async (
   artistId: string,
-  market = 'BR'
+  market: string
 ): Promise<TrackModel[]> => {
   const response = await spotifyGet<ArtistTopTracksResponse>(`${BASE_URL}/artists/${artistId}/top-tracks`, {
     params: { market },
@@ -31,3 +38,17 @@ export const getArtistTopTracks = async (
     explicit: track.explicit,
   }));
 };
+
+export const getArtistTopTracks = (
+  artistId: string,
+  market = 'BR'
+): Promise<TrackModel[]> => artistTopTracksCache.getOrLoad(
+  `${market}:${artistId}`,
+  () => loadArtistTopTracks(artistId, market),
+  15 * 60_000
+);
+
+export const discardPrefetchedArtistTopTracks = (artistId: string, market = 'BR') =>
+  artistTopTracksCache.delete(`${market}:${artistId}`);
+
+export const _clearArtistTopTracksCacheForTests = () => artistTopTracksCache.clear();

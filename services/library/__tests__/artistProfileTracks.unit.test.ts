@@ -48,6 +48,32 @@ describe('mergeArtistProfileTracks', () => {
 
     expect(result.primaryTracks).toEqual([]);
     expect(result.participationTracks).toHaveLength(1);
-    expect(result.participationTracks[0].id).toBe('yt_stream');
+    expect(result.participationTracks[0].id).toBe('spotify_track');
+  });
+
+  it('keeps catalogue order and appends only contextual tracks not in the catalogue', () => {
+    const catalogFirst = track('catalog_first', 'First', [
+      { id: 'pedro', name: 'Pedro Qualy' },
+    ]);
+    const catalogSecond = track('catalog_second', 'Second', [
+      { id: 'pedro', name: 'Pedro Qualy' },
+    ]);
+    const contextual = track('contextual', 'Contextual', [
+      { id: 'pedro', name: 'Pedro Qualy' },
+    ]);
+
+    const result = mergeArtistProfileTracks({
+      artistId: 'pedro',
+      artistName: 'Pedro Qualy',
+      contextualTracks: [contextual, catalogFirst],
+      primaryTracks: [catalogFirst, catalogSecond],
+      participationTracks: [],
+    });
+
+    expect(result.primaryTracks.map((item) => item.id)).toEqual([
+      'catalog_first',
+      'catalog_second',
+      'contextual',
+    ]);
   });
 });

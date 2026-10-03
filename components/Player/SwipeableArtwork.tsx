@@ -32,6 +32,8 @@ export type SwipeableArtworkProps = {
   previousArtworkUri?: string | null;
   nextArtworkUri?: string | null;
   size: number;
+  viewportWidth?: number;
+  gap?: number;
   canGoPrevious: boolean;
   canGoNext: boolean;
   onPrevious: ArtworkCallback;
@@ -48,6 +50,7 @@ export type SwipeableArtworkProps = {
 type ArtworkTileProps = {
   uri?: string | null;
   size: number;
+  gapAfter?: number;
   fallbackSource?: ImageSourcePropType;
   testID?: string;
 };
@@ -60,6 +63,7 @@ const normalizeArtworkSource = (
 const ArtworkTile = ({
   uri,
   size,
+  gapAfter = 0,
   fallbackSource,
   testID,
 }: ArtworkTileProps) => {
@@ -80,6 +84,7 @@ const ArtworkTile = ({
         {
           width: size,
           height: size,
+          marginRight: gapAfter,
           borderRadius: Math.max(16, Math.min(24, size * 0.07)),
         },
       ]}
@@ -114,6 +119,8 @@ export const SwipeableArtwork = ({
   previousArtworkUri,
   nextArtworkUri,
   size,
+  viewportWidth = size,
+  gap = 0,
   canGoPrevious,
   canGoNext,
   onPrevious,
@@ -165,7 +172,6 @@ export const SwipeableArtwork = ({
   const panGesture = React.useMemo(
     () =>
       Gesture.Pan()
-        .enabled(!loading)
         .activeOffsetX([-12, 12])
         .failOffsetY([-18, 18])
         .onBegin(() => {
@@ -205,7 +211,7 @@ export const SwipeableArtwork = ({
 
           uiLocked.value = true;
           dragX.value = withTiming(
-            direction === 'previous' ? size : -size,
+            direction === 'previous' ? size + gap : -(size + gap),
             {
               duration: 160,
             },
@@ -224,12 +230,14 @@ export const SwipeableArtwork = ({
             dragX.value = withTiming(0, { duration: 180 });
           }
         }),
-    [canGoNext, canGoPrevious, dragX, loading, runSwipeCallback, size, uiLocked]
+    [canGoNext, canGoPrevious, dragX, gap, runSwipeCallback, size, uiLocked]
   );
 
-  const trackStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: -size + dragX.value }],
-  }));
+  const restingOffset = (viewportWidth - size) / 2 - (size + gap);
+  const trackStyle = useAnimatedStyle(
+    () => ({ transform: [{ translateX: restingOffset + dragX.value }] }),
+    [restingOffset]
+  );
 
   return (
     <View
@@ -238,7 +246,7 @@ export const SwipeableArtwork = ({
       style={[
         styles.container,
         {
-          width: size,
+          width: viewportWidth,
           height: size,
           borderRadius: Math.max(16, Math.min(24, size * 0.07)),
         },
@@ -251,7 +259,7 @@ export const SwipeableArtwork = ({
           style={[
             styles.track,
             {
-              width: size * 3,
+              width: size * 3 + gap * 2,
               height: size,
             },
             trackStyle,
@@ -261,12 +269,14 @@ export const SwipeableArtwork = ({
           <ArtworkTile
             uri={canGoPrevious ? previousArtworkUri : null}
             size={size}
+            gapAfter={gap}
             fallbackSource={canGoPrevious ? previousFallbackSource : undefined}
             testID={`${testID}-previous`}
           />
           <ArtworkTile
             uri={artworkUri}
             size={size}
+            gapAfter={gap}
             fallbackSource={fallbackSource}
             testID={`${testID}-current`}
           />

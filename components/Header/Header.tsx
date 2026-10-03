@@ -4,7 +4,7 @@
  */
 
 import * as React from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Keyboard, StyleSheet, Text, TextInput, View } from 'react-native';
 import { type Href, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -35,6 +35,7 @@ export const Header = () => {
   const [importModalVisible, setImportModalVisible] = React.useState(false);
   const [downloadsModalVisible, setDownloadsModalVisible] = React.useState(false);
   const [createPlaylistVisible, setCreatePlaylistVisible] = React.useState(false);
+  const searchInputRef = React.useRef<TextInput>(null);
   const { activeDownloadsCount } = useDownloads();
   const {
     librarySearchQuery,
@@ -49,6 +50,10 @@ export const Header = () => {
     Boolean(librarySearchQuery)
   );
   const searchCopy = libraryCopy[libraryView];
+  const handleSearchSubmit = React.useCallback(() => {
+    Keyboard.dismiss();
+    searchInputRef.current?.blur();
+  }, []);
 
   return (
     <View style={[styles.container, { paddingTop: statusBarOffset + 8 }]}>
@@ -141,11 +146,13 @@ export const Header = () => {
 
       {searchVisible ? (
         <TextInput
+          ref={searchInputRef}
           autoFocus
           value={librarySearchQuery}
           onChangeText={setLibrarySearchQuery}
           accessibilityLabel={`Pesquisar ${searchCopy}`}
           returnKeyType="search"
+          onSubmitEditing={handleSearchSubmit}
           placeholder={`Pesquisar ${searchCopy}`}
           placeholderTextColor="#777"
           style={styles.searchInput}
