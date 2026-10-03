@@ -13,6 +13,7 @@ import {
 import { useDetailNavigation } from '@hooks';
 import { AlbumModel, ArtistModel } from '@models';
 import { getDisplayTime } from '@utils';
+import { prefetchArtistData } from '@services';
 
 export type AlbumScreenPropsType = {
   albumId: string;
@@ -77,6 +78,7 @@ const YouTubeMusicAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
     void getYouTubeMusicAlbum(albumId)
       .then((albumData) => {
         if (active) setAlbum(albumData);
+        prefetchArtistData(albumData.artists);
       })
       .catch(() => {
         if (active) {
@@ -118,6 +120,7 @@ const YouTubeMusicAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
       totalDurationMs={duration}
       tracks={album.tracks}
       artists={album.artists}
+      disableTrackArtistLinks
       onArtistPress={(artistId) => openDetail('artist', artistId)}
       onRefresh={refresh}
       refreshing={isRefreshing}
@@ -149,6 +152,7 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
         void Promise.all(albumData.artists.map(({ id }) => getArtist(id)))
           .then((artistData) => {
             if (active) setArtists(artistData);
+            prefetchArtistData(artistData.map(({ id, name }) => ({ id, name })));
           })
           .catch(() => {});
       })
@@ -201,6 +205,7 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
       totalDurationMs={album.duration}
       tracks={album.tracks.items}
       artists={artists.map(({ id, name, imageURL }) => ({ id, name, imageURL }))}
+      disableTrackArtistLinks
       onArtistPress={handleArtistPress}
       onRefresh={refresh}
       refreshing={isRefreshing}

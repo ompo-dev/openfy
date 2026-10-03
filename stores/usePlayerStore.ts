@@ -58,7 +58,10 @@ import { getCachedAppSettings } from '../services/settings/appSettings';
 import { log } from '../utils/appLogger';
 import { useConnectivityStore } from './useConnectivityStore';
 import { showOfflineActionMessage } from '../services/network/offlineFeedback';
-import { prefetchTrackArtistData } from '../services/library/artistProfilePrefetch';
+import {
+  prefetchArtistData,
+  prefetchTrackArtistData,
+} from '../services/library/artistProfilePrefetch';
 
 export type PlayerTrack = TrackCatalogMetadata & {
   spotifyId: string;
@@ -568,6 +571,12 @@ const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
       trackId: track.spotifyId,
       bufferRatio: ratio,
     });
+    prefetchArtistData(track.artists?.length
+      ? track.artists
+      : track.artistName
+          .split(/\s*(?:,|&| feat\.?)\s*/i)
+          .filter(Boolean)
+          .map((name) => ({ name })));
     warmTrackLyrics(track, direction);
     warmTrackAudio(
       track,

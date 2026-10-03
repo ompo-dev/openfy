@@ -753,6 +753,12 @@ export const loadAndPlay = async (
       resolveLockScreenMetadata(lockScreenMetadata),
     ]);
     if (generation !== loadGeneration) return false;
+    // The repaired container is the only reliable duration for a downloaded
+    // file. Reconcile it before configuring the player so a duplicated source
+    // timeline cannot leak into the native duration or the stop boundary.
+    const playbackDurationMs = repair?.durationMs
+      ? reconcilePlaybackDurationMs(repair.durationMs, diagnosticTrack?.duration_ms)
+      : diagnosticTrack?.duration_ms;
     const sourceDescription = describeSource(uri);
     currentSourceKind = sourceDescription.sourceKind;
     currentSourceHost = sourceDescription.sourceHost;
@@ -784,10 +790,10 @@ export const loadAndPlay = async (
     }
     if (generation !== loadGeneration) return false;
     preloadedSources.delete(uri);
-    const playerOptions = getPlayerOptions(diagnosticTrack?.duration_ms);
+    const playerOptions = getPlayerOptions(playbackDurationMs);
     log.player('active track buffer target', {
       trackId: diagnosticTrack?.spotifyId,
-      durationMs: diagnosticTrack?.duration_ms,
+      durationMs: playbackDurationMs,
       preferredForwardBufferDuration: playerOptions.preferredForwardBufferDuration,
     });
     const player = playerInstance || createAudioPlayer(playerSource as any, playerOptions);
@@ -830,7 +836,7 @@ export const loadAndPlay = async (
       const rawState = toState(status);
       const durationMs = reconcilePlaybackDurationMs(
         rawState.durationMs,
-        diagnosticTrack?.duration_ms
+        playbackDurationMs
       );
       const positionMs = clampPlaybackPositionMs(rawState.positionMs, durationMs);
       const reachedDurationLimit =

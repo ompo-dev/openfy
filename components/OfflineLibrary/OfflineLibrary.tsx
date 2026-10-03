@@ -309,7 +309,7 @@ export const OfflineLibrary = () => {
 
     const row = (
       <LoggedPressable
-        style={styles.trackItem}
+        style={[styles.trackItem, isPlaying && styles.trackItemActive]}
         onPress={() => void handlePlay(index)}
         accessibilityLabel={`Tocar ${item.title}`}
       >
@@ -575,8 +575,10 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   trackItem: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 8,
+  },
+  trackItemActive: {
+    backgroundColor: 'rgba(255,255,255,0.085)',
   },
   trackContent: {
     flexDirection: 'row',

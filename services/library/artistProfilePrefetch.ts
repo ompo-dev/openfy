@@ -33,6 +33,7 @@ const MAX_ACTIVE_ARTISTS = 5;
 const activeArtistKeys = new Set<string>();
 const activeProfiles = new Map<string, { spotifyId: string; youtubeRouteId: string }>();
 const pendingPrefetches = new Map<string, Promise<void>>();
+const backgroundPendingPrefetches = new Map<string, Promise<void>>();
 
 const normalize = (value: string) => value
   .normalize('NFKD')
@@ -146,8 +147,68 @@ export const prefetchTrackArtistData = (track: TrackArtistData): void => {
 export const _getActivePrefetchedArtistKeysForTests = () =>
   [...activeArtistKeys];
 
+/** Warm likely-to-open profiles without evicting the artists of the current track. */
+export const prefetchArtistData = (artists: ArtistRef[]): void => {
+  const seen = new Set<string>();
+  const candidates = artists
+    .map((artist) => ({ id: artist.id?.trim() || '', name: artist.name.trim() }))
+    .filter((artist) => {
+      const key = artist.id || normalize(artist.name);
+      if (!artist.name || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 16);
+  if (!candidates.length) return;
+
+  const artistApis = getArtistApis();
+  candidates.forEach((artist) => {
+    const spotifyId = /^[A-Za-z0-9]{22}$/.test(artist.id) ? artist.id : '';
+    const youtubeRouteId = artist.id.startsWith('ytartist_')
+      ? artist.id
+      : toYouTubeMusicArtistRouteId(
+          artist.id.startsWith('UC') ? artist.id : undefined,
+          artist.name
+        );
+    const cacheKey = spotifyId || youtubeRouteId;
+    if (backgroundPendingPrefetches.has(cacheKey)) return;
+
+    const request = artistApis
+      .then(async (apis) => {
+        const youtubeNameRoute = toYouTubeMusicArtistRouteId(undefined, artist.name);
+        await Promise.allSettled([
+          getCachedArtistImage(
+            artist.name,
+            () => apis.getArtistCatalogImage(spotifyId || youtubeRouteId, artist.name),
+            [artist.id, spotifyId, youtubeRouteId].filter(Boolean)
+          ),
+          apis.getYouTubeMusicArtistProfile(youtubeRouteId),
+          ...(youtubeNameRoute !== youtubeRouteId
+            ? [apis.getYouTubeMusicArtistProfile(youtubeNameRoute)]
+            : []),
+          ...(spotifyId
+            ? [Promise.all([
+                apis.getArtist(spotifyId),
+                apis.getArtistTopTracks(spotifyId, 'BR'),
+                apis.getArtistDiscography(spotifyId),
+              ])]
+            : []),
+        ]);
+      })
+      .catch(() => {})
+      .then(() => undefined)
+      .finally(() => {
+        if (backgroundPendingPrefetches.get(cacheKey) === request) {
+          backgroundPendingPrefetches.delete(cacheKey);
+        }
+      });
+    backgroundPendingPrefetches.set(cacheKey, request);
+  });
+};
+
 export const _clearArtistProfilePrefetchForTests = () => {
   activeArtistKeys.clear();
   activeProfiles.clear();
   pendingPrefetches.clear();
+  backgroundPendingPrefetches.clear();
 };

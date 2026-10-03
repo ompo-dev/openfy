@@ -16,7 +16,12 @@ export const reconcilePlaybackDurationMs = (
   if (!reported) return canonical;
 
   const ratio = reported / canonical;
-  return ratio >= 1.8 && ratio <= 2.2 ? canonical : reported;
+  // Some containers expose a duplicated timeline, while repaired/downloaded
+  // files can carry catalog metadata that is the duplicated value. In both
+  // directions, the shorter trustworthy timeline prevents silent tails.
+  if (ratio >= 1.8 && ratio <= 2.2) return canonical;
+  if (ratio >= 0.45 && ratio <= 0.56) return reported;
+  return reported;
 };
 
 export const clampPlaybackPositionMs = (

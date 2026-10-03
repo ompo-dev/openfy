@@ -151,6 +151,10 @@ export {
   getCachedArtistImage,
   rememberCachedArtistImage,
 } from './library/artistImageCache';
+export {
+  prefetchArtistData,
+  prefetchTrackArtistData,
+} from './library/artistProfilePrefetch';
 
 export {
   getLocalAlbumId,

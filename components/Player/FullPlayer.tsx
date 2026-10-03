@@ -515,7 +515,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           ))}
           style={styles.lyricsTrackPillText}
           containerStyle={styles.lyricsTrackPillMarquee}
-          align={withArtwork ? 'left' : 'center'}
+          align="center"
           fadeWidth={14}
           scrollMode="left"
           delay={2000}
@@ -1302,6 +1302,88 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     await seekToPosition(startTimeMs);
   };
 
+  const renderArtistDetails = () => (
+    <View style={styles.artistDetailsSection}>
+      <Text style={styles.artistDetailsHeading}>Sobre o artista</Text>
+      <LoggedPressable
+        accessibilityLabel={`Abrir perfil de ${primaryArtist?.name || 'artista principal'}`}
+        disabled={!primaryArtist}
+        onPress={() => primaryArtist && void handleArtistPress(primaryArtist.id, primaryArtist.name)}
+        style={styles.primaryArtistCard}
+      >
+        {primaryArtistImage ? (
+          <SkeletonImage
+            source={{ uri: primaryArtistImage }}
+            cachePolicy="memory-disk"
+            contentFit="cover"
+            style={styles.primaryArtistImage}
+          />
+        ) : (
+          <View style={[styles.primaryArtistImage, styles.primaryArtistFallback]}>
+            <Ionicons name="person" size={24} color="#DDD" />
+          </View>
+        )}
+        <View style={styles.primaryArtistCopy}>
+          <Text style={styles.artistRole}>Artista principal</Text>
+          <Text numberOfLines={1} style={styles.primaryArtistName}>
+            {primaryArtist?.name || 'Artista não identificado'}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.6)" />
+      </LoggedPressable>
+      {primaryArtistBiography ? (
+        <View style={styles.artistBiography}>
+          <Text
+            numberOfLines={isBiographyExpanded ? undefined : 4}
+            style={styles.artistBiographyText}
+          >
+            {primaryArtistBiography}
+          </Text>
+          {primaryArtistBiography.length > 120 ? (
+            <LoggedPressable
+              accessibilityRole="button"
+              accessibilityLabel={isBiographyExpanded ? 'Mostrar menos sobre o artista' : 'Mostrar mais sobre o artista'}
+              onPress={() => setIsBiographyExpanded((expanded) => !expanded)}
+              style={styles.biographyToggle}
+            >
+              <Text style={styles.biographyToggleText}>
+                {isBiographyExpanded ? 'Mostrar menos' : 'Mostrar mais'}
+              </Text>
+            </LoggedPressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      <Text style={[styles.artistDetailsHeading, styles.creditsHeading]}>Créditos</Text>
+      {artistLinks.map((artist, index) => (
+        <LoggedPressable
+          key={`${artist.id}-${artist.name}-${index}`}
+          accessibilityLabel={`Abrir perfil de ${artist.name}`}
+          onPress={() => void handleArtistPress(artist.id, artist.name)}
+          style={styles.creditRow}
+        >
+          {artistImages[artist.name] ? (
+            <SkeletonImage
+              source={{ uri: artistImages[artist.name] }}
+              cachePolicy="memory-disk"
+              contentFit="cover"
+              style={styles.creditAvatar}
+            />
+          ) : (
+            <View style={[styles.creditAvatar, styles.primaryArtistFallback]}>
+              <Ionicons name="person" size={17} color="#DDD" />
+            </View>
+          )}
+          <View style={styles.creditCopy}>
+            <Text numberOfLines={1} style={styles.creditName}>{artist.name}</Text>
+            <Text style={styles.creditRole}>{index === 0 ? 'Artista principal' : 'Participação'}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.55)" />
+        </LoggedPressable>
+      ))}
+    </View>
+  );
+
   return (
     <Modal
       visible={visible}
@@ -1391,7 +1473,21 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             /* =========================================================
              * FULL SCREEN APPLE MUSIC SYNCED LYRICS VIEW
              * ========================================================= */
-            <LyricsViewport>
+            <GestureDetector gesture={playerScrollGesture}>
+              <ScrollView
+                ref={playerScrollRef}
+                testID="player-lyrics-scroll-view"
+                style={styles.playerScroll}
+                contentContainerStyle={[
+                  styles.playerScrollContent,
+                  { paddingBottom: Math.max(24, insets.bottom + 20) },
+                ]}
+                contentInsetAdjustmentBehavior="never"
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={styles.lyricsCoverViewport}>
+                  <LyricsViewport>
               {lyricTimeline.length > 0 ? (
                 <FlatList
                   testID="player-synced-lyrics"
@@ -1406,6 +1502,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                       : `lyric_${item.startTimeMs}_${item.index}`
                   }
                   showsVerticalScrollIndicator={false}
+                  nestedScrollEnabled
                   contentContainerStyle={styles.lyricsScrollContent}
                   onLayout={() => scrollLyricsToActive(false)}
                   onContentSizeChange={() => scrollLyricsToActive(false)}
@@ -1497,6 +1594,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                     .filter((l) => l.trim().length > 0)}
                   keyExtractor={(_, i) => String(i)}
                   showsVerticalScrollIndicator={false}
+                  nestedScrollEnabled
                   contentContainerStyle={styles.lyricsScrollContent}
                   renderItem={({ item }) => (
                     <View style={styles.plainLyricRow}>
@@ -1518,7 +1616,11 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   </Text>
                 </View>
               )}
-            </LyricsViewport>
+                  </LyricsViewport>
+                </View>
+                {renderArtistDetails()}
+              </ScrollView>
+            </GestureDetector>
           ) : (
             <GestureDetector gesture={playerScrollGesture}>
             <ScrollView
@@ -1720,67 +1822,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               </View>
             ) : null}
 
-            <View style={styles.artistDetailsSection}>
-              <Text style={styles.artistDetailsHeading}>Sobre o artista</Text>
-              <LoggedPressable
-                accessibilityLabel={`Abrir perfil de ${primaryArtist?.name || 'artista principal'}`}
-                disabled={!primaryArtist}
-                onPress={() => primaryArtist && void handleArtistPress(primaryArtist.id, primaryArtist.name)}
-                style={styles.primaryArtistCard}
-              >
-                {primaryArtistImage ? <SkeletonImage source={{ uri: primaryArtistImage }} cachePolicy="memory-disk" contentFit="cover" style={styles.primaryArtistImage} /> : <View style={[styles.primaryArtistImage, styles.primaryArtistFallback]}><Ionicons name="person" size={24} color="#DDD" /></View>}
-                <View style={styles.primaryArtistCopy}>
-                  <Text style={styles.artistRole}>Artista principal</Text>
-                  <Text numberOfLines={1} style={styles.primaryArtistName}>{primaryArtist?.name || 'Artista não identificado'}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.6)" />
-              </LoggedPressable>
-              {primaryArtistBiography ? (
-                <View style={styles.artistBiography}>
-                  <Text numberOfLines={isBiographyExpanded ? undefined : 4} style={styles.artistBiographyText}>
-                    {primaryArtistBiography}
-                  </Text>
-                  {primaryArtistBiography.length > 120 ? (
-                    <LoggedPressable
-                      accessibilityRole="button"
-                      accessibilityLabel={isBiographyExpanded ? 'Mostrar menos sobre o artista' : 'Mostrar mais sobre o artista'}
-                      onPress={() => setIsBiographyExpanded((expanded) => !expanded)}
-                      style={styles.biographyToggle}
-                    >
-                      <Text style={styles.biographyToggleText}>{isBiographyExpanded ? 'Mostrar menos' : 'Mostrar mais'}</Text>
-                    </LoggedPressable>
-                  ) : null}
-                </View>
-              ) : null}
-
-              <Text style={[styles.artistDetailsHeading, styles.creditsHeading]}>Créditos</Text>
-              {artistLinks.map((artist, index) => (
-                <LoggedPressable
-                  key={`${artist.id}-${artist.name}-${index}`}
-                  accessibilityLabel={`Abrir perfil de ${artist.name}`}
-                  onPress={() => void handleArtistPress(artist.id, artist.name)}
-                  style={styles.creditRow}
-                >
-                  {artistImages[artist.name] ? (
-                    <SkeletonImage
-                      source={{ uri: artistImages[artist.name] }}
-                      cachePolicy="memory-disk"
-                      contentFit="cover"
-                      style={styles.creditAvatar}
-                    />
-                  ) : (
-                    <View style={[styles.creditAvatar, styles.primaryArtistFallback]}>
-                      <Ionicons name="person" size={17} color="#DDD" />
-                    </View>
-                  )}
-                  <View style={styles.creditCopy}>
-                    <Text numberOfLines={1} style={styles.creditName}>{artist.name}</Text>
-                    <Text style={styles.creditRole}>{index === 0 ? 'Artista principal' : 'Participação'}</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.55)" />
-                </LoggedPressable>
-              ))}
-            </View>
+            {renderArtistDetails()}
             </ScrollView>
             </GestureDetector>
           )}
@@ -2157,6 +2199,12 @@ const styles = StyleSheet.create({
     position: 'relative',
     overflow: 'hidden',
   },
+  lyricsCoverViewport: {
+    flexGrow: 0,
+    flexShrink: 0,
+    height: COVER_SIZE,
+    width: '100%',
+  },
   lyricsList: { flex: 1, width: '100%' },
   lyricsScrollContent: {
     paddingTop: 48,
@@ -2164,8 +2212,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   lyricLineButton: {
+    alignItems: 'flex-start',
     paddingVertical: 14,
     paddingHorizontal: 8,
+    width: '100%',
   },
   lyricEditorLine: {
     alignItems: 'center',
@@ -2181,8 +2231,9 @@ const styles = StyleSheet.create({
   lyricText: {
     fontSize: 22,
     fontWeight: '600',
-    letterSpacing: -0.2,
-    textAlign: 'center',
+    letterSpacing: 0,
+    textAlign: 'left',
+    width: '100%',
   },
   lyricEditorText: {
     fontSize: 19,
@@ -2201,6 +2252,9 @@ const styles = StyleSheet.create({
   lyricTextInactive: {
     color: 'rgba(255,255,255,0.32)',
     opacity: 0.78,
+    textShadowColor: 'rgba(255,255,255,0.16)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 5,
     ...(Platform.OS === 'web' ? { filter: 'blur(3px)' } : {}),
   },
   lyricTextUnblurred: {
@@ -2210,7 +2264,8 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.46)',
     fontSize: 18,
     letterSpacing: 6,
-    textAlign: 'center',
+    textAlign: 'left',
+    width: '100%',
   },
   lyricTiming: {
     color: 'rgba(255,255,255,0.58)',
@@ -2270,13 +2325,15 @@ const styles = StyleSheet.create({
   },
   lyricsTrackPillExpanded: {
     maxWidth: undefined,
-    paddingLeft: 6,
+    paddingLeft: 10,
+    paddingRight: 10,
   },
   lyricsPillArtworkButton: {
     alignItems: 'center',
     flexShrink: 0,
     height: 40,
     justifyContent: 'center',
+    marginLeft: 10,
     marginRight: 8,
     width: 40,
   },

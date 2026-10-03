@@ -5,6 +5,7 @@ import { useFocusEffect } from 'expo-router';
 import {
   getLibraryTracks,
   groupLocalAlbums,
+  prefetchArtistData,
   type LocalAlbumCollection,
 } from '@services';
 import { useDetailNavigation } from '@hooks';
@@ -16,7 +17,22 @@ export const LocalAlbum = ({ albumId }: { albumId: string }) => {
 
   const loadAlbum = React.useCallback(async () => {
     const tracks = await getLibraryTracks();
-    setAlbum(groupLocalAlbums(tracks).find((candidate) => candidate.id === albumId) || null);
+    const nextAlbum = groupLocalAlbums(tracks).find((candidate) => candidate.id === albumId) || null;
+    setAlbum(nextAlbum);
+    if (nextAlbum) {
+      const artists = new Map<string, { id?: string; name: string }>();
+      nextAlbum.tracks.forEach((track) => {
+        const refs = track.artists?.length
+          ? track.artists
+          : [{ id: '', name: track.artistName }];
+        refs.forEach((artist) => {
+          if (artist.name && !artists.has(artist.id || artist.name.toLocaleLowerCase())) {
+            artists.set(artist.id || artist.name.toLocaleLowerCase(), artist);
+          }
+        });
+      });
+      prefetchArtistData([...artists.values()]);
+    }
   }, [albumId]);
 
   useFocusEffect(
@@ -44,6 +60,7 @@ export const LocalAlbum = ({ albumId }: { albumId: string }) => {
         album.tracks.length === 1 ? 'música' : 'músicas'
       }`}
       trackCount={album.tracks.length}
+      disableTrackArtistLinks
       onArtistPress={handleArtistPress}
       tracks={album.tracks.map((track) => ({
         ...track,

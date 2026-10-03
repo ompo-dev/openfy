@@ -27,6 +27,7 @@ import {
   isTrackParticipantArtist,
   isTrackPrimaryArtist,
   mergeArtistProfileTracks,
+  prefetchArtistData,
   rememberCachedArtistImage,
   type LibraryTrack,
 } from '@services';
@@ -276,6 +277,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           const ref = artistRefs[cursor++];
           try {
             if (ref.name) {
+              prefetchArtistData([ref as { id?: string; name: string }]);
               await getCachedArtistImage(
                 ref.name,
                 () => getArtistCatalogImage(ref.id, ref.name || ''),
@@ -285,6 +287,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             }
             const artistData = await getArtist(ref.id);
             if (!artistData?.name) continue;
+            prefetchArtistData([{ id: ref.id, name: artistData.name }]);
             await getCachedArtistImage(
               artistData.name,
               () => Promise.resolve(artistData.imageURL || '')

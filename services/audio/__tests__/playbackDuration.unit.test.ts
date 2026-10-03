@@ -9,6 +9,10 @@ describe('playback duration reconciliation', () => {
     expect(reconcilePlaybackDurationMs(325_002, 162_507)).toBe(162_507);
   });
 
+  it('uses the measured media timeline when catalog metadata is doubled', () => {
+    expect(reconcilePlaybackDurationMs(180_000, 360_000)).toBe(180_000);
+  });
+
   it('keeps small encoder differences from the real media timeline', () => {
     expect(reconcilePlaybackDurationMs(181_200, 180_000)).toBe(181_200);
   });
