@@ -2,7 +2,14 @@ import * as React from 'react';
 import { View } from 'react-native';
 
 import { CollectionDetail, LocalAlbum } from '@components';
-import { findArtistIdByName, getAlbum, getArtist } from '@api';
+import {
+  findArtistIdByName,
+  getAlbum,
+  getArtist,
+  getYouTubeMusicAlbum,
+  isYouTubeMusicAlbumId,
+  type YouTubeMusicAlbum,
+} from '@api';
 import { useDetailNavigation } from '@hooks';
 import { AlbumModel, ArtistModel } from '@models';
 import { getDisplayTime } from '@utils';
@@ -25,9 +32,71 @@ const getLocalAlbumId = (albumId: string): string => {
 export const AlbumScreen = ({ albumId }: AlbumScreenPropsType) =>
   albumId.startsWith(LOCAL_ALBUM_PREFIX) ? (
     <LocalAlbum albumId={getLocalAlbumId(albumId)} />
+  ) : isYouTubeMusicAlbumId(albumId) ? (
+    <YouTubeMusicAlbumScreen albumId={albumId} />
   ) : (
     <RemoteAlbumScreen albumId={albumId} />
   );
+
+const YouTubeMusicAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
+  const { openDetail } = useDetailNavigation();
+  const [album, setAlbum] = React.useState<YouTubeMusicAlbum | null>(null);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const [refreshSequence, setRefreshSequence] = React.useState(0);
+  const refresh = React.useCallback(() => {
+    setIsRefreshing(true);
+    setRefreshSequence((sequence) => sequence + 1);
+  }, []);
+
+  React.useEffect(() => {
+    let active = true;
+    void getYouTubeMusicAlbum(albumId)
+      .then((albumData) => {
+        if (active) setAlbum(albumData);
+      })
+      .catch(() => {
+        if (active) setAlbum(null);
+      })
+      .finally(() => {
+        if (active) setIsRefreshing(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [albumId, refreshSequence]);
+
+  if (!album) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
+
+  const releaseLabel = album.releaseType === 'single'
+    ? 'single'
+    : album.releaseType === 'compilation'
+      ? 'EP'
+      : 'álbum';
+  const duration = album.tracks.reduce((total, track) => total + (track.durationMs || 0), 0);
+  const metadata = [
+    album.releaseDate,
+    releaseLabel,
+    `${album.tracks.length} ${album.tracks.length === 1 ? 'música' : 'músicas'}`,
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <CollectionDetail
+      kind="album"
+      collectionId={album.id}
+      title={album.name}
+      imageURL={album.imageURL}
+      description=""
+      metadata={metadata}
+      trackCount={album.tracks.length}
+      totalDurationMs={duration}
+      tracks={album.tracks}
+      artists={album.artists}
+      onArtistPress={(artistId) => openDetail('artist', artistId)}
+      onRefresh={refresh}
+      refreshing={isRefreshing}
+    />
+  );
+};
 
 const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
   const { openDetail } = useDetailNavigation();

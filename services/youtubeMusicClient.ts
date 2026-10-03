@@ -39,7 +39,10 @@ export type YouTubeMusicItem = {
   video_id?: string;
   title?: string;
   name?: string;
+  subtitle?: unknown;
   item_type?: string;
+  year?: string;
+  item_count?: string;
   selected?: boolean;
   primary?: YouTubeMusicItem | null;
   duration?: { seconds?: number };
@@ -47,8 +50,9 @@ export type YouTubeMusicItem = {
   artists?: YouTubeMusicArtistRef[];
   authors?: YouTubeMusicArtistRef[];
   author?: YouTubeMusicArtistRef;
-  thumbnails?: { url?: string; width?: number }[];
   thumbnail?: { url?: string; width?: number }[] | { contents?: { url?: string; width?: number }[] };
+  thumbnails?: { url?: string; width?: number }[];
+  endpoint?: { payload?: { browseId?: string; videoId?: string } };
   subscribers?: string;
 };
 
@@ -133,6 +137,19 @@ export type YouTubeMusicArtistPage = {
   }>;
 };
 
+export type YouTubeMusicAlbumPage = {
+  header?: {
+    title?: unknown;
+    year?: unknown;
+    subtitle?: unknown;
+    second_subtitle?: unknown;
+    thumbnails?: { url?: string; width?: number }[];
+    thumbnail?: YouTubeMusicItem['thumbnail'];
+    author?: YouTubeMusicArtistRef;
+  };
+  contents?: YouTubeMusicItem[];
+};
+
 export type YouTubeMusicPlaylistPage = {
   items?: YouTubeMusicItem[];
   has_continuation?: boolean;
@@ -150,7 +167,7 @@ export type YouTubeMusicClient = {
     }>;
     getArtist: (artistId: string) => Promise<YouTubeMusicArtistPage>;
     getPlaylist: (playlistId: string) => Promise<YouTubeMusicPlaylistPage>;
-    getAlbum: (albumId: string) => Promise<{ contents?: YouTubeMusicItem[] }>;
+    getAlbum: (albumId: string) => Promise<YouTubeMusicAlbumPage>;
     getUpNext: (
       videoId: string,
       automix?: boolean

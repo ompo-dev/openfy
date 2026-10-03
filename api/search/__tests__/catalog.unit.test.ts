@@ -353,6 +353,55 @@ describe('public YouTube Music catalog', () => {
     expect(profile.participationTracks.map((track) => track.title)).toEqual(['Guest appearance']);
   });
 
+  it('keeps album, single, and EP shelves in the artist profile', async () => {
+    const search = jest.fn().mockResolvedValue({ songs: { contents: [] } });
+    const getArtist = jest.fn().mockResolvedValue({
+      header: { title: 'Catalog artist' },
+      sections: [
+        {
+          header: { title: 'Albums' },
+          contents: [{
+            id: 'MPREb-album',
+            item_type: 'album',
+            title: 'Album oficial',
+            year: '2024',
+            thumbnail: [{ url: 'https://images.example/album=w120-h120', width: 120 }],
+          }],
+        },
+        {
+          header: { title: 'Singles' },
+          contents: [{
+            id: 'MPREb-single',
+            item_type: 'album',
+            title: 'Single oficial',
+            year: '2025',
+          }],
+        },
+        {
+          header: { title: 'EPs' },
+          contents: [{
+            id: 'MPREb-ep',
+            item_type: 'album',
+            title: 'EP oficial',
+          }],
+        },
+      ],
+    });
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({
+      music: { search, getArtist },
+    } as never);
+
+    const profile = await getYouTubeMusicArtistProfile(
+      'ytartist_UCcatalog-releases~Catalog%20artist'
+    );
+
+    expect(profile.albums).toEqual([
+      expect.objectContaining({ title: 'Album oficial', subtitle: '2024 · album' }),
+      expect.objectContaining({ title: 'Single oficial', subtitle: '2025 · single' }),
+      expect.objectContaining({ title: 'EP oficial', subtitle: 'EP' }),
+    ]);
+  });
+
   it('gets the matching artist image without loading a full profile or using a fan result', async () => {
     const search = jest.fn().mockResolvedValue({
       artists: { contents: [

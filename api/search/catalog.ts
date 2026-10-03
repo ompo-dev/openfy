@@ -1,4 +1,4 @@
-import type { ArtistModel, TrackModel } from '@models';
+import type { ArtistModel, LibraryItemModel, TrackModel } from '@models';
 import {
   getBestYouTubeMusicThumbnail,
   getYouTubeMusicClient,
@@ -26,6 +26,7 @@ export type YouTubeMusicArtistProfile = {
   artist: ArtistModel;
   tracks: TrackModel[];
   participationTracks: TrackModel[];
+  albums: LibraryItemModel[];
 };
 
 const asRecord = (value: unknown): Record<string, unknown> =>
@@ -174,7 +175,7 @@ const loadArtistTopSongs = async (
   }
 };
 
-const toTrackModel = (item: YouTubeMusicItem): TrackModel | null => {
+export const toYouTubeMusicTrackModel = (item: YouTubeMusicItem): TrackModel | null => {
   const data = asRecord(item);
   const videoId = asString(data.id) || asString(data.video_id);
   const title = asString(data.title) || asString(data.name);
@@ -204,6 +205,44 @@ const toTrackModel = (item: YouTubeMusicItem): TrackModel | null => {
       ? Math.max(0, durationSeconds) * 1000
       : 0,
     artists,
+  };
+};
+
+const getReleaseSectionTitle = (section: unknown) => {
+  const data = asRecord(section);
+  return asString(data.header && asRecord(data.header)?.title) || asString(data.title);
+};
+
+const getYouTubeMusicReleaseType = (sectionTitle: string) => {
+  const normalized = normalizeArtistName(sectionTitle);
+  if (normalized.includes('single')) return 'single';
+  if (/\beps?\b/.test(normalized) || normalized.includes('extended play')) return 'EP';
+  if (normalized.includes('album')) return 'album';
+  return 'release';
+};
+
+const toYouTubeMusicReleaseModel = (
+  item: YouTubeMusicItem,
+  sectionTitle: string
+): LibraryItemModel | null => {
+  const data = asRecord(item);
+  const itemType = asString(data.item_type);
+  if (itemType && itemType !== 'album') return null;
+
+  const endpoint = asRecord(data.endpoint);
+  const payload = asRecord(endpoint?.payload);
+  const browseId = asString(data.id) || asString(payload?.browseId);
+  const title = asString(data.title) || asString(data.name);
+  if (!browseId || !title) return null;
+
+  const releaseType = getYouTubeMusicReleaseType(sectionTitle);
+  const year = asString(data.year) || asString(data.subtitle).match(/\b(?:19|20)\d{2}\b/)?.[0] || '';
+  return {
+    id: `ytalbum_${encodeURIComponent(browseId)}`,
+    type: 'album',
+    title,
+    subtitle: [year, releaseType].filter(Boolean).join(' · '),
+    imageURL: largestImage(item, 720),
   };
 };
 
@@ -392,7 +431,7 @@ const searchCatalogUncached = async (
     });
   }
   const tracks = songItems
-    .map(toTrackModel)
+    .map(toYouTubeMusicTrackModel)
     .filter((track): track is TrackModel => Boolean(track))
     .slice(0, limit);
   const artists = artistItems
@@ -536,6 +575,17 @@ const loadYouTubeMusicArtistProfile = async (
         validVideoId(asString(item.id) || asString(item.video_id));
     }) as YouTubeMusicItem[];
   const name = asString(headerItem.title) || routeName || 'Artista';
+  const albums = asArray(page.sections)
+    .flatMap((section) => {
+      const sectionTitle = getReleaseSectionTitle(section);
+      return asArray(asRecord(section).contents)
+        .map((item) => toYouTubeMusicReleaseModel(item as YouTubeMusicItem, sectionTitle))
+        .filter((item): item is LibraryItemModel => Boolean(item));
+    })
+    .filter((item, index, values) => values.findIndex((candidate) =>
+      candidate.id === item.id ||
+      candidate.title.toLocaleLowerCase() === item.title.toLocaleLowerCase()
+    ) === index);
   const [searchedSongs, completeSongShelf] = await Promise.all([
     initialSongSearch || searchArtistSongs(name),
     loadArtistTopSongs(client, page),
@@ -556,7 +606,7 @@ const loadYouTubeMusicArtistProfile = async (
   const tracks: TrackModel[] = [];
   const participationTracks: TrackModel[] = [];
   for (const item of pageAndCatalogSongs.values()) {
-    const track = toTrackModel(item);
+    const track = toYouTubeMusicTrackModel(item);
     if (!track) continue;
     const credits = artistReferences(item);
     const artistCreditIndex = credits.findIndex((artist) =>
@@ -571,6 +621,7 @@ const loadYouTubeMusicArtistProfile = async (
     catalogTracks: matchingSearchedSongs.length,
     uniqueTracks: tracks.length + participationTracks.length,
     participations: participationTracks.length,
+    releases: albums.length,
   });
 
   const profileImageRoute = toYouTubeMusicArtistRouteId(browseId, name);
@@ -596,6 +647,7 @@ const loadYouTubeMusicArtistProfile = async (
     },
     tracks,
     participationTracks,
+    albums,
   };
 };
 

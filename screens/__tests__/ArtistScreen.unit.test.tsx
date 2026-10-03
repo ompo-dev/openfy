@@ -145,16 +145,22 @@ describe('ArtistScreen', () => {
     });
   });
 
-  it('replaces a legacy name-only route with its canonical Spotify artist id', async () => {
+  it('uses the canonical Spotify artist id for a legacy name-only route', async () => {
     const spotifyArtistId = '1234567890123456789012';
     jest.mocked(findArtistIdByName).mockResolvedValue(spotifyArtistId);
+    jest.mocked(getArtist).mockResolvedValue({
+      id: spotifyArtistId,
+      type: 'artist',
+      name: 'Ebony',
+      imageURL: '',
+    } as never);
 
     await render(<ArtistScreen artistId="ytartist_name_Ebony" />);
 
     await waitFor(() => {
-      expect(openDetail).toHaveBeenCalledWith('artist', spotifyArtistId);
+      expect(getArtist).toHaveBeenCalledWith(spotifyArtistId);
     });
-    expect(getYouTubeMusicArtistProfile).not.toHaveBeenCalled();
+    expect(openDetail).not.toHaveBeenCalled();
   });
 
   it('does not let a late local-library response overwrite the full public artist catalog', async () => {

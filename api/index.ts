@@ -6,7 +6,10 @@ export {
   getSavedAlbums,
   checkSavedAlbums,
   getUserTopAlbums,
+  getYouTubeMusicAlbum,
+  isYouTubeMusicAlbumId,
 } from './albums';
+export type { YouTubeMusicAlbum } from './albums';
 
 export {
   findArtistIdByName,

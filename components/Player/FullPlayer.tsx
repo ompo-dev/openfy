@@ -76,7 +76,7 @@ import { SkeletonImage } from '../common/SkeletonImage';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const COVER_SIZE = Math.min(Math.max(208, SCREEN_WIDTH * 0.64), 340);
+const COVER_SIZE = Math.min(Math.max(208, SCREEN_WIDTH * 0.72), 340);
 const COVER_VIEWPORT_WIDTH = SCREEN_WIDTH;
 const COVER_GAP = 12;
 const PREVIEW_SCRUB_LINE_HEIGHT = 21;
