@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react-native';
-import { useRouter, useSegments } from 'expo-router';
+import { usePathname, useRouter, useSegments } from 'expo-router';
 import {
   getDetailHref,
   getSectionFromSegments,
@@ -9,16 +9,19 @@ import {
 
 jest.mock('expo-router', () => ({
   useRouter: jest.fn(),
+  usePathname: jest.fn(),
   useSegments: jest.fn(),
 }));
 
 describe('useDetailNavigation', () => {
   const navigate = jest.fn();
+  const push = jest.fn();
   const replace = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.mocked(useRouter).mockReturnValue({ navigate, replace } as any);
+    jest.mocked(useRouter).mockReturnValue({ navigate, push, replace } as any);
+    jest.mocked(usePathname).mockReturnValue('/(tabs)/library');
   });
 
   it('opens the first detail as a singular route in the current tab', async () => {
@@ -34,17 +37,32 @@ describe('useDetailNavigation', () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
-  it('replaces an existing detail instead of stacking another screen', async () => {
+  it('pushes a detail opened from another detail so back returns to the previous screen', async () => {
     jest
       .mocked(useSegments)
       .mockReturnValue(['(tabs)', 'library', 'artist', '[id]'] as any);
+    jest.mocked(usePathname).mockReturnValue('/(tabs)/library/artist/artist_1');
     const { result } = await renderHook(() => useDetailNavigation());
 
     await act(() => result.current.openDetail('album', 'album_2'));
 
-    expect(replace).toHaveBeenCalledWith(
+    expect(push).toHaveBeenCalledWith(
       '/(tabs)/library/album/album_2'
     );
+    expect(navigate).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it('does not add the same detail route twice', async () => {
+    jest
+      .mocked(useSegments)
+      .mockReturnValue(['(tabs)', 'library', 'artist', '[id]'] as any);
+    jest.mocked(usePathname).mockReturnValue('/(tabs)/library/artist/artist_1');
+    const { result } = await renderHook(() => useDetailNavigation());
+
+    await act(() => result.current.openDetail('artist', 'artist_1'));
+
+    expect(push).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
   });
 

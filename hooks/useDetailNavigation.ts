@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Href, useRouter, useSegments } from 'expo-router';
+import { Href, usePathname, useRouter, useSegments } from 'expo-router';
 
 export type DetailRouteType =
   | 'album'
@@ -35,20 +35,27 @@ export const getDetailHref = (
 export const useDetailNavigation = () => {
   const router = useRouter();
   const segments = useSegments();
+  const pathname = usePathname();
   const section = getSectionFromSegments(segments);
   const detailIsOpen = isDetailRoute(segments);
 
   const openDetail = React.useCallback(
     (type: DetailRouteType, id: string, targetSection: AppSection = section) => {
       const href = getDetailHref(targetSection, type, id);
-      if (detailIsOpen) {
-        router.replace(href);
+      if (pathname === href) {
+        return;
+      }
+
+      // Keep the current detail in the tab stack so the native back gesture
+      // returns to the artist/playlist that opened the next detail.
+      if (detailIsOpen && targetSection === section) {
+        router.push(href);
         return;
       }
 
       router.navigate(href, { dangerouslySingular: true });
     },
-    [detailIsOpen, router, section]
+    [detailIsOpen, pathname, router, section]
   );
 
   return { openDetail, section };

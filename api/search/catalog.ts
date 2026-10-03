@@ -861,6 +861,10 @@ export const getArtistCatalogImage = async (
   const routeId = isYouTubeRoute
     ? artistId
     : toYouTubeMusicArtistRouteId(youtubeChannelId, name);
+  if (/^[A-Za-z0-9]{22}$/.test(artistId)) {
+    const spotifyImage = await getSpotifyArtistImage(artistId).catch(() => null);
+    if (spotifyImage) return spotifyImage;
+  }
   const youtubeImage = await getYouTubeMusicArtistImage(routeId).catch(() => '');
   if (youtubeImage) return youtubeImage;
 

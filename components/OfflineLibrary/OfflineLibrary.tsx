@@ -436,7 +436,11 @@ export const OfflineLibrary = () => {
           if (isArtist) {
             openDetail(
               'artist',
-              `local_artist_${encodeURIComponent(item.id)}`,
+              (isArtist && /^[A-Za-z0-9]{22}$/.test(
+                String((item as { spotifyArtistId?: string }).spotifyArtistId || '')
+              )
+                ? String((item as { spotifyArtistId?: string }).spotifyArtistId)
+                : '') || `local_artist_${encodeURIComponent(item.title)}`,
               'library'
             );
             return;

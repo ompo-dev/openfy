@@ -37,6 +37,7 @@ const mockSwipeableArtwork = jest.fn((props) => {
 });
 jest.mock('expo-router', () => ({
   useRouter: () => ({ navigate: mockNavigate, replace: mockReplace }),
+  usePathname: () => '/(tabs)/library',
   useSegments: () => ['(tabs)', 'library'],
 }));
 jest.mock('@api', () => ({
@@ -440,7 +441,7 @@ describe('FullPlayer artist row and YouTube source', () => {
       '/(tabs)/library/artist/ytartist_name_Ebony',
       { dangerouslySingular: true }
     ));
-    expect(findArtistIdByName).not.toHaveBeenCalled();
+    expect(findArtistIdByName).toHaveBeenCalledWith('Ebony');
   });
 
   it('replaces the title with a sticky mini-player after the player scrolls away', async () => {

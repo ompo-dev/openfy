@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useRouter, useSegments } from 'expo-router';
+import { usePathname, useRouter, useSegments } from 'expo-router';
 import {
   render,
   fireEvent,
@@ -9,6 +9,7 @@ import { Artists, ArtistsPropsType } from '../Artists';
 
 jest.mock('expo-router', () => ({
   useRouter: jest.fn(),
+  usePathname: jest.fn(),
   useSegments: jest.fn(),
 }));
 
@@ -45,8 +46,10 @@ describe('AlbumArtists', () => {
   beforeEach(async () => {
     (useRouter as jest.Mock).mockReturnValue({
       navigate: mockNavigate,
+      push: jest.fn(),
       replace: mockReplace,
     });
+    (usePathname as jest.Mock).mockReturnValue('/(tabs)/home');
     (useSegments as jest.Mock).mockReturnValue(['(tabs)', 'home']);
     container = await render(<Artists {...defaultProps} />);
   });

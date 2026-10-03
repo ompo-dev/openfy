@@ -443,7 +443,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       );
       const canonicalArtistId = isSpotifyArtistId
         ? artistId
-        : shouldResolveArtistName && !isYouTubeTrack
+        : shouldResolveArtistName
           ? await findArtistIdByName(artistName)
           : '';
       const targetArtistId = canonicalArtistId || artistId || (

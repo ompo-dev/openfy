@@ -11,6 +11,7 @@ const mockPush = jest.fn();
 
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush, replace: mockReplace }),
+  usePathname: () => '/(tabs)/library/album/album-test',
   useSegments: () => ['(tabs)', 'library'],
 }));
 
@@ -185,7 +186,7 @@ describe('CollectionDetail', () => {
     );
 
     fireEvent.press(screen.getAllByLabelText('Abrir artista Artista sem id')[0]);
-    expect(onArtistPress).toHaveBeenCalledWith('', 'Artista sem id');
+    await waitFor(() => expect(onArtistPress).toHaveBeenCalledWith('', 'Artista sem id'));
   });
 
   it('shows active shuffle and pause states for the current collection', async () => {

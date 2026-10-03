@@ -98,6 +98,16 @@ const normalizeSearchValue = (value: string) =>
     .toLocaleLowerCase()
     .trim();
 
+const normalizeArtistKey = (value: string) => normalizeSearchValue(value).replace(/\s+/g, ' ');
+
+const isSpotifyArtistId = (value: string) => /^[A-Za-z0-9]{22}$/.test(value);
+
+const preferredArtistId = (current: string, next: string) => {
+  if (!current) return next;
+  if (isSpotifyArtistId(next) && !isSpotifyArtistId(current)) return next;
+  return current;
+};
+
 const getTrackArtists = (track: CollectionTrack) => {
   if (track.artists?.length) return track.artists;
   return track.subtitle
@@ -285,10 +295,10 @@ export const CollectionDetail = ({
       const name = artist.name?.trim();
       if (!name) return;
       const id = artist.id?.trim() || '';
-      const key = (id || name).toLocaleLowerCase();
+      const key = normalizeArtistKey(name);
       const previous = byKey.get(key);
       byKey.set(key, {
-        id: id || previous?.id || '',
+        id: preferredArtistId(previous?.id || '', id),
         name: previous?.name || name,
         imageURL: artist.imageURL || previous?.imageURL,
       });
@@ -321,19 +331,23 @@ export const CollectionDetail = ({
       !artist.imageURL &&
       !artistImages[artist.name] &&
       !artistImages[artist.id] &&
-      !attemptedArtistImages.current.has(artist.id || artist.name.toLocaleLowerCase())
+      !attemptedArtistImages.current.has(normalizeArtistKey(artist.name))
     );
     if (!unresolved.length) return;
     unresolved.forEach((artist) =>
-      attemptedArtistImages.current.add(artist.id || artist.name.toLocaleLowerCase())
+      attemptedArtistImages.current.add(normalizeArtistKey(artist.name))
     );
     void (async () => {
       for (let index = 0; index < unresolved.length; index += 4) {
         const batch = await Promise.all(unresolved.slice(index, index + 4).map(async (artist) => {
+          const canonicalId = isSpotifyArtistId(artist.id)
+            ? artist.id
+            : await findArtistIdByName(artist.name);
+          const imageArtistId = canonicalId || artist.id;
           const imageURL = await getCachedArtistImage(
             artist.name,
-            () => getArtistCatalogImage(artist.id, artist.name),
-            [artist.id]
+            () => getArtistCatalogImage(imageArtistId, artist.name),
+            [artist.id, canonicalId]
           );
           return [artist.name, artist.id, imageURL] as [string, string, string];
         }));
@@ -351,22 +365,26 @@ export const CollectionDetail = ({
       }
     })().catch((error) => {
       unresolved.forEach((artist) =>
-        attemptedArtistImages.current.delete(artist.id || artist.name.toLocaleLowerCase())
+        attemptedArtistImages.current.delete(normalizeArtistKey(artist.name))
       );
       log.error('load collection artist images failed', { collectionId, error });
     });
   }, [artistImageLoadLimit, artistImages, collectionArtists, collectionId, isArtistListVisible]);
 
   const handleCollectionArtistPress = React.useCallback(async (artist: { id: string; name: string }) => {
+    const canonicalId = isSpotifyArtistId(artist.id)
+      ? artist.id
+      : await findArtistIdByName(artist.name);
+    const resolvedArtist = { ...artist, id: canonicalId || artist.id };
     if (onArtistPress) {
-      await onArtistPress(artist.id, artist.name);
+      await onArtistPress(resolvedArtist.id, resolvedArtist.name);
       return;
     }
-    const routeId = artist.id.startsWith('ytartist_') || artist.id.startsWith('local_artist_')
-      ? artist.id
-      : artist.id && /^[A-Za-z0-9]{22}$/.test(artist.id)
-        ? artist.id
-        : (await findArtistIdByName(artist.name)) || `ytartist_name_${encodeURIComponent(artist.name)}`;
+    const routeId = resolvedArtist.id.startsWith('ytartist_') || resolvedArtist.id.startsWith('local_artist_')
+      ? resolvedArtist.id
+      : resolvedArtist.id && isSpotifyArtistId(resolvedArtist.id)
+        ? resolvedArtist.id
+        : `ytartist_name_${encodeURIComponent(resolvedArtist.name)}`;
     openDetail('artist', routeId);
   }, [onArtistPress, openDetail]);
 
@@ -513,6 +531,10 @@ export const CollectionDetail = ({
   }, [onSharePress, title]);
 
   const handleBack = React.useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
     const section = segments.join('/').includes('library') ? 'library' : 'home';
     router.replace(`/(tabs)/${section}` as Href);
   }, [router, segments]);

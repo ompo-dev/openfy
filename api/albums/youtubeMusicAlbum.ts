@@ -39,6 +39,13 @@ const releaseTypeFrom = (value: string): YouTubeMusicAlbum['releaseType'] => {
   return 'album';
 };
 
+const normalizeArtistName = (value: string) => value
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .trim()
+  .replace(/\s+/g, ' ')
+  .toLocaleLowerCase();
+
 export const isYouTubeMusicAlbumId = (value: string) =>
   value.startsWith(YOUTUBE_MUSIC_ALBUM_PREFIX);
 
@@ -92,7 +99,8 @@ export const getYouTubeMusicAlbum = async (
     if (!artistName) return;
     const channelId = getYouTubeMusicText(artist.channel_id) || getYouTubeMusicText(artist.id);
     const id = toYouTubeMusicArtistRouteId(channelId, artistName);
-    if (!artists.has(id)) artists.set(id, { id, name: artistName });
+    const key = normalizeArtistName(artistName);
+    if (!artists.has(key)) artists.set(key, { id, name: artistName });
   };
   if (author.name) addArtist(author as { name?: unknown; id?: unknown; channel_id?: unknown });
   tracks.forEach((track) => track.artists?.forEach((artist) => addArtist(artist)));

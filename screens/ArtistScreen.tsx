@@ -315,7 +315,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         setArtist((current) => ({
           ...catalogProfile.artist,
           id: routeId,
-          imageURL: catalogProfile.artist.imageURL || current?.imageURL || localProfile?.artist.imageURL || '',
+          imageURL: current?.imageURL || catalogProfile.artist.imageURL || localProfile?.artist.imageURL || '',
           ...(catalogProfile.artist.description || current?.description
             ? { description: catalogProfile.artist.description || current?.description }
             : {}),
@@ -420,7 +420,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             return;
           }
           hasRemoteArtistProfile = true;
-          const imageURL = searchSeed?.artist.imageURL || artistData.imageURL || '';
+          const imageURL = artistData.imageURL || searchSeed?.artist.imageURL || '';
           setArtist((current) => ({
             ...artistData,
             id: artistId,
@@ -554,7 +554,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
                 const profileName = artistData?.name || routeArtistName;
                 const imageURL = await getCachedArtistImage(
                   profileName,
-                  () => getArtistCatalogImage(artistId, profileName)
+                  () => getArtistCatalogImage(spotifyArtistId, profileName)
                     .then((knownImage) => knownImage || artistData?.imageURL || ''),
                   [artistId, spotifyArtistId]
                 );
