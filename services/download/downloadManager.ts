@@ -33,6 +33,7 @@ import {
   recordDownloadDiagnostic,
   startDownloadDiagnostics,
 } from './downloadDiagnostics';
+import { useConnectivityStore } from '../../stores/useConnectivityStore';
 
 export type DownloadStatus = 'idle' | 'downloading' | 'completed' | 'error';
 
@@ -1503,6 +1504,9 @@ export const downloadTrack = (
 ): Promise<DownloadedTrack | null> => {
   const active = activeDownloads.get(track.spotifyId);
   if (active) return active;
+  if (useConnectivityStore.getState().status === 'offline') {
+    return Promise.resolve(null);
+  }
 
   cancelledDownloads.delete(track.spotifyId);
   const request = downloadTrackInternal(

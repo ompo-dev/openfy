@@ -1,4 +1,4 @@
-export { parseSpotifyLink, isValidSpotifyLink } from './spotify/linkParser';
+export { parseSpotifyLink, isValidSpotifyLink, findMediaLinkInText } from './spotify/linkParser';
 export type {
   ParsedSpotifyLink,
   SpotifyResourceType,
@@ -25,11 +25,13 @@ export type {
 export {
   hasNativeYouTubePlayback,
   parseNativeYouTubePlaybackUri,
+  preloadNativeYouTubeAudio,
   toNativeYouTubePlaybackUri,
 } from './audio/nativeYouTubeTransfer';
 export type {
   NativeYouTubePlaybackMetadata,
   NativeYouTubePlaybackStatus,
+  NativeYouTubePreloadResult,
 } from './audio/nativeYouTubeTransfer';
 export {
   clampPlaybackPositionMs,

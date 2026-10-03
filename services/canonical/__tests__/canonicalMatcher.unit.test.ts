@@ -119,6 +119,30 @@ describe('evaluateCandidateMatch', () => {
     ).toBe(true);
   });
 
+  it('matches official titles when a number is joined to the next word', () => {
+    expect(
+      hasCanonicalTitleMatch(
+        'EBONY - 100MILI (Tipo Bratz) ft. Larinhx [Videoclipe Oficial]',
+        '100 Mili'
+      )
+    ).toBe(true);
+  });
+
+  it('accepts a missing terminal Freestyle descriptor on the canonical title', () => {
+    expect(
+      hasCanonicalTitleMatch(
+        'EBONY - Espero Que Entendam (prod. LARINHX)',
+        'Espero Que Entendam - Freestyle'
+      )
+    ).toBe(true);
+    expect(
+      hasCanonicalTitleMatch(
+        'EBONY - Espero Que Entendam 2 (prod. LARINHX)',
+        'Espero Que Entendam - Freestyle'
+      )
+    ).toBe(false);
+  });
+
   it('allows official metadata inserted between title words', () => {
     expect(
       hasCanonicalTitleMatch(

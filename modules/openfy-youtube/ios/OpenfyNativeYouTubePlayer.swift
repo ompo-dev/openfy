@@ -51,7 +51,8 @@ public final class OpenfyNativeYouTubePlayer {
   public func play(
     descriptor: YouTubeStreamDescriptor,
     rangeClient: YouTubeHTTPRangeClient,
-    metadata: OpenfyNowPlayingMetadata
+    metadata: OpenfyNowPlayingMetadata,
+    prefetchedAudio: Data? = nil
   ) throws {
     // 1. Clean up any existing playback session
     stop()
@@ -72,7 +73,8 @@ public final class OpenfyNativeYouTubePlayer {
     let asset = AVURLAsset(url: virtualURL)
     let loader = OpenfyAssetResourceLoader(
       descriptor: descriptor,
-      rangeClient: rangeClient
+      rangeClient: rangeClient,
+      prefetchedPrefix: prefetchedAudio
     )
 
     // IMPORTANT: AVURLAsset holds a weak reference to the delegate.

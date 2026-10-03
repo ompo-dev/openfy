@@ -28,6 +28,32 @@ private struct GuestPlayerClient {
   ]
 }
 
+private actor NativeYouTubePreloadStore {
+  struct Entry: Sendable {
+    let descriptor: YouTubeStreamDescriptor
+    let initialAudio: Data
+    let expiresAt: Date
+  }
+
+  private var entries: [String: Entry] = [:]
+
+  func store(_ entry: Entry, for videoId: String) {
+    entries = entries.filter { $0.value.expiresAt > Date() }
+    entries[videoId] = entry
+    while entries.count > 4 {
+      guard let oldest = entries.min(by: { $0.value.expiresAt < $1.value.expiresAt }) else { break }
+      entries.removeValue(forKey: oldest.key)
+    }
+  }
+
+  func take(_ videoId: String) -> Entry? {
+    guard let entry = entries.removeValue(forKey: videoId), entry.expiresAt > Date() else {
+      return nil
+    }
+    return entry
+  }
+}
+
 /**
  * Owns the complete native media transfer. Googlevideo signed URLs are bound
  * to the player identity that issued them, so every byte range uses the same
@@ -47,6 +73,7 @@ public final class OpenfyYouTubeModule: Module {
   }()
 
   private static let rangeClient = YouTubeHTTPRangeClient(session: session)
+  private static let preloadedStreams = NativeYouTubePreloadStore()
   @MainActor
   private lazy var nativePlayer: OpenfyNativeYouTubePlayer = {
     let player = OpenfyNativeYouTubePlayer()
@@ -103,6 +130,11 @@ public final class OpenfyYouTubeModule: Module {
       try await self.playNativeYouTube(videoId: videoId, metadata: metadata)
     }
 
+    AsyncFunction("preloadNativeYouTubeAsync") { (videoId: String) async throws -> [String: Int] in
+      let bytes = try await Self.preloadNativeYouTube(videoId: videoId)
+      return ["bytes": bytes]
+    }
+
     AsyncFunction("pauseNativeYouTubeAsync") {
       await self.nativePlayer.pause()
     }
@@ -132,30 +164,69 @@ public final class OpenfyYouTubeModule: Module {
       throw Self.transferError("invalid_video_id")
     }
 
+    let staged = await Self.preloadedStreams.take(videoId)
+    let descriptor: YouTubeStreamDescriptor
+    if let staged {
+      descriptor = staged.descriptor
+    } else {
+      descriptor = try await Self.resolveAudioDescriptor(videoId: videoId)
+    }
+    NSLog("[NATIVE] Using %@ stream preparation for %@", staged == nil ? "fresh" : "preloaded", videoId)
+
+    try await self.nativePlayer.play(
+      descriptor: descriptor,
+      rangeClient: Self.rangeClient,
+      metadata: OpenfyNowPlayingMetadata(values: metadata),
+      prefetchedAudio: staged?.initialAudio
+    )
+  }
+
+  private static func preloadNativeYouTube(videoId: String) async throws -> Int {
+    guard isValidVideoId(videoId) else {
+      throw transferError("invalid_video_id")
+    }
+    let descriptor = try await resolveAudioDescriptor(videoId: videoId)
+    let prefixLength = min(Int64(512 * 1024), descriptor.contentLength)
+    guard prefixLength > 0 else {
+      throw StreamTransportError.invalidContentRange
+    }
+    let initialAudio = try await rangeClient.request(
+      descriptor: descriptor,
+      start: 0,
+      end: prefixLength - 1
+    )
+    await preloadedStreams.store(
+      NativeYouTubePreloadStore.Entry(
+        descriptor: descriptor,
+        initialAudio: initialAudio,
+        expiresAt: Date().addingTimeInterval(4 * 60)
+      ),
+      for: videoId
+    )
+    NSLog("[NATIVE] Preloaded %ld initial audio bytes for %@", initialAudio.count, videoId)
+    return initialAudio.count
+  }
+
+  private static func resolveAudioDescriptor(videoId: String) async throws -> YouTubeStreamDescriptor {
     NSLog("[NATIVE] Resolving videoId: %@", videoId)
-    let playerRes = try await Self.guestPlayerResponse(videoId: videoId)
+    let playerRes = try await guestPlayerResponse(videoId: videoId)
 
     guard (200...299).contains(playerRes.response.statusCode) else {
       NSLog("[NATIVE] Player HTTP error: %ld", playerRes.response.statusCode)
       throw StreamTransportError.http(statusCode: playerRes.response.statusCode)
     }
 
-    guard Self.playerStatus(from: playerRes.payload) == "OK" else {
-      NSLog(
-        "[NATIVE] Player status not OK: %@",
-        Self.playerStatus(from: playerRes.payload) ?? "nil"
-      )
+    guard playerStatus(from: playerRes.payload) == "OK" else {
+      NSLog("[NATIVE] Player status not OK: %@", playerStatus(from: playerRes.payload) ?? "nil")
       throw StreamTransportError.audioTrackUnavailable
     }
 
-    let headers = GuestPlayerClient.mediaHeaders
-    let descriptor = try await Self.bestAudioStreamDescriptor(
+    let descriptor = try await bestAudioStreamDescriptor(
       videoId: videoId,
       payload: playerRes.payload,
-      headers: headers,
-      rangeClient: Self.rangeClient
+      headers: GuestPlayerClient.mediaHeaders,
+      rangeClient: rangeClient
     )
-
     NSLog(
       "[NATIVE] Selected descriptor itag=%ld mime=%@ bitrate=%ld contentLength=%lld",
       descriptor.itag ?? 0,
@@ -163,12 +234,7 @@ public final class OpenfyYouTubeModule: Module {
       descriptor.bitrate,
       descriptor.contentLength
     )
-
-    try await self.nativePlayer.play(
-      descriptor: descriptor,
-      rangeClient: Self.rangeClient,
-      metadata: OpenfyNowPlayingMetadata(values: metadata)
-    )
+    return descriptor
   }
 
   private static func resolveAndDownload(

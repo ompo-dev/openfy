@@ -86,3 +86,14 @@ export const parseSpotifyLink = (
 export const isValidSpotifyLink = (input: string): boolean => {
   return parseSpotifyLink(input) !== null;
 };
+
+export const findMediaLinkInText = (input: string): string | null => {
+  const matches = input.matchAll(
+    /(?:https?:\/\/)?(?:www\.)?(?:open\.spotify\.com|music\.youtube\.com|youtube\.com|youtu\.be)\/[^\s<>"']+|spotify:(?:track|playlist|album):[A-Za-z0-9]+/gi
+  );
+  for (const match of matches) {
+    const candidate = match[0].replace(/[),.;!?]+$/, '');
+    if (parseSpotifyLink(candidate)) return candidate;
+  }
+  return null;
+};

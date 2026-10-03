@@ -96,22 +96,34 @@ export const hasCanonicalTitleMatch = (
   candidateTitle: string,
   canonicalTitle: string
 ): boolean => {
-  const candidate = normalizeString(candidateTitle);
-  const canonical = normalizeString(canonicalTitle);
-  const escapedCanonical = canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const hasUnexpectedContinuation =
-    !!canonical &&
-    new RegExp(`(?:^|\\s)${escapedCanonical}\\s+\\d+\\b`).test(candidate);
-
-  if (!canonical || hasUnexpectedContinuation) return false;
-
+  const normalizeTitle = (value: string) =>
+    normalizeString(value)
+      .replace(/(\d)([a-z])/g, '$1 $2')
+      .replace(/([a-z])(\d)/g, '$1 $2');
+  const candidate = normalizeTitle(candidateTitle);
   const candidateWords = candidate.split(' ');
-  let candidateIndex = 0;
-  return canonical.split(' ').every((word) => {
-    const nextIndex = candidateWords.indexOf(word, candidateIndex);
-    if (nextIndex < 0) return false;
-    candidateIndex = nextIndex + 1;
-    return true;
+  const canonicalVariants = [normalizeTitle(canonicalTitle)];
+  const withoutFreestyleSuffix = canonicalTitle.replace(/\s*[-–—:]\s*freestyle\s*$/i, '');
+  if (withoutFreestyleSuffix !== canonicalTitle) {
+    canonicalVariants.push(normalizeTitle(withoutFreestyleSuffix));
+  }
+
+  return canonicalVariants.some((canonical) => {
+    const escapedCanonical = canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (
+      !canonical ||
+      new RegExp(`(?:^|\\s)${escapedCanonical}\\s+\\d+\\b`).test(candidate)
+    ) {
+      return false;
+    }
+
+    let candidateIndex = 0;
+    return canonical.split(' ').every((word) => {
+      const nextIndex = candidateWords.indexOf(word, candidateIndex);
+      if (nextIndex < 0) return false;
+      candidateIndex = nextIndex + 1;
+      return true;
+    });
   });
 };
 

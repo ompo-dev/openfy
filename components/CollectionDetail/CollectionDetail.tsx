@@ -22,6 +22,7 @@ import { useDownloads, usePlayer } from '@context';
 import type { DownloadTrackInput } from '@services';
 import { formatCollectionMeta, log } from '@utils';
 import { GlassSurface, LoggedPressable, NativeIconButton } from '../native';
+import { DownloadActionIcon } from '../native/DownloadActionIcon';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
 import { MarqueeText } from '../common/MarqueeText';
@@ -42,6 +43,8 @@ type ExtraTrackSection = {
   title: string;
   tracks: CollectionTrack[];
 };
+
+const ARTIST_TRACKS_PAGE_SIZE = 15;
 
 export type CollectionDetailProps = {
   kind: 'album' | 'artist' | 'playlist';
@@ -184,6 +187,8 @@ export const CollectionDetail = ({
   const [sortAscending, setSortAscending] = React.useState(false);
   const [isSearchOpen, setIsSearchOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
+  const [artistTrackLimit, setArtistTrackLimit] = React.useState(ARTIST_TRACKS_PAGE_SIZE);
+  const [artistSectionLimits, setArtistSectionLimits] = React.useState<Record<string, number>>({});
   const [isArtistListVisible, setIsArtistListVisible] = React.useState(false);
   const [artistImageLoadLimit, setArtistImageLoadLimit] = React.useState(8);
   const [isLoadingAllArtists, setIsLoadingAllArtists] = React.useState(false);
@@ -225,7 +230,7 @@ export const CollectionDetail = ({
       totalDurationMs ?? tracks.reduce((total, track) => total + (track.durationMs || 0), 0),
   });
   const normalizedSearchQuery = normalizeSearchValue(searchQuery);
-  const visibleTracks = React.useMemo(() => {
+  const matchingTracks = React.useMemo(() => {
     const filtered = tracks.filter((track) =>
       hasTrackArtistCredit(track) && trackMatchesSearch(track, normalizedSearchQuery)
     );
@@ -233,17 +238,32 @@ export const CollectionDetail = ({
       ? [...filtered].sort((first, second) => first.title.localeCompare(second.title))
       : filtered;
   }, [normalizedSearchQuery, sortAscending, tracks]);
-  const visibleExtraSections = React.useMemo(
+  const visibleTracks = React.useMemo(
+    () => kind === 'artist' && !normalizedSearchQuery
+      ? matchingTracks.slice(0, artistTrackLimit)
+      : matchingTracks,
+    [artistTrackLimit, kind, matchingTracks, normalizedSearchQuery]
+  );
+  const matchingExtraSections = React.useMemo(
     () =>
       extraTrackSections
         .map((section) => ({
           ...section,
           tracks: section.tracks.filter((track) =>
-            trackMatchesSearch(track, normalizedSearchQuery)
+            hasTrackArtistCredit(track) && trackMatchesSearch(track, normalizedSearchQuery)
           ),
         }))
         .filter((section) => section.tracks.length > 0),
     [extraTrackSections, normalizedSearchQuery]
+  );
+  const visibleExtraSections = React.useMemo(
+    () => matchingExtraSections.map((section) => ({
+      ...section,
+      visibleTracks: kind === 'artist' && !normalizedSearchQuery
+        ? section.tracks.slice(0, artistSectionLimits[section.id] || ARTIST_TRACKS_PAGE_SIZE)
+        : section.tracks,
+    })),
+    [artistSectionLimits, kind, matchingExtraSections, normalizedSearchQuery]
   );
   const allArtistTracks =
     resolvedArtistTracks?.collectionId === collectionId
@@ -276,6 +296,11 @@ export const CollectionDetail = ({
       isMountedRef.current = false;
     };
   }, []);
+
+  React.useEffect(() => {
+    setArtistTrackLimit(ARTIST_TRACKS_PAGE_SIZE);
+    setArtistSectionLimits({});
+  }, [collectionId, kind]);
 
   React.useEffect(() => {
     const prioritizedArtists = collectionArtists.slice(
@@ -570,17 +595,15 @@ export const CollectionDetail = ({
             }}
             style={styles.trackAction}
           >
-            <Ionicons
-              name={
-                downloadState === 'completed'
-                  ? 'checkmark-circle'
-                  : downloadState === 'active'
-                    ? 'time-outline'
-                    : 'download-outline'
-              }
-              size={19}
-              color={downloadState === 'completed' ? '#1ED760' : '#CACACA'}
-            />
+            {downloadState === 'idle' ? (
+              <DownloadActionIcon size={19} color="#CACACA" />
+            ) : (
+              <Ionicons
+                name={downloadState === 'completed' ? 'checkmark-circle' : 'time-outline'}
+                size={19}
+                color={downloadState === 'completed' ? '#1ED760' : '#CACACA'}
+              />
+            )}
           </LoggedPressable>
         </LoggedPressable>
       );
@@ -598,18 +621,22 @@ export const CollectionDetail = ({
   );
   const renderTrack = React.useCallback(
     ({ item, index }: { item: CollectionTrack; index: number }) =>
-      renderTrackRow(item, index, visibleTracks, collectionPlaybackId),
-    [collectionPlaybackId, renderTrackRow, visibleTracks]
+      renderTrackRow(item, index, matchingTracks, collectionPlaybackId),
+    [collectionPlaybackId, matchingTracks, renderTrackRow]
   );
 
   const extraSections = visibleExtraSections;
+  const hasMoreArtistTracks = kind === 'artist' && !normalizedSearchQuery &&
+    visibleTracks.length < matchingTracks.length;
 
   return (
     <View style={styles.screen}>
       <FlatList
+        testID="collection-track-list"
         data={visibleTracks}
         keyExtractor={(item) => item.id}
         renderItem={renderTrack}
+        initialNumToRender={kind === 'artist' ? ARTIST_TRACKS_PAGE_SIZE : undefined}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.6}
         contentContainerStyle={{ paddingBottom: BOTTOM_NAVIGATION_HEIGHT + 112 }}
@@ -787,17 +814,15 @@ export const CollectionDetail = ({
                   onPress={handleDownloadCollection}
                   style={styles.pillAction}
                 >
-                  <Ionicons
-                    name={
-                      collectionDownloadState === 'completed'
-                        ? 'checkmark-circle'
-                        : collectionDownloadState === 'active'
-                          ? 'time-outline'
-                          : 'download-outline'
-                    }
-                    size={21}
-                    color={collectionDownloadState === 'completed' ? '#1ED760' : '#FFFFFF'}
-                  />
+                  {collectionDownloadState === 'idle' ? (
+                    <DownloadActionIcon size={21} color="#FFFFFF" />
+                  ) : (
+                    <Ionicons
+                      name={collectionDownloadState === 'completed' ? 'checkmark-circle' : 'time-outline'}
+                      size={21}
+                      color={collectionDownloadState === 'completed' ? '#1ED760' : '#FFFFFF'}
+                    />
+                  )}
                 </LoggedPressable>
                 <View style={styles.pillDivider} />
                 <LoggedPressable
@@ -832,12 +857,22 @@ export const CollectionDetail = ({
           </>
         }
         ListFooterComponent={
-          extraSections.length || footer ? (
+          hasMoreArtistTracks || extraSections.length || footer ? (
             <>
+              {hasMoreArtistTracks ? (
+                <LoggedPressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Mostrar mais músicas do artista"
+                  onPress={() => setArtistTrackLimit((limit) => limit + ARTIST_TRACKS_PAGE_SIZE)}
+                  style={styles.showMoreTracks}
+                >
+                  <Text style={styles.showMoreTracksText}>Mostrar mais</Text>
+                </LoggedPressable>
+              ) : null}
               {extraSections.map((section) => (
                 <View key={section.id} style={styles.extraSection}>
                   <Text style={styles.sectionTitle}>{section.title}</Text>
-                  {section.tracks.map((track, index) => (
+                  {section.visibleTracks.map((track, index) => (
                     <React.Fragment key={track.id}>
                       {renderTrackRow(
                         track,
@@ -847,6 +882,20 @@ export const CollectionDetail = ({
                       )}
                     </React.Fragment>
                   ))}
+                  {kind === 'artist' && !normalizedSearchQuery &&
+                  section.visibleTracks.length < section.tracks.length ? (
+                    <LoggedPressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Mostrar mais de ${section.title.toLocaleLowerCase()}`}
+                      onPress={() => setArtistSectionLimits((limits) => ({
+                        ...limits,
+                        [section.id]: (limits[section.id] || ARTIST_TRACKS_PAGE_SIZE) + ARTIST_TRACKS_PAGE_SIZE,
+                      }))}
+                      style={styles.showMoreTracks}
+                    >
+                      <Text style={styles.showMoreTracksText}>Mostrar mais</Text>
+                    </LoggedPressable>
+                  ) : null}
                 </View>
               ))}
               {footer}
@@ -972,6 +1021,8 @@ const styles = StyleSheet.create({
   sectionTitle: { color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 18, paddingBottom: 8, paddingHorizontal: 16 },
   extraSection: { paddingTop: 20 },
   listFooter: { paddingTop: 18 },
+  showMoreTracks: { alignSelf: 'center', paddingHorizontal: 20, paddingVertical: 14 },
+  showMoreTracksText: { color: '#1ED760', fontFamily: 'SF-Semibold', fontSize: 15 },
   artistModalBackdrop: { backgroundColor: 'rgba(0,0,0,0.72)', flex: 1, justifyContent: 'flex-end' },
   artistModal: { backgroundColor: '#171717', borderColor: 'rgba(255,255,255,0.12)', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: StyleSheet.hairlineWidth, elevation: 24, flexShrink: 1, maxHeight: '88%', minHeight: 260, paddingHorizontal: 18, paddingTop: 16 },
   artistModalScroll: { flex: 1, minHeight: 0 },

@@ -14,6 +14,8 @@ import { useLibraryStore } from './useLibraryStore';
 import { executeCommand } from '../src/application/commandBus';
 import { log } from '../utils/appLogger';
 import { Platform } from 'react-native';
+import { useConnectivityStore } from './useConnectivityStore';
+import { showOfflineActionMessage } from '../services/network/offlineFeedback';
 
 export type DownloadJobStatus =
   | 'queued'
@@ -79,6 +81,9 @@ const runDownload = (
 ): Promise<boolean> => {
   const active = activeRuns.get(track.spotifyId);
   if (active) return active;
+  if (useConnectivityStore.getState().status === 'offline') {
+    return Promise.resolve(false);
+  }
 
   const request = executeCommand({
     name: 'download.track',
@@ -197,6 +202,10 @@ export const useDownloadStore = create<DownloadState>((set, get) => ({
       });
       return;
     }
+    if (useConnectivityStore.getState().status === 'offline') {
+      showOfflineActionMessage();
+      return;
+    }
 
     set((state) => {
       const downloads = mergeJobs(state.downloads, additions);
@@ -264,6 +273,10 @@ export const useDownloadStore = create<DownloadState>((set, get) => ({
     return { downloads, activeDownloadsCount: downloads.filter(isActive).length };
   }),
   retryDownload: async (spotifyId) => {
+    if (useConnectivityStore.getState().status === 'offline') {
+      showOfflineActionMessage();
+      return;
+    }
     const job = get().downloads.find((candidate) => candidate.spotifyId === spotifyId);
     if (!job || isActive(job) || job.status === 'completed') return;
     await executeCommand({

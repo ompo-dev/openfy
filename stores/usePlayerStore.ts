@@ -29,6 +29,7 @@ import {
   getDownloadedTrack,
   restoreCurrentVolume,
   preloadAudio,
+  preloadNativeYouTubeAudio,
   releasePreloadedAudio,
   recordInteraction,
   reportDirectYouTubeStreamRefusal,
@@ -55,6 +56,8 @@ import type {
 } from '../services/download/downloadManager';
 import { getCachedAppSettings } from '../services/settings/appSettings';
 import { log } from '../utils/appLogger';
+import { useConnectivityStore } from './useConnectivityStore';
+import { showOfflineActionMessage } from '../services/network/offlineFeedback';
 
 export type PlayerTrack = TrackCatalogMetadata & {
   spotifyId: string;
@@ -126,6 +129,7 @@ export interface PlayerStoreState {
 
 // In-Memory Fast Caches
 const lyricsCache = new Map<string, LyricsData>();
+const pendingLyricsLoads = new Map<string, Promise<LyricsData | null>>();
 
 // Existing entries were created by native fallback providers. Start new caches
 // on canonical backend so iPhone cannot reuse a different song or expired URL.
@@ -140,6 +144,8 @@ const warmedAudioSources = new Map<
 >();
 const activeAudioWarmups = new Map<string, Promise<void>>();
 const queuePreloadKeys = new Set<string>();
+const preparedNativeAudio = new Map<string, { bytes: number; expiresAt: number }>();
+const pendingNativeAudioPreloads = new Map<string, Promise<number | null>>();
 const isAppActiveForPreload = () =>
   !AppState?.currentState || AppState.currentState === 'active';
 
@@ -292,13 +298,104 @@ const cacheAudioSource = (track: PlayerTrack, source: AudioSourceInput) => {
   });
 };
 
+const loadLyricsForTrack = (track: PlayerTrack): Promise<LyricsData | null> => {
+  const cacheKey = getCacheKey(track);
+  const lyricsCacheKey = getLyricsCacheKey(track);
+  const cached = lyricsCache.get(lyricsCacheKey);
+  if (cached) return Promise.resolve(cached);
+  const pending = pendingLyricsLoads.get(lyricsCacheKey);
+  if (pending) return pending;
+
+  const loading = (async () => {
+    try {
+      const stored = await AsyncStorage.getItem(`${STORAGE_LYRICS_PREFIX}${cacheKey}`);
+      if (stored) {
+        const lyrics = JSON.parse(stored) as LyricsData;
+        lyricsCache.set(lyricsCacheKey, lyrics);
+        return lyrics;
+      }
+    } catch {}
+
+    if (useConnectivityStore.getState().status === 'offline') return null;
+
+    try {
+      const lyrics = await fetchLyrics(
+        track.title,
+        track.artistName,
+        track.duration_ms ? track.duration_ms / 1000 : undefined,
+        track.albumName
+      );
+      if (lyrics) {
+        lyricsCache.set(lyricsCacheKey, lyrics);
+        void AsyncStorage.setItem(
+          `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
+          JSON.stringify(lyrics)
+        ).catch(() => {});
+      }
+      return lyrics;
+    } catch {
+      return null;
+    }
+  })().finally(() => {
+    pendingLyricsLoads.delete(lyricsCacheKey);
+  });
+  pendingLyricsLoads.set(lyricsCacheKey, loading);
+  return loading;
+};
+
+const warmTrackLyrics = (track: PlayerTrack, direction: string) => {
+  if (useConnectivityStore.getState().status === 'offline') return;
+  if (lyricsCache.has(getLyricsCacheKey(track))) return;
+  const finishWarmup = log.time('player', 'queue lyrics warmup', {
+    trackId: track.spotifyId,
+    direction,
+  });
+  void loadLyricsForTrack(track).then(
+    (lyrics) => finishWarmup({ ok: Boolean(lyrics), direction }),
+    (error) => finishWarmup({ ok: false, direction, error: String(error) })
+  );
+};
+
+const warmNativeYouTubeAudio = (videoId: string): Promise<number | null> => {
+  const now = Date.now();
+  const cached = preparedNativeAudio.get(videoId);
+  if (cached && cached.expiresAt > now) return Promise.resolve(cached.bytes);
+  preparedNativeAudio.delete(videoId);
+  const pending = pendingNativeAudioPreloads.get(videoId);
+  if (pending) return pending;
+
+  const loading = Promise.resolve()
+    .then(() => typeof preloadNativeYouTubeAudio === 'function'
+      ? preloadNativeYouTubeAudio(videoId)
+      : null)
+    .then((result) => {
+      if (!result?.bytes) return null;
+      preparedNativeAudio.set(videoId, {
+        bytes: result.bytes,
+        expiresAt: Date.now() + 4 * 60_000,
+      });
+      while (preparedNativeAudio.size > 4) {
+        const oldest = preparedNativeAudio.keys().next().value;
+        if (!oldest) break;
+        preparedNativeAudio.delete(oldest);
+      }
+      return result.bytes;
+    })
+    .catch(() => null)
+    .finally(() => pendingNativeAudioPreloads.delete(videoId));
+  pendingNativeAudioPreloads.set(videoId, loading);
+  return loading;
+};
+
 const warmTrackAudio = (
   track?: PlayerTrack,
   isStillNeeded: () => boolean = () => true,
-  bufferRatio = 0.25
+  bufferRatio = 0.25,
+  prioritizeNativeAudio = false
 ) => {
   if (!track) return;
   if (!isStillNeeded() || !isAppActiveForPreload()) return;
+  if (useConnectivityStore.getState().status === 'offline') return;
   const cacheKey = getCacheKey(track);
   const durationSeconds = Math.max(0, track.duration_ms || 0) / 1000;
   const preferredForwardBufferDuration = durationSeconds
@@ -306,6 +403,29 @@ const warmTrackAudio = (
     : 5;
   const suppliedSource = getFreshPreloadedSource(track);
   if (suppliedSource) {
+    const suppliedNativeVideoId = typeof suppliedSource === 'string'
+      ? parseNativeYouTubePlaybackUri(suppliedSource)
+      : null;
+    if (suppliedNativeVideoId) {
+      const finishWarmup = log.time('player', 'queue neighbor warmup', {
+        trackId: track.spotifyId,
+        bufferRatio,
+      });
+      void (async () => {
+        const bytes = prioritizeNativeAudio && isStillNeeded()
+          ? await warmNativeYouTubeAudio(suppliedNativeVideoId)
+          : null;
+        finishWarmup({
+          ok: !prioritizeNativeAudio || Boolean(bytes),
+          source: bytes ? 'native-audio-buffer' : 'native-video-id-only',
+          audioPrepared: Boolean(bytes),
+          preparedBytes: bytes || 0,
+          trackId: track.spotifyId,
+          bufferRatio,
+        });
+      })();
+      return;
+    }
     if (isStillNeeded()) {
       const finishWarmup = log.time('player', 'queue neighbor warmup', {
         trackId: track.spotifyId,
@@ -326,6 +446,7 @@ const warmTrackAudio = (
   });
   let sourceKind = 'stream';
   let warmupError: unknown;
+  let preparedBytes = 0;
   const warmup = (async () => {
     const directSavedSource = await getSavedAudioSource(track);
     if (directSavedSource) {
@@ -344,14 +465,24 @@ const warmTrackAudio = (
       return;
     }
 
-    // The iOS native engine opens the next YouTube item by canonical video ID.
-    // Resolving a short-lived JS URL here only wastes requests and can poison
-    // the client-health cache before the user reaches that track.
-    if (
-      typeof hasNativeYouTubePlayback === 'function' &&
-      hasNativeYouTubePlayback()
-    ) {
-      sourceKind = 'native-video-id';
+    if (useConnectivityStore.getState().status === 'offline') {
+      sourceKind = 'offline';
+      return;
+    }
+
+    if (typeof hasNativeYouTubePlayback === 'function' && hasNativeYouTubePlayback()) {
+      const nativeSource = await resolveNativeYouTubeSource(track);
+      if (!nativeSource || !isStillNeeded()) {
+        sourceKind = 'unresolved';
+        return;
+      }
+      const videoId = parseNativeYouTubePlaybackUri(nativeSource);
+      cacheAudioSource(track, nativeSource);
+      sourceKind = 'native-video-id-only';
+      if (prioritizeNativeAudio && videoId) {
+        preparedBytes = (await warmNativeYouTubeAudio(videoId)) || 0;
+        if (preparedBytes > 0) sourceKind = 'native-audio-buffer';
+      }
       return;
     }
 
@@ -381,6 +512,8 @@ const warmTrackAudio = (
       finishWarmup({
         ok: !warmupError && sourceKind !== 'unresolved',
         source: sourceKind,
+        audioPrepared: preparedBytes > 0,
+        preparedBytes,
         trackId: track.spotifyId,
         bufferRatio,
         preferredForwardBufferDuration,
@@ -427,10 +560,12 @@ const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
       trackId: track.spotifyId,
       bufferRatio: ratio,
     });
+    warmTrackLyrics(track, direction);
     warmTrackAudio(
       track,
       () => isAppActiveForPreload() && queuePreloadKeys.has(getCacheKey(track)),
-      ratio
+      ratio,
+      true
     );
   });
 };
@@ -462,6 +597,19 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   playTrack: async (track: PlayerTrack, options = {}) => {
     const { showPlayer = true, setQueue = true } = options;
     let hasSavedWebDownload = false;
+    let offlinePlaybackBlocked = false;
+
+    if (useConnectivityStore.getState().status === 'offline') {
+      const localTrackAudio = await getExistingLocalAudioPath(track.localAudioPath);
+      const downloaded = localTrackAudio ? null : await getDownloadedTrack(track.spotifyId);
+      const downloadedAudio = localTrackAudio
+        ? localTrackAudio
+        : await getExistingLocalAudioPath(downloaded?.localAudioPath);
+      if (!downloadedAudio) {
+        showOfflineActionMessage();
+        return;
+      }
+    }
 
     // 1. ATOMIC GENERATION LOCK 🔒: Increments request counter to cancel any stale in-flight fetches
     const requestId = get().activeRequestId + 1;
@@ -526,8 +674,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         return downloadedSavedSource;
       }
 
-      const nativeYouTubeSource = await resolveNativeYouTubeSource(track);
-      if (nativeYouTubeSource) return nativeYouTubeSource;
+      if (useConnectivityStore.getState().status === 'offline') {
+        offlinePlaybackBlocked = true;
+        return null;
+      }
 
       const preloadedSource = getFreshPreloadedSource(track);
       if (preloadedSource) {
@@ -541,6 +691,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         const warmedSource = getFreshPreloadedSource(track);
         if (warmedSource) return warmedSource;
       }
+
+      const nativeYouTubeSource = await resolveNativeYouTubeSource(track);
+      if (nativeYouTubeSource) return nativeYouTubeSource;
 
       const resolved = await resolveAudioUrl(
         track.title,
@@ -562,41 +715,14 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     const startLyricsLoading = () => {
       if (cachedLyrics) return;
-      void (async () => {
-        let lyrics: LyricsData | null = null;
-        try {
-          await new Promise((resolve) => setTimeout(resolve, 0));
-          if (get().activeRequestId !== requestId) return;
-          const stored = await AsyncStorage.getItem(
-            `${STORAGE_LYRICS_PREFIX}${cacheKey}`
-          );
-          if (stored) {
-            lyrics = JSON.parse(stored) as LyricsData;
-            lyricsCache.set(lyricsCacheKey, lyrics);
-          } else {
-            lyrics = await fetchLyrics(
-              track.title,
-              track.artistName,
-              track.duration_ms ? track.duration_ms / 1000 : undefined,
-              track.albumName
-            );
-            if (lyrics) {
-              lyricsCache.set(lyricsCacheKey, lyrics);
-              void AsyncStorage.setItem(
-                `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
-                JSON.stringify(lyrics)
-              ).catch(() => {});
-            }
-          }
-        } catch {
-          lyrics = null;
-        } finally {
-          if (get().activeRequestId === requestId) {
-            set({ lyricsData: lyrics, isLoadingLyrics: false });
-          }
+      void loadLyricsForTrack(track).then((lyrics) => {
+        if (get().activeRequestId === requestId) {
+          set({ lyricsData: lyrics, isLoadingLyrics: false });
         }
-      })();
+      });
     };
+
+    startLyricsLoading();
 
     // Execute Audio resolution
     const finishResolution = log.time('player', 'audio source resolution', {
@@ -630,7 +756,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           error: 'Não foi possível carregar o áudio desta faixa.',
         },
       });
-      startLyricsLoading();
+      if (offlinePlaybackBlocked) showOfflineActionMessage();
       void ensurePlaybackDiagnostics(track).catch(() => {});
       // Resolution failed for the selected id. Dispose the paused previous
       // engine so no later native/lock-screen command can resume another song.
@@ -848,7 +974,6 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     if (get().activeRequestId !== requestId) return;
 
     if (success) {
-      startLyricsLoading();
       void ensurePlaybackDiagnostics(track).catch(() => {});
       recordInteraction(track, 'play').catch(() => {});
       warmQueueNeighbors(get().queue, get().queueIndex);
@@ -970,6 +1095,24 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     // Always read real-time state from playerService (not Zustand state which can be stale)
     // This ensures pause works from any screen: banners, carrossel, etc.
     const realState = getStatus();
+
+    if (
+      useConnectivityStore.getState().status === 'offline' &&
+      !realState.isPlaying &&
+      currentTrack
+    ) {
+      const localTrackAudio = await getExistingLocalAudioPath(currentTrack.localAudioPath);
+      const downloaded = localTrackAudio
+        ? null
+        : await getDownloadedTrack(currentTrack.spotifyId);
+      const downloadedAudio = localTrackAudio
+        ? localTrackAudio
+        : await getExistingLocalAudioPath(downloaded?.localAudioPath);
+      if (!downloadedAudio) {
+        showOfflineActionMessage();
+        return;
+      }
+    }
 
     if (!realState.isLoaded && currentTrack) {
       await playTrack(currentTrack, { setQueue: false });

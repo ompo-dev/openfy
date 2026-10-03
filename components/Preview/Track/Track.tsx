@@ -19,6 +19,8 @@ import {
 } from '@services';
 
 import { styles } from './styles';
+import { useConnectivityStore } from '../../../stores/useConnectivityStore';
+import { showOfflineActionMessage } from '../../../services/network/offlineFeedback';
 
 export type TrackPropsType = {
   type: 'album' | 'playlist';
@@ -55,6 +57,7 @@ export const Track = ({
   const maxWidth = width - 150;
   const isPlaylist = type === 'playlist';
   const { playTrack, currentTrack, playerState } = usePlayer();
+  const isOffline = useConnectivityStore((state) => state.status === 'offline');
 
   const [isDownloaded, setIsDownloaded] = React.useState(isDownloadedProp);
   const [isDownloading, setIsDownloading] = React.useState(false);
@@ -84,6 +87,11 @@ export const Track = ({
       return;
     }
 
+    if (isOffline) {
+      showOfflineActionMessage();
+      return;
+    }
+
     // Try stream resolution
     const resolved = await resolveAudioUrl(
       title,
@@ -105,6 +113,10 @@ export const Track = ({
 
   const handleDownload = async () => {
     if (!trackId || isDownloaded || isDownloading) return;
+    if (isOffline) {
+      showOfflineActionMessage();
+      return;
+    }
 
     setIsDownloading(true);
     setDownloadProgress(0);
@@ -237,7 +249,7 @@ export const Track = ({
           ) : isDownloaded ? (
             <Ionicons name="checkmark-circle" size={18} color="#1DB954" />
           ) : (
-            <Ionicons name="download-outline" size={18} color="#A0A0A0" />
+            <Ionicons name={isOffline ? 'cloud-offline-outline' : 'download-outline'} size={18} color="#A0A0A0" />
           )}
         </Pressable>
       )}

@@ -36,6 +36,7 @@ import { resolveSpotifyTrackVideoId } from '../../audio/catalogResolver';
 import { getDownloadDiagnostics } from '../downloadDiagnostics';
 import { fetchSpotifyTrackMetadata } from '../../metadata/spotifyMetadata';
 import { getCatalogMapping } from '../../audio/catalogMappingCache';
+import { useConnectivityStore } from '../../../stores/useConnectivityStore';
 import {
   downloadAudio,
   downloadTrack,
@@ -85,6 +86,7 @@ const fetchMock = jest.fn();
 
 describe('queueDownloads', () => {
   beforeEach(async () => {
+    useConnectivityStore.setState({ status: 'online', isOnline: true });
     await AsyncStorage.clear();
     (fetchSpotifyTrackMetadata as jest.Mock).mockReset().mockResolvedValue(null);
     (getCatalogMapping as jest.Mock).mockReset().mockResolvedValue(null);
@@ -115,6 +117,25 @@ describe('queueDownloads', () => {
     mockNativePlayerAndDownload.mockReset();
     fetchMock.mockReset();
     global.fetch = fetchMock;
+  });
+
+  it('does not start remote download resolution while offline', async () => {
+    useConnectivityStore.setState({ status: 'offline', isOnline: false });
+
+    await expect(
+      downloadTrack({
+        spotifyId: 'offline-track',
+        title: 'Faixa offline',
+        artistName: 'Artista',
+        albumName: 'Álbum',
+        imageURL: '',
+        duration_ms: 180000,
+      })
+    ).resolves.toBeNull();
+
+    expect(resolveAudioUrlMock).not.toHaveBeenCalled();
+    expect(directAudioMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('persists hydrated audio URL and format for background resume', async () => {

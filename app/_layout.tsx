@@ -18,6 +18,7 @@ import {
 } from '@context';
 import { MiniPlayer, FullPlayer } from '@components';
 import { PlayerWidgetSync } from '../components/Player/PlayerWidgetSync';
+import { GlobalConnectivity } from '../components/GlobalConnectivity/GlobalConnectivity';
 import { registerBackgroundDownloadTask } from '@services';
 import { useOTAUpdates } from '@hooks';
 import { installErrorLogging, log } from '@utils';
@@ -113,6 +114,7 @@ export default function RootLayout() {
                       />
                     </Stack>
                     <PlayerOverlay />
+                    <GlobalConnectivity />
                   </View>
                   <StatusBar style="light" />
                 </GestureHandlerRootView>

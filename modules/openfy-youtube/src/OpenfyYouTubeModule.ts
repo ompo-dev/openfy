@@ -27,6 +27,8 @@ export type NativeYouTubePlaybackMetadata = {
   durationMs?: number;
 };
 
+export type NativeYouTubePreloadResult = { bytes: number };
+
 declare class OpenfyYouTubeModule extends NativeModule<{}> {
   /**
    * Transfers an already-resolved googlevideo stream in deterministic byte
@@ -59,6 +61,7 @@ declare class OpenfyYouTubeModule extends NativeModule<{}> {
     videoId: string,
     metadata: NativeYouTubePlaybackMetadata
   ): Promise<void>;
+  preloadNativeYouTubeAsync(videoId: string): Promise<NativeYouTubePreloadResult>;
   pauseNativeYouTubeAsync(): Promise<void>;
   resumeNativeYouTubeAsync(): Promise<void>;
   seekNativeYouTubeAsync(positionMs: number): Promise<void>;

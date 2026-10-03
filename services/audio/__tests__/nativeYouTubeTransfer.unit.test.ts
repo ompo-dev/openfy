@@ -2,6 +2,7 @@ const mockNativeDownload = jest.fn();
 const mockNativeResolveAndDownload = jest.fn();
 const mockNativePlay = jest.fn();
 const mockNativeStatus = jest.fn();
+const mockNativePreload = jest.fn();
 
 jest.mock('../../../modules/openfy-youtube', () => ({
   __esModule: true,
@@ -11,6 +12,7 @@ jest.mock('../../../modules/openfy-youtube', () => ({
     playNativeYouTubeAsync: mockNativePlay,
     playNativeYouTubeWithMetadataAsync: mockNativePlay,
     getNativePlaybackStatusAsync: mockNativeStatus,
+    preloadNativeYouTubeAsync: mockNativePreload,
   },
 }));
 
@@ -19,6 +21,7 @@ import {
   getNativeYouTubePlaybackStatus,
   parseNativeYouTubePlaybackUri,
   playYouTubeVideoNatively,
+  preloadNativeYouTubeAudio,
   resolveAndDownloadYouTubeVideoNatively,
   toNativeYouTubePlaybackUri,
 } from '../nativeYouTubeTransfer';
@@ -29,6 +32,7 @@ describe('downloadYouTubeStreamNatively', () => {
     mockNativeResolveAndDownload.mockReset();
     mockNativePlay.mockReset();
     mockNativeStatus.mockReset();
+    mockNativePreload.mockReset();
   });
 
   it('delegates a fresh iOS player resolution and transfer to one native session', async () => {
@@ -145,5 +149,16 @@ describe('downloadYouTubeStreamNatively', () => {
       artworkFallbackUrl: 'https://images.example/cover-fallback.jpg',
       durationMs: '180123',
     });
+  });
+
+  it('preloads audio through the iOS module and rejects invalid video ids', async () => {
+    mockNativePreload.mockResolvedValue({ bytes: 512 * 1024 });
+
+    await expect(preloadNativeYouTubeAudio('V1M1hYxmRvA')).resolves.toEqual({
+      bytes: 512 * 1024,
+    });
+    await expect(preloadNativeYouTubeAudio('invalid')).resolves.toBeNull();
+    expect(mockNativePreload).toHaveBeenCalledTimes(1);
+    expect(mockNativePreload).toHaveBeenCalledWith('V1M1hYxmRvA');
   });
 });

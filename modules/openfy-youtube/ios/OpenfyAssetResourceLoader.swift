@@ -12,15 +12,18 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
   public let queue = DispatchQueue(label: "openfy.youtube.resource-loader", qos: .userInitiated)
   private let descriptor: YouTubeStreamDescriptor
   private let rangeClient: YouTubeHTTPRangeClient
+  private let prefetchedPrefix: Data?
   private let chunkSize: Int64 = 1024 * 1024 // 1 MB chunks
   private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
 
   public init(
     descriptor: YouTubeStreamDescriptor,
-    rangeClient: YouTubeHTTPRangeClient
+    rangeClient: YouTubeHTTPRangeClient,
+    prefetchedPrefix: Data? = nil
   ) {
     self.descriptor = descriptor
     self.rangeClient = rangeClient
+    self.prefetchedPrefix = prefetchedPrefix
     super.init()
   }
 
@@ -112,6 +115,15 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
         dataRequest.requestedOffset + Int64(dataRequest.requestedLength) - 1,
         descriptor.contentLength - 1
       )
+    }
+
+    if let prefetchedPrefix, offset >= 0, offset < Int64(prefetchedPrefix.count) {
+      let availableEnd = min(Int64(prefetchedPrefix.count), targetEnd + 1)
+      if offset < availableEnd {
+        dataRequest.respond(with: prefetchedPrefix.subdata(in: Int(offset)..<Int(availableEnd)))
+        NSLog("[RESOURCE] Reused %lld preloaded bytes for %@", availableEnd - offset, descriptor.videoId)
+        offset = availableEnd
+      }
     }
 
     while offset <= targetEnd {

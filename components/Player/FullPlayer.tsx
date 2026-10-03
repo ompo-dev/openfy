@@ -14,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Linking,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -66,6 +67,7 @@ import { MarqueeText } from '../common/MarqueeText';
 import { SwipeableArtwork } from './SwipeableArtwork';
 import { MiniPlayer } from './MiniPlayer';
 import { SkeletonImage } from '../common/SkeletonImage';
+import { useConnectivityStore } from '../../stores/useConnectivityStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COVER_SIZE = Math.min(SCREEN_WIDTH - 64, 340);
@@ -249,6 +251,7 @@ function PlayerGlassButton({
 
 export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const insets = useSafeAreaInsets();
+  const isOffline = useConnectivityStore((state) => state.status === 'offline');
   const { openDetail } = useDetailNavigation();
   const { clearCompletedDownloads, downloads, enqueueDownloads } =
     useDownloads();
@@ -299,11 +302,21 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [artistImages, setArtistImages] = React.useState<Record<string, string>>({});
   const [primaryArtistBiography, setPrimaryArtistBiography] = React.useState('');
   const [isBiographyExpanded, setIsBiographyExpanded] = React.useState(false);
+  const [previewCurrentLineCount, setPreviewCurrentLineCount] = React.useState(0);
+  const [previewNextLineCount, setPreviewNextLineCount] = React.useState(0);
+  const [scrubbedLyricTimelineIndex, setScrubbedLyricTimelineIndex] = React.useState<number | null>(null);
 
   const lyricsListRef = React.useRef<FlatList>(null);
   const playerScrollRef = React.useRef<ScrollView>(null);
   const lyricScrollRetriedRef = React.useRef(false);
   const shouldScrollLyricsOnOpenRef = React.useRef(false);
+  const manualLyricsFollowUntilRef = React.useRef(0);
+  const manualLyricsFollowTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewGestureStartPositionRef = React.useRef(0);
+  const previewLineIndicesRef = React.useRef<number[]>([]);
+  const activePreviewPositionRef = React.useRef(0);
+  const lastPreviewSeekTimelineIndexRef = React.useRef<number | null>(null);
+  const lyricsListDraggingRef = React.useRef(false);
   const currentTrackRef = React.useRef(currentTrack);
   const youtubeLinkRef = React.useRef({ trackKey: '', url: '' });
   const draftLyricSegmentsRef = React.useRef<LyricSegment[]>([]);
@@ -573,6 +586,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     setDraftLyricSegments([]);
     draftLyricSegmentsRef.current = [];
     setSelectedLyricTarget({ kind: 'lyric', index: 0 });
+    setScrubbedLyricTimelineIndex(null);
+    manualLyricsFollowUntilRef.current = 0;
+    lyricsListDraggingRef.current = false;
+    if (manualLyricsFollowTimerRef.current) {
+      clearTimeout(manualLyricsFollowTimerRef.current);
+      manualLyricsFollowTimerRef.current = null;
+    }
   }, [currentTrackKey]);
 
   React.useEffect(() => {
@@ -600,30 +620,64 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     return currentMs >= lyricTimeline[lastIndex].startTimeMs ? lastIndex : 0;
   }, [lyricTimeline, playerState.positionMs]);
 
+  const lyricTimelineIndices = React.useMemo(
+    () => lyricTimeline.flatMap((block, index) => block.kind === 'lyric' ? [index] : []),
+    [lyricTimeline]
+  );
+  const activePreviewPosition = React.useMemo(() => {
+    const currentMs = playerState.positionMs;
+    const activePosition = lyricTimelineIndices.findIndex((index) => {
+      const line = lyricTimeline[index];
+      return currentMs >= line.startTimeMs && currentMs < line.endTimeMs;
+    });
+    if (activePosition >= 0) return activePosition;
+    const upcomingPosition = lyricTimelineIndices.findIndex(
+      (index) => lyricTimeline[index].endTimeMs > currentMs
+    );
+    return upcomingPosition >= 0 ? upcomingPosition : Math.max(0, lyricTimelineIndices.length - 1);
+  }, [lyricTimeline, lyricTimelineIndices, playerState.positionMs]);
+  previewLineIndicesRef.current = lyricTimelineIndices;
+  activePreviewPositionRef.current = activePreviewPosition;
+
   const lyricPreview = React.useMemo(() => {
-    if (lyricTimeline.length) {
-      const currentMs = playerState.positionMs;
-      let start = lyricTimeline.findIndex((line) =>
-        line.kind === 'lyric' && currentMs >= line.startTimeMs && currentMs < line.endTimeMs
-      );
-      if (start < 0) {
-        start = lyricTimeline.findIndex((line) => line.kind === 'lyric' && line.endTimeMs > currentMs);
-      }
-      if (start < 0) start = lyricTimeline.findIndex((line) => line.kind === 'lyric');
-      return lyricTimeline
-        .slice(Math.max(0, start))
-        .flatMap((line, offset) => line.kind === 'lyric'
-          ? [{ text: line.text, active: Math.max(0, start) + offset === activeLineIndex }]
-          : [])
-        .slice(0, 2);
+    if (lyricTimelineIndices.length) {
+      const manualIndex = scrubbedLyricTimelineIndex === null
+        ? -1
+        : lyricTimelineIndices.indexOf(scrubbedLyricTimelineIndex);
+      const startPosition = manualIndex >= 0 ? manualIndex : activePreviewPosition;
+      return lyricTimelineIndices
+        .slice(startPosition, startPosition + 2)
+        .map((timelineIndex) => {
+          const line = lyricTimeline[timelineIndex];
+          return {
+            text: line.text,
+            active: timelineIndex === activeLineIndex || timelineIndex === scrubbedLyricTimelineIndex,
+            timelineIndex,
+            startTimeMs: line.startTimeMs,
+          };
+        });
     }
     return (lyricsData?.plainLyrics || '')
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
       .slice(0, 2)
-      .map((text, index) => ({ text, active: index === 0 }));
-  }, [activeLineIndex, lyricTimeline, lyricsData?.plainLyrics, playerState.positionMs]);
+      .map((text, index) => ({ text, active: index === 0, timelineIndex: null, startTimeMs: null }));
+  }, [
+    activeLineIndex,
+    activePreviewPosition,
+    lyricTimeline,
+    lyricTimelineIndices,
+    lyricsData?.plainLyrics,
+    scrubbedLyricTimelineIndex,
+  ]);
+  const previewCurrentText = lyricPreview[0]?.text;
+  const previewNextText = lyricPreview[1]?.text;
+
+  React.useEffect(() => {
+    setPreviewCurrentLineCount(0);
+    setPreviewNextLineCount(0);
+  }, [currentTrackKey, previewCurrentText, previewNextText]);
 
   React.useEffect(() => {
     if (!isLyricsEditing || !playerState.isPlaying || activeLineIndex < 0) {
@@ -642,7 +696,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     (animated: boolean) => {
       if (
         !showLyricsFull ||
-        !shouldScrollLyricsOnOpenRef.current ||
+        Date.now() < manualLyricsFollowUntilRef.current ||
         activeLineIndex < 0 ||
         !lyricsListRef.current ||
         isLyricsEditing ||
@@ -660,32 +714,63 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     [activeLineIndex, isLyricsEditing, lyricTimeline.length, showLyricsFull]
   );
 
+  const pauseLyricsAutoFollow = React.useCallback(() => {
+    manualLyricsFollowUntilRef.current = Date.now() + 2500;
+    if (manualLyricsFollowTimerRef.current) {
+      clearTimeout(manualLyricsFollowTimerRef.current);
+    }
+    manualLyricsFollowTimerRef.current = setTimeout(() => {
+      manualLyricsFollowUntilRef.current = 0;
+      manualLyricsFollowTimerRef.current = null;
+      lyricsListDraggingRef.current = false;
+      setScrubbedLyricTimelineIndex(null);
+      scrollLyricsToActive(true);
+    }, 2500);
+  }, [scrollLyricsToActive]);
+
   React.useEffect(() => {
     if (showLyricsFull) return;
     lyricScrollRetriedRef.current = false;
     shouldScrollLyricsOnOpenRef.current = false;
+    manualLyricsFollowUntilRef.current = 0;
+    lyricsListDraggingRef.current = false;
+    if (manualLyricsFollowTimerRef.current) {
+      clearTimeout(manualLyricsFollowTimerRef.current);
+      manualLyricsFollowTimerRef.current = null;
+    }
+    setScrubbedLyricTimelineIndex(null);
   }, [showLyricsFull]);
 
-  // The active line is centered once when lyrics open. From then on the listener
-  // owns the scroll position, even if playback continues.
+  React.useEffect(() => () => {
+    if (manualLyricsFollowTimerRef.current) {
+      clearTimeout(manualLyricsFollowTimerRef.current);
+    }
+  }, []);
+
+  // Follow timing changes unless the listener is exploring another part.
   React.useEffect(() => {
     if (
       !showLyricsFull ||
       isLyricsEditing ||
-      activeLineIndex < 0 ||
-      !shouldScrollLyricsOnOpenRef.current
+      activeLineIndex < 0
     ) {
       return;
     }
 
+    const animated = shouldScrollLyricsOnOpenRef.current;
     const frame = requestAnimationFrame(() => {
-      scrollLyricsToActive(true);
+      scrollLyricsToActive(animated);
       shouldScrollLyricsOnOpenRef.current = false;
     });
     return () => cancelAnimationFrame(frame);
   }, [activeLineIndex, isLyricsEditing, scrollLyricsToActive, showLyricsFull]);
 
   const openLyricsView = () => {
+    if (manualLyricsFollowTimerRef.current) {
+      clearTimeout(manualLyricsFollowTimerRef.current);
+      manualLyricsFollowTimerRef.current = null;
+    }
+    manualLyricsFollowUntilRef.current = 0;
     lyricScrollRetriedRef.current = false;
     shouldScrollLyricsOnOpenRef.current = true;
     setShowLyricsFull(true);
@@ -699,6 +784,50 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     }
     openLyricsView();
   };
+
+  const lyricPreviewPanResponder = React.useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gesture) =>
+      previewLineIndicesRef.current.length > 1 &&
+      Math.abs(gesture.dy) > 10 &&
+      Math.abs(gesture.dy) > Math.abs(gesture.dx),
+    onMoveShouldSetPanResponderCapture: (_, gesture) =>
+      previewLineIndicesRef.current.length > 1 &&
+      Math.abs(gesture.dy) > 10 &&
+      Math.abs(gesture.dy) > Math.abs(gesture.dx),
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: () => {
+      const scrubbedPosition = scrubbedLyricTimelineIndex === null
+        ? -1
+        : previewLineIndicesRef.current.indexOf(scrubbedLyricTimelineIndex);
+      const position = scrubbedPosition >= 0
+        ? scrubbedPosition
+        : activePreviewPositionRef.current;
+      const timelineIndex = previewLineIndicesRef.current[position];
+      previewGestureStartPositionRef.current = position;
+      lastPreviewSeekTimelineIndexRef.current = timelineIndex ?? null;
+      if (timelineIndex !== undefined) setScrubbedLyricTimelineIndex(timelineIndex);
+      pauseLyricsAutoFollow();
+    },
+    onPanResponderMove: (_, gesture) => {
+      const lineIndices = previewLineIndicesRef.current;
+      if (lineIndices.length < 2) return;
+      const start = previewGestureStartPositionRef.current;
+      const position = Math.max(0, Math.min(
+        lineIndices.length - 1,
+        start + Math.round(-gesture.dy / 36)
+      ));
+      const timelineIndex = lineIndices[position];
+      const line = lyricTimeline[timelineIndex];
+      if (!line || lastPreviewSeekTimelineIndexRef.current === timelineIndex) return;
+      lastPreviewSeekTimelineIndexRef.current = timelineIndex;
+      setScrubbedLyricTimelineIndex(timelineIndex);
+      pauseLyricsAutoFollow();
+      void seekToPosition(line.startTimeMs);
+    },
+    onPanResponderRelease: () => pauseLyricsAutoFollow(),
+    onPanResponderTerminate: () => pauseLyricsAutoFollow(),
+  }), [lyricTimeline, pauseLyricsAutoFollow, scrubbedLyricTimelineIndex, seekToPosition]);
 
   const handleOpenYoutubeMenu = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -1049,6 +1178,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   };
 
   const handleLyricPress = async (segment: LyricSegment, index: number) => {
+    pauseLyricsAutoFollow();
     if (isLyricsEditing) setSelectedLyricTarget({ kind: 'lyric', index });
     await seekToPosition(segment.startTimeMs);
   };
@@ -1057,6 +1187,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     target: LyricGapTarget,
     startTimeMs: number
   ) => {
+    pauseLyricsAutoFollow();
     if (isLyricsEditing) setSelectedLyricTarget({ kind: 'gap', target });
     await seekToPosition(startTimeMs);
   };
@@ -1196,6 +1327,18 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   contentContainerStyle={styles.lyricsScrollContent}
                   onLayout={() => scrollLyricsToActive(false)}
                   onContentSizeChange={() => scrollLyricsToActive(false)}
+                  onScrollBeginDrag={() => {
+                    lyricsListDraggingRef.current = true;
+                    pauseLyricsAutoFollow();
+                  }}
+                  onScroll={() => {
+                    if (lyricsListDraggingRef.current) pauseLyricsAutoFollow();
+                  }}
+                  onScrollEndDrag={() => pauseLyricsAutoFollow()}
+                  onMomentumScrollEnd={() => {
+                    lyricsListDraggingRef.current = false;
+                    pauseLyricsAutoFollow();
+                  }}
                   onScrollToIndexFailed={({ averageItemLength }) => {
                     if (lyricScrollRetriedRef.current) return;
                     lyricScrollRetriedRef.current = true;
@@ -1336,18 +1479,42 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 testID="player-artwork"
               />
 
-              <View style={styles.lyricPreview}>
-                {lyricPreview.length ? lyricPreview.map((line, index) => (
-                  <Text
-                    key={`${currentTrackKey}-preview-${index}`}
-                    numberOfLines={2}
-                    style={[styles.lyricPreviewText, line.active && styles.lyricPreviewActive]}
-                  >{line.text}</Text>
-                )) : (
-                  <Text style={styles.lyricPreviewPlaceholder}>
-                    {isLoadingLyrics ? 'Carregando letra…' : 'Letra não disponível para esta faixa.'}
-                  </Text>
-                )}
+              <View style={styles.lyricPreview} {...lyricPreviewPanResponder.panHandlers}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Abrir letra completa"
+                  onPress={openLyricsView}
+                  style={styles.lyricPreviewPressable}
+                >
+                  {lyricPreview.length ? (
+                    <>
+                      <Text
+                        testID="player-lyric-preview-current"
+                        onTextLayout={(event) => setPreviewCurrentLineCount(event.nativeEvent.lines.length)}
+                        style={[styles.lyricPreviewText, lyricPreview[0].active && styles.lyricPreviewActive]}
+                      >{lyricPreview[0].text}</Text>
+                      {lyricPreview[1] && previewCurrentLineCount === 1 && previewNextLineCount === 1 ? (
+                        <Text
+                          testID="player-lyric-preview-next"
+                          numberOfLines={1}
+                          style={[styles.lyricPreviewNext, lyricPreview[1].active && styles.lyricPreviewActive]}
+                        >{lyricPreview[1].text}</Text>
+                      ) : null}
+                      {lyricPreview[1] ? (
+                        <Text
+                          testID="player-lyric-preview-next-measure"
+                          accessible={false}
+                          onTextLayout={(event) => setPreviewNextLineCount(event.nativeEvent.lines.length)}
+                          style={styles.lyricPreviewMeasure}
+                        >{lyricPreview[1].text}</Text>
+                      ) : null}
+                    </>
+                  ) : (
+                    <Text style={styles.lyricPreviewPlaceholder}>
+                      {isLoadingLyrics ? 'Carregando letra…' : 'Letra não disponível para esta faixa.'}
+                    </Text>
+                  )}
+                </Pressable>
               </View>
             </View>
             {isLyricsEditing ? (
@@ -1415,12 +1582,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 }}
               >
                 <PlayerGlassButton
-                  accessibilityLabel={isCurrentTrackDownloading ? `Baixando ${currentDownloadProgress}%` : isCurrentTrackDownloaded ? 'Excluir download' : 'Baixar música'}
+                  accessibilityLabel={isCurrentTrackDownloading ? `Baixando ${currentDownloadProgress}%` : isCurrentTrackDownloaded ? 'Excluir download' : isOffline ? 'Offline: download indisponível' : 'Baixar música'}
                   disabled={isCurrentTrackDownloading || isDownloadMutationPending}
                   onPress={handleDownloadAction}
                   style={styles.sideControlBtn}
                 >
-                  {isCurrentTrackDownloading ? <Text style={styles.downloadProgressText}>{currentDownloadProgress}%</Text> : isDownloadMutationPending ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons name={isCurrentTrackDownloaded ? 'trash-outline' : 'download-outline'} size={23} color="rgba(255,255,255,0.82)" />}
+                  {isCurrentTrackDownloading ? <Text style={styles.downloadProgressText}>{currentDownloadProgress}%</Text> : isDownloadMutationPending ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons name={isCurrentTrackDownloaded ? 'trash-outline' : isOffline ? 'cloud-offline-outline' : 'download-outline'} size={23} color="rgba(255,255,255,0.82)" />}
                 </PlayerGlassButton>
                 <PlayerGlassButton accessibilityLabel="Faixa anterior" disabled={!canGoPrevious} onPress={playPrevious} style={styles.seekControlBtn}>
                   <Ionicons name="play-back" size={32} color={canGoPrevious ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} />
@@ -1554,8 +1721,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   </View>
                 </View>
                 <View style={styles.controlsRow}>
-                  <PlayerGlassButton accessibilityLabel={isCurrentTrackDownloaded ? 'Excluir download' : 'Baixar música'} disabled={isCurrentTrackDownloading || isDownloadMutationPending} onPress={handleDownloadAction} style={styles.sideControlBtn}>
-                    {isCurrentTrackDownloading ? <Text style={styles.downloadProgressText}>{currentDownloadProgress}%</Text> : <Ionicons name={isCurrentTrackDownloaded ? 'trash-outline' : 'download-outline'} size={23} color="rgba(255,255,255,0.82)" />}
+                  <PlayerGlassButton accessibilityLabel={isCurrentTrackDownloaded ? 'Excluir download' : isOffline ? 'Offline: download indisponível' : 'Baixar música'} disabled={isCurrentTrackDownloading || isDownloadMutationPending} onPress={handleDownloadAction} style={styles.sideControlBtn}>
+                    {isCurrentTrackDownloading ? <Text style={styles.downloadProgressText}>{currentDownloadProgress}%</Text> : <Ionicons name={isCurrentTrackDownloaded ? 'trash-outline' : isOffline ? 'cloud-offline-outline' : 'download-outline'} size={23} color="rgba(255,255,255,0.82)" />}
                   </PlayerGlassButton>
                   <PlayerGlassButton accessibilityLabel="Faixa anterior" disabled={!canGoPrevious} onPress={playPrevious} style={styles.seekControlBtn}><Ionicons name="play-back" size={32} color={canGoPrevious ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} /></PlayerGlassButton>
                   <PlayerGlassButton accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'} glass="thick" onPress={togglePlayPause} style={styles.playPauseCircle} tintColor="rgba(255,255,255,0.92)"><Ionicons name={playerState.isPlaying ? 'pause' : 'play'} size={34} color="#FFFFFF" /></PlayerGlassButton>
@@ -1850,7 +2017,10 @@ const styles = StyleSheet.create({
   },
   trackTitleMarquee: { maxWidth: '100%' },
   lyricPreview: { alignSelf: 'stretch', paddingHorizontal: 8, width: '100%' },
+  lyricPreviewPressable: { alignSelf: 'stretch', position: 'relative', width: '100%' },
   lyricPreviewText: { color: 'rgba(255,255,255,0.58)', fontSize: 15, lineHeight: 21, textAlign: 'left' },
+  lyricPreviewNext: { color: 'rgba(255,255,255,0.48)', fontSize: 13, lineHeight: 18, textAlign: 'left' },
+  lyricPreviewMeasure: { fontSize: 13, left: 0, lineHeight: 18, opacity: 0, position: 'absolute', top: 0, width: '100%' },
   lyricPreviewActive: { color: '#FFFFFF', fontWeight: '700' },
   lyricPreviewPlaceholder: { color: 'rgba(255,255,255,0.5)', fontSize: 14, lineHeight: 20 },
   artistDetailsSection: { paddingHorizontal: 4, paddingTop: 18 },

@@ -28,6 +28,8 @@ export type NativeYouTubePlaybackMetadata = {
   durationMs?: number;
 };
 
+export type NativeYouTubePreloadResult = { bytes: number };
+
 export type NativeYouTubePlaybackEvent =
   | 'onNativePlaybackEnded'
   | 'onNativeRemoteNext'
@@ -52,6 +54,7 @@ type OpenfyYouTubeNativeModule = {
     videoId: string,
     metadata: Record<string, string>
   ): Promise<void>;
+  preloadNativeYouTubeAsync?(videoId: string): Promise<unknown>;
   pauseNativeYouTubeAsync?(): Promise<void>;
   resumeNativeYouTubeAsync?(): Promise<void>;
   seekNativeYouTubeAsync?(positionMs: number): Promise<void>;
@@ -115,6 +118,15 @@ export const parseNativeYouTubePlaybackUri = (uri: string): string | null => {
 export const hasNativeYouTubePlayback = (): boolean =>
   Platform.OS === 'ios' &&
   typeof getNativeModule()?.playNativeYouTubeAsync === 'function';
+
+export const preloadNativeYouTubeAudio = async (
+  videoId: string
+): Promise<NativeYouTubePreloadResult | null> => {
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
+  const result = await getNativeModule()?.preloadNativeYouTubeAsync?.(videoId);
+  if (!isRecord(result) || typeof result.bytes !== 'number') return null;
+  return { bytes: result.bytes };
+};
 
 const metadataRecord = (
   metadata: NativeYouTubePlaybackMetadata

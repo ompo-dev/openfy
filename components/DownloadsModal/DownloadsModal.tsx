@@ -6,6 +6,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useDownloads, type DownloadJobStatus } from '@context';
 import { formatDownloadDiagnostics } from '@services';
 import { SheetFrame } from '../native';
+import { useConnectivityStore } from '../../stores/useConnectivityStore';
 
 type DownloadsModalProps = {
   visible: boolean;
@@ -35,6 +36,7 @@ const statusColor: Record<DownloadJobStatus, string> = {
 };
 
 export function DownloadsModal({ visible, onClose }: DownloadsModalProps) {
+  const isOffline = useConnectivityStore((state) => state.status === 'offline');
   const {
     downloads,
     activeDownloadsCount,
@@ -172,12 +174,12 @@ export function DownloadsModal({ visible, onClose }: DownloadsModalProps) {
                   <View style={styles.errorActions}>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel={`Tentar baixar ${download.title} novamente`}
+                      accessibilityLabel={isOffline ? `Offline: não é possível baixar ${download.title}` : `Tentar baixar ${download.title} novamente`}
                       hitSlop={10}
                       onPress={() => void retryDownload(download.spotifyId)}
                       style={styles.cancelButton}
                     >
-                      <Ionicons name="refresh" color="#F6B26B" size={19} />
+                      <Ionicons name={isOffline ? 'cloud-offline-outline' : 'refresh'} color="#F6B26B" size={19} />
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"

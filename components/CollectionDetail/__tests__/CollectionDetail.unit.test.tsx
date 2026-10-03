@@ -284,6 +284,26 @@ describe('CollectionDetail', () => {
     expect(screen.queryByText('Crédito genérico')).toBeNull();
   });
 
+  it('paginates artist tracks by 15 and exposes the next page on demand', async () => {
+    const artistTracks = Array.from({ length: 17 }, (_, index) => ({
+      id: `artist-track-${index + 1}`,
+      title: `Artist track ${index + 1}`,
+      subtitle: 'Artist name',
+    }));
+    const screen = await renderCollection({
+      kind: 'artist',
+      tracks: artistTracks,
+    });
+
+    expect(screen.getByTestId('collection-track-list').props.data).toHaveLength(15);
+    expect(screen.getByText('Artist track 1')).toBeTruthy();
+    expect(screen.queryByText('Artist track 16')).toBeNull();
+    fireEvent.press(screen.getByLabelText('Mostrar mais músicas do artista'));
+    await waitFor(() => {
+      expect(screen.getByTestId('collection-track-list').props.data).toHaveLength(17);
+    });
+  });
+
   it('loads remaining remote playlist pages when the full artist list is requested', async () => {
     const resolveTracksForPlayback = jest.fn().mockResolvedValue([
       ...tracks,

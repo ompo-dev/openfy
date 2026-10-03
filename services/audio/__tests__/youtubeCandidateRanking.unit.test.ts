@@ -43,6 +43,62 @@ describe('YouTube candidate ranking', () => {
     expect(rankYouTubeCandidate(official, canonical).rank).toBeGreaterThan(small.rank);
   });
 
+  it('lets a substantially more viewed matching video outrank an official-channel badge', () => {
+    const officialLowViews = { ...official, viewCount: 5_000_000, subscriberCount: 0 };
+    const popularVideo = {
+      ...official,
+      videoId: 'popular-video',
+      artist: 'Pedro Qualy',
+      isOfficialArtistChannel: false,
+      isVerifiedChannel: false,
+      viewCount: 10_000_000,
+      subscriberCount: 0,
+    };
+
+    expect(rankYouTubeCandidate(popularVideo, canonical).rank).toBeGreaterThan(
+      rankYouTubeCandidate(officialLowViews, canonical).rank
+    );
+  });
+
+  it('accepts the official candidates that the download diagnostics rejected by title', () => {
+    const ebonyTrack = {
+      spotifyId: '2faP6QUfGN94HI1FTSrpsm',
+      title: '100 Mili',
+      artists: ['Ebony', 'LARINHX'],
+      durationMs: 143000,
+    };
+    const oneHundredMili = rankYouTubeCandidate(
+      {
+        videoId: 'mmW3LUhIGcA',
+        title: 'EBONY - 100MILI (Tipo Bratz) ft. Larinhx [Videoclipe Oficial]',
+        artist: 'EBONY',
+        durationMs: 144000,
+        viewCount: 15374197,
+        isOfficialArtistChannel: true,
+      },
+      ebonyTrack
+    );
+    expect(oneHundredMili.eligible).toBe(true);
+
+    const freestyle = rankYouTubeCandidate(
+      {
+        videoId: 'P6mNggaNaTA',
+        title: 'EBONY - Espero Que Entendam (prod • LARINHX)',
+        artist: 'EBONY',
+        durationMs: 199000,
+        viewCount: 9220394,
+        isOfficialArtistChannel: true,
+      },
+      {
+        spotifyId: '3MEMW13ORJh94KnERm44JM',
+        title: 'Espero Que Entendam - Freestyle',
+        artists: ['Ebony', 'LARINHX'],
+        durationMs: 199000,
+      }
+    );
+    expect(freestyle.eligible).toBe(true);
+  });
+
   it.each([
     ['486,390 views', 486390], ['486.390 visualizacoes', 486390], ['3.43M subscribers', 3430000],
     ['3,43 mi subscribers', 3430000], ['204K subscribers', 204000], ['1,2 mil inscritos', 1200],

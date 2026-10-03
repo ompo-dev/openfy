@@ -33,6 +33,8 @@ import {
   type SpotifyArtist,
 } from '../../services/metadata/spotifyMetadata';
 import axios from 'axios';
+import { useConnectivityStore } from '../../stores/useConnectivityStore';
+import { showOfflineActionMessage } from '../../services/network/offlineFeedback';
 
 type TrackPreview = {
   spotifyId: string;
@@ -55,6 +57,7 @@ type TrackPreview = {
 
 type ImportModalProps = {
   visible: boolean;
+  initialInput?: string;
   onClose: () => void;
   onLibraryChanged?: () => void;
 };
@@ -167,6 +170,7 @@ const fetchYouTubePlaylist = async (
 
 export const ImportModal = ({
   visible,
+  initialInput,
   onClose,
   onLibraryChanged,
 }: ImportModalProps) => {
@@ -179,6 +183,14 @@ export const ImportModal = ({
     () => new Map(downloads.map((download) => [download.spotifyId, download])),
     [downloads]
   );
+  const isOffline = useConnectivityStore((state) => state.status === 'offline');
+
+  React.useEffect(() => {
+    if (!visible || !initialInput) return;
+    setInputText(initialInput);
+    setError('');
+    setTracks([]);
+  }, [initialInput, visible]);
 
   const reset = () => {
     setInputText('');
@@ -202,6 +214,10 @@ export const ImportModal = ({
   };
 
   const handleImport = async () => {
+    if (isOffline) {
+      showOfflineActionMessage();
+      return;
+    }
     if (!inputText.trim()) {
       setError('Por favor, cole um link do Spotify ou YouTube Music.');
       return;
@@ -396,7 +412,7 @@ export const ImportModal = ({
                 onPress={handleDownloadAll}
                 style={styles.downloadAllButton}
               >
-                <Ionicons name="download-outline" size={16} color="#000" />
+                <Ionicons name={isOffline ? 'cloud-offline-outline' : 'download-outline'} size={16} color="#000" />
                 <Text style={styles.downloadAllText}>Baixar Todas</Text>
               </Pressable>
             ) : null}
@@ -463,11 +479,7 @@ export const ImportModal = ({
                     ) : download?.status === 'error' ? (
                       <Ionicons name="alert-circle" size={22} color="#FF4444" />
                     ) : (
-                      <Ionicons
-                        name="download-outline"
-                        size={22}
-                        color="#FFFFFF"
-                      />
+                      <Ionicons name={isOffline ? 'cloud-offline-outline' : 'download-outline'} size={22} color="#FFFFFF" />
                     )}
                   </Pressable>
                 </View>

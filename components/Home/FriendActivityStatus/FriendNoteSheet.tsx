@@ -27,6 +27,8 @@ import { NoteLyricInline } from './NoteLyricLine';
 import { NoteBubbleFullWidth } from './NoteBubble';
 import { resolveNoteTailTuning } from './noteTailTuning';
 import type { NoteTailTuning } from './noteTailTuning';
+import { useConnectivityStore } from '../../../stores/useConnectivityStore';
+import { showOfflineActionMessage } from '../../../services/network/offlineFeedback';
 
 const PLAYBACK_BUTTON_SIZE = 36;
 const PLAYBACK_RING_RADIUS = 15;
@@ -110,6 +112,7 @@ export const FriendNoteSheet = ({
 }: FriendNoteSheetProps) => {
   const { playerState, currentTrack, lyricsData, togglePlayPause, playTrack } =
     usePlayer();
+  const isOffline = useConnectivityStore((state) => state.status === 'offline');
   const [isDownloaded, setIsDownloaded] = React.useState(false);
   const [isDownloading, setIsDownloading] = React.useState(false);
   const noteSpotifyId = note?.note.spotifyId;
@@ -190,6 +193,10 @@ export const FriendNoteSheet = ({
 
   const handleDownload = async () => {
     if (!note.note.spotifyId || isDownloaded || isDownloading) return;
+    if (isOffline) {
+      showOfflineActionMessage();
+      return;
+    }
 
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -315,7 +322,7 @@ export const FriendNoteSheet = ({
                           <ActivityIndicator size="small" color="#FFFFFF" />
                         ) : (
                           <Ionicons
-                            name={isDownloaded ? 'heart' : 'heart-outline'}
+                            name={isDownloaded ? 'heart' : isOffline ? 'cloud-offline-outline' : 'heart-outline'}
                             size={19}
                             color={isDownloaded ? '#FF5575' : '#FFFFFF'}
                           />

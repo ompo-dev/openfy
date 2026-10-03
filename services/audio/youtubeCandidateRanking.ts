@@ -38,10 +38,10 @@ export const rankYouTubeCandidate = (
     ...candidate, provider: 'youtube', url: `https://www.youtube.com/watch?v=${candidate.videoId}`,
   }, canonical);
   const fanChannel = /\b(fan|fans|fandom|unofficial|reuploads?)\b/.test(normalizeString(candidate.artist));
-  // Audience only breaks ties among tracks that already pass identity and timing.
-  const authority = candidate.isOfficialArtistChannel ? 32 : candidate.isVerifiedChannel ? 20 : 0;
-  const audience = Math.min(6, Math.log10(1 + (candidate.subscriberCount || 0))) +
-    Math.min(5, Math.log10(1 + (candidate.viewCount || 0)) * 0.7);
+  // Views are the strongest publisher signal; a badge only breaks close ties.
+  const authority = candidate.isOfficialArtistChannel ? 10 : candidate.isVerifiedChannel ? 5 : 0;
+  const audience = Math.min(600, Math.log10(1 + (candidate.viewCount || 0)) * 60) +
+    Math.min(3, Math.log10(1 + (candidate.subscriberCount || 0)) * 0.35);
   const artistName = hasCanonicalArtistMatch('', candidate.artist, canonical.artists) ? 4 : 0;
   const durationPenalty = Math.min(20, match.durationDifferenceMs / 1000);
   const eligible = match.isVerified && !candidate.isLive && !candidate.isUpcoming && !fanChannel;

@@ -27,7 +27,16 @@ jest.mock('@services', () => ({
   fadeOutCurrent: jest.fn().mockResolvedValue(undefined),
   restoreCurrentVolume: jest.fn().mockResolvedValue(undefined),
   preloadAudio: jest.fn().mockResolvedValue(undefined),
+  preloadNativeYouTubeAudio: jest.fn().mockResolvedValue({ bytes: 512 * 1024 }),
   releasePreloadedAudio: jest.fn(),
+  hasNativeYouTubePlayback: jest.fn(() => false),
+  toNativeYouTubePlaybackUri: jest.fn((videoId: string) => `openfy-youtube://video/${videoId}`),
+  parseNativeYouTubePlaybackUri: jest.fn((uri: string) =>
+    uri.match(/^openfy-youtube:\/\/video\/([A-Za-z0-9_-]{11})$/)?.[1] || null
+  ),
+  resolveNativeYouTubeSource: jest.fn(async (track: PlayerTrack) =>
+    track.youtubeVideoId ? `openfy-youtube://video/${track.youtubeVideoId}` : null
+  ),
   setRemotePlaybackHandlers: jest.fn(),
   recordInteraction: jest.fn().mockResolvedValue(undefined),
 }));
@@ -41,12 +50,17 @@ import {
   downloadTrack,
   getDownloadedTrack,
   loadAndPlay,
+  hasNativeYouTubePlayback,
   preloadAudio,
+  preloadNativeYouTubeAudio,
   releasePreloadedAudio,
+  resolveNativeYouTubeSource,
   resolveAudioUrl,
   unload,
 } from '@services';
+import { Platform } from 'react-native';
 import { usePlayerStore, type PlayerTrack } from '../usePlayerStore';
+import { fetchLyrics } from '../../services/lyrics/lyricsService';
 
 const realPlayTrack = usePlayerStore.getState().playTrack;
 
@@ -100,6 +114,11 @@ const flushAsync = async () => {
 };
 
 describe('queue preload window', () => {
+  afterEach(() => {
+    Platform.OS = 'web';
+    jest.restoreAllMocks();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     (getDownloadedTrack as jest.Mock).mockResolvedValue(null);
@@ -108,6 +127,11 @@ describe('queue preload window', () => {
       Promise.resolve({ url: `https://media.test/${title}.m4a`, format: 'm4a' })
     );
     (preloadAudio as jest.Mock).mockResolvedValue(undefined);
+    (preloadNativeYouTubeAudio as jest.Mock).mockResolvedValue({ bytes: 512 * 1024 });
+    (hasNativeYouTubePlayback as jest.Mock).mockReturnValue(false);
+    (resolveNativeYouTubeSource as jest.Mock).mockImplementation(async (track: PlayerTrack) =>
+      track.youtubeVideoId ? `openfy-youtube://video/${track.youtubeVideoId}` : null
+    );
     usePlayerStore.setState({
       activeRequestId: 0,
       currentTrack: null,
@@ -190,6 +214,49 @@ describe('queue preload window', () => {
     );
     randomSpy.mockRestore();
   });
+
+  it.each([false, true])(
+    'preloads the next two native audio tracks and lyrics (shuffle=%s)',
+    async (shuffle) => {
+      Platform.OS = 'ios';
+      (hasNativeYouTubePlayback as jest.Mock).mockReturnValue(true);
+      const nativeTracks = Array.from({ length: 5 }, (_, index) => ({
+        ...tracks[index],
+        spotifyId: `native-${shuffle ? 'shuffle' : 'linear'}-${index}`,
+        title: `Native ${shuffle ? 'shuffle' : 'linear'} ${index}`,
+        youtubeVideoId: `${shuffle ? 'S' : 'L'}${String(index).padStart(10, '0')}`,
+      }));
+      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
+
+      await usePlayerStore.getState().playWithQueue(
+        nativeTracks,
+        2,
+        `library:native-${shuffle}`,
+        { shuffle }
+      );
+      await flushAsync();
+
+      const { queue, queueIndex } = usePlayerStore.getState();
+      const neighbors = [
+        queue[queueIndex + 1],
+        queue[queueIndex - 1],
+        queue[queueIndex + 2],
+        queue[queueIndex - 2],
+      ].filter((track): track is PlayerTrack => Boolean(track));
+      expect(neighbors).toHaveLength(shuffle ? 2 : 4);
+      neighbors.forEach((neighbor) => {
+        expect(preloadNativeYouTubeAudio).toHaveBeenCalledWith(neighbor.youtubeVideoId);
+        expect(fetchLyrics).toHaveBeenCalledWith(
+          neighbor.title,
+          neighbor.artistName,
+          neighbor.duration_ms / 1000,
+          neighbor.albumName
+        );
+      });
+      randomSpy.mockRestore();
+      Platform.OS = 'web';
+    }
+  );
 
   it('does not start a second download for a track already saved in the web library', async () => {
     const savedUrl = 'https://media.test/Atual.m4a';

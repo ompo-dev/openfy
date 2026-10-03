@@ -229,6 +229,35 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       });
     }
 
+    const earlyArtistName = isYouTubeArtist
+      ? getYouTubeMusicArtistRouteName(artistId) || searchSeed?.artist.name || ''
+      : localArtistName || searchSeed?.artist.name || currentTrackArtistName;
+    const earlyArtistImage = earlyArtistName
+      ? getCachedArtistImage(
+          earlyArtistName,
+          () => getArtistCatalogImage(artistId, earlyArtistName),
+          [artistId]
+        ).catch(() => '')
+      : null;
+    if (earlyArtistName) {
+      setArtist((current) => current?.id === artistId ? current : {
+        ...(searchSeed?.artist || {}),
+        id: artistId,
+        type: 'artist',
+        name: earlyArtistName,
+        imageURL: searchSeed?.artist.imageURL || '',
+      });
+      if (earlyArtistImage) {
+        void earlyArtistImage.then((imageURL) => {
+          if (active && imageURL) {
+            setArtist((current) => current?.id === artistId
+              ? { ...current, imageURL }
+              : current);
+          }
+        });
+      }
+    }
+
     const libraryPromise = getLibraryTracks();
     const supplementFromPublicCatalog = (
       artistName: string,
@@ -361,22 +390,38 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             finishProfileLoad({ ok: false, stale: true });
             return;
           }
-          const imageURL = await getCachedArtistImage(
-            artistData.name,
-            () => Promise.resolve(searchSeed?.artist.imageURL || artistData.imageURL || '')
-              .then((knownImage) => knownImage || getArtistCatalogImage(artistData.id, artistData.name)),
-            [artistId, artistData.id]
-          );
-          if (!active) {
-            finishProfileLoad({ ok: false, stale: true });
-            return;
-          }
-          const description = artistData.description || await getYouTubeMusicArtistBiography(artistId);
-          if (!active) return;
-          setArtist({ ...artistData, imageURL, description });
+          const imageURL = searchSeed?.artist.imageURL || artistData.imageURL || '';
+          setArtist((current) => ({
+            ...artistData,
+            id: artistId,
+            imageURL: imageURL || current?.imageURL || '',
+            ...(current?.description ? { description: current.description } : {}),
+          }));
           setTopTracks(tracks);
           setParticipationTracks(remoteParticipations);
           setArtistError('');
+          if (!imageURL) {
+            void (earlyArtistImage || getCachedArtistImage(
+              artistData.name,
+              () => getArtistCatalogImage(artistData.id, artistData.name),
+              [artistId, artistData.id]
+            )).then((resolvedImage) => {
+              if (active && resolvedImage) {
+                setArtist((current) => current?.id === artistId
+                  ? { ...current, imageURL: resolvedImage }
+                  : current);
+              }
+            }).catch(() => {});
+          }
+          if (!artistData.description) {
+            void getYouTubeMusicArtistBiography(artistId).then((description) => {
+              if (active && description) {
+                setArtist((current) => current?.id === artistId
+                  ? { ...current, description }
+                  : current);
+              }
+            }).catch(() => {});
+          }
           log.artist('profile loaded', {
             artistId,
             tracks: tracks.length,
@@ -433,7 +478,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         });
       };
 
-      const routeArtistName = getYouTubeMusicArtistRouteName(artistId) || searchSeed?.artist.name || '';
+      const routeArtistName = earlyArtistName;
       void (async () => {
         if (routeArtistName) {
           try {
@@ -555,17 +600,28 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     const artistRequest = getArtist(artistId)
       .then(async (artistData) => {
         if (!active) return undefined;
-        const imageURL = await getCachedArtistImage(
-          artistData.name,
-          () => getArtistCatalogImage(artistId, artistData.name)
-            .then((knownImage) => knownImage || artistData.imageURL || ''),
-          [artistId]
-        );
-        if (!active) return undefined;
-        setArtist({ ...artistData, imageURL });
+        setArtist({
+          ...artistData,
+          imageURL: artistData.imageURL || searchSeed?.artist.imageURL || '',
+        });
         setArtistError('');
-        log.artist('profile loaded', { artistId, source: 'spotify', hasImage: Boolean(imageURL) });
-        return { ...artistData, imageURL };
+        void getCachedArtistImage(
+          artistData.name,
+          () => getArtistCatalogImage(artistId, artistData.name),
+          [artistId]
+        ).then((imageURL) => {
+          if (active && imageURL) {
+            setArtist((current) => current?.id === artistId
+              ? { ...current, imageURL }
+              : current);
+          }
+        }).catch(() => {});
+        log.artist('profile loaded', {
+          artistId,
+          source: 'spotify',
+          hasImage: Boolean(artistData.imageURL || searchSeed?.artist.imageURL),
+        });
+        return artistData;
       })
       .catch(async (error) => {
         log.error('spotify artist profile failed', { artistId, error });

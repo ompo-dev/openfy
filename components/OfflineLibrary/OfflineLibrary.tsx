@@ -32,6 +32,7 @@ import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
 import { useDetailNavigation } from '@hooks';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { LoggedPressable } from '../native';
+import { DownloadActionIcon } from '../native/DownloadActionIcon';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
 import { log } from '../../utils/appLogger';
@@ -318,17 +319,13 @@ export const OfflineLibrary = () => {
             }}
             style={styles.actionButton}
           >
-            <Ionicons
-              name={
-                isComplete
-                  ? 'checkmark-circle'
-                  : isDownloading
-                    ? 'time-outline'
-                    : 'download-outline'
-              }
-              size={21}
-              color={isComplete ? '#1DB954' : '#B8B8B8'}
-            />
+            {isComplete ? (
+              <Ionicons name="checkmark-circle" size={21} color="#1DB954" />
+            ) : isDownloading ? (
+              <Ionicons name="time-outline" size={21} color="#B8B8B8" />
+            ) : (
+              <DownloadActionIcon size={21} color="#B8B8B8" />
+            )}
           </LoggedPressable>
         </View>
       </LoggedPressable>

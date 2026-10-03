@@ -261,6 +261,53 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(screen.getByText('A song')).toBeTruthy();
   });
 
+  it('shows the next inline lyric only when both lines fit on one line', async () => {
+    jest.mocked(usePlayer).mockReturnValue({
+      ...makePlayer(),
+      lyricsData: {
+        segments: [
+          { index: 0, startTimeMs: 0, endTimeMs: 10000, text: 'Current short line' },
+          { index: 1, startTimeMs: 10000, endTimeMs: 20000, text: 'Next short line' },
+        ],
+      },
+    } as any);
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+    const currentLine = screen.getByTestId('player-lyric-preview-current');
+    const nextLineMeasure = screen.getByTestId('player-lyric-preview-next-measure');
+
+    expect(screen.queryByTestId('player-lyric-preview-next')).toBeNull();
+    await fireEvent(currentLine, 'textLayout', {
+      nativeEvent: { lines: [{ text: 'Current short line' }] },
+    });
+    await fireEvent(nextLineMeasure, 'textLayout', {
+      nativeEvent: { lines: [{ text: 'Next short line' }] },
+    });
+    expect(screen.getByTestId('player-lyric-preview-next')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText('Abrir letra completa'));
+    expect(screen.getByTestId('player-synced-lyrics')).toBeTruthy();
+  });
+
+  it('hides the next inline lyric when the current lyric wraps', async () => {
+    jest.mocked(usePlayer).mockReturnValue({
+      ...makePlayer(),
+      lyricsData: {
+        segments: [
+          { index: 0, startTimeMs: 0, endTimeMs: 10000, text: 'Current lyric wraps across lines' },
+          { index: 1, startTimeMs: 10000, endTimeMs: 20000, text: 'Next short line' },
+        ],
+      },
+    } as any);
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+    await fireEvent(screen.getByTestId('player-lyric-preview-current'), 'textLayout', {
+      nativeEvent: { lines: [{ text: 'Current lyric' }, { text: 'wraps across lines' }] },
+    });
+    await fireEvent(screen.getByTestId('player-lyric-preview-next-measure'), 'textLayout', {
+      nativeEvent: { lines: [{ text: 'Next short line' }] },
+    });
+
+    expect(screen.queryByTestId('player-lyric-preview-next')).toBeNull();
+  });
+
   it('replaces the title with a sticky mini-player after the player scrolls away', async () => {
     const screen = await mountPlayer();
     await fireEvent(screen.getByTestId('player-controls-row'), 'layout', {
