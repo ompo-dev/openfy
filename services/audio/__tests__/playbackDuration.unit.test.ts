@@ -6,6 +6,7 @@ import {
 describe('playback duration reconciliation', () => {
   it('uses canonical metadata when the media timeline is doubled', () => {
     expect(reconcilePlaybackDurationMs(539_570, 269_785)).toBe(269_785);
+    expect(reconcilePlaybackDurationMs(325_002, 162_507)).toBe(162_507);
   });
 
   it('keeps small encoder differences from the real media timeline', () => {

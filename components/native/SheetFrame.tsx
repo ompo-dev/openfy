@@ -8,7 +8,8 @@ import {
   type KeyboardEvent,
   View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
 import { LoggedPressable } from './Logged';
 import { AppIcon } from './AppIcon';
 import { GlassSurface } from './GlassSurface';
@@ -34,7 +35,6 @@ export function SheetFrame({
   hideDefaultClose = false,
   scroll = true,
 }: SheetFrameProps) {
-  const insets = useSafeAreaInsets();
   const [keyboardInset, setKeyboardInset] = useState(0);
 
   useEffect(() => {
@@ -55,10 +55,14 @@ export function SheetFrame({
   }, [visible]);
 
   const handle = <View style={styles.handle} />;
+  const closeWithFeedback = () => {
+    Haptics.selectionAsync().catch(() => {});
+    onClose();
+  };
 
   const closeButton = (
     <LoggedPressable
-      onPress={onClose}
+      onPress={closeWithFeedback}
       hitSlop={10}
       accessibilityRole="button"
       accessibilityLabel="Fechar"
@@ -108,7 +112,7 @@ export function SheetFrame({
       <View style={styles.modalBackdrop}>
         <LoggedPressable
           style={StyleSheet.absoluteFill}
-          onPress={onClose}
+          onPress={closeWithFeedback}
           accessibilityRole="button"
           accessibilityLabel="Fechar"
         />

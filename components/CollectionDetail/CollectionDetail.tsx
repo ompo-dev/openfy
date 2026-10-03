@@ -564,7 +564,7 @@ export const CollectionDetail = ({
         <LoggedPressable
           accessibilityLabel={`Tocar ${item.title}`}
           onPress={() => void playTrackList(sourceTracks, index, sourceId)}
-          style={styles.trackRow}
+          style={[styles.trackRow, active && isPlaying && styles.trackRowActive]}
         >
           {kind === 'playlist' || kind === 'artist' ? (
             item.imageURL ? (
@@ -1043,7 +1043,8 @@ const styles = StyleSheet.create({
   actionPill: { alignItems: 'center', borderRadius: 999, flexDirection: 'row', minHeight: 46, paddingHorizontal: 6 },
   pillAction: { alignItems: 'center', height: 42, justifyContent: 'center', width: 43 },
   pillDivider: { backgroundColor: 'rgba(255,255,255,0.2)', height: 22, width: StyleSheet.hairlineWidth },
-  trackRow: { alignItems: 'center', borderBottomColor: 'rgba(255,255,255,0.09)', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 11, minHeight: 64, paddingHorizontal: 16, paddingVertical: 8 },
+  trackRow: { alignItems: 'center', flexDirection: 'row', gap: 11, minHeight: 64, paddingHorizontal: 16, paddingVertical: 8 },
+  trackRowActive: { backgroundColor: 'rgba(255,255,255,0.085)' },
   trackArtwork: { borderRadius: 3, height: 42, width: 42 },
   artworkFallback: { alignItems: 'center', backgroundColor: '#292929', justifyContent: 'center' },
   trackNumber: { color: 'rgba(255,255,255,0.68)', fontFamily: 'SF-Regular', fontSize: 13, textAlign: 'center', width: 22 },

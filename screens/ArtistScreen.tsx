@@ -3,13 +3,16 @@ import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import {
   findArtistIdByName,
+  getAlbum,
   getArtist,
   getArtistCatalogImage,
   getArtistDiscography,
   getArtistTopTracks,
   getCachedArtistSearchSeed,
   getYouTubeMusicArtistBiography,
+  getYouTubeMusicAlbum,
   getYouTubeMusicArtistProfile,
+  isYouTubeMusicAlbumId,
 } from '@api';
 import { CollectionDetail } from '@components';
 import { usePlayer, type PlayerTrack } from '@context';
@@ -228,6 +231,79 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
   const currentTrackArtistName = currentTrack?.artists?.find(
     (candidate) => candidate.id === artistId
   )?.name || '';
+
+  // Release cards only contain the release id. Warm their credited artists
+  // after the profile shell is visible so opening an album can render avatars
+  // from the shared artist-image cache immediately.
+  React.useEffect(() => {
+    let active = true;
+    const releases = [...albums, ...singlesAndEps].slice(0, 12);
+    if (!releases.length) return () => { active = false; };
+
+    type ArtistRef = { id: string; name?: string };
+    const warm = async () => {
+      const refs = new Map<string, ArtistRef>();
+      let cursor = 0;
+      const loadRelease = async () => {
+        while (active && cursor < releases.length) {
+          const release = releases[cursor++];
+          try {
+            if (isYouTubeMusicAlbumId(release.id)) {
+              const album = await getYouTubeMusicAlbum(release.id);
+              album.artists.forEach((ref) => {
+                const key = ref.id || ref.name.toLocaleLowerCase();
+                if (key && !refs.has(key)) refs.set(key, ref);
+              });
+            } else if (/^[A-Za-z0-9]{22}$/.test(release.id)) {
+              const album = await getAlbum(release.id);
+              album.artists.forEach((ref) => {
+                if (ref.id && !refs.has(ref.id)) refs.set(ref.id, { id: ref.id });
+              });
+            }
+          } catch {
+            // A single unavailable release must not affect the profile.
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(3, releases.length) }, () => loadRelease())
+      );
+
+      const artistRefs = [...refs.values()];
+      cursor = 0;
+      const warmArtist = async () => {
+        while (active && cursor < artistRefs.length) {
+          const ref = artistRefs[cursor++];
+          try {
+            if (ref.name) {
+              await getCachedArtistImage(
+                ref.name,
+                () => getArtistCatalogImage(ref.id, ref.name || ''),
+                [ref.id]
+              );
+              continue;
+            }
+            const artistData = await getArtist(ref.id);
+            if (!artistData?.name) continue;
+            await getCachedArtistImage(
+              artistData.name,
+              () => Promise.resolve(artistData.imageURL || '')
+                .then((image) => image || getArtistCatalogImage(ref.id, artistData.name)),
+              [ref.id]
+            );
+          } catch {
+            // Image warming is opportunistic and never blocks navigation.
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(3, artistRefs.length) }, () => warmArtist())
+      );
+    };
+
+    void warm().catch(() => {});
+    return () => { active = false; };
+  }, [albums, singlesAndEps]);
 
   React.useEffect(() => {
     let active = true;

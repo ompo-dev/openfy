@@ -22,14 +22,19 @@ enum YouTubePlaybackDurationPolicy {
     let streamSeconds = validSeconds(streamDurationMs)
     let catalogSeconds = validSeconds(catalogDurationMs)
 
-    // AVPlayer can expose a duplicated MP4/DASH timeline. Keep the actual
-    // stream length when it is legitimate, but never expose the silent second
-    // half when the measured container is roughly twice a trusted duration.
-    if let streamSeconds, isDuplicated(measuredSeconds, comparedWith: streamSeconds) {
-      return streamSeconds
-    }
+    // The catalog duration is the stable source of truth for tracks resolved
+    // from YouTube. Both the stream descriptor and AVPlayer can carry the
+    // same duplicated MP4/DASH timeline, so compare both against the catalog
+    // before accepting either native value.
     if let catalogSeconds, isDuplicated(measuredSeconds, comparedWith: catalogSeconds) {
       return catalogSeconds
+    }
+    if let streamSeconds, let catalogSeconds,
+       isDuplicated(streamSeconds, comparedWith: catalogSeconds) {
+      return catalogSeconds
+    }
+    if let streamSeconds, isDuplicated(measuredSeconds, comparedWith: streamSeconds) {
+      return streamSeconds
     }
     if measuredSeconds.isFinite && measuredSeconds > 0 {
       return measuredSeconds

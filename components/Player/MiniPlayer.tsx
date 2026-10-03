@@ -228,7 +228,7 @@ const styles = StyleSheet.create({
   coverWrapper: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 10,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
@@ -241,7 +241,7 @@ const styles = StyleSheet.create({
   coverImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 18,
+    borderRadius: 10,
     backgroundColor: '#1C1C1E',
   },
   coverFallback: {

@@ -13,6 +13,7 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Linking,
   Modal,
   Platform,
@@ -313,6 +314,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [previewCurrentLineCount, setPreviewCurrentLineCount] = React.useState(0);
   const [scrubbedLyricTimelineIndex, setScrubbedLyricTimelineIndex] = React.useState<number | null>(null);
   const [isPreviewScrubbing, setIsPreviewScrubbing] = React.useState(false);
+  const [isLyricsUserScrolling, setIsLyricsUserScrolling] = React.useState(false);
   const previewDragOffset = React.useRef(new Animated.Value(0)).current;
   const previewScrubbingRef = React.useRef(false);
   const playerScrollGesture = React.useMemo(() => Gesture.Native(), []);
@@ -462,40 +464,66 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     ]
   );
 
-  const renderArtistPill = () => (
-    <GlassSurface glass="regular" style={styles.lyricsTrackPill}>
-      <MarqueeText
-        testID="player-artists"
-        text={artistLinks.map((artist) => artist.name).join(' · ')}
-        interactiveContent={artistLinks.map((artist, index) => (
-          <React.Fragment key={`${artist.id}-${artist.name}-${index}`}>
-            {index > 0 ? (
-              <Text style={styles.lyricsTrackPillText} accessible={false}> · </Text>
-            ) : null}
-            <Pressable
-              style={styles.artistLink}
-              accessibilityRole="link"
-              accessibilityLabel={`Abrir artista ${artist.name}`}
-              hitSlop={{ top: 14, bottom: 14, left: 5, right: 5 }}
-              pressRetentionOffset={{ top: 20, bottom: 20, left: 10, right: 10 }}
-              onPress={() => void handleArtistPress(artist.id, artist.name)}
-            >
-              <Text style={styles.lyricsTrackPillText} numberOfLines={1} accessible={false}>
-                {artist.name}
-              </Text>
-            </Pressable>
-          </React.Fragment>
-        ))}
-        style={styles.lyricsTrackPillText}
-        containerStyle={styles.lyricsTrackPillMarquee}
-        align="center"
-        fadeWidth={14}
-        scrollMode="left"
-        delay={2000}
-        endDelay={2000}
-        speed={30}
-        active={visible}
-      />
+  const renderArtistPill = (withArtwork = false) => (
+    <GlassSurface
+      glass="regular"
+      style={[styles.lyricsTrackPill, withArtwork && styles.lyricsTrackPillExpanded]}
+    >
+      {withArtwork ? (
+        <LoggedPressable
+          accessibilityRole="button"
+          accessibilityLabel="Fechar letras sincronizadas"
+          onPress={toggleLyricsView}
+          style={styles.lyricsPillArtworkButton}
+        >
+          {artworkUrl ? (
+            <SkeletonImage
+              source={{ uri: artworkUrl }}
+              cachePolicy="memory-disk"
+              contentFit="cover"
+              style={styles.lyricsPillArtwork}
+            />
+          ) : (
+            <View style={[styles.lyricsPillArtwork, styles.coverFallback]}>
+              <Ionicons name="musical-note" size={17} color="#FFFFFF" />
+            </View>
+          )}
+        </LoggedPressable>
+      ) : null}
+      <View style={styles.lyricsTrackPillCopy}>
+        <MarqueeText
+          testID="player-artists"
+          text={artistLinks.map((artist) => artist.name).join(' · ')}
+          interactiveContent={artistLinks.map((artist, index) => (
+            <React.Fragment key={`${artist.id}-${artist.name}-${index}`}>
+              {index > 0 ? (
+                <Text style={styles.lyricsTrackPillText} accessible={false}> · </Text>
+              ) : null}
+              <Pressable
+                style={styles.artistLink}
+                accessibilityRole="link"
+                accessibilityLabel={`Abrir artista ${artist.name}`}
+                hitSlop={{ top: 14, bottom: 14, left: 5, right: 5 }}
+                pressRetentionOffset={{ top: 20, bottom: 20, left: 10, right: 10 }}
+                onPress={() => void handleArtistPress(artist.id, artist.name)}
+              >
+                <Text style={styles.lyricsTrackPillText} numberOfLines={1} accessible={false}>
+                  {artist.name}
+                </Text>
+              </Pressable>
+            </React.Fragment>
+          ))}
+          style={styles.lyricsTrackPillText}
+          containerStyle={styles.lyricsTrackPillMarquee}
+          align={withArtwork ? 'left' : 'center'}
+          fadeWidth={14}
+          scrollMode="left"
+          delay={2000}
+          endDelay={2000}
+          speed={30}
+          active={visible}
+        />
+      </View>
     </GlassSurface>
   );
 
@@ -613,6 +641,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     setScrubbedLyricTimelineIndex(null);
     previewScrubbingRef.current = false;
     setIsPreviewScrubbing(false);
+    setIsLyricsUserScrolling(false);
     previewDragOffset.setValue(0);
     manualLyricsFollowUntilRef.current = 0;
     lyricsListDraggingRef.current = false;
@@ -763,6 +792,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       manualLyricsFollowUntilRef.current = 0;
       manualLyricsFollowTimerRef.current = null;
       lyricsListDraggingRef.current = false;
+      setIsLyricsUserScrolling(false);
       setScrubbedLyricTimelineIndex(null);
       scrollLyricsToActive(true);
     }, 2500);
@@ -810,6 +840,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   }, [activeLineIndex, isLyricsEditing, scrollLyricsToActive, showLyricsFull]);
 
   const openLyricsView = React.useCallback(() => {
+    if (Platform.OS !== 'web') {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    }
+    Haptics.selectionAsync().catch(() => {});
     if (manualLyricsFollowTimerRef.current) {
       clearTimeout(manualLyricsFollowTimerRef.current);
       manualLyricsFollowTimerRef.current = null;
@@ -821,6 +855,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   }, []);
 
   const toggleLyricsView = () => {
+    if (Platform.OS !== 'web') {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    }
+    Haptics.selectionAsync().catch(() => {});
     if (showLyricsFull) {
       shouldScrollLyricsOnOpenRef.current = false;
       setShowLyricsFull(false);
@@ -866,6 +904,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
         if (!line || lastPreviewSeekTimelineIndexRef.current === timelineIndex) return;
         lastPreviewSeekTimelineIndexRef.current = timelineIndex;
         setScrubbedLyricTimelineIndex(timelineIndex);
+        Haptics.selectionAsync().catch(() => {});
         void seekToPositionRef.current(line.startTimeMs);
     },
     onEnd: () => {
@@ -1007,11 +1046,27 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   };
 
   const handleArtworkPrevious = React.useCallback(() => {
-    if (canGoPrevious) void playQueueIndex(previousQueueIndex);
+    if (canGoPrevious) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      void playQueueIndex(previousQueueIndex);
+    }
   }, [canGoPrevious, playQueueIndex, previousQueueIndex]);
   const handleArtworkNext = React.useCallback(() => {
-    if (canGoNext) void playQueueIndex(nextQueueIndex);
+    if (canGoNext) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      void playQueueIndex(nextQueueIndex);
+    }
   }, [canGoNext, nextQueueIndex, playQueueIndex]);
+  const handlePlayPrevious = React.useCallback(() => {
+    if (!canGoPrevious) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    void playPrevious();
+  }, [canGoPrevious, playPrevious]);
+  const handlePlayNext = React.useCallback(() => {
+    if (!canGoNext) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    void playNext();
+  }, [canGoNext, playNext]);
 
   if (!currentTrack) return null;
 
@@ -1344,7 +1399,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   removeClippedSubviews={false}
                   ref={lyricsListRef}
                   data={lyricTimeline}
-                  extraData={`${activeLineIndex}:${isLyricsEditing}:${JSON.stringify(selectedLyricTarget)}`}
+                  extraData={`${activeLineIndex}:${isLyricsEditing}:${isLyricsUserScrolling}:${JSON.stringify(selectedLyricTarget)}`}
                   keyExtractor={(item) =>
                     item.kind === 'gap'
                       ? item.id
@@ -1356,6 +1411,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   onContentSizeChange={() => scrollLyricsToActive(false)}
                   onScrollBeginDrag={() => {
                     lyricsListDraggingRef.current = true;
+                    setIsLyricsUserScrolling(true);
+                    Haptics.selectionAsync().catch(() => {});
                     pauseLyricsAutoFollow();
                   }}
                   onScroll={() => {
@@ -1418,7 +1475,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                               ? styles.lyricGapText
                               : isActive
                                 ? styles.lyricTextActive
-                                : styles.lyricTextInactive,
+                                : isLyricsUserScrolling
+                                  ? styles.lyricTextUnblurred
+                                  : styles.lyricTextInactive,
                             isLyricsEditing && styles.lyricEditorText,
                           ]}
                         >
@@ -1588,13 +1647,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               <>
                 <View style={styles.actionPillRow}>
                   <PlayerGlassButton
-                    accessibilityLabel={showLyricsFull ? 'Fechar letras sincronizadas' : 'Abrir letras sincronizadas'}
+                    accessibilityLabel="Abrir letras sincronizadas"
                     onPress={toggleLyricsView}
                     style={styles.circleActionBtn}
                     testID="player-lyrics-toggle"
-                    tintColor={showLyricsFull ? 'rgba(255,255,255,0.28)' : undefined}
                   >
-                    <Ionicons name="chatbubble-ellipses-outline" size={20} color={showLyricsFull ? '#FFFFFF' : 'rgba(255,255,255,0.75)'} />
+                    <Ionicons name="chatbubble-ellipses-outline" size={20} color="rgba(255,255,255,0.75)" />
                   </PlayerGlassButton>
                   {renderArtistPill()}
                   <PlayerGlassButton accessibilityLabel="Opções do YouTube" onPress={handleOpenYoutubeMenu} style={styles.circleActionBtn}>
@@ -1610,10 +1668,15 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                     minimumTrackTintColor="#FFFFFF"
                     maximumTrackTintColor="rgba(255,255,255,0.22)"
                     thumbTintColor="#FFFFFF"
-                    onSlidingStart={(value) => { setSeeking(true); setSeekValue(value); }}
+                    onSlidingStart={(value) => {
+                      setSeeking(true);
+                      setSeekValue(value);
+                      Haptics.selectionAsync().catch(() => {});
+                    }}
                     onValueChange={(value) => setSeekValue(value)}
                     onSlidingComplete={async (value) => {
                       setSeeking(false);
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                       await seekToPosition(value * totalDurationMs);
                     }}
                   />
@@ -1642,13 +1705,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 >
                   {isCurrentTrackDownloading ? <Text style={styles.downloadProgressText}>{currentDownloadProgress}%</Text> : isDownloadMutationPending ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons name={isCurrentTrackDownloaded ? 'trash-outline' : isOffline ? 'cloud-offline-outline' : 'download-outline'} size={23} color="rgba(255,255,255,0.82)" />}
                 </PlayerGlassButton>
-                <PlayerGlassButton accessibilityLabel="Faixa anterior" disabled={!canGoPrevious} onPress={playPrevious} style={styles.seekControlBtn}>
+                <PlayerGlassButton accessibilityLabel="Faixa anterior" disabled={!canGoPrevious} onPress={handlePlayPrevious} style={styles.seekControlBtn}>
                   <Ionicons name="play-back" size={32} color={canGoPrevious ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} />
                 </PlayerGlassButton>
                 <PlayerGlassButton accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'} glass="thick" onPress={togglePlayPause} style={styles.playPauseCircle} tintColor="rgba(255,255,255,0.92)">
                   {playerState.isBuffering && !playerState.isPlaying ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name={playerState.isPlaying ? 'pause' : 'play'} size={34} color="#FFFFFF" style={!playerState.isPlaying ? { marginLeft: 3 } : undefined} />}
                 </PlayerGlassButton>
-                <PlayerGlassButton accessibilityLabel="Próxima faixa" disabled={!canGoNext} onPress={playNext} style={styles.seekControlBtn}>
+                <PlayerGlassButton accessibilityLabel="Próxima faixa" disabled={!canGoNext} onPress={handlePlayNext} style={styles.seekControlBtn}>
                   <Ionicons name="play-forward" size={32} color={canGoNext ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} />
                 </PlayerGlassButton>
                 <PlayerGlassButton accessibilityLabel="Adicionar música a playlists" onPress={() => setIsPlaylistPickerVisible(true)} style={styles.sideControlBtn}>
@@ -1740,15 +1803,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             ) : (
               <View style={styles.lyricsPlaybackBar}>
                 <View style={styles.actionPillRow}>
-                  <PlayerGlassButton
-                    accessibilityLabel="Fechar letras sincronizadas"
-                    onPress={toggleLyricsView}
-                    style={styles.circleActionBtn}
-                    testID="player-lyrics-toggle"
-                  >
-                    <Ionicons name="chatbubble-ellipses-outline" size={20} color="#FFFFFF" />
-                  </PlayerGlassButton>
-                  {renderArtistPill()}
+                  {renderArtistPill(true)}
                   <PlayerGlassButton accessibilityLabel="Opções do YouTube" onPress={handleOpenYoutubeMenu} style={styles.circleActionBtn}>
                     <Ionicons name="logo-youtube" size={20} color="rgba(255,255,255,0.85)" />
                   </PlayerGlassButton>
@@ -1762,10 +1817,15 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                     minimumTrackTintColor="#FFFFFF"
                     maximumTrackTintColor="rgba(255,255,255,0.22)"
                     thumbTintColor="#FFFFFF"
-                    onSlidingStart={(value) => { setSeeking(true); setSeekValue(value); }}
+                    onSlidingStart={(value) => {
+                      setSeeking(true);
+                      setSeekValue(value);
+                      Haptics.selectionAsync().catch(() => {});
+                    }}
                     onValueChange={setSeekValue}
                     onSlidingComplete={async (value) => {
                       setSeeking(false);
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                       await seekToPosition(value * totalDurationMs);
                     }}
                   />
@@ -1778,9 +1838,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   <PlayerGlassButton accessibilityLabel={isCurrentTrackDownloaded ? 'Excluir download' : isOffline ? 'Offline: download indisponível' : 'Baixar música'} disabled={isCurrentTrackDownloading || isDownloadMutationPending} onPress={handleDownloadAction} style={styles.sideControlBtn}>
                     {isCurrentTrackDownloading ? <Text style={styles.downloadProgressText}>{currentDownloadProgress}%</Text> : <Ionicons name={isCurrentTrackDownloaded ? 'trash-outline' : isOffline ? 'cloud-offline-outline' : 'download-outline'} size={23} color="rgba(255,255,255,0.82)" />}
                   </PlayerGlassButton>
-                  <PlayerGlassButton accessibilityLabel="Faixa anterior" disabled={!canGoPrevious} onPress={playPrevious} style={styles.seekControlBtn}><Ionicons name="play-back" size={32} color={canGoPrevious ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} /></PlayerGlassButton>
+                  <PlayerGlassButton accessibilityLabel="Faixa anterior" disabled={!canGoPrevious} onPress={handlePlayPrevious} style={styles.seekControlBtn}><Ionicons name="play-back" size={32} color={canGoPrevious ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} /></PlayerGlassButton>
                   <PlayerGlassButton accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'} glass="thick" onPress={togglePlayPause} style={styles.playPauseCircle} tintColor="rgba(255,255,255,0.92)"><Ionicons name={playerState.isPlaying ? 'pause' : 'play'} size={34} color="#FFFFFF" /></PlayerGlassButton>
-                  <PlayerGlassButton accessibilityLabel="Próxima faixa" disabled={!canGoNext} onPress={playNext} style={styles.seekControlBtn}><Ionicons name="play-forward" size={32} color={canGoNext ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} /></PlayerGlassButton>
+                  <PlayerGlassButton accessibilityLabel="Próxima faixa" disabled={!canGoNext} onPress={handlePlayNext} style={styles.seekControlBtn}><Ionicons name="play-forward" size={32} color={canGoNext ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} /></PlayerGlassButton>
                   <PlayerGlassButton accessibilityLabel="Adicionar música a playlists" onPress={() => setIsPlaylistPickerVisible(true)} style={styles.sideControlBtn}><MaterialCommunityIcons name="playlist-plus" size={24} color="rgba(255,255,255,0.82)" /></PlayerGlassButton>
                 </View>
               </View>
@@ -2140,6 +2200,11 @@ const styles = StyleSheet.create({
   },
   lyricTextInactive: {
     color: 'rgba(255,255,255,0.32)',
+    opacity: 0.78,
+    ...(Platform.OS === 'web' ? { filter: 'blur(3px)' } : {}),
+  },
+  lyricTextUnblurred: {
+    color: 'rgba(255,255,255,0.48)',
   },
   lyricGapText: {
     color: 'rgba(255,255,255,0.46)',
@@ -2202,6 +2267,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     maxWidth: SCREEN_WIDTH - 138,
+  },
+  lyricsTrackPillExpanded: {
+    maxWidth: undefined,
+    paddingLeft: 6,
+  },
+  lyricsPillArtworkButton: {
+    alignItems: 'center',
+    flexShrink: 0,
+    height: 40,
+    justifyContent: 'center',
+    marginRight: 8,
+    width: 40,
+  },
+  lyricsPillArtwork: {
+    backgroundColor: '#252525',
+    borderRadius: 10,
+    height: 36,
+    overflow: 'hidden',
+    width: 36,
+  },
+  lyricsTrackPillCopy: {
+    flex: 1,
+    minWidth: 0,
   },
   lyricsTrackPillText: {
     color: '#FFFFFF',

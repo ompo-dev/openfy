@@ -152,6 +152,7 @@ let nativeYouTubeSubscriptions: { remove(): void }[] = [];
 let nativeYouTubeStatusTimer: ReturnType<typeof setInterval> | undefined;
 let nativeYouTubeActive = false;
 let nativeYouTubeState: PlayerState = DEFAULT_STATE;
+let nativeDurationLimitReached = false;
 let nativeYouTubeStatusCallback: ((state: PlayerState) => void) | null = null;
 let nativeStopPromise = Promise.resolve();
 let loadGeneration = 0;
@@ -276,6 +277,7 @@ const detachNativeYouTubeSubscriptions = () => {
 const stopNativeYouTubeEngine = (): Promise<void> => {
   const shouldStop = nativeYouTubeActive || nativeYouTubeSubscriptions.length > 0;
   nativeYouTubeActive = false;
+  nativeDurationLimitReached = false;
   nativeYouTubeState = DEFAULT_STATE;
   detachNativeYouTubeSubscriptions();
   if (!shouldStop) return nativeStopPromise;
@@ -599,6 +601,7 @@ const loadAndPlayNativeYouTube = async (
     currentDiagnosticSpotifyId = diagnosticTrack?.spotifyId || null;
     lastDiagnosticSignature = '';
     nativeYouTubeActive = true;
+    nativeDurationLimitReached = false;
     nativeYouTubeState = {
       ...DEFAULT_STATE,
       isBuffering: true,
@@ -611,13 +614,31 @@ const loadAndPlayNativeYouTube = async (
       if (!nativeYouTubeActive || generation !== loadGeneration) return;
       const status = await getNativeYouTubePlaybackStatus();
       if (!status || !nativeYouTubeActive || generation !== loadGeneration) return;
+      const durationMs = reconcilePlaybackDurationMs(
+        status.durationMs,
+        diagnosticTrack?.duration_ms
+      );
+      const positionMs = clampPlaybackPositionMs(status.positionMs, durationMs);
+      const reachedCanonicalDuration = Boolean(
+        status.isLoaded && durationMs > 0 && positionMs >= durationMs
+      );
+
+      // Some YouTube containers expose a duplicated timeline. Stop the native
+      // engine at the trusted catalog duration instead of allowing its silent
+      // second half to become audible or visible to the rest of the app.
+      if (reachedCanonicalDuration && !nativeDurationLimitReached) {
+        nativeDurationLimitReached = true;
+        await pauseNativeYouTubePlayback().catch(() => {});
+      } else if (!reachedCanonicalDuration && positionMs < durationMs - 500) {
+        nativeDurationLimitReached = false;
+      }
       const nextState: PlayerState = {
-        isPlaying: status.isPlaying,
+        isPlaying: reachedCanonicalDuration ? false : status.isPlaying,
         isBuffering: status.isBuffering ?? false,
         isLoaded: status.isLoaded,
-        positionMs: status.positionMs,
-        durationMs: status.durationMs,
-        didJustFinish: status.didJustFinish,
+        positionMs: reachedCanonicalDuration ? durationMs : positionMs,
+        durationMs,
+        didJustFinish: Boolean(status.didJustFinish || reachedCanonicalDuration),
         error: status.error,
       };
       const changed = playbackTransition(nextState) !== playbackTransition(nativeYouTubeState) ||

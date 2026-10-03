@@ -87,7 +87,7 @@ describe('MiniPlayer', () => {
     expect(StyleSheet.flatten(screen.getByTestId('mini-player-cover').props.style)).toMatchObject({
       width: 36,
       height: 36,
-      borderRadius: 18,
+      borderRadius: 10,
     });
   });
 
