@@ -13,6 +13,11 @@ type UpdateCheckerOptions = {
   getNow?: () => number;
 };
 
+export type OTAUpdateProgressHandlers = {
+  onDownloading?: () => void;
+  onDownloadFinished?: () => void;
+};
+
 const isExpoGo = () => Constants.appOwnership === 'expo';
 
 const canUseUpdates = () =>
@@ -52,7 +57,8 @@ const updateContext = () => ({
 
 export const checkForOTAUpdateNow = async (
   source: 'manual' | 'automatic' = 'manual',
-  canContinue: () => boolean = () => true
+  canContinue: () => boolean = () => true,
+  progress: OTAUpdateProgressHandlers = {}
 ): Promise<OTAUpdateCheckResult> => {
   if (!canUseUpdates()) {
     log.updates('check unavailable in this runtime', {
@@ -106,7 +112,13 @@ export const checkForOTAUpdateNow = async (
     }
 
     stage = 'fetch';
-    const fetched = await Updates.fetchUpdateAsync();
+    progress.onDownloading?.();
+    let fetched: Awaited<ReturnType<typeof Updates.fetchUpdateAsync>>;
+    try {
+      fetched = await Updates.fetchUpdateAsync();
+    } finally {
+      progress.onDownloadFinished?.();
+    }
     if (!fetched.isNew && !fetched.isRollBackToEmbedded) {
       log.error('update fetch returned no installable update', {
         source,
@@ -151,6 +163,8 @@ export const checkForOTAUpdateNow = async (
 };
 
 export function useOTAUpdates(options: UpdateCheckerOptions = {}) {
+  const [isDownloading, setIsDownloading] = React.useState(false);
+  const [lastResult, setLastResult] = React.useState<OTAUpdateCheckResult | null>(null);
   const canCheckForUpdates = options.canUseUpdates ?? canUseUpdates;
   const getNow = options.getNow ?? Date.now;
   const lastCheckAtRef = React.useRef(getNow());
@@ -204,8 +218,13 @@ export function useOTAUpdates(options: UpdateCheckerOptions = {}) {
           if (AppState.currentState !== 'active') return;
           const result = await checkForOTAUpdateNow(
             'automatic',
-            () => activeRef.current && AppState.currentState === 'active'
+            () => activeRef.current && AppState.currentState === 'active',
+            {
+              onDownloading: () => setIsDownloading(true),
+              onDownloadFinished: () => setIsDownloading(false),
+            }
           );
+          setLastResult(result);
           log.updates('automatic check finished', { status: result.status });
         } catch (error) {
           log.error('automatic update check failed', error);
@@ -235,4 +254,6 @@ export function useOTAUpdates(options: UpdateCheckerOptions = {}) {
       subscription.remove();
     };
   }, [canCheckForUpdates, getNow]);
+
+  return { isDownloading, lastResult };
 }

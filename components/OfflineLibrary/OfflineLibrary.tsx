@@ -13,7 +13,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { Swipeable } from 'react-native-gesture-handler';
-import { getArtistCatalogImage } from '@api';
+import { getArtistCatalogImage, getYouTubeMusicArtistProfile } from '@api';
 
 import {
   deleteDownloadedTrack,
@@ -54,9 +54,11 @@ export const OfflineLibrary = () => {
   const [tracks, setTracks] = React.useState<LibraryTrack[]>([]);
   const [playlists, setPlaylists] = React.useState<LocalPlaylist[]>([]);
   const [artistImageURLs, setArtistImageURLs] = React.useState<Record<string, string>>({});
+  const [artistTrackCounts, setArtistTrackCounts] = React.useState<Record<string, number>>({});
   const [artistImageLoadLimit, setArtistImageLoadLimit] = React.useState(12);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const requestedArtistImages = React.useRef(new Set<string>());
+  const requestedArtistCounts = React.useRef(new Set<string>());
   const artistImageQueue = React.useRef<Promise<void>>(Promise.resolve());
   const isMountedRef = React.useRef(true);
   const libraryLoadRef = React.useRef<Promise<void> | null>(null);
@@ -265,6 +267,36 @@ export const OfflineLibrary = () => {
     });
   }, [artistsForImageLoad]);
 
+  React.useEffect(() => {
+    if (libraryView !== 'artists' || !normalizedQuery) return;
+    const artistsToLoad = visibleCollections
+      .slice(0, 12)
+      .filter((artist) => artist.title && !requestedArtistCounts.current.has(artist.id));
+    if (!artistsToLoad.length) return;
+    artistsToLoad.forEach((artist) => requestedArtistCounts.current.add(artist.id));
+    void Promise.all(artistsToLoad.map(async (artist) => {
+      try {
+        const profile = await getYouTubeMusicArtistProfile(
+          `ytartist_name_${encodeURIComponent(artist.title)}`
+        );
+        return { id: artist.id, count: profile.tracks.length };
+      } catch {
+        requestedArtistCounts.current.delete(artist.id);
+        return null;
+      }
+    })).then((counts) => {
+      if (!isMountedRef.current) return;
+      const resolved = counts.filter(
+        (value): value is { id: string; count: number } => Boolean(value)
+      );
+      if (!resolved.length) return;
+      setArtistTrackCounts((current) => ({
+        ...current,
+        ...Object.fromEntries(resolved.map((value) => [value.id, value.count])),
+      }));
+    });
+  }, [libraryView, normalizedQuery, visibleCollections]);
+
   const renderTrack = ({ item, index }: { item: LibraryTrack; index: number }) => {
     const isCurrentTrack = currentTrack?.spotifyId === item.spotifyId;
     const isPlaying = isCurrentTrack && playerIsPlaying;
@@ -431,7 +463,9 @@ export const OfflineLibrary = () => {
         <View style={styles.playlistInfo}>
           <Text style={styles.playlistTitle} numberOfLines={1}>{item.title}</Text>
           <Text style={styles.playlistMeta} numberOfLines={1}>
-            {isArtist ? `${item.tracks.length} músicas` : item.subtitle}
+            {isArtist
+              ? `${artistTrackCounts[item.id] ?? item.tracks.length} músicas`
+              : item.subtitle}
           </Text>
         </View>
         <Ionicons name="chevron-forward" size={18} color="#8B8B8B" />

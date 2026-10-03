@@ -60,14 +60,29 @@ export const getYouTubeMusicAlbum = async (
     thumbnail: header.thumbnail,
     thumbnails: header.thumbnails,
   });
-  const tracks = (page.contents || [])
+  const headerArtists: { id: string; name: string; imageURL?: string }[] = [];
+  const headerAuthor = asRecord(header.author);
+  const headerAuthorName = getYouTubeMusicText(headerAuthor.name);
+  if (headerAuthorName) {
+    const headerAuthorId = getYouTubeMusicText(headerAuthor.channel_id) ||
+      getYouTubeMusicText(headerAuthor.id);
+    headerArtists.push({
+      id: toYouTubeMusicArtistRouteId(headerAuthorId, headerAuthorName),
+      name: headerAuthorName,
+    });
+  }
+  const contents = page.contents || (asRecord(page).items as YouTubeMusicItem[] | undefined) || [];
+  const releaseType = releaseTypeFrom(`${subtitle} ${secondSubtitle}`);
+  const tracks = contents
     .map((item) => toYouTubeMusicTrackModel(item as YouTubeMusicItem))
     .filter((track): track is TrackModel => Boolean(track))
     .map((track) => ({
       ...track,
       albumId,
-      albumName: track.albumName || name,
-      imageURL: track.imageURL || imageURL,
+      albumName: name,
+      albumArtists: track.albumArtists?.length ? track.albumArtists : headerArtists,
+      imageURL: imageURL || track.imageURL,
+      releaseType,
     }));
 
   const artists = new Map<string, { id: string; name: string; imageURL?: string }>();

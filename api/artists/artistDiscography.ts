@@ -124,19 +124,27 @@ const loadDiscography = async (artistId: string): Promise<ArtistDiscography> => 
     if (track.id && !tracks.has(track.id)) tracks.set(track.id, track);
   });
 
-  const releases: LibraryItemModel[] = uniqueAlbums.map((album) => ({
+  const releases: LibraryItemModel[] = uniqueAlbums.map((album) => {
+    const releaseType = album.album_type === 'single'
+      ? 'single'
+      : album.album_type === 'compilation'
+        ? 'compilation'
+        : 'album';
+    return {
       id: album.id,
       type: 'album' as const,
       title: album.name,
-      subtitle: [album.release_date?.slice(0, 4), album.album_type]
+      subtitle: [album.release_date?.slice(0, 4), releaseType]
         .filter(Boolean)
         .join(' · '),
       imageURL: album.images?.[0]?.url || '',
-    }));
+      releaseType,
+    };
+  });
 
   return {
-    albums: releases.filter((release) => !/single|ep/i.test(release.subtitle)),
-    singlesAndEps: releases.filter((release) => /single|ep/i.test(release.subtitle)),
+    albums: releases.filter((release) => release.releaseType === 'album'),
+    singlesAndEps: releases.filter((release) => release.releaseType !== 'album'),
     tracks: [...tracks.values()],
   };
 };

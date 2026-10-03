@@ -104,14 +104,24 @@ export const prefetchTrackArtistData = (track: TrackArtistData): void => {
         () => apis.getArtistCatalogImage(spotifyId || youtubeRouteId, name),
         [id, spotifyId, youtubeRouteId].filter(Boolean)
       );
-      const profileRequest = spotifyId
-        ? Promise.all([
-            apis.getArtist(spotifyId),
-            apis.getArtistTopTracks(spotifyId, 'BR'),
-            apis.getArtistDiscography(spotifyId),
-          ])
-        : apis.getYouTubeMusicArtistProfile(youtubeRouteId);
-      await Promise.allSettled([imageRequest, profileRequest]);
+      // Local-library routes are name based, while public cards use the YTM
+      // channel route. Warm both keys so opening the current artist does not
+      // repeat the same catalog request after playback has already started.
+      const youtubeNameRoute = toYouTubeMusicArtistRouteId(undefined, name);
+      const profileRequests: Promise<unknown>[] = [
+        apis.getYouTubeMusicArtistProfile(youtubeRouteId),
+        ...(youtubeNameRoute !== youtubeRouteId
+          ? [apis.getYouTubeMusicArtistProfile(youtubeNameRoute)]
+          : []),
+        ...(spotifyId
+          ? [Promise.all([
+              apis.getArtist(spotifyId),
+              apis.getArtistTopTracks(spotifyId, 'BR'),
+              apis.getArtistDiscography(spotifyId),
+            ])]
+          : []),
+      ];
+      await Promise.allSettled([imageRequest, ...profileRequests]);
     })
       .catch(() => {})
       .then(() => undefined)

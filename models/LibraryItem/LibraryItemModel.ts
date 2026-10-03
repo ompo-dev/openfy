@@ -4,5 +4,7 @@ export type LibraryItemModel = {
   title: string;
   imageURL: string;
   subtitle: string;
+  /** Provider classification. Keep this separate from the display subtitle. */
+  releaseType?: 'album' | 'single' | 'ep' | 'compilation' | 'release';
   ownerId?: string;
 };

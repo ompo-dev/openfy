@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { CollectionDetail, LocalAlbum } from '@components';
 import {
@@ -29,6 +29,28 @@ const getLocalAlbumId = (albumId: string): string => {
   }
 };
 
+const AlbumLoadingState = ({
+  error,
+  onRetry,
+}: {
+  error: string;
+  onRetry: () => void;
+}) => (
+  <View style={{ flex: 1, backgroundColor: '#101010', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+    <ActivityIndicator color="#1ED760" />
+    <Text style={{ color: '#FFFFFF', fontSize: 16 }}>
+      {error || 'Carregando álbum...'}
+    </Text>
+    {error ? (
+      <Pressable onPress={onRetry} accessibilityRole="button">
+        <Text style={{ color: '#1ED760', fontSize: 16, fontWeight: '700' }}>
+          Tentar novamente
+        </Text>
+      </Pressable>
+    ) : null}
+  </View>
+);
+
 export const AlbumScreen = ({ albumId }: AlbumScreenPropsType) =>
   albumId.startsWith(LOCAL_ALBUM_PREFIX) ? (
     <LocalAlbum albumId={getLocalAlbumId(albumId)} />
@@ -41,6 +63,7 @@ export const AlbumScreen = ({ albumId }: AlbumScreenPropsType) =>
 const YouTubeMusicAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
   const { openDetail } = useDetailNavigation();
   const [album, setAlbum] = React.useState<YouTubeMusicAlbum | null>(null);
+  const [error, setError] = React.useState('');
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [refreshSequence, setRefreshSequence] = React.useState(0);
   const refresh = React.useCallback(() => {
@@ -50,12 +73,16 @@ const YouTubeMusicAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
 
   React.useEffect(() => {
     let active = true;
+    setError('');
     void getYouTubeMusicAlbum(albumId)
       .then((albumData) => {
         if (active) setAlbum(albumData);
       })
       .catch(() => {
-        if (active) setAlbum(null);
+        if (active) {
+          setAlbum(null);
+          setError('Não foi possível carregar este álbum.');
+        }
       })
       .finally(() => {
         if (active) setIsRefreshing(false);
@@ -65,7 +92,7 @@ const YouTubeMusicAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
     };
   }, [albumId, refreshSequence]);
 
-  if (!album) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
+  if (!album) return <AlbumLoadingState error={error} onRetry={refresh} />;
 
   const releaseLabel = album.releaseType === 'single'
     ? 'single'
@@ -102,6 +129,7 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
   const { openDetail } = useDetailNavigation();
   const [album, setAlbum] = React.useState<AlbumModel | null>(null);
   const [artists, setArtists] = React.useState<ArtistModel[]>([]);
+  const [error, setError] = React.useState('');
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [refreshSequence, setRefreshSequence] = React.useState(0);
   const refresh = React.useCallback(() => {
@@ -111,6 +139,7 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
 
   React.useEffect(() => {
     let active = true;
+    setError('');
 
     void getAlbum(albumId)
       .then((albumData) => {
@@ -127,6 +156,7 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
         if (active) {
           setAlbum(null);
           setArtists([]);
+          setError('Não foi possível carregar este álbum.');
         }
         console.error('Failed to get album data:', error);
       })
@@ -148,7 +178,7 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
     [openDetail]
   );
 
-  if (!album) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
+  if (!album) return <AlbumLoadingState error={error} onRetry={refresh} />;
 
   const metadata = [
     album.genres[0],

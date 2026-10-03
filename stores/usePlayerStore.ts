@@ -798,6 +798,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const RECOVERY_STABLE_MS = 10_000;
     let initialLoadInProgress = true;
     let handledTrackFinish = false;
+    let durationLimitReached = false;
     let lastPlaybackPositionMs = 0;
 
     console.log(`[PlayerStore #${requestId}] Playing stream:`, activeStreamUri);
@@ -829,7 +830,28 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         state.positionMs,
         currentDuration
       );
-      if (state.isPlaying && !state.didJustFinish) handledTrackFinish = false;
+      const reachedCanonicalDuration = Boolean(
+        state.isLoaded &&
+        state.isPlaying &&
+        currentDuration > 0 &&
+        state.positionMs >= currentDuration
+      );
+      if (reachedCanonicalDuration && !durationLimitReached) {
+        // Some native/remote players expose a duplicated timeline with a
+        // silent tail. Stop the engine at the catalog duration as well as
+        // clamping the UI, so the tail can never be heard or reported.
+        durationLimitReached = true;
+        void pause();
+      } else if (
+        state.isPlaying &&
+        currentDuration > 0 &&
+        currentPosition < currentDuration - 500
+      ) {
+        durationLimitReached = false;
+      }
+      if (state.isPlaying && !state.didJustFinish && !reachedCanonicalDuration) {
+        handledTrackFinish = false;
+      }
       set({
         isLoadingAudio: false,
         playerState: {

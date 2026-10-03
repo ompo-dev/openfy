@@ -115,8 +115,16 @@ const mergeArtistReleases = (
 };
 
 const splitArtistReleases = (releases: LibraryItemModel[]) => ({
-  albums: releases.filter((release) => !/single|ep/i.test(release.subtitle)),
-  singlesAndEps: releases.filter((release) => /single|ep/i.test(release.subtitle)),
+  albums: releases.filter((release) =>
+    release.releaseType !== 'single' &&
+    release.releaseType !== 'ep' &&
+    release.releaseType !== 'compilation'
+  ),
+  singlesAndEps: releases.filter((release) =>
+    release.releaseType === 'single' ||
+    release.releaseType === 'ep' ||
+    release.releaseType === 'compilation'
+  ),
 });
 
 const mergeCatalogTracks = (
@@ -160,13 +168,13 @@ const buildLocalArtistProfile = (
   if (!collection) return null;
 
   const featuredTracks = collection.tracks.filter((track) =>
-    isTrackPrimaryArtist(track, collection.id)
+    isTrackPrimaryArtist(track, collection.title)
   );
   const participationTracks = collection.tracks.filter((track) =>
-    isTrackParticipantArtist(track, collection.id)
+    isTrackParticipantArtist(track, collection.title)
   );
   const albums = groupLocalAlbums(
-    featuredTracks.filter((track) => artistMatchesAlbumPrimary(track, collection.id))
+    featuredTracks.filter((track) => artistMatchesAlbumPrimary(track, collection.title))
   ).map((album) => ({
     id: `local_album_${encodeURIComponent(album.id)}`,
     type: 'album' as const,

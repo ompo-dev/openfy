@@ -48,6 +48,14 @@ const artistReferences = (item: unknown) => {
     };
   }).filter((artist) => artist.name);
 };
+
+const artistReferencesFromValue = (value: unknown) => asArray(value).map((entry) => {
+  const artist = asRecord(entry);
+  return {
+    name: asString(artist.name),
+    id: asString(artist.channel_id) || asString(artist.id),
+  };
+}).filter((artist) => artist.name);
 const validVideoId = (id?: string) => Boolean(id && /^[A-Za-z0-9_-]{11}$/.test(id));
 
 const decodeRoutePart = (value: string) => {
@@ -190,16 +198,47 @@ export const toYouTubeMusicTrackModel = (item: YouTubeMusicItem): TrackModel | n
       name: artist.name,
     }));
   const album = asRecord(data.album);
+  const release = asRecord(data.release);
+  const albumId = asString(album.id) ||
+    asString(data.album_id) ||
+    asString(data.albumId) ||
+    asString(release.id) ||
+    asString(release.browse_id);
+  const albumName = asString(album.name) ||
+    asString(data.album_name) ||
+    asString(data.albumName) ||
+    asString(release.name);
+  const albumArtists = artistReferencesFromValue(
+    asArray(data.album_artists).length
+      ? data.album_artists
+      : asArray(album.artists).length
+        ? album.artists
+        : release.artists
+  ).map((artist) => ({
+    id: toYouTubeMusicArtistRouteId(artist.id, artist.name),
+    name: artist.name,
+  }));
+  const albumImage = largestImage(album, 720) || largestImage(release, 720);
   const duration = asRecord(data.duration);
   const durationSeconds = Number(duration.seconds ?? data.duration_seconds ?? 0);
+  const explicitReleaseType = [
+    data.release_type,
+    data.releaseType,
+    data.album_type,
+    data.albumType,
+  ].map(asString).find(Boolean);
 
   return {
     id: `yt_${videoId}`,
     title,
     subtitle: artists.map((artist) => artist.name).join(', '),
-    imageURL: largestImage(item, 720) || largestImage(album, 720),
-    albumName: asString(album.name) || 'YouTube Music',
-    albumId: asString(album.id) || undefined,
+    imageURL: albumId ? albumImage || largestImage(item, 720) : largestImage(item, 720) || albumImage,
+    albumName: albumName || 'YouTube Music',
+    albumId: albumId || undefined,
+    albumArtists: albumArtists.length ? albumArtists : undefined,
+    releaseType: explicitReleaseType
+      ? getYouTubeMusicReleaseType(explicitReleaseType)
+      : undefined,
     youtubeVideoId: videoId,
     youtubeUrl: `https://www.youtube.com/watch?v=${videoId}`,
     durationMs: Number.isFinite(durationSeconds)
@@ -216,15 +255,28 @@ const getReleaseSectionTitle = (section: unknown) => {
 
 const getYouTubeMusicReleaseType = (sectionTitle: string) => {
   const normalized = normalizeArtistName(sectionTitle);
-  if (normalized.includes('single')) return 'single';
-  if (/\beps?\b/.test(normalized) || normalized.includes('extended play')) return 'EP';
-  if (normalized.includes('album')) return 'album';
+  if (normalized.includes('single')) return 'single' as const;
+  if (/\beps?\b/.test(normalized) || normalized.includes('extended play')) return 'ep' as const;
+  if (normalized.includes('album')) return 'album' as const;
   return 'release';
+};
+
+const getExplicitYouTubeMusicReleaseType = (item: Record<string, unknown>) => {
+  const value = [
+    item.release_type,
+    item.releaseType,
+    item.album_type,
+    item.albumType,
+    item.type,
+  ].map(asString).find(Boolean);
+  if (!value) return null;
+  const type = getYouTubeMusicReleaseType(value);
+  return type === 'release' ? null : type;
 };
 
 type YouTubeMusicReleaseModel = {
   item: LibraryItemModel;
-  kind: 'album' | 'single' | 'EP' | 'release';
+  kind: 'album' | 'single' | 'ep' | 'release';
 };
 
 const toYouTubeMusicReleaseModel = (
@@ -233,7 +285,7 @@ const toYouTubeMusicReleaseModel = (
 ): YouTubeMusicReleaseModel | null => {
   const data = asRecord(item);
   const itemType = asString(data.item_type);
-  if (itemType && itemType !== 'album') return null;
+  if (itemType && /song|video|artist|playlist/i.test(itemType)) return null;
 
   const endpoint = asRecord(data.endpoint);
   const payload = asRecord(endpoint?.payload);
@@ -241,16 +293,19 @@ const toYouTubeMusicReleaseModel = (
   const title = asString(data.title) || asString(data.name);
   if (!browseId || !title) return null;
 
-  const releaseType = getYouTubeMusicReleaseType(sectionTitle);
+  const releaseType = getExplicitYouTubeMusicReleaseType(data) ||
+    getYouTubeMusicReleaseType(sectionTitle);
   const year = asString(data.year) || asString(data.subtitle).match(/\b(?:19|20)\d{2}\b/)?.[0] || '';
+  const displayReleaseType = releaseType === 'ep' ? 'EP' : releaseType;
   return {
     kind: releaseType,
     item: {
       id: `ytalbum_${encodeURIComponent(browseId)}`,
       type: 'album',
       title,
-      subtitle: [year, releaseType].filter(Boolean).join(' · '),
+      subtitle: [year, displayReleaseType].filter(Boolean).join(' · '),
       imageURL: largestImage(item, 720),
+      releaseType,
     },
   };
 };
@@ -267,6 +322,24 @@ const toArtistModel = (item: YouTubeMusicItem): ArtistModel | null => {
     name,
     imageURL: largestImage(item),
   };
+};
+
+const dedupeArtistResults = (artists: ArtistModel[]) => {
+  const deduped = new Map<string, ArtistModel>();
+  artists.forEach((artist) => {
+    const key = normalizeArtistName(artist.name);
+    const current = deduped.get(key);
+    if (!current) {
+      deduped.set(key, artist);
+      return;
+    }
+    const currentHasBrowseId = current.id.startsWith(`${YOUTUBE_MUSIC_ARTIST_PREFIX}UC`);
+    const nextHasBrowseId = artist.id.startsWith(`${YOUTUBE_MUSIC_ARTIST_PREFIX}UC`);
+    if ((!current.imageURL && artist.imageURL) || (!currentHasBrowseId && nextHasBrowseId)) {
+      deduped.set(key, artist);
+    }
+  });
+  return [...deduped.values()];
 };
 
 const artistSearchSeeds = new Map<string, {
@@ -443,10 +516,10 @@ const searchCatalogUncached = async (
     .map(toYouTubeMusicTrackModel)
     .filter((track): track is TrackModel => Boolean(track))
     .slice(0, limit);
-  const artists = artistItems
+  const artists = dedupeArtistResults(artistItems
     .map(toArtistModel)
     .filter((artist): artist is ArtistModel => Boolean(artist))
-    .slice(0, Math.min(limit, 8));
+  ).slice(0, Math.min(limit, 8));
 
   const catalogResults: CatalogSearchResults = {
     artists,
@@ -593,8 +666,7 @@ const loadYouTubeMusicArtistProfile = async (
     });
   const uniqueReleases = releases
     .filter((release, index, values) => values.findIndex((candidate) =>
-      candidate.item.id === release.item.id ||
-      candidate.item.title.toLocaleLowerCase() === release.item.title.toLocaleLowerCase()
+      candidate.item.id === release.item.id
     ) === index);
   const albums = uniqueReleases
     .filter((release) => release.kind === 'album')
@@ -621,9 +693,35 @@ const loadYouTubeMusicArtistProfile = async (
   }
   const tracks: TrackModel[] = [];
   const participationTracks: TrackModel[] = [];
+  const releaseByTitle = new Map(
+    uniqueReleases.map((release) => [normalizeArtistName(release.item.title), release])
+  );
+  const releaseByImage = new Map<string, YouTubeMusicReleaseModel | null>();
+  uniqueReleases.forEach((release) => {
+    const imageKey = release.item.imageURL
+      .replace(/=w\d+[^/]*$/i, '')
+      .replace(/=s\d+[^/]*$/i, '');
+    if (!imageKey) return;
+    releaseByImage.set(imageKey, releaseByImage.has(imageKey) ? null : release);
+  });
   for (const item of pageAndCatalogSongs.values()) {
-    const track = toYouTubeMusicTrackModel(item);
-    if (!track) continue;
+    const parsedTrack = toYouTubeMusicTrackModel(item);
+    if (!parsedTrack) continue;
+    const imageKey = (parsedTrack.imageURL || '')
+      .replace(/=w\d+[^/]*$/i, '')
+      .replace(/=s\d+[^/]*$/i, '');
+    const matchingRelease = (parsedTrack.albumName && parsedTrack.albumName !== 'YouTube Music'
+      ? releaseByTitle.get(normalizeArtistName(parsedTrack.albumName))
+      : undefined) || (imageKey ? releaseByImage.get(imageKey) || undefined : undefined);
+    const track = matchingRelease
+      ? {
+          ...parsedTrack,
+          albumId: matchingRelease.item.id.replace(/^ytalbum_/, ''),
+          albumName: matchingRelease.item.title,
+          imageURL: matchingRelease.item.imageURL || parsedTrack.imageURL,
+          releaseType: matchingRelease.item.releaseType,
+        }
+      : parsedTrack;
     const credits = artistReferences(item);
     const artistCreditIndex = credits.findIndex((artist) =>
       artist.id === browseId || normalizeArtistName(artist.name) === normalizeArtistName(name)

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -55,6 +55,17 @@ function PlayerOverlay() {
   );
 }
 
+function OTAUpdateOverlay({ visible }: { visible: boolean }) {
+  if (!visible) return null;
+  return (
+    <View style={styles.updateOverlay} pointerEvents="none">
+      <ActivityIndicator size="large" color="#1ED760" />
+      <Text style={styles.updateOverlayTitle}>Baixando atualização</Text>
+      <Text style={styles.updateOverlaySubtitle}>O Openfy ficará pronto em instantes.</Text>
+    </View>
+  );
+}
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     'SF-Regular': require('@assets/fonts/Simply Rounded.ttf'),
@@ -67,7 +78,7 @@ export default function RootLayout() {
     'SimplyRounded-BoldItalic': require('@assets/fonts/Simply Rounded Bold Italic.ttf'),
   });
 
-  useOTAUpdates();
+  const { isDownloading: isDownloadingUpdate } = useOTAUpdates();
 
   React.useEffect(() => {
     if (fontsLoaded) {
@@ -115,6 +126,7 @@ export default function RootLayout() {
                     </Stack>
                     <PlayerOverlay />
                     <GlobalConnectivity />
+                    <OTAUpdateOverlay visible={isDownloadingUpdate} />
                   </View>
                   <StatusBar style="light" />
                 </GestureHandlerRootView>
@@ -134,5 +146,26 @@ const styles = StyleSheet.create({
   },
   stackContent: {
     backgroundColor: '#121212',
+  },
+  updateOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(18, 18, 18, 0.96)',
+    zIndex: 100,
+    gap: 12,
+  },
+  updateOverlayTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  updateOverlaySubtitle: {
+    color: '#A8A8A8',
+    fontSize: 14,
   },
 });

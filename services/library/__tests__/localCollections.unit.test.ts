@@ -75,8 +75,9 @@ describe('groupLocalArtists', () => {
       ] },
       { spotifyId: 'two', artistName: 'Rob', artists: [{ id: 'rob-2', name: 'Rob' }] },
     ] as any);
-    expect(artists.map((artist) => artist.id)).toEqual(['spotify:duo', 'spotify:rob-1', 'spotify:rob-2']);
+    expect(artists.map((artist) => artist.id)).toEqual(['a & b', 'rob']);
     expect(artists[0]).toMatchObject({ title: 'A & B', spotifyArtistId: 'duo' });
+    expect(artists[1].tracks.map((track) => track.spotifyId)).toEqual(['one', 'two']);
   });
   it('groups collaboration credits under each artist', () => {
     const artistTracks = [

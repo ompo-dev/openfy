@@ -27,7 +27,7 @@ const getTrackArtists = (track: Pick<LibraryTrack, 'artistName' | 'artists'>) =>
     .filter((artist) => artist.name);
 
 const normalizeArtistIdentity = (artist: { id?: string; name: string }) =>
-  artist.id ? `spotify:${artist.id}` : artist.name.trim().toLocaleLowerCase();
+  artist.name.trim().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase();
 
 const normalizeArtistLookup = (artistIdOrName: string) =>
   artistIdOrName.trim().toLocaleLowerCase();
@@ -117,7 +117,13 @@ export const groupLocalArtists = (
         artists.set(
           id,
           current
-            ? { ...current, tracks: [...current.tracks, track] }
+            ? {
+                ...current,
+                spotifyArtistId: current.spotifyArtistId || artist.id || undefined,
+                tracks: current.tracks.some((candidate) => candidate.spotifyId === track.spotifyId)
+                  ? current.tracks
+                  : [...current.tracks, track],
+              }
             : {
                 id,
                 spotifyArtistId: artist.id || undefined,
