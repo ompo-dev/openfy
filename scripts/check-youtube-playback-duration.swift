@@ -5,10 +5,24 @@ struct CheckYouTubePlaybackDuration {
   static func main() {
     precondition(
       YouTubePlaybackDurationPolicy.resolveSeconds(
-        measuredSeconds: .nan,
+        measuredSeconds: 368,
         streamDurationMs: 184_000,
         catalogDurationMs: 140_727
       ) == 184
+    )
+    precondition(
+      YouTubePlaybackDurationPolicy.resolveSeconds(
+        measuredSeconds: 360,
+        streamDurationMs: 180_000,
+        catalogDurationMs: 180_000
+      ) == 180
+    )
+    precondition(
+      YouTubePlaybackDurationPolicy.resolveSeconds(
+        measuredSeconds: 360,
+        streamDurationMs: 0,
+        catalogDurationMs: 180_000
+      ) == 180
     )
     precondition(
       YouTubePlaybackDurationPolicy.resolveSeconds(

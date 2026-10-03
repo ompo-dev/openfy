@@ -19,6 +19,10 @@ import { log } from '../../utils/appLogger';
 import { getDirectYouTubeMediaHeaders } from './directYouTubeResolver';
 import { prepareLocalAudioForPlayback } from './localAudioRepair';
 import {
+  clampPlaybackPositionMs,
+  reconcilePlaybackDurationMs,
+} from './playbackDuration';
+import {
   addNativeYouTubePlaybackListener,
   getNativeYouTubePlaybackStatus,
   parseNativeYouTubePlaybackUri,
@@ -799,9 +803,32 @@ export const loadAndPlay = async (
 
     let lastTransition = '';
     let lastPositionMs = 0;
+    let durationLimitReached = false;
     const publishStatus = (status: AudioStatus, force = false) => {
       if (generation !== loadGeneration || playerInstance !== player) return;
-      const state = toState(status);
+      const rawState = toState(status);
+      const durationMs = reconcilePlaybackDurationMs(
+        rawState.durationMs,
+        diagnosticTrack?.duration_ms
+      );
+      const positionMs = clampPlaybackPositionMs(rawState.positionMs, durationMs);
+      const reachedDurationLimit =
+        !durationLimitReached &&
+        rawState.isLoaded &&
+        durationMs > 0 &&
+        rawState.positionMs >= durationMs;
+      if (reachedDurationLimit) {
+        durationLimitReached = true;
+        player.pause();
+      }
+      const state: PlayerState = {
+        ...rawState,
+        durationMs,
+        positionMs,
+        ...(reachedDurationLimit
+          ? { isPlaying: false, didJustFinish: true }
+          : {}),
+      };
       if (state.error && state.positionMs === 0) {
         state.positionMs = lastPositionMs;
       } else if (state.isLoaded && !state.error) {

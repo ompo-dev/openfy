@@ -196,6 +196,9 @@ public final class OpenfyNativeYouTubePlayer {
     let posSec = CMTimeGetSeconds(player.currentTime())
     let durationSeconds = resolvedDurationSeconds(for: item)
     let safePositionSeconds = posSec.isFinite ? max(0, posSec) : 0
+    if durationSeconds > 0 && safePositionSeconds >= durationSeconds {
+      finishPlaybackIfNeeded()
+    }
     let isPlaying = player.timeControlStatus == .playing
     let positionMs = safePositionSeconds * 1000.0
     let durationMs = durationSeconds * 1000.0

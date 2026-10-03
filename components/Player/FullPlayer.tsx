@@ -76,9 +76,9 @@ import { SkeletonImage } from '../common/SkeletonImage';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const COVER_SIZE = Math.min(Math.max(208, SCREEN_WIDTH * 0.72), 340);
+const COVER_SIZE = Math.min(Math.max(240, SCREEN_WIDTH * 0.82), 340);
 const COVER_VIEWPORT_WIDTH = SCREEN_WIDTH;
-const COVER_GAP = 12;
+const COVER_GAP = -16;
 const PREVIEW_SCRUB_LINE_HEIGHT = 21;
 
 type FullPlayerProps = {
@@ -443,7 +443,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       );
       const canonicalArtistId = isSpotifyArtistId
         ? artistId
-        : shouldResolveArtistName
+        : shouldResolveArtistName && !isYouTubeTrack
           ? await findArtistIdByName(artistName)
           : '';
       const targetArtistId = canonicalArtistId || artistId || (

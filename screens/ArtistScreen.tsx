@@ -114,6 +114,11 @@ const mergeArtistReleases = (
   return [...releases.values()];
 };
 
+const splitArtistReleases = (releases: LibraryItemModel[]) => ({
+  albums: releases.filter((release) => !/single|ep/i.test(release.subtitle)),
+  singlesAndEps: releases.filter((release) => /single|ep/i.test(release.subtitle)),
+});
+
 const mergeCatalogTracks = (
   artistId: string,
   artistName: string,
@@ -181,6 +186,7 @@ const buildLocalArtistProfile = (
     topTracks: featuredTracks.map(toTrackModel),
     participationTracks: participationTracks.map(toTrackModel),
     albums,
+    singlesAndEps: [],
   };
 };
 
@@ -193,6 +199,8 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     []
   );
   const [albums, setAlbums] = React.useState<LibraryItemModel[]>([]);
+  const [singlesAndEps, setSinglesAndEps] = React.useState<LibraryItemModel[]>([]);
+  const [isProfileReady, setIsProfileReady] = React.useState(false);
   const [artistError, setArtistError] = React.useState('');
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [refreshSequence, setRefreshSequence] = React.useState(0);
@@ -214,7 +222,9 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     let active = true;
     let hasCanonicalSpotifyProfile = false;
     let hasRemoteArtistProfile = false;
+    let waitingForSupplement = false;
     setArtistError('');
+    setIsProfileReady(false);
     const searchSeed = isYouTubeArtist
       ? getCachedArtistSearchSeed(artistId)
       : null;
@@ -225,6 +235,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       setParticipationTracks([]);
       setContextualTracks([]);
       setAlbums([]);
+      setSinglesAndEps([]);
     }
     if (searchSeed) {
       setArtist(searchSeed.artist);
@@ -281,9 +292,11 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       additionalPrimaryTracks: TrackModel[] = [],
       additionalParticipationTracks: TrackModel[] = []
     ) => {
+      waitingForSupplement = true;
       const catalogRouteId = `ytartist_name_${encodeURIComponent(artistName)}`;
       void getYouTubeMusicArtistProfile(catalogRouteId).then((catalogProfile) => {
         if (!active) return;
+        waitingForSupplement = false;
         hasRemoteArtistProfile = true;
         const merged = mergeCatalogTracks(
           catalogProfile.artist.id,
@@ -302,10 +315,16 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         }));
         setTopTracks(merged.primaryTracks);
         setParticipationTracks(merged.participationTracks);
+        const publicReleases = splitArtistReleases(catalogProfile.albums || []);
         setAlbums((current) => mergeArtistReleases(
           current,
-          [...(localProfile?.albums || []), ...(catalogProfile.albums || [])]
+          [...(localProfile?.albums || []), ...publicReleases.albums]
         ));
+        setSinglesAndEps((current) => mergeArtistReleases(
+          current,
+          [...(localProfile?.singlesAndEps || []), ...publicReleases.singlesAndEps]
+        ));
+        setIsProfileReady(true);
         setArtistError('');
         log.artist('public artist catalog supplemented local profile', {
           artist: catalogProfile.artist.name,
@@ -313,6 +332,8 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           participations: merged.participationTracks.length,
         });
       }).catch((error) => {
+        waitingForSupplement = false;
+        if (active) setIsProfileReady(true);
         log.artist('public artist catalog fallback failed', {
           artist: artistName,
           error: String(error),
@@ -338,6 +359,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         const profile = buildLocalArtistProfile(downloaded, artistId, localArtistName);
         if (!profile) {
           setArtistError('Não encontrei músicas deste artista na biblioteca.');
+          setIsProfileReady(true);
           setIsRefreshing(false);
           return;
         }
@@ -345,6 +367,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         setTopTracks(profile.topTracks);
         setParticipationTracks(profile.participationTracks);
         setAlbums(profile.albums);
+        setSinglesAndEps(profile.singlesAndEps);
         setIsRefreshing(false);
         if (profile.collection.spotifyArtistId && /^[A-Za-z0-9]{22}$/.test(profile.collection.spotifyArtistId)) {
           void getCachedArtistImage(profile.artist.name, () =>
@@ -359,6 +382,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         supplementFromPublicCatalog(profile.artist.name, artistId, profile);
       }).catch(() => {
         if (active) {
+          setIsProfileReady(true);
           setArtistError('Não foi possível carregar as músicas deste artista.');
           setIsRefreshing(false);
         }
@@ -381,6 +405,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           tracks,
           participationTracks: remoteParticipations = [],
           albums: remoteAlbums = [],
+          singlesAndEps: remoteSinglesAndEps = [],
         }) => {
           if (!active) {
             finishProfileLoad({ ok: false, stale: true });
@@ -397,6 +422,8 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           setTopTracks(tracks);
           setParticipationTracks(remoteParticipations);
           setAlbums(remoteAlbums);
+          setSinglesAndEps(remoteSinglesAndEps);
+          setIsProfileReady(true);
           setArtistError('');
           if (!imageURL) {
             void (earlyArtistImage || getCachedArtistImage(
@@ -451,6 +478,8 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             setTopTracks(localProfile.topTracks);
             setParticipationTracks(localProfile.participationTracks);
             setAlbums(localProfile.albums);
+            setSinglesAndEps(localProfile.singlesAndEps);
+            setIsProfileReady(true);
             setArtistError('');
             void getCachedArtistImage(localProfile.artist.name, () =>
               getArtistCatalogImage(artistId, localProfile.artist.name),
@@ -462,13 +491,16 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             }).catch(() => {});
           } else if (searchSeed) {
             setArtist(searchSeed.artist);
-            setTopTracks([]);
+            setTopTracks(searchSeed.tracks);
+            setParticipationTracks([]);
+            setIsProfileReady(true);
             setArtistError('');
             log.artist('profile kept search results after remote failure', {
               artistId,
               tracks: searchSeed.tracks.length,
             });
           } else {
+            setIsProfileReady(true);
             setArtistError('Não foi possível carregar o perfil agora. Verifique a conexão e tente novamente.');
           }
         })
@@ -510,7 +542,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
               const finishDiscography = log.time('artist', 'canonical Spotify artist discography render', {
                 artistId: spotifyArtistId,
               });
-              if (artistData || topTracks.length || discography?.tracks.length || discography?.albums.length) {
+              if (artistData || topTracks.length || discography?.tracks.length || discography?.albums.length || discography?.singlesAndEps.length) {
                 const profileName = artistData?.name || routeArtistName;
                 const imageURL = await getCachedArtistImage(
                   profileName,
@@ -541,9 +573,13 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
                 setArtist(artistProfile);
                 setTopTracks(uniqueTracksById(popularPrimary));
                 setParticipationTracks(uniqueTracksById(popularFeatured));
-                setAlbums(discography?.albums || []);
+                const spotifyReleases = splitArtistReleases([
+                  ...(discography?.albums || []),
+                  ...(discography?.singlesAndEps || []),
+                ]);
+                setAlbums(spotifyReleases.albums);
+                setSinglesAndEps(spotifyReleases.singlesAndEps);
                 setArtistError('');
-                setIsRefreshing(false);
                 finishProfile({
                   ok: true,
                   topTracks: uniqueTracksById(popularPrimary).length,
@@ -559,10 +595,15 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
                   );
                   setTopTracks((current) => uniqueTracksById([...current, ...primaryTracks]));
                   setParticipationTracks((current) => uniqueTracksById([...current, ...featuredTracks]));
-                  setAlbums(discography.albums);
+                  const updatedReleases = splitArtistReleases([
+                    ...discography.albums,
+                    ...(discography.singlesAndEps || []),
+                  ]);
+                  setAlbums(updatedReleases.albums);
+                  setSinglesAndEps(updatedReleases.singlesAndEps);
                   finishDiscography({
                     ok: true,
-                    albums: discography.albums.length,
+                    albums: updatedReleases.albums.length,
                     primaryTracks: primaryTracks.length,
                     participations: featuredTracks.length,
                   });
@@ -581,6 +622,8 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
                     popularPrimary,
                     popularFeatured
                   );
+                } else {
+                  setIsProfileReady(true);
                 }
                 return;
               }
@@ -641,6 +684,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           setTopTracks(localProfile.topTracks);
           setParticipationTracks(localProfile.participationTracks);
           setAlbums(localProfile.albums);
+          setSinglesAndEps(localProfile.singlesAndEps);
           supplementFromPublicCatalog(localProfile.artist.name, artistId, localProfile);
         } else {
           const currentArtistName = currentTrackArtistName;
@@ -723,7 +767,12 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         ]);
         setTopTracks((current) => uniqueTracksById([...current, ...primaryTracks]));
         setParticipationTracks((current) => uniqueTracksById([...current, ...featuredTracks]));
-        setAlbums(discography.albums);
+        const spotifyReleases = splitArtistReleases([
+          ...discography.albums,
+          ...(discography.singlesAndEps || []),
+        ]);
+        setAlbums(spotifyReleases.albums);
+        setSinglesAndEps(spotifyReleases.singlesAndEps);
         if (
           primaryTracks.length + featuredTracks.length < MIN_TRACKS_BEFORE_PUBLIC_CATALOG_SUPPLEMENT &&
           artistName
@@ -746,7 +795,10 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       .catch((error) => log.error('Spotify artist discography failed', { artistId, error }));
 
     void Promise.allSettled([artistRequest, tracksRequest, discographyRequest]).finally(() => {
-      if (active) setIsRefreshing(false);
+      if (active) {
+        setIsRefreshing(false);
+        if (!waitingForSupplement) setIsProfileReady(true);
+      }
     });
 
     return () => {
@@ -763,9 +815,11 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       ...contextualTracks,
     ];
     const profileArtistId = artist.id || artistId;
-    const profileContext = /^[A-Za-z0-9]{22}$/.test(profileArtistId)
-      ? candidateContext.filter((track) => /^[A-Za-z0-9]{22}$/.test(track.id))
-      : candidateContext;
+    const profileContext = isYouTubeArtist
+      ? []
+      : /^[A-Za-z0-9]{22}$/.test(profileArtistId)
+        ? candidateContext.filter((track) => /^[A-Za-z0-9]{22}$/.test(track.id))
+        : candidateContext;
     return mergeArtistProfileTracks({
       artistId: profileArtistId,
       artistName: artist.name,
@@ -778,11 +832,12 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     artistId,
     contextualTracks,
     currentTrack,
+    isYouTubeArtist,
     participationTracks,
     topTracks,
   ]);
 
-  if (!artist) {
+  if (!artist || (isYouTubeArtist && !isProfileReady)) {
     return (
       <View
         style={{
@@ -840,14 +895,27 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       onRefresh={refresh}
       refreshing={isRefreshing}
       footer={
-        albums.length ? (
-          <Slider
-            title="Álbuns, singles e EPs"
-            slides={albums}
-            size={Sizes.SMALL}
-            shape={Shapes.SQUARE_BORDER}
-            withShowAll={false}
-          />
+        albums.length || singlesAndEps.length ? (
+          <>
+            {albums.length ? (
+              <Slider
+                title="Álbuns"
+                slides={albums}
+                size={Sizes.SMALL}
+                shape={Shapes.SQUARE_BORDER}
+                withShowAll={false}
+              />
+            ) : null}
+            {singlesAndEps.length ? (
+              <Slider
+                title="Singles e EPs"
+                slides={singlesAndEps}
+                size={Sizes.SMALL}
+                shape={Shapes.SQUARE_BORDER}
+                withShowAll={false}
+              />
+            ) : null}
+          </>
         ) : null
       }
     />

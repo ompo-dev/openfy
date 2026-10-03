@@ -428,9 +428,7 @@ describe('FullPlayer artist row and YouTube source', () => {
     );
   });
 
-  it('resolves YouTube Music artist aliases to the canonical Spotify profile', async () => {
-    const spotifyArtistId = '1234567890123456789012';
-    jest.mocked(findArtistIdByName).mockResolvedValue(spotifyArtistId);
+  it('keeps YouTube Music artist aliases on the public catalog profile', async () => {
     const screen = await mountPlayer({
       youtubeVideoId: 'aaaaaaaaaaa',
       artists: [{ id: 'ytartist_name_Ebony', name: 'Ebony' }],
@@ -439,9 +437,10 @@ describe('FullPlayer artist row and YouTube source', () => {
     await fireEvent.press(screen.getByLabelText('Abrir artista Ebony'));
 
     await waitFor(() => expect(mockNavigate).toHaveBeenLastCalledWith(
-      `/(tabs)/library/artist/${spotifyArtistId}`,
+      '/(tabs)/library/artist/ytartist_name_Ebony',
       { dangerouslySingular: true }
     ));
+    expect(findArtistIdByName).not.toHaveBeenCalled();
   });
 
   it('replaces the title with a sticky mini-player after the player scrolls away', async () => {

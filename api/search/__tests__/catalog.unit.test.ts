@@ -397,6 +397,8 @@ describe('public YouTube Music catalog', () => {
 
     expect(profile.albums).toEqual([
       expect.objectContaining({ title: 'Album oficial', subtitle: '2024 · album' }),
+    ]);
+    expect(profile.singlesAndEps).toEqual([
       expect.objectContaining({ title: 'Single oficial', subtitle: '2025 · single' }),
       expect.objectContaining({ title: 'EP oficial', subtitle: 'EP' }),
     ]);

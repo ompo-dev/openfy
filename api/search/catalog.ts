@@ -27,6 +27,7 @@ export type YouTubeMusicArtistProfile = {
   tracks: TrackModel[];
   participationTracks: TrackModel[];
   albums: LibraryItemModel[];
+  singlesAndEps: LibraryItemModel[];
 };
 
 const asRecord = (value: unknown): Record<string, unknown> =>
@@ -221,10 +222,15 @@ const getYouTubeMusicReleaseType = (sectionTitle: string) => {
   return 'release';
 };
 
+type YouTubeMusicReleaseModel = {
+  item: LibraryItemModel;
+  kind: 'album' | 'single' | 'EP' | 'release';
+};
+
 const toYouTubeMusicReleaseModel = (
   item: YouTubeMusicItem,
   sectionTitle: string
-): LibraryItemModel | null => {
+): YouTubeMusicReleaseModel | null => {
   const data = asRecord(item);
   const itemType = asString(data.item_type);
   if (itemType && itemType !== 'album') return null;
@@ -238,11 +244,14 @@ const toYouTubeMusicReleaseModel = (
   const releaseType = getYouTubeMusicReleaseType(sectionTitle);
   const year = asString(data.year) || asString(data.subtitle).match(/\b(?:19|20)\d{2}\b/)?.[0] || '';
   return {
-    id: `ytalbum_${encodeURIComponent(browseId)}`,
-    type: 'album',
-    title,
-    subtitle: [year, releaseType].filter(Boolean).join(' · '),
-    imageURL: largestImage(item, 720),
+    kind: releaseType,
+    item: {
+      id: `ytalbum_${encodeURIComponent(browseId)}`,
+      type: 'album',
+      title,
+      subtitle: [year, releaseType].filter(Boolean).join(' · '),
+      imageURL: largestImage(item, 720),
+    },
   };
 };
 
@@ -575,17 +584,24 @@ const loadYouTubeMusicArtistProfile = async (
         validVideoId(asString(item.id) || asString(item.video_id));
     }) as YouTubeMusicItem[];
   const name = asString(headerItem.title) || routeName || 'Artista';
-  const albums = asArray(page.sections)
+  const releases = asArray(page.sections)
     .flatMap((section) => {
       const sectionTitle = getReleaseSectionTitle(section);
       return asArray(asRecord(section).contents)
         .map((item) => toYouTubeMusicReleaseModel(item as YouTubeMusicItem, sectionTitle))
-        .filter((item): item is LibraryItemModel => Boolean(item));
-    })
-    .filter((item, index, values) => values.findIndex((candidate) =>
-      candidate.id === item.id ||
-      candidate.title.toLocaleLowerCase() === item.title.toLocaleLowerCase()
+        .filter((item): item is YouTubeMusicReleaseModel => Boolean(item));
+    });
+  const uniqueReleases = releases
+    .filter((release, index, values) => values.findIndex((candidate) =>
+      candidate.item.id === release.item.id ||
+      candidate.item.title.toLocaleLowerCase() === release.item.title.toLocaleLowerCase()
     ) === index);
+  const albums = uniqueReleases
+    .filter((release) => release.kind === 'album')
+    .map((release) => release.item);
+  const singlesAndEps = uniqueReleases
+    .filter((release) => release.kind !== 'album')
+    .map((release) => release.item);
   const [searchedSongs, completeSongShelf] = await Promise.all([
     initialSongSearch || searchArtistSongs(name),
     loadArtistTopSongs(client, page),
@@ -621,7 +637,7 @@ const loadYouTubeMusicArtistProfile = async (
     catalogTracks: matchingSearchedSongs.length,
     uniqueTracks: tracks.length + participationTracks.length,
     participations: participationTracks.length,
-    releases: albums.length,
+    releases: uniqueReleases.length,
   });
 
   const profileImageRoute = toYouTubeMusicArtistRouteId(browseId, name);
@@ -648,6 +664,7 @@ const loadYouTubeMusicArtistProfile = async (
     tracks,
     participationTracks,
     albums,
+    singlesAndEps,
   };
 };
 

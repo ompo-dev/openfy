@@ -3,10 +3,12 @@ import { toYouTubeMusicArtistRouteId } from '../youtubeMusicClient';
 
 const loadArtistApis = () => Promise.all([
   import('../../api/artists/artist'),
+  import('../../api/artists/artistDiscography'),
   import('../../api/artists/artistTopTracks'),
   import('../../api/search/catalog'),
-]).then(([artist, topTracks, catalog]) => ({
+]).then(([artist, discography, topTracks, catalog]) => ({
   ...artist,
+  ...discography,
   ...topTracks,
   ...catalog,
 }));
@@ -106,6 +108,7 @@ export const prefetchTrackArtistData = (track: TrackArtistData): void => {
         ? Promise.all([
             apis.getArtist(spotifyId),
             apis.getArtistTopTracks(spotifyId, 'BR'),
+            apis.getArtistDiscography(spotifyId),
           ])
         : apis.getYouTubeMusicArtistProfile(youtubeRouteId);
       await Promise.allSettled([imageRequest, profileRequest]);

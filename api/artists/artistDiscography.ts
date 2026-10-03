@@ -24,6 +24,7 @@ type AlbumTrackPage = { items: AlbumTrack[]; total: number };
 
 export type ArtistDiscography = {
   albums: LibraryItemModel[];
+  singlesAndEps: LibraryItemModel[];
   tracks: TrackModel[];
 };
 
@@ -123,16 +124,19 @@ const loadDiscography = async (artistId: string): Promise<ArtistDiscography> => 
     if (track.id && !tracks.has(track.id)) tracks.set(track.id, track);
   });
 
-  return {
-    albums: uniqueAlbums.map((album) => ({
+  const releases: LibraryItemModel[] = uniqueAlbums.map((album) => ({
       id: album.id,
-      type: 'album',
+      type: 'album' as const,
       title: album.name,
       subtitle: [album.release_date?.slice(0, 4), album.album_type]
         .filter(Boolean)
         .join(' · '),
       imageURL: album.images?.[0]?.url || '',
-    })),
+    }));
+
+  return {
+    albums: releases.filter((release) => !/single|ep/i.test(release.subtitle)),
+    singlesAndEps: releases.filter((release) => /single|ep/i.test(release.subtitle)),
     tracks: [...tracks.values()],
   };
 };

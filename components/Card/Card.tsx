@@ -64,7 +64,11 @@ const Card = React.memo(
         <View style={styles.cardImageView}>
           <React.Suspense fallback={renderIcon()}>
             {imageURL ? (
-              <Image style={styles.cardImage} source={{ uri: imageURL }} />
+              <Image
+                style={styles.cardImage}
+                source={{ uri: imageURL }}
+                contentFit="cover"
+              />
             ) : (
               renderIcon()
             )}

@@ -131,7 +131,7 @@ describe('ArtistScreen', () => {
     jest.mocked(getArtist).mockRejectedValue(new Error('Spotify profile unavailable'));
     jest.mocked(findArtistIdByName).mockResolvedValue('');
     jest.mocked(getArtistTopTracks).mockResolvedValue([] as never);
-    jest.mocked(getArtistDiscography).mockResolvedValue({ albums: [], tracks: [] });
+    jest.mocked(getArtistDiscography).mockResolvedValue({ albums: [], singlesAndEps: [], tracks: [] });
   });
 
   afterEach(() => consoleError.mockRestore());

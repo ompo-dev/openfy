@@ -101,6 +101,45 @@ describe('playerService fades', () => {
     expect(player.seekTo.mock.calls).toEqual([[10]]);
   });
 
+  it('stops a duplicated media timeline at the catalog duration', async () => {
+    const player = createPlayer();
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+    const onStatus = jest.fn();
+
+    await loadAndPlay(
+      'file:///duplicated-timeline.m4a',
+      onStatus,
+      undefined,
+      0,
+      {
+        spotifyId: 'track-2-minutes',
+        title: 'Faixa de teste',
+        artistName: 'Artista',
+        albumName: 'Álbum',
+        duration_ms: 120_000,
+      }
+    );
+
+    const publishStatus = player.addListener.mock.calls.find(
+      ([event]) => event === 'playbackStatusUpdate'
+    )![1];
+    publishStatus({
+      ...player.currentStatus,
+      isLoaded: true,
+      playing: true,
+      currentTime: 120,
+      duration: 240,
+    });
+
+    expect(player.pause).toHaveBeenCalledTimes(1);
+    expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({
+      durationMs: 120_000,
+      positionMs: 120_000,
+      didJustFinish: true,
+      isPlaying: false,
+    }));
+  });
+
   it('waits for local container repair before creating or preloading a player', async () => {
     (Platform as { OS: string }).OS = 'ios';
     const uri = 'file:///downloaded.m4a';

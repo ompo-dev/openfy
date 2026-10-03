@@ -44,7 +44,7 @@ type ExtraTrackSection = {
   tracks: CollectionTrack[];
 };
 
-const ARTIST_TRACKS_PAGE_SIZE = 15;
+const ARTIST_TRACKS_PAGE_SIZE = 10;
 
 export type CollectionDetailProps = {
   kind: 'album' | 'artist' | 'playlist';
