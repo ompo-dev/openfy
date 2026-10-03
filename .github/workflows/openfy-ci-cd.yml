@@ -139,7 +139,9 @@ jobs:
             if ! kill -0 "$SERVER_PID" 2>/dev/null; then cat "$OTA_DIR/server.log"; exit 1; fi
             sleep 1
           done
-          curl --fail --silent http://127.0.0.1:8787/health >/dev/null
+          HEALTH_JSON="$(curl --fail --silent http://127.0.0.1:8787/health)"
+          OTA_UPDATE_ID="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).updateId)' "$HEALTH_JSON")"
+          OTA_CREATED_AT="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).createdAt)' "$HEALTH_JSON")"
 
           "$OTA_DIR/cloudflared" tunnel --no-autoupdate --url http://127.0.0.1:8787 \
             > "$OTA_DIR/cloudflared.log" 2>&1 &
@@ -160,6 +162,8 @@ jobs:
             --active true \
             --update-url "$PUBLIC_TUNNEL_URL/api/manifest" \
             --runtime-version "$RUNTIME_VERSION" \
+            --update-id "$OTA_UPDATE_ID" \
+            --created-at "$OTA_CREATED_AT" \
             --run-id "${{ github.run_id }}" \
             --commit-sha "${{ github.sha }}" \
             --duration-seconds 605

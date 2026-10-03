@@ -14,7 +14,6 @@ import {
   KeyboardAvoidingView,
   Linking,
   Modal,
-  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -26,7 +25,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
@@ -70,9 +73,9 @@ import { SkeletonImage } from '../common/SkeletonImage';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const COVER_SIZE = Math.min(Math.max(208, SCREEN_WIDTH * 0.66), 340);
-const COVER_VIEWPORT_WIDTH = Math.min(SCREEN_WIDTH - 32, COVER_SIZE + 120);
-const COVER_GAP = 16;
+const COVER_SIZE = Math.min(Math.max(208, SCREEN_WIDTH * 0.64), 340);
+const COVER_VIEWPORT_WIDTH = SCREEN_WIDTH;
+const COVER_GAP = 12;
 
 type FullPlayerProps = {
   visible: boolean;
@@ -290,8 +293,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [isEditModalVisible, setIsEditModalVisible] = React.useState(false);
   const [customLinkInput, setCustomLinkInput] = React.useState('');
   const [isUpdatingAudio, setIsUpdatingAudio] = React.useState(false);
-  const [isArtworkNavigationPending, setIsArtworkNavigationPending] =
-    React.useState(false);
   const [isDownloadMutationPending, setIsDownloadMutationPending] =
     React.useState(false);
   const [isCurrentTrackDownloaded, setIsCurrentTrackDownloaded] =
@@ -364,10 +365,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       : null;
   const canGoPrevious = !!previousTrack;
   const canGoNext = !!nextTrack;
-  const artworkIsLoading =
-    (!!playerState.isBuffering && !playerState.isPlaying) ||
-    isArtworkNavigationPending;
-
   const artistLinks = React.useMemo(() => {
     if (!currentTrack) return [];
     if (currentTrack.artists?.length) return currentTrack.artists;
@@ -821,69 +818,59 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     openLyricsView();
   };
 
-  const lyricPreviewPanResponder = React.useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponderCapture: () => true,
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_, gesture) =>
-      previewLineIndicesRef.current.length > 1 &&
-      Math.abs(gesture.dy) > 8 &&
-      Math.abs(gesture.dy) > Math.abs(gesture.dx),
-    onMoveShouldSetPanResponderCapture: (_, gesture) =>
-      previewLineIndicesRef.current.length > 1 &&
-      Math.abs(gesture.dy) > 8 &&
-      Math.abs(gesture.dy) > Math.abs(gesture.dx),
-    onPanResponderTerminationRequest: () => false,
-    onPanResponderGrant: () => {
-      previewGestureDidMoveRef.current = false;
-      const scrubbedIndex = scrubbedLyricTimelineIndexRef.current;
-      const scrubbedPosition = scrubbedIndex === null
-        ? -1
-        : previewLineIndicesRef.current.indexOf(scrubbedIndex);
-      const position = scrubbedPosition >= 0
-        ? scrubbedPosition
-        : activePreviewPositionRef.current;
-      const timelineIndex = previewLineIndicesRef.current[position];
-      previewGestureStartPositionRef.current = position;
-      lastPreviewSeekTimelineIndexRef.current = timelineIndex ?? null;
-      if (timelineIndex !== undefined) setScrubbedLyricTimelineIndex(timelineIndex);
-    },
-    onPanResponderMove: (_, gesture) => {
-      if (Math.abs(gesture.dx) > 10 || Math.abs(gesture.dy) > 10) {
-        if (!previewGestureDidMoveRef.current) {
-          pauseLyricsAutoFollowRef.current();
+  const lyricPreviewGesture = React.useMemo(() => {
+    const pan = Gesture.Pan()
+      .enabled(lyricTimelineIndices.length > 1)
+      .activateAfterLongPress(250)
+      .shouldCancelWhenOutside(false)
+      .runOnJS(true)
+      .onStart(() => {
+        previewGestureDidMoveRef.current = false;
+        const scrubbedIndex = scrubbedLyricTimelineIndexRef.current;
+        const scrubbedPosition = scrubbedIndex === null
+          ? -1
+          : previewLineIndicesRef.current.indexOf(scrubbedIndex);
+        const position = scrubbedPosition >= 0
+          ? scrubbedPosition
+          : activePreviewPositionRef.current;
+        const timelineIndex = previewLineIndicesRef.current[position];
+        previewGestureStartPositionRef.current = position;
+        lastPreviewSeekTimelineIndexRef.current = timelineIndex ?? null;
+        if (timelineIndex !== undefined) setScrubbedLyricTimelineIndex(timelineIndex);
+      })
+      .onUpdate((event) => {
+        if (Math.abs(event.translationY) > 8) {
+          if (!previewGestureDidMoveRef.current) {
+            pauseLyricsAutoFollowRef.current();
+          }
+          previewGestureDidMoveRef.current = true;
         }
-        previewGestureDidMoveRef.current = true;
-      }
-      const lineIndices = previewLineIndicesRef.current;
-      if (lineIndices.length < 2) return;
-      const start = previewGestureStartPositionRef.current;
-      const position = Math.max(0, Math.min(
-        lineIndices.length - 1,
-        start + Math.round(-gesture.dy / 36)
-      ));
-      const timelineIndex = lineIndices[position];
-      const line = lyricTimelineRef.current[timelineIndex];
-      if (!line || lastPreviewSeekTimelineIndexRef.current === timelineIndex) return;
-      lastPreviewSeekTimelineIndexRef.current = timelineIndex;
-      setScrubbedLyricTimelineIndex(timelineIndex);
-      pauseLyricsAutoFollowRef.current();
-      void seekToPositionRef.current(line.startTimeMs);
-    },
-    onPanResponderRelease: (_, gesture) => {
-      if (
-        !previewGestureDidMoveRef.current &&
-        Math.abs(gesture.dx) < 12 &&
-        Math.abs(gesture.dy) < 12
-      ) {
-        openLyricsViewRef.current();
-      } else {
+        const lineIndices = previewLineIndicesRef.current;
+        if (lineIndices.length < 2) return;
+        const start = previewGestureStartPositionRef.current;
+        const position = Math.max(0, Math.min(
+          lineIndices.length - 1,
+          start + Math.round(-event.translationY / 28)
+        ));
+        const timelineIndex = lineIndices[position];
+        const line = lyricTimelineRef.current[timelineIndex];
+        if (!line || lastPreviewSeekTimelineIndexRef.current === timelineIndex) return;
+        lastPreviewSeekTimelineIndexRef.current = timelineIndex;
+        setScrubbedLyricTimelineIndex(timelineIndex);
         pauseLyricsAutoFollowRef.current();
-      }
-    },
-    onPanResponderTerminate: () => {
-      if (previewGestureDidMoveRef.current) pauseLyricsAutoFollowRef.current();
-    },
-  }), []);
+        void seekToPositionRef.current(line.startTimeMs);
+      })
+      .onFinalize(() => {
+        if (previewGestureDidMoveRef.current) pauseLyricsAutoFollowRef.current();
+      });
+    const tap = Gesture.Tap()
+      .maxDuration(220)
+      .onEnd((_event, succeeded) => {
+        if (succeeded) openLyricsViewRef.current();
+      });
+
+    return Gesture.Race(pan, tap);
+  }, [lyricTimelineIndices.length]);
 
   const handleOpenYoutubeMenu = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -1248,26 +1235,14 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     await seekToPosition(startTimeMs);
   };
 
-  const handleArtworkPrevious = async () => {
+  const handleArtworkPrevious = () => {
     if (!canGoPrevious) return;
-
-    setIsArtworkNavigationPending(true);
-    try {
-      await playQueueIndex(previousQueueIndex);
-    } finally {
-      setIsArtworkNavigationPending(false);
-    }
+    void playQueueIndex(previousQueueIndex);
   };
 
-  const handleArtworkNext = async () => {
+  const handleArtworkNext = () => {
     if (!canGoNext) return;
-
-    setIsArtworkNavigationPending(true);
-    try {
-      await playQueueIndex(nextQueueIndex);
-    } finally {
-      setIsArtworkNavigationPending(false);
-    }
+    void playQueueIndex(nextQueueIndex);
   };
 
   return (
@@ -1523,7 +1498,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 canGoNext={canGoNext}
                 onPrevious={handleArtworkPrevious}
                 onNext={handleArtworkNext}
-                loading={artworkIsLoading}
+                loading={false}
                 fallbackSource={
                   getLocalArtworkFallback(currentTrack)
                 }
@@ -1537,41 +1512,42 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 testID="player-artwork"
               />
 
-              <View
-                accessible
-                accessibilityRole="button"
-                accessibilityLabel="Abrir letra completa"
-                testID="player-lyric-preview"
-                onAccessibilityTap={openLyricsView}
-                style={styles.lyricPreview}
-                {...lyricPreviewPanResponder.panHandlers}
-              >
-                {lyricPreview.length ? (
-                  <>
-                    <Text
-                      testID="player-lyric-preview-current"
-                      numberOfLines={lyricPreview[0].active ? 2 : 1}
-                      ellipsizeMode="tail"
-                      onTextLayout={(event) => setPreviewCurrentLineCount(event.nativeEvent.lines.length)}
-                      style={[styles.lyricPreviewText, lyricPreview[0].active && styles.lyricPreviewActive]}
-                    >{lyricPreview[0].text}</Text>
-                    {lyricPreview[1] && (
-                      !lyricPreview[0].active || previewCurrentLineCount === 1
-                    ) ? (
+              <GestureDetector gesture={lyricPreviewGesture}>
+                <View
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityLabel="Abrir letra completa"
+                  testID="player-lyric-preview"
+                  onAccessibilityTap={openLyricsView}
+                  style={styles.lyricPreview}
+                >
+                  {lyricPreview.length ? (
+                    <>
                       <Text
-                        testID="player-lyric-preview-next"
-                        numberOfLines={1}
+                        testID="player-lyric-preview-current"
+                        numberOfLines={lyricPreview[0].active ? 2 : 1}
                         ellipsizeMode="tail"
-                        style={[styles.lyricPreviewNext, lyricPreview[1].active && styles.lyricPreviewActive]}
-                      >{lyricPreview[1].text}</Text>
-                    ) : null}
-                  </>
-                ) : (
-                  <Text style={styles.lyricPreviewPlaceholder}>
-                    {isLoadingLyrics ? 'Carregando letra…' : 'Letra não disponível para esta faixa.'}
-                  </Text>
-                )}
-              </View>
+                        onTextLayout={(event) => setPreviewCurrentLineCount(event.nativeEvent.lines.length)}
+                        style={[styles.lyricPreviewText, lyricPreview[0].active && styles.lyricPreviewActive]}
+                      >{lyricPreview[0].text}</Text>
+                      {lyricPreview[1] && (
+                        !lyricPreview[0].active || previewCurrentLineCount === 1
+                      ) ? (
+                        <Text
+                          testID="player-lyric-preview-next"
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                          style={[styles.lyricPreviewNext, lyricPreview[1].active && styles.lyricPreviewActive]}
+                        >{lyricPreview[1].text}</Text>
+                      ) : null}
+                    </>
+                  ) : (
+                    <Text style={styles.lyricPreviewPlaceholder}>
+                      {isLoadingLyrics ? 'Carregando letra…' : 'Letra não disponível para esta faixa.'}
+                    </Text>
+                  )}
+                </View>
+              </GestureDetector>
             </View>
             {isLyricsEditing ? (
               <LyricSyncEditor
@@ -2201,13 +2177,13 @@ const styles = StyleSheet.create({
   lyricsTrackPill: {
     flex: 1,
     minWidth: 0,
-    height: 44,
-    paddingHorizontal: 20,
-    borderRadius: 22,
+    height: 50,
+    paddingHorizontal: 14,
+    borderRadius: 25,
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
-    maxWidth: SCREEN_WIDTH - 150,
+    maxWidth: SCREEN_WIDTH - 138,
   },
   lyricsTrackPillText: {
     color: '#FFFFFF',

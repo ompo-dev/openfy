@@ -64,6 +64,10 @@ test('serves a platform-specific Expo manifest and its verified assets', async (
     assert.equal(assetResponse.headers.get('content-type'), 'image/png');
     const assetBody = Buffer.from(await assetResponse.arrayBuffer());
     assert.equal(manifest.assets[0].hash, createHash('sha256').update(assetBody).digest('base64url'));
+
+    const health = await fetch(`${origin}/health`).then((response) => response.json());
+    assert.equal(health.updateId, manifest.id);
+    assert.equal(health.createdAt, manifest.createdAt);
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await rm(directory, { recursive: true, force: true });

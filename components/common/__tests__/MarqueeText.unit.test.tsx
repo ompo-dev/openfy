@@ -62,6 +62,10 @@ describe('MarqueeText', () => {
       alignSelf: 'flex-start',
       justifyContent: 'flex-start',
     });
+    expect(StyleSheet.flatten(container.props.style)).toMatchObject({
+      alignItems: 'flex-start',
+      justifyContent: 'flex-start',
+    });
     expect(start).toHaveBeenCalled();
     await screen.rerender(<MarqueeText text="Another equally long artist" align="center" />);
     expect(stop).toHaveBeenCalled();

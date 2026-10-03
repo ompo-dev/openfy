@@ -13,12 +13,15 @@ type TemporaryOTAPointer = {
   active: boolean;
   updateUrl: string;
   runtimeVersion: string;
+  updateId?: string;
+  createdAt?: string;
   expiresAt: string;
   runId: number;
 };
 
 export type TemporaryOTAResult =
   | { status: 'inactive' }
+  | { status: 'already-installed'; runId: number; expiresAt: string }
   | { status: 'ready'; runId: number; expiresAt: string }
   | { status: 'restart-required'; runId: number; expiresAt: string }
   | { status: 'incompatible'; reason: string };
@@ -54,6 +57,8 @@ const parsePointer = (value: unknown): TemporaryOTAPointer | null => {
     pointer.active !== true ||
     !isTemporaryUpdateUrl(pointer.updateUrl) ||
     typeof pointer.runtimeVersion !== 'string' ||
+    (pointer.updateId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pointer.updateId)) ||
+    (pointer.createdAt !== undefined && !Number.isFinite(Date.parse(pointer.createdAt))) ||
     typeof pointer.expiresAt !== 'string' ||
     !Number.isSafeInteger(pointer.runId)
   ) {
@@ -101,6 +106,16 @@ export async function prepareTemporaryOTAUpdate(
       ...updateContext(),
     });
     return { status: 'incompatible', reason: 'runtime-version-mismatch' };
+  }
+  if (pointer.updateId && pointer.updateId.toLowerCase() === Updates.updateId?.toLowerCase()) {
+    log.updates('temporary update is already installed', {
+      source,
+      runId: pointer.runId,
+      pointerUpdateId: pointer.updateId,
+      createdAt: pointer.createdAt,
+      ...updateContext(),
+    });
+    return { status: 'already-installed', runId: pointer.runId, expiresAt: pointer.expiresAt };
   }
 
   const storedUrl = await AsyncStorage.getItem(CONFIGURED_UPDATE_URL_KEY);

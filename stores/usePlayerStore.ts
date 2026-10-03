@@ -270,6 +270,16 @@ const getSavedAudioSource = async (
   return getPlayableAudioUrl(webSource);
 };
 
+const getWarmedAudioSource = (track: PlayerTrack): AudioSourceInput | null => {
+  const now = Date.now();
+  const warmed = warmedAudioSources.get(getCacheKey(track));
+  return warmed &&
+    warmed.trackId === track.spotifyId &&
+    warmed.expiresAt > now + MIN_PRELOADED_SOURCE_LIFETIME_MS
+    ? warmed.source
+    : null;
+};
+
 const getFreshPreloadedSource = (
   track: PlayerTrack
 ): AudioSourceInput | null => {
@@ -279,16 +289,13 @@ const getFreshPreloadedSource = (
     (Platform.OS === 'web' ||
       (track.streamExpiresAt || 0) > now + MIN_PRELOADED_SOURCE_LIFETIME_MS)
   ) {
-    const headers = getDirectYouTubeMediaHeaders(track.streamUrl);
+    const headers = typeof getDirectYouTubeMediaHeaders === 'function'
+      ? getDirectYouTubeMediaHeaders(track.streamUrl)
+      : null;
     return headers ? { uri: track.streamUrl, headers } : track.streamUrl;
   }
 
-  const warmed = warmedAudioSources.get(getCacheKey(track));
-  return warmed &&
-    warmed.trackId === track.spotifyId &&
-    warmed.expiresAt > now + MIN_PRELOADED_SOURCE_LIFETIME_MS
-    ? warmed.source
-    : null;
+  return getWarmedAudioSource(track);
 };
 
 const cacheAudioSource = (track: PlayerTrack, source: AudioSourceInput) => {
@@ -661,11 +668,37 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     prefetchTrackArtistData(track);
     // 2. CONCURRENT AUDIO STREAM RESOLUTION & PERSISTENT CACHE
     const resolveAudioPromise = (async (): Promise<AudioSourceInput | null> => {
+      const hasFreshTrackStream = Boolean(
+        track.streamUrl &&
+        (Platform.OS === 'web' ||
+          (track.streamExpiresAt || 0) >
+            Date.now() + MIN_PRELOADED_SOURCE_LIFETIME_MS)
+      );
+      if (hasFreshTrackStream) {
+        const trackStream = getFreshPreloadedSource(track);
+        if (trackStream) {
+          cacheAudioSource(track, trackStream);
+          return trackStream;
+        }
+      }
+
+      const preloadedSource = getWarmedAudioSource(track);
+      if (preloadedSource) {
+        return preloadedSource;
+      }
+
       const directSavedSource = await getSavedAudioSource(track);
       if (directSavedSource) {
         cacheAudioSource(track, directSavedSource);
         hasSavedWebDownload = Platform.OS === 'web';
         return directSavedSource;
+      }
+
+      const activeWarmup = activeAudioWarmups.get(cacheKey);
+      if (activeWarmup) {
+        await activeWarmup;
+        const warmedSource = getWarmedAudioSource(track);
+        if (warmedSource) return warmedSource;
       }
 
       const downloaded = await getDownloadedTrack(track.spotifyId);
@@ -679,19 +712,6 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       if (useConnectivityStore.getState().status === 'offline') {
         offlinePlaybackBlocked = true;
         return null;
-      }
-
-      const preloadedSource = getFreshPreloadedSource(track);
-      if (preloadedSource) {
-        cacheAudioSource(track, preloadedSource);
-        return preloadedSource;
-      }
-
-      const activeWarmup = activeAudioWarmups.get(cacheKey);
-      if (activeWarmup) {
-        await activeWarmup;
-        const warmedSource = getFreshPreloadedSource(track);
-        if (warmedSource) return warmedSource;
       }
 
       const nativeYouTubeSource = await resolveNativeYouTubeSource(track);

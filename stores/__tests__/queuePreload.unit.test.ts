@@ -63,6 +63,7 @@ import { usePlayerStore, type PlayerTrack } from '../usePlayerStore';
 import { fetchLyrics } from '../../services/lyrics/lyricsService';
 
 const realPlayTrack = usePlayerStore.getState().playTrack;
+let queueTestRun = 0;
 
 const tracks: PlayerTrack[] = [
   {
@@ -121,6 +122,10 @@ describe('queue preload window', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    queueTestRun += 1;
+    tracks.forEach((track, index) => {
+      track.spotifyId = `queue-test-${queueTestRun}-${index}`;
+    });
     (getDownloadedTrack as jest.Mock).mockResolvedValue(null);
     (loadAndPlay as jest.Mock).mockResolvedValue(true);
     (resolveAudioUrl as jest.Mock).mockImplementation((title: string) =>
@@ -174,6 +179,25 @@ describe('queue preload window', () => {
     expect(releasePreloadedAudio).toHaveBeenCalledWith(
       'https://media.test/Anterior.m4a'
     );
+  });
+
+  it('uses a warmed queue source before checking the persisted download registry', async () => {
+    const fastTracks = tracks.map((track, index) => ({
+      ...track,
+      spotifyId: `fast-next-${index}`,
+      title: `Fast next ${index}`,
+    }));
+    await usePlayerStore.getState().playWithQueue(fastTracks, 1, 'library:fast-next');
+    await flushAsync();
+    const targetDownloadLookupsAfterWarmup = jest
+      .mocked(getDownloadedTrack)
+      .mock.calls.filter(([trackId]) => trackId === fastTracks[2].spotifyId).length;
+
+    await usePlayerStore.getState().playNext();
+
+    expect(
+      jest.mocked(getDownloadedTrack).mock.calls.filter(([trackId]) => trackId === fastTracks[2].spotifyId)
+    ).toHaveLength(targetDownloadLookupsAfterWarmup);
   });
 
   it('warms the same five-track window in the stable shuffled order', async () => {

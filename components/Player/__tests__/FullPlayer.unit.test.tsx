@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { ActionSheetIOS, Alert, Linking, Platform } from 'react-native';
+import { Gesture } from 'react-native-gesture-handler';
 import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
 import { findArtistIdByName } from '@api';
 import {
@@ -54,7 +55,32 @@ jest.mock('@context', () => ({
 jest.mock('react-native-gesture-handler', () => {
   const React = require('react');
   const { View } = require('react-native');
+  const createGesture = () => {
+    const gesture: Record<string, unknown> = {};
+    const link = (name: string) => (value?: unknown) => {
+      gesture[`${name}Value`] = value;
+      return gesture;
+    };
+    Object.assign(gesture, {
+      activateAfterLongPress: link('activateAfterLongPress'),
+      enabled: link('enabled'),
+      maxDuration: link('maxDuration'),
+      onEnd: link('onEnd'),
+      onFinalize: link('onFinalize'),
+      onStart: link('onStart'),
+      onUpdate: link('onUpdate'),
+      runOnJS: link('runOnJS'),
+      shouldCancelWhenOutside: link('shouldCancelWhenOutside'),
+    });
+    return gesture;
+  };
   return {
+    Gesture: {
+      Pan: jest.fn(createGesture),
+      Race: jest.fn((...gestures: unknown[]) => ({ gestures })),
+      Tap: jest.fn(createGesture),
+    },
+    GestureDetector: ({ children }: React.PropsWithChildren) => children,
     GestureHandlerRootView: ({
       children,
       style,
@@ -292,6 +318,7 @@ describe('FullPlayer artist row and YouTube source', () => {
     const seekToPosition = jest.fn().mockResolvedValue(undefined);
     jest.mocked(usePlayer).mockReturnValue({
       ...makePlayer(),
+      playerState: { positionMs: 10000, durationMs: 180000, isPlaying: true },
       seekToPosition,
       lyricsData: {
         segments: [
@@ -301,43 +328,44 @@ describe('FullPlayer artist row and YouTube source', () => {
         ],
       },
     } as any);
-    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
-    const preview = screen.getByLabelText('Abrir letra completa');
-    const gesture = { dx: 0, dy: 0, vx: 0, vy: 0, moveX: 0, moveY: 0, x0: 0, y0: 0 };
-    const startTouchHistory = {
-      indexOfSingleActiveTouch: 0,
-      mostRecentTimeStamp: 1,
-      numberActiveTouches: 1,
-      touchBank: [{
-        touchActive: true,
-        currentTimeStamp: 1,
-        currentPageX: 0,
-        currentPageY: 100,
-        previousPageX: 0,
-        previousPageY: 100,
-      }],
-    };
+    await render(<FullPlayer visible onClose={jest.fn()} />);
+    const pan = (Gesture.Pan as jest.Mock).mock.results.at(-1)?.value as Record<string, any>;
 
-    expect(preview.props.onStartShouldSetResponderCapture({
-      nativeEvent: { touches: [{}] },
-      touchHistory: startTouchHistory,
-    })).toBe(true);
+    expect(pan.activateAfterLongPressValue).toBe(250);
+    expect(pan.enabledValue).toBe(true);
+    expect(pan.shouldCancelWhenOutsideValue).toBe(false);
     await act(async () => {
-      preview.props.onResponderGrant({ touchHistory: startTouchHistory }, gesture);
-      preview.props.onResponderMove({
-        touchHistory: {
-          ...startTouchHistory,
-          mostRecentTimeStamp: 2,
-          touchBank: [{
-            ...startTouchHistory.touchBank[0],
-            currentTimeStamp: 2,
-            currentPageY: 64,
-          }],
-        },
-      }, { ...gesture, dy: -36 });
+      pan.onStartValue();
+      pan.onUpdateValue({ translationY: -28 });
+      pan.onUpdateValue({ translationY: 28 });
+      pan.onFinalizeValue();
     });
 
-    expect(seekToPosition).toHaveBeenCalledWith(10000);
+    expect(seekToPosition.mock.calls.map(([position]) => position)).toEqual([
+      20000,
+      0,
+    ]);
+  });
+
+  it('opens the full lyrics on a short tap of the preview', async () => {
+    jest.mocked(usePlayer).mockReturnValue({
+      ...makePlayer(),
+      lyricsData: {
+        segments: [
+          { index: 0, startTimeMs: 0, endTimeMs: 10000, text: 'First lyric' },
+          { index: 1, startTimeMs: 10000, endTimeMs: 20000, text: 'Second lyric' },
+        ],
+      },
+    } as any);
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+    const tap = (Gesture.Tap as jest.Mock).mock.results.at(-1)?.value as Record<string, any>;
+
+    await act(async () => {
+      tap.onEndValue({}, true);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('player-synced-lyrics')).toBeTruthy();
   });
 
   it('shows two upcoming timed lyrics as inactive before the first line starts', async () => {
@@ -887,7 +915,7 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(getLastArtworkProps().trackKey).toContain('second-shared-cover');
   });
 
-  it('blocks artwork swipes while playback is buffering', async () => {
+  it('keeps the cover visible while playback is buffering', async () => {
     jest.mocked(usePlayer).mockReturnValue({
       ...makePlayer(),
       playerState: {
@@ -902,7 +930,7 @@ describe('FullPlayer artist row and YouTube source', () => {
 
     await render(<FullPlayer visible onClose={jest.fn()} />);
 
-    expect(getLastArtworkProps().loading).toBe(true);
+    expect(getLastArtworkProps().loading).toBe(false);
   });
 
   it('keeps pause controls and artwork responsive when audio is playing during a buffer report', async () => {

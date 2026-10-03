@@ -15,7 +15,7 @@ jest.mock('expo-updates', () => ({
   isEnabled: true,
   channel: null,
   runtimeVersion: '1.0.2',
-  updateId: 'embedded-update',
+  updateId: '123e4567-e89b-12d3-a456-426614174000',
   setUpdateURLAndRequestHeadersOverride: jest.fn(),
 }));
 
@@ -84,6 +84,33 @@ describe('prepareTemporaryOTAUpdate', () => {
       reason: 'runtime-version-mismatch',
     });
     expect(Updates.setUpdateURLAndRequestHeadersOverride).not.toHaveBeenCalled();
+  });
+
+  it('treats the already-running bundle as up to date without reconfiguring OTA', async () => {
+    const updateUrl = 'https://openfy-ci.trycloudflare.com/api/manifest';
+    const fetcher = jest.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        active: true,
+        updateUrl,
+        runtimeVersion: '1.0.2',
+        updateId: '123e4567-e89b-12d3-a456-426614174000',
+        createdAt: '2026-10-01T12:00:00.000Z',
+        runId: 123,
+        expiresAt: '2026-10-01T12:10:05.000Z',
+      }),
+    });
+
+    await expect(
+      prepareTemporaryOTAUpdate('manual', { fetcher, now: () => now })
+    ).resolves.toEqual({
+      status: 'already-installed',
+      runId: 123,
+      expiresAt: '2026-10-01T12:10:05.000Z',
+    });
+    expect(Updates.setUpdateURLAndRequestHeadersOverride).not.toHaveBeenCalled();
+    expect(AsyncStorage.getItem).not.toHaveBeenCalled();
   });
 
   it('ignores expired and non-HTTPS pointers', async () => {

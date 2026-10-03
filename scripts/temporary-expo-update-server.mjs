@@ -112,7 +112,7 @@ export async function createExpoUpdateServer({
 
     if (request.method === 'GET' && url.pathname === '/health') {
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ ok: true, runtimeVersion }));
+      response.end(JSON.stringify({ ok: true, runtimeVersion, updateId, createdAt }));
       return;
     }
 

@@ -25,11 +25,15 @@ export async function writeTemporaryOTAPointer(args) {
   if (active) {
     const updateUrl = args.get('update-url');
     const runtimeVersion = args.get('runtime-version');
+    const updateId = args.get('update-id');
+    const createdAt = args.get('created-at');
     const runId = Number(args.get('run-id'));
     const durationSeconds = Number(args.get('duration-seconds') || 630);
     if (
       !updateUrl ||
       !runtimeVersion ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(updateId || '') ||
+      !createdAt || !Number.isFinite(Date.parse(createdAt)) ||
       !Number.isSafeInteger(runId) ||
       !Number.isSafeInteger(durationSeconds) ||
       durationSeconds < 600 ||
@@ -52,6 +56,8 @@ export async function writeTemporaryOTAPointer(args) {
       active: true,
       updateUrl,
       runtimeVersion,
+      updateId,
+      createdAt,
       runId,
       commitSha: args.get('commit-sha') || '',
       publishedAt: now.toISOString(),

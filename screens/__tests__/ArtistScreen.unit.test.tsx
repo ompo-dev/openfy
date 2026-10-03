@@ -11,6 +11,7 @@ import {
   getYouTubeMusicArtistProfile,
 } from '@api';
 import { usePlayer } from '@context';
+import { useDetailNavigation } from '@hooks';
 import {
   getCachedArtistImage,
   getLibraryTracks,
@@ -36,6 +37,7 @@ jest.mock('@api', () => ({
   getCachedArtistSearchSeed: jest.fn(),
 }));
 jest.mock('@context', () => ({ usePlayer: jest.fn() }));
+jest.mock('@hooks', () => ({ useDetailNavigation: jest.fn() }));
 jest.mock('@services', () => ({
   getCachedArtistImage: jest.fn(),
   rememberCachedArtistImage: jest.fn(),
@@ -89,9 +91,14 @@ const localTrack = {
 
 describe('ArtistScreen', () => {
   let consoleError: jest.SpyInstance;
+  const openDetail = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.mocked(useDetailNavigation).mockReturnValue({
+      openDetail,
+      section: 'library',
+    } as never);
     consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
     jest.mocked(usePlayer).mockReturnValue({ currentTrack: null } as never);
     jest.mocked(getLibraryTracks).mockResolvedValue([localTrack] as never);
@@ -136,6 +143,48 @@ describe('ArtistScreen', () => {
       expect(view.getByText('Artista existente')).toBeTruthy();
       expect(view.getByText('track-count:1')).toBeTruthy();
     });
+  });
+
+  it('replaces a legacy name-only route with its canonical Spotify artist id', async () => {
+    const spotifyArtistId = '1234567890123456789012';
+    jest.mocked(findArtistIdByName).mockResolvedValue(spotifyArtistId);
+
+    await render(<ArtistScreen artistId="ytartist_name_Ebony" />);
+
+    await waitFor(() => {
+      expect(openDetail).toHaveBeenCalledWith('artist', spotifyArtistId);
+    });
+    expect(getYouTubeMusicArtistProfile).not.toHaveBeenCalled();
+  });
+
+  it('does not let a late local-library response overwrite the full public artist catalog', async () => {
+    const artistId = 'ytartist_UCEbony~Ebony';
+    const remoteTracks = [
+      { id: 'catalog-1', title: 'Catalog one', artists: [{ name: 'Ebony' }] },
+      { id: 'catalog-2', title: 'Catalog two', artists: [{ name: 'Ebony' }] },
+    ];
+    jest.mocked(findArtistIdByName).mockResolvedValue('');
+    jest.mocked(getLibraryTracks).mockImplementation(() => new Promise((resolve) => {
+      setTimeout(() => resolve([localTrack] as never), 25);
+    }));
+    jest.mocked(groupLocalArtists).mockReturnValue([{
+      id: 'spotify:ebony-id',
+      spotifyArtistId: 'ebony-id',
+      title: 'Ebony',
+      imageURL: '',
+      tracks: [localTrack],
+    }] as never);
+    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
+      artist: { id: artistId, type: 'artist', name: 'Ebony', imageURL: '' },
+      tracks: remoteTracks,
+      participationTracks: [],
+    } as never);
+
+    const view = await render(<ArtistScreen artistId={artistId} />);
+    await waitFor(() => expect(view.getByText('track-count:2')).toBeTruthy());
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    expect(view.getByText('track-count:2')).toBeTruthy();
   });
 
   it('never uses a song cover as the artist portrait when the remote profile is unavailable', async () => {
@@ -203,7 +252,7 @@ describe('ArtistScreen', () => {
     expect(view.queryByText('Artista')).toBeNull();
   });
 
-  it('uses the exact Spotify discography for a YouTube search artist route', async () => {
+  it('supplements a sparse Spotify discography for a YouTube search artist route', async () => {
     const artistId = 'ytartist_UCspotify~Artista%20Real';
     const spotifyArtistId = '1234567890123456789012';
     jest.mocked(findArtistIdByName).mockResolvedValue(spotifyArtistId);
@@ -239,8 +288,54 @@ describe('ArtistScreen', () => {
       expect(view.getByText('track-count:2')).toBeTruthy();
     });
     expect(view.getByText('Artista Real')).toBeTruthy();
-    expect(getYouTubeMusicArtistProfile).not.toHaveBeenCalled();
+    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
+      'ytartist_name_Artista%20Real'
+    );
     expect(getArtistDiscography).toHaveBeenCalledWith(spotifyArtistId);
+  });
+
+  it('enriches a sparse canonical artist profile with the full public catalog', async () => {
+    const spotifyArtistId = '1234567890123456789012';
+    const spotifyTracks = Array.from({ length: 19 }, (_, index) => ({
+      id: `spotify-${index}`,
+      title: `Spotify track ${index}`,
+      artists: [{ id: spotifyArtistId, name: 'Ebony' }],
+    }));
+    const publicTracks = Array.from({ length: 45 }, (_, index) => ({
+      id: `youtube-${index}`,
+      title: `Public track ${index}`,
+      artists: [{ name: 'Ebony' }],
+    }));
+    jest.mocked(getArtist).mockResolvedValue({
+      id: spotifyArtistId,
+      type: 'artist',
+      name: 'Ebony',
+      imageURL: '',
+    } as never);
+    jest.mocked(getArtistTopTracks).mockResolvedValue([] as never);
+    jest.mocked(getArtistDiscography).mockResolvedValue({
+      albums: [],
+      tracks: spotifyTracks,
+    } as never);
+    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
+      artist: {
+        id: 'ytartist_UCEbony~Ebony',
+        type: 'artist',
+        name: 'Ebony',
+        imageURL: 'https://images.example/ebony.jpg',
+      },
+      tracks: publicTracks,
+      participationTracks: [],
+    } as never);
+
+    const view = await render(<ArtistScreen artistId={spotifyArtistId} />);
+
+    await waitFor(() => {
+      expect(view.getByText('track-count:64')).toBeTruthy();
+    });
+    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
+      'ytartist_name_Ebony'
+    );
   });
 
   it('falls back to the public YouTube Music catalog when Spotify has no session', async () => {

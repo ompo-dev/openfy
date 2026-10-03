@@ -72,6 +72,9 @@ export const checkForOTAUpdateNow = async (
     if (temporaryUpdate.status === 'inactive') {
       return { status: 'window-inactive' };
     }
+    if (temporaryUpdate.status === 'already-installed') {
+      return { status: 'up-to-date' };
+    }
     if (temporaryUpdate.status === 'incompatible') {
       return { status: 'not-applicable', reason: temporaryUpdate.reason };
     }

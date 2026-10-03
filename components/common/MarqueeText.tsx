@@ -181,8 +181,8 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
       style={[
         styles.container,
         {
-          alignItems: isCenter ? 'center' : 'flex-start',
-          justifyContent: isCenter ? 'center' : 'flex-start',
+          alignItems: isCenter && !isOverflowing ? 'center' : 'flex-start',
+          justifyContent: isCenter && !isOverflowing ? 'center' : 'flex-start',
         },
         containerStyle,
         isOverflowing && Platform.OS === 'web'
