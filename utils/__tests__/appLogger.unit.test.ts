@@ -75,4 +75,13 @@ describe('app logger', () => {
     });
     expect(formatPerformanceMetricSummary(metrics)).toContain('catalog query');
   });
+
+  it('counts failed timed results instead of reporting zero failures', () => {
+    log.time('player', 'audio source resolution')({ ok: false });
+    log.time('player', 'audio source resolution')({ ok: true });
+    log.time('player', 'audio source resolution')({ ok: false });
+    const metrics = getPerformanceMetricSummary();
+    expect(metrics[0]).toMatchObject({ count: 3, failures: 2 });
+    expect(formatPerformanceMetricSummary(metrics)).toContain('falhas=2');
+  });
 });

@@ -217,8 +217,17 @@ export const resolveCatalogYouTubeVideoId = (
         sourceTitle: info.title, sourceDurationMs: info.durationMs,
       });
       // Search only after a proven content mismatch, never after a transport failure.
-      return resolveSpotifyTrackVideoId(key, source.title, source.artists, source.durationMs);
+      const result = await resolveSpotifyTrackVideoId(key, source.title, source.artists, source.durationMs);
+      if (result.status === 'not_found') {
+        recordDownloadDiagnostic(`yt_${source.videoId}`, 'audio.youtube.catalog_source_unresolved', {
+          expectedTitle: source.title, videoId: source.videoId, reason: result.reason,
+        });
+      }
+      return result;
     } catch (error) {
+      recordDownloadDiagnostic(`yt_${source.videoId}`, 'audio.youtube.catalog_source_metadata_failed', {
+        expectedTitle: source.title, videoId: source.videoId, error: String(error),
+      });
       return { status: 'not_found', reason: `source_metadata_unavailable: ${String(error)}` };
     }
   }, 6 * 60 * 60_000);

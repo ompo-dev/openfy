@@ -205,7 +205,9 @@ export const getPerformanceMetricSummary = (): PerformanceMetricSummary[] => {
       failures: 0,
     };
     group.durations.push(meta.durationMs);
-    if (meta.ok === false) group.failures += 1;
+    const result = meta.result;
+    if (meta.ok === false || (result && typeof result === 'object' &&
+        (result as Record<string, unknown>).ok === false)) group.failures += 1;
     groups.set(key, group);
   });
   return [...groups.values()].map((group) => {

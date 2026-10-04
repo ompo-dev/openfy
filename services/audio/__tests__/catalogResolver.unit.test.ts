@@ -114,6 +114,20 @@ describe('catalog songs referencing a multi-song YouTube film', () => {
     expect(search).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['4iKtTmnHojU', 'Samba in Paris (feat. Gl\u00f3ria Groove)', '06. Baco Exu do Blues - Samba in Paris [ft. Gloria Groove]', 267000, 266],
+    ['IwRZP9V-gYE', 'L\u00e1grimas (feat. Gal Costa)', '09. Baco Exu do Blues - L\u00e1grimas [ft. Gal Costa]', 178000, 176],
+    ['QKn5RJU11iI', 'Imortais e Fatais 2 (feat. Vin\u00edcius de Moraes)', '11. Baco Exu do Blues - Imortais e Fatais 2 [ft. Vinicius de Moraes]', 180000, 179],
+  ])('accepts the exact %s recording from the reported logs without a fallback search', async (videoId, title, videoTitle, durationMs, seconds) => {
+    getBasicInfo.mockResolvedValue({ basic_info: { title: videoTitle, duration: seconds } });
+    const track = { videoId, title, artists: ['Baco Exu do Blues'], durationMs };
+    expect(await resolveCatalogYouTubeVideoId(track)).toMatchObject({ status: 'resolved', videoId });
+    expect(search).not.toHaveBeenCalled();
+    _resetCatalogResolverForTests();
+    expect(await resolveCatalogYouTubeVideoId(track)).toMatchObject({ status: 'resolved', videoId });
+    expect(getBasicInfo).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves a full film explicitly imported with its own title and duration', async () => {
     expect(await resolveCatalogYouTubeVideoId({ ...source, title: filmTitle, durationMs: 308_000 }))
       .toMatchObject({ status: 'resolved', videoId: source.videoId });

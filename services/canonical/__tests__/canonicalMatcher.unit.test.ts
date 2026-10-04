@@ -14,6 +14,18 @@ describe('evaluateCandidateMatch', () => {
     spotifyId: 'spotify-track-id',
   };
 
+  it.each(['ft.', 'feat.', 'featuring'])('matches %s credits while preserving the guest identity', (credit) => {
+    expect(hasCanonicalTitleMatch(`06. Baco Exu do Blues - Samba in Paris [${credit} Gloria Groove]`,
+      'Samba in Paris (feat. Gl\u00f3ria Groove)')).toBe(true);
+    expect(hasCanonicalTitleMatch(`Baco Exu do Blues - Samba in Paris [${credit} Another Artist]`,
+      'Samba in Paris (feat. Gl\u00f3ria Groove)')).toBe(false);
+  });
+
+  it('still rejects a different numbered song with equivalent credit markers', () => {
+    expect(hasCanonicalTitleMatch('Baco - Imortais e Fatais 2 [ft. Vinicius de Moraes]',
+      'Imortais e Fatais (feat. Vinicius de Moraes)')).toBe(false);
+  });
+
   it('rejects a same-duration song from a different artist', () => {
     const result = evaluateCandidateMatch(
       {

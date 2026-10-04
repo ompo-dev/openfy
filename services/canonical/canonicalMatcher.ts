@@ -98,6 +98,8 @@ export const hasCanonicalTitleMatch = (
 ): boolean => {
   const normalizeTitle = (value: string) =>
     normalizeString(value)
+      // The same credit is commonly written "feat.", "ft." or "featuring".
+      .replace(/\b(?:ft|featuring)\b/g, 'feat')
       .replace(/(\d)([a-z])/g, '$1 $2')
       .replace(/([a-z])(\d)/g, '$1 $2');
   const candidate = normalizeTitle(candidateTitle);
@@ -109,7 +111,8 @@ export const hasCanonicalTitleMatch = (
   }
 
   return canonicalVariants.some((canonical) => {
-    const escapedCanonical = canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const titleBeforeCredits = canonical.split(/\s+feat\b/)[0];
+    const escapedCanonical = titleBeforeCredits.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     if (
       !canonical ||
       new RegExp(`(?:^|\\s)${escapedCanonical}\\s+\\d+\\b`).test(candidate)
