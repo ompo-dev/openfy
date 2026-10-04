@@ -101,6 +101,8 @@ const normalizeValue = (
   return String(value);
 };
 
+export const sanitizeLogData = (value: unknown): unknown => normalizeValue('meta', value);
+
 const serializeMeta = (meta: unknown) => {
   try {
     const serialized = JSON.stringify(normalizeValue('meta', meta));

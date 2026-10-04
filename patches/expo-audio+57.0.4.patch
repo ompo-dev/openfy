@@ -1,5 +1,28 @@
+diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioModule.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioModule.kt
+index 992239b..18cea98 100644
+--- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioModule.kt
++++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioModule.kt
+@@ -202,6 +202,7 @@ class AudioModule : Module() {
+   @OptIn(DelicateCoroutinesApi::class)
+   override fun definition() = ModuleDefinition {
+     Name("ExpoAudio")
++    Constants("supportsChannelMode" to true)
+ 
+     OnCreate {
+       audioManager = appContext.reactContext?.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+@@ -535,6 +536,10 @@ class AudioModule : Module() {
+         player.seekTo(seekTime)
+       }.runOnQueue(Queues.MAIN)
+ 
++      AsyncFunction("setChannelMode") { player: AudioPlayer, mode: String ->
++        player.setChannelMode(mode)
++      }.runOnQueue(Queues.MAIN)
++
+       Function("setPlaybackRate") { player: AudioPlayer, rate: Float ->
+         appContext.mainQueue.launch {
+           player.setPlaybackRate(rate)
 diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioPlayer.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioPlayer.kt
-index c76a9fd..68fb8d1 100644
+index c76a9fd..622d43c 100644
 --- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioPlayer.kt
 +++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioPlayer.kt
 @@ -24,6 +24,8 @@ import java.lang.ref.WeakReference
@@ -11,7 +34,32 @@ index c76a9fd..68fb8d1 100644
  private const val SEEK_JUMP_INTERVAL_MS: Long = 10_000
  
  @UnstableApi
-@@ -144,6 +146,14 @@ class AudioPlayer(
+@@ -32,9 +34,10 @@ class AudioPlayer(
+   appContext: AppContext,
+   source: MediaSource?,
+   updateInterval: Double,
+-  bufferDurationMs: Long = 0
++  bufferDurationMs: Long = 0,
++  private val channelProcessor: OpenfyChannelProcessor = OpenfyChannelProcessor()
+ ) : BaseAudioPlayer(
+-  player = ExoPlayer.Builder(context)
++  player = ExoPlayer.Builder(context, OpenfyAudioRenderers(context, channelProcessor))
+     .setLooper(context.mainLooper)
+     .setAudioAttributes(AudioAttributes.DEFAULT, false)
+     .setSeekForwardIncrementMs(SEEK_JUMP_INTERVAL_MS)
+@@ -60,6 +63,11 @@ class AudioPlayer(
+ ) {
+   var preservesPitch = true
+ 
++  fun setChannelMode(mode: String) {
++    require(mode == "stereo" || mode == "mono")
++    channelProcessor.mono = mode == "mono"
++  }
++
+   // Lock screen controls
+   var isActiveForLockScreen = false
+   internal var metadata: Metadata? = null
+@@ -144,6 +152,14 @@ class AudioPlayer(
      }
    }
  
@@ -39,6 +87,61 @@ index 86880d9..5da5950 100644
    @Field val showSeekForward: Boolean,
    @Field val showSeekBackward: Boolean,
    @Field val isLiveStream: Boolean? = null
+diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/OpenfyChannelProcessor.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/OpenfyChannelProcessor.kt
+new file mode 100644
+index 0000000..c6a1ac6
+--- /dev/null
++++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/OpenfyChannelProcessor.kt
+@@ -0,0 +1,49 @@
++package expo.modules.audio
++
++import android.content.Context
++import androidx.media3.common.audio.AudioMixingUtil
++import androidx.media3.common.audio.AudioProcessor.AudioFormat
++import androidx.media3.common.audio.AudioProcessor.UnhandledAudioFormatException
++import androidx.media3.common.audio.BaseAudioProcessor
++import androidx.media3.common.audio.ChannelMixingMatrix
++import androidx.media3.common.util.UnstableApi
++import androidx.media3.exoplayer.DefaultRenderersFactory
++import androidx.media3.exoplayer.audio.AudioSink
++import androidx.media3.exoplayer.audio.DefaultAudioSink
++import java.nio.ByteBuffer
++
++@UnstableApi
++class OpenfyChannelProcessor : BaseAudioProcessor() {
++  @Volatile var mono = false
++  private var monoMatrix = ChannelMixingMatrix(2, 2, floatArrayOf(0.5f, 0.5f, 0.5f, 0.5f))
++
++  override fun onConfigure(input: AudioFormat): AudioFormat {
++    if (!AudioMixingUtil.canMix(input)) throw UnhandledAudioFormatException(input)
++    val channels = input.channelCount
++    monoMatrix = ChannelMixingMatrix(channels, channels, FloatArray(channels * channels) { 1f / channels })
++    // Keep the processor active in stereo too: live mode changes need no seek/flush.
++    return input
++  }
++
++  override fun queueInput(input: ByteBuffer) {
++    val output = replaceOutputBuffer(input.remaining())
++    if (mono && inputAudioFormat.channelCount > 1) {
++      AudioMixingUtil.mix(input, inputAudioFormat, output, outputAudioFormat,
++        monoMatrix, input.remaining() / inputAudioFormat.bytesPerFrame, false, true)
++    } else {
++      output.put(input)
++    }
++    output.flip()
++  }
++}
++
++@UnstableApi
++class OpenfyAudioRenderers(context: Context, private val channels: OpenfyChannelProcessor) : DefaultRenderersFactory(context) {
++  override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): AudioSink {
++    return DefaultAudioSink.Builder(context)
++      .setEnableFloatOutput(false)
++      .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
++      .setAudioProcessors(arrayOf(channels))
++      .build()
++  }
++}
 diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
 index 196a5d5..8f4cd1b 100644
 --- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
@@ -243,8 +346,169 @@ index f3ae4ee..de63a83 100644
  };
  export declare class AudioRecorder extends SharedObject<RecordingEvents> {
      /**
+diff --git a/node_modules/expo-audio/build/AudioPlayer.web.js b/node_modules/expo-audio/build/AudioPlayer.web.js
+index 89bc872..1046ce3 100644
+--- a/node_modules/expo-audio/build/AudioPlayer.web.js
++++ b/node_modules/expo-audio/build/AudioPlayer.web.js
+@@ -10,10 +10,11 @@ function isIOSSafari() {
+ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+     constructor(source, options = {}) {
+         super();
+-        const { updateInterval = 500, crossOrigin } = options;
++        const { updateInterval = 500, crossOrigin, channelMode = 'stereo' } = options;
+         this.src = source;
+         this.interval = Math.max(updateInterval, 1);
+         this.crossOrigin = crossOrigin;
++        this.channelMode = channelMode;
+         this.media = this._createMediaElement();
+         activePlayers.add(this);
+     }
+@@ -29,6 +30,56 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+     crossOrigin;
+     analyser = null;
+     sourceNode = null;
++    outputNode = null;
++    channelMode = 'stereo';
++    async setChannelMode(mode) {
++        if (mode === 'stereo' && !this.sourceNode) {
++            this.channelMode = mode;
++            return;
++        }
++        if (mode === 'mono' && !this.media.crossOrigin && this._isCrossOrigin()) {
++            throw new Error('Mono requires a CORS-enabled source. Change mode before starting the track.');
++        }
++        const ctx = getAudioContext();
++        if (ctx.state === 'suspended') {
++            let timer;
++            try {
++                await Promise.race([ctx.resume(), new Promise((_, reject) => {
++                        timer = setTimeout(() => reject(new Error('Audio processing needs a browser playback gesture.')), 2000);
++                    })]);
++            }
++            finally {
++                clearTimeout(timer);
++            }
++        }
++        if (ctx.state !== 'running')
++            throw new Error('Audio processing needs an active browser audio context.');
++        if (!this.sourceNode)
++            this.sourceNode = ctx.createMediaElementSource(this.media);
++        if (!this.outputNode)
++            this.outputNode = ctx.createGain();
++        this.channelMode = mode;
++        this.outputNode.channelCount = mode === 'mono' ? 1 : 2;
++        this.outputNode.channelCountMode = mode === 'mono' ? 'explicit' : 'max';
++        this.connectOutputGraph();
++    }
++    connectOutputGraph() {
++        if (!this.sourceNode)
++            return;
++        const ctx = getAudioContext();
++        this.sourceNode.disconnect();
++        this.outputNode?.disconnect();
++        this.analyser?.disconnect();
++        const output = this.outputNode || this.sourceNode;
++        if (this.outputNode)
++            this.sourceNode.connect(this.outputNode);
++        if (this.analyser) {
++            output.connect(this.analyser);
++            this.analyser.connect(ctx.destination);
++        }
++        else
++            output.connect(ctx.destination);
++    }
+     samplingFrameId = null;
+     samplingEnabled = false;
+     samplingBuffer = null;
+@@ -134,9 +185,7 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+             }
+             this.analyser = ctx.createAnalyser();
+             this.analyser.fftSize = 2048;
+-            this.sourceNode.disconnect();
+-            this.sourceNode.connect(this.analyser);
+-            this.analyser.connect(ctx.destination);
++            this.connectOutputGraph();
+             this.samplingBuffer = new Float32Array(this.analyser.frequencyBinCount);
+             this.samplingEnabled = true;
+             if (this.isPlaying) {
+@@ -151,9 +200,7 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+                 this.analyser = null;
+             }
+             if (this.sourceNode) {
+-                const ctx = getAudioContext();
+-                this.sourceNode.disconnect();
+-                this.sourceNode.connect(ctx.destination);
++                this.connectOutputGraph();
+             }
+             this.samplingBuffer = null;
+             this.samplingEnabled = false;
+@@ -199,6 +246,8 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+             this.sourceNode.disconnect();
+             this.sourceNode = null;
+         }
++        this.outputNode?.disconnect();
++        this.outputNode = null;
+         this.samplingEnabled = false;
+         this.media.pause();
+         // Clear event handlers to prevent memory leaks
+@@ -231,6 +280,8 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+         mediaSessionController.clear(this);
+     }
+     _isCrossOrigin() {
++        if (this.media.src.startsWith('data:'))
++            return false;
+         try {
+             return new URL(this.media.src).origin !== window.location.origin;
+         }
+@@ -241,10 +292,15 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+     _createMediaElement() {
+         const newSource = getSourceUri(this.src);
+         const cachedUri = newSource && preloadCache.has(newSource) ? preloadCache.get(newSource).blobUrl : newSource;
+-        const media = new Audio(cachedUri);
+-        if (this.crossOrigin !== undefined) {
++        const media = new Audio();
++        if (this.channelMode === 'mono') {
++            media.crossOrigin = 'anonymous';
++        }
++        else if (this.crossOrigin !== undefined) {
+             media.crossOrigin = this.crossOrigin;
+         }
++        if (cachedUri)
++            media.src = cachedUri;
+         let lastEmitTime = 0;
+         const intervalSec = this.interval / 1000;
+         // Throttled status updates based on interval
+@@ -314,4 +370,3 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+         return media;
+     }
+ }
+-//# sourceMappingURL=AudioPlayer.web.js.map
+\ No newline at end of file
+diff --git a/node_modules/expo-audio/ios/AudioModule.swift b/node_modules/expo-audio/ios/AudioModule.swift
+index d265606..4cde9f4 100644
+--- a/node_modules/expo-audio/ios/AudioModule.swift
++++ b/node_modules/expo-audio/ios/AudioModule.swift
+@@ -17,6 +17,7 @@ public class AudioModule: Module {
+ 
+   public func definition() -> ModuleDefinition {
+     Name("ExpoAudio")
++    Constants(["supportsChannelMode": true])
+ 
+     OnCreate {
+       #if os(iOS)
+@@ -231,6 +232,10 @@ public class AudioModule: Module {
+         }
+       }
+ 
++      AsyncFunction("setChannelMode") { (player: AudioPlayer, mode: String) in
++        try await player.setChannelMode(mode)
++      }
++
+       Function("replace") { (player, source: AudioSource) in
+         if let uri = source.uri?.absoluteString, let cachedPlayer = self.registry.removePreloadedPlayer(forKey: uri) {
+           let cachedItem = cachedPlayer.currentItem
 diff --git a/node_modules/expo-audio/ios/AudioPlayer.swift b/node_modules/expo-audio/ios/AudioPlayer.swift
-index 0742943..e797cfc 100644
+index 0742943..4d9c047 100644
 --- a/node_modules/expo-audio/ios/AudioPlayer.swift
 +++ b/node_modules/expo-audio/ios/AudioPlayer.swift
 @@ -1,9 +1,14 @@
@@ -262,7 +526,38 @@ index 0742943..e797cfc 100644
  }
  
  public class AudioPlayer: SharedRef<AVPlayer>, Playable {
-@@ -47,6 +52,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -23,6 +28,30 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+     ref.rate == 0.0
+   }
+   var samplingEnabled = false
++  private var mono = false
++
++  @MainActor
++  func setChannelMode(_ mode: String) async throws {
++    guard mode == "mono" || mode == "stereo" else { throw NSError(domain: "OpenfyAudio", code: 1) }
++    mono = mode == "mono"
++    audioProcessor?.mono = mono
++    if !mono {
++      if !samplingEnabled { uninstallTap() }
++      return
++    }
++    guard let item = ref.currentItem else { return }
++    let tracks = try await item.asset.loadTracks(withMediaType: .audio)
++    guard ref.currentItem === item, mono, let track = tracks.first else { return }
++    if audioProcessor?.isTapInstalled != true {
++      audioProcessor?.invalidate()
++      audioProcessor = AudioTapProcessor(player: ref)
++      audioProcessor?.mono = true
++      guard audioProcessor?.installTap(track: track) == true else {
++        throw NSError(domain: "OpenfyAudio", code: 2, userInfo: [NSLocalizedDescriptionKey: "Mono processing unavailable for this source"])
++      }
++      tapInstalled = true
++    }
++  }
+   var keepAudioSessionActive = false
+ 
+   var isLooping = false {
+@@ -47,6 +76,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
    private var timeToken: Any?
    private var cancellables = Set<AnyCancellable>()
    private var endObserver: NSObjectProtocol?
@@ -270,7 +565,16 @@ index 0742943..e797cfc 100644
  
    private var audioProcessor: AudioTapProcessor?
    private var tapInstalled = false
-@@ -164,6 +170,14 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -125,7 +155,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+         shouldInstallAudioTap = true
+       }
+     } else {
+-      uninstallTap()
++      if !mono { uninstallTap() }
+       shouldInstallAudioTap = false
+     }
+   }
+@@ -164,6 +194,14 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
      }
    }
  
@@ -285,7 +589,84 @@ index 0742943..e797cfc 100644
    func updateStatus(with dict: [String: Any]) {
      var arguments = currentStatus()
      arguments.merge(dict) { _, new in
-@@ -479,11 +493,20 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -210,7 +248,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+           if self.isLooping {
+             self.enqueueNextLoopItem()
+           }
+-          if shouldInstallAudioTap || samplingEnabled {
++          if shouldInstallAudioTap || samplingEnabled || mono {
+             installTap()
+             shouldInstallAudioTap = false
+           }
+@@ -232,7 +270,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+           self.enqueueNextLoopItem()
+           self.addPlaybackEndNotification()
+         }
+-        if self.samplingEnabled && self.isLoaded {
++        if (self.samplingEnabled || self.mono) && self.isLoaded {
+           self.uninstallTap()
+           self.installTap()
+         }
+@@ -246,7 +284,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+     removeQueuedLoopItems()
+     ref.pause()
+ 
+-    if samplingEnabled {
++    if samplingEnabled || mono {
+       uninstallTap()
+     }
+     replacePlayerItem(with: item)
+@@ -267,7 +305,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+     removeQueuedLoopItems()
+     ref.pause()
+ 
+-    if samplingEnabled {
++    if samplingEnabled || mono {
+       uninstallTap()
+     }
+     let item = AudioUtils.createAVPlayerItem(from: source)
+@@ -320,9 +358,9 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+ 
+   private func teardownPlayer() {
+     removeQueuedLoopItems()
+-    if samplingEnabled {
+-      uninstallTap()
+-    }
++    audioProcessor?.invalidate()
++    audioProcessor = nil
++    tapInstalled = false
+     if let timeToken {
+       ref.removeTimeObserver(timeToken)
+       self.timeToken = nil
+@@ -358,20 +396,15 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+       return
+     }
+ 
+-    guard audioProcessor?.isTapInstalled != true else {
++    if audioProcessor?.isTapInstalled == true {
+       tapInstalled = true
+-      return
+-    }
+-
+-    if let audioProcessor {
+-      audioProcessor.invalidate()
++    } else {
++      audioProcessor?.invalidate()
++      audioProcessor = AudioTapProcessor(player: ref)
++      audioProcessor?.mono = mono
++      tapInstalled = audioProcessor?.installTap() ?? false
+     }
+-
+-    audioProcessor = AudioTapProcessor(player: ref)
+-    let success = audioProcessor?.installTap() ?? false
+-    tapInstalled = success
+-
+-    if success {
++    if tapInstalled {
+       audioProcessor?.sampleBufferCallback = { [weak self] buffer, frameCount, timestamp in
+         guard let self = self,
+           let audioBuffer = buffer?.pointee,
+@@ -479,11 +512,20 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
      let updateInterval = interval / 1000
      let interval = CMTime(seconds: updateInterval, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
  
@@ -320,6 +701,113 @@ index 33db27c..8154e4c 100644
    @Field var showSeekForward: Bool = false
    @Field var showSeekBackward: Bool = false
    @Field var isLiveStream: Bool? = false
+diff --git a/node_modules/expo-audio/ios/AudioTapProcessor.h b/node_modules/expo-audio/ios/AudioTapProcessor.h
+index ddd4f23..78c9b39 100644
+--- a/node_modules/expo-audio/ios/AudioTapProcessor.h
++++ b/node_modules/expo-audio/ios/AudioTapProcessor.h
+@@ -8,9 +8,11 @@ typedef void (^SampleBufferCallback)(AudioBuffer *audioBuffer, long frameCount,
+ @property (nonatomic, copy, nullable) SampleBufferCallback sampleBufferCallback;
+ @property (nonatomic, strong, readonly) AVPlayer *player;
+ @property (nonatomic, readonly) BOOL isTapInstalled;
++@property (atomic) BOOL mono;
+ 
+ - (instancetype)initWithPlayer:(AVPlayer *)player;
+ - (BOOL)installTap;
++- (BOOL)installTapForTrack:(AVAssetTrack *)track NS_SWIFT_NAME(installTap(track:));
+ - (void)uninstallTap;
+ - (void)invalidate;
+ 
+diff --git a/node_modules/expo-audio/ios/AudioTapProcessor.m b/node_modules/expo-audio/ios/AudioTapProcessor.m
+index 6f8fb16..204c41a 100644
+--- a/node_modules/expo-audio/ios/AudioTapProcessor.m
++++ b/node_modules/expo-audio/ios/AudioTapProcessor.m
+@@ -41,6 +41,11 @@ typedef struct AVAudioTapProcessorContext {
+ }
+ 
+ - (BOOL)installTap {
++  AVAssetTrack *track = _player.currentItem.tracks.firstObject.assetTrack;
++  return track ? [self installTapForTrack:track] : NO;
++}
++
++- (BOOL)installTapForTrack:(AVAssetTrack *)track {
+   os_unfair_lock_lock(&_lock);
+   
+   if (_isInvalidated || _isTapInstalled) {
+@@ -53,7 +58,6 @@ typedef struct AVAudioTapProcessorContext {
+     return NO;
+   }
+   
+-  AVAssetTrack *track = _player.currentItem.tracks.firstObject.assetTrack;
+   if (!track) {
+     os_unfair_lock_unlock(&_lock);
+     return NO;
+@@ -110,6 +114,7 @@ typedef struct AVAudioTapProcessorContext {
+       }
+     }
+     
++    if (_audioProcessingTap) CFRelease(_audioProcessingTap);
+     _audioProcessingTap = NULL;
+   }
+   
+@@ -133,6 +138,7 @@ typedef struct AVAudioTapProcessorContext {
+         context->self = NULL;
+       }
+     }
++    if (_audioProcessingTap) CFRelease(_audioProcessingTap);
+     _audioProcessingTap = NULL;
+   }
+   
+@@ -168,7 +174,11 @@ void tapFinalize(MTAudioProcessingTapRef tap) {
+ 
+ void tapPrepare(MTAudioProcessingTapRef tap, CMItemCount maxFrames, const AudioStreamBasicDescription *processingFormat) {
+   AVAudioTapProcessorContext *context = (AVAudioTapProcessorContext *)MTAudioProcessingTapGetStorage(tap);
+-  context->supportedTapProcessingFormat = true;
++  if (!context) return;
++  context->supportedTapProcessingFormat =
++    processingFormat->mFormatID == kAudioFormatLinearPCM &&
++    (processingFormat->mFormatFlags & kAudioFormatFlagIsFloat) &&
++    processingFormat->mBitsPerChannel == 32;
+   
+   if (processingFormat->mFormatID != kAudioFormatLinearPCM) {
+     NSLog(@"Audio Format ID for audioProcessingTap: LinearPCM");
+@@ -178,9 +188,7 @@ void tapPrepare(MTAudioProcessingTapRef tap, CMItemCount maxFrames, const AudioS
+     NSLog(@"Audio Format ID for audioProcessingTap: Float only");
+   }
+   
+-  if (processingFormat->mFormatFlags & kAudioFormatFlagIsNonInterleaved) {
+-    context->isNonInterleaved = true;
+-  }
++  context->isNonInterleaved = (processingFormat->mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0;
+ }
+ 
+ void tapProcess(MTAudioProcessingTapRef tap, CMItemCount numberFrames, MTAudioProcessingTapFlags flags, AudioBufferList *bufferListInOut, CMItemCount *numberFramesOut, MTAudioProcessingTapFlags *flagsOut) {
+@@ -201,6 +209,26 @@ void tapProcess(MTAudioProcessingTapRef tap, CMItemCount numberFrames, MTAudioPr
+     return;
+   }
+ 
++  // Mix before output, without allocating sample arrays or emitting JS events.
++  if (processor.mono && context->supportedTapProcessingFormat && bufferListInOut) {
++    if (bufferListInOut->mNumberBuffers == 0) return;
++    UInt32 channels = context->isNonInterleaved ? bufferListInOut->mNumberBuffers : bufferListInOut->mBuffers[0].mNumberChannels;
++    if (channels > 1) {
++      for (CMItemCount frame = 0; frame < *numberFramesOut; frame++) {
++        float sum = 0;
++        for (UInt32 channel = 0; channel < channels; channel++) {
++          float *samples = bufferListInOut->mBuffers[context->isNonInterleaved ? channel : 0].mData;
++          sum += samples[context->isNonInterleaved ? frame : frame * channels + channel];
++        }
++        float sample = sum / channels;
++        for (UInt32 channel = 0; channel < channels; channel++) {
++          float *samples = bufferListInOut->mBuffers[context->isNonInterleaved ? channel : 0].mData;
++          samples[context->isNonInterleaved ? frame : frame * channels + channel] = sample;
++        }
++      }
++    }
++  }
++  
+   SampleBufferCallback callback = processor.sampleBufferCallback;
+   if (callback && bufferListInOut && bufferListInOut->mNumberBuffers > 0) {
+     double timestamp = 0.0; 
 diff --git a/node_modules/expo-audio/ios/BackgroundPlaybackGate.swift b/node_modules/expo-audio/ios/BackgroundPlaybackGate.swift
 new file mode 100644
 index 0000000..3de1e72
@@ -627,3 +1115,124 @@ index 7e75371..aef5e92 100644
  };
  
  export declare class AudioRecorder extends SharedObject<RecordingEvents> {
+diff --git a/node_modules/expo-audio/src/AudioPlayer.web.ts b/node_modules/expo-audio/src/AudioPlayer.web.ts
+index 61db2df..1502fd1 100644
+--- a/node_modules/expo-audio/src/AudioPlayer.web.ts
++++ b/node_modules/expo-audio/src/AudioPlayer.web.ts
+@@ -32,10 +32,11 @@ export class AudioPlayerWeb
+ {
+   constructor(source: AudioSource, options: AudioPlayerOptions = {}) {
+     super();
+-    const { updateInterval = 500, crossOrigin } = options;
++    const { updateInterval = 500, crossOrigin, channelMode = 'stereo' } = options as AudioPlayerOptions & { channelMode?: 'stereo' | 'mono' };
+     this.src = source;
+     this.interval = Math.max(updateInterval, 1);
+     this.crossOrigin = crossOrigin;
++    this.channelMode = channelMode;
+     this.media = this._createMediaElement();
+     activePlayers.add(this);
+   }
+@@ -53,6 +54,48 @@ export class AudioPlayerWeb
+   private crossOrigin?: 'anonymous' | 'use-credentials';
+   private analyser: AnalyserNode | null = null;
+   private sourceNode: MediaElementAudioSourceNode | null = null;
++  private outputNode: GainNode | null = null;
++  private channelMode: 'stereo' | 'mono' = 'stereo';
++
++  async setChannelMode(mode: 'stereo' | 'mono'): Promise<void> {
++    if (mode === 'stereo' && !this.sourceNode) {
++      this.channelMode = mode;
++      return;
++    }
++    if (mode === 'mono' && !this.media.crossOrigin && this._isCrossOrigin()) {
++      throw new Error('Mono requires a CORS-enabled source. Change mode before starting the track.');
++    }
++    const ctx = getAudioContext();
++    if (ctx.state === 'suspended') {
++      let timer: ReturnType<typeof setTimeout> | undefined;
++      try {
++        await Promise.race([ctx.resume(), new Promise<never>((_, reject) => {
++          timer = setTimeout(() => reject(new Error('Audio processing needs a browser playback gesture.')), 2000);
++        })]);
++      } finally { clearTimeout(timer); }
++    }
++    if (ctx.state !== 'running') throw new Error('Audio processing needs an active browser audio context.');
++    if (!this.sourceNode) this.sourceNode = ctx.createMediaElementSource(this.media);
++    if (!this.outputNode) this.outputNode = ctx.createGain();
++    this.channelMode = mode;
++    this.outputNode.channelCount = mode === 'mono' ? 1 : 2;
++    this.outputNode.channelCountMode = mode === 'mono' ? 'explicit' : 'max';
++    this.connectOutputGraph();
++  }
++
++  private connectOutputGraph(): void {
++    if (!this.sourceNode) return;
++    const ctx = getAudioContext();
++    this.sourceNode.disconnect();
++    this.outputNode?.disconnect();
++    this.analyser?.disconnect();
++    const output = this.outputNode || this.sourceNode;
++    if (this.outputNode) this.sourceNode.connect(this.outputNode);
++    if (this.analyser) {
++      output.connect(this.analyser);
++      this.analyser.connect(ctx.destination);
++    } else output.connect(ctx.destination);
++  }
+   private samplingFrameId: number | null = null;
+   private samplingEnabled = false;
+   private samplingBuffer: Float32Array<ArrayBuffer> | null = null;
+@@ -197,9 +240,7 @@ export class AudioPlayerWeb
+       this.analyser = ctx.createAnalyser();
+       this.analyser.fftSize = 2048;
+ 
+-      this.sourceNode.disconnect();
+-      this.sourceNode.connect(this.analyser);
+-      this.analyser.connect(ctx.destination);
++      this.connectOutputGraph();
+ 
+       this.samplingBuffer = new Float32Array(this.analyser.frequencyBinCount);
+       this.samplingEnabled = true;
+@@ -217,9 +258,7 @@ export class AudioPlayerWeb
+       }
+ 
+       if (this.sourceNode) {
+-        const ctx = getAudioContext();
+-        this.sourceNode.disconnect();
+-        this.sourceNode.connect(ctx.destination);
++        this.connectOutputGraph();
+       }
+ 
+       this.samplingBuffer = null;
+@@ -272,6 +311,8 @@ export class AudioPlayerWeb
+       this.sourceNode.disconnect();
+       this.sourceNode = null;
+     }
++    this.outputNode?.disconnect();
++    this.outputNode = null;
+ 
+     this.samplingEnabled = false;
+     this.media.pause();
+@@ -313,6 +354,7 @@ export class AudioPlayerWeb
+   }
+ 
+   _isCrossOrigin(): boolean {
++    if (this.media.src.startsWith('data:')) return false;
+     try {
+       return new URL(this.media.src).origin !== window.location.origin;
+     } catch {
+@@ -324,10 +366,13 @@ export class AudioPlayerWeb
+     const newSource = getSourceUri(this.src);
+     const cachedUri =
+       newSource && preloadCache.has(newSource) ? preloadCache.get(newSource)!.blobUrl : newSource;
+-    const media = new Audio(cachedUri);
+-    if (this.crossOrigin !== undefined) {
++    const media = new Audio();
++    if (this.channelMode === 'mono') {
++      media.crossOrigin = 'anonymous';
++    } else if (this.crossOrigin !== undefined) {
+       media.crossOrigin = this.crossOrigin;
+     }
++    if (cachedUri) media.src = cachedUri;
+ 
+     let lastEmitTime = 0;
+     const intervalSec = this.interval / 1000;

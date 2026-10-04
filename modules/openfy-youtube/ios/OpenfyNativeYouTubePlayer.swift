@@ -2,6 +2,7 @@
 @preconcurrency import MediaPlayer
 @preconcurrency import UIKit
 import Foundation
+import ExpoAudio
 
 public struct OpenfyNowPlayingMetadata: Sendable {
   public let title: String
@@ -39,6 +40,24 @@ public final class OpenfyNativeYouTubePlayer {
   private var streamDurationSeconds = 0.0
   private var catalogDurationSeconds = 0.0
   private var didJustFinish = false
+  private var channelProcessor: AudioTapProcessor?
+  private var mono = false
+
+  public func setChannelMode(_ mode: String) async throws {
+    mono = mode == "mono"
+    channelProcessor?.mono = mono
+    guard mono, let player, let item = player.currentItem else { return }
+    let tracks = try await item.asset.loadTracks(withMediaType: .audio)
+    guard self.player === player, player.currentItem === item, mono else { return }
+    guard let track = tracks.first else { throw StreamTransportError.audioTrackUnavailable }
+    if channelProcessor?.isTapInstalled != true {
+      channelProcessor?.invalidate()
+      let processor = AudioTapProcessor(player: player)
+      processor.mono = true
+      guard processor.installTap(track: track) else { throw StreamTransportError.audioTrackUnavailable }
+      channelProcessor = processor
+    }
+  }
 
   public var onPlaybackEnded: (() -> Void)?
   public var onNextTrack: (() -> Void)?
@@ -53,7 +72,7 @@ public final class OpenfyNativeYouTubePlayer {
     rangeClient: YouTubeHTTPRangeClient,
     metadata: OpenfyNowPlayingMetadata,
     prefetchedAudio: Data? = nil
-  ) throws {
+  ) async throws {
     // 1. Clean up any existing playback session
     stop()
     didJustFinish = false
@@ -133,6 +152,8 @@ public final class OpenfyNativeYouTubePlayer {
       from: metadata.artworkURL,
       fallback: metadata.fallbackArtworkURL
     )
+    try await setChannelMode(mono ? "mono" : "stereo")
+    guard self.player === player else { return }
     player.play()
   }
 
@@ -157,6 +178,8 @@ public final class OpenfyNativeYouTubePlayer {
   }
 
   public func stop() {
+    channelProcessor?.invalidate()
+    channelProcessor = nil
     itemStatusObserver?.invalidate()
     itemStatusObserver = nil
     timeControlStatusObserver?.invalidate()

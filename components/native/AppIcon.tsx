@@ -61,7 +61,13 @@ export type AppIconName =
   | 'eye'
   | 'copy'
   | 'wifi'
-  | 'bluetooth';
+  | 'bluetooth'
+  | 'headset'
+  | 'code-slash'
+  | 'pulse'
+  | 'logo-github'
+  | 'radio-button-on'
+  | 'radio-button-off';
 
 interface AppIconProps {
   name: AppIconName;

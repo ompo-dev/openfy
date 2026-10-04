@@ -64,6 +64,12 @@ const SF: Record<AppIconName, string> = {
   'copy': 'doc.on.doc',
   'wifi': 'wifi',
   'bluetooth': 'dot.radiowaves.left.and.right',
+  'headset': 'headphones',
+  'code-slash': 'chevron.left.forwardslash.chevron.right',
+  'pulse': 'waveform.path',
+  'logo-github': 'link',
+  'radio-button-on': 'largecircle.fill.circle',
+  'radio-button-off': 'circle',
 };
 
 interface AppIconProps {

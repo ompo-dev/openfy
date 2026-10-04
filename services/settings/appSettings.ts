@@ -1,11 +1,20 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+export type AudioChannelMode = 'stereo' | 'mono';
+export type AudioQuality = 'high' | 'economy';
+
 export type AppSettings = {
   personalizedHome: boolean;
   allowExplicitRecommendations: boolean;
   preloadNextTrack: boolean;
   downloadNotifications: boolean;
   automaticUpdates: boolean;
+  audioChannelMode: AudioChannelMode;
+  streamingQuality: AudioQuality;
+  downloadQuality: AudioQuality;
+  blurInactiveLyrics: boolean;
+  captureLogs: boolean;
+  verboseLogs: boolean;
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -14,6 +23,12 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   preloadNextTrack: true,
   downloadNotifications: true,
   automaticUpdates: true,
+  audioChannelMode: 'stereo',
+  streamingQuality: 'high',
+  downloadQuality: 'high',
+  blurInactiveLyrics: true,
+  captureLogs: true,
+  verboseLogs: false,
 };
 
 const STORAGE_KEY = 'openfy_app_settings_v1';
@@ -23,7 +38,7 @@ let hydration: Promise<AppSettings> | null = null;
 let hydrated = false;
 let mutationQueue: Promise<unknown> = Promise.resolve();
 
-const normalizeSettings = (value: unknown): AppSettings => {
+export const normalizeAppSettings = (value: unknown): AppSettings => {
   const stored = value && typeof value === 'object'
     ? value as Partial<AppSettings>
     : {};
@@ -31,9 +46,13 @@ const normalizeSettings = (value: unknown): AppSettings => {
   return Object.fromEntries(
     Object.entries(DEFAULT_APP_SETTINGS).map(([key, fallback]) => [
       key,
-      typeof stored[key as keyof AppSettings] === 'boolean'
-        ? stored[key as keyof AppSettings]
-        : fallback,
+      typeof fallback === 'boolean'
+        ? typeof stored[key as keyof AppSettings] === 'boolean'
+          ? stored[key as keyof AppSettings] : fallback
+        : typeof stored[key as keyof AppSettings] === 'string' &&
+          (key === 'audioChannelMode' ? ['stereo', 'mono'] : ['high', 'economy'])
+            .includes(String(stored[key as keyof AppSettings]))
+          ? stored[key as keyof AppSettings] : fallback,
     ])
   ) as AppSettings;
 };
@@ -52,7 +71,7 @@ export const getAppSettings = async (): Promise<AppSettings> => {
   hydration = (async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      const settings = normalizeSettings(raw ? JSON.parse(raw) : null);
+      const settings = normalizeAppSettings(raw ? JSON.parse(raw) : null);
       publish(settings);
       hydrated = true;
       return settings;
@@ -75,9 +94,9 @@ export const updateAppSettings = async (
 ): Promise<AppSettings> => {
   const mutation = mutationQueue.then(async () => {
     const current = await getAppSettings();
-    const next = normalizeSettings({ ...current, ...update });
-    publish(next);
+    const next = normalizeAppSettings({ ...current, ...update });
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    publish(next);
     return next;
   });
   mutationQueue = mutation.catch(() => {});

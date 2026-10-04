@@ -15,6 +15,7 @@ jest.mock('expo-file-system/legacy', () => ({
 jest.mock('../localAudioRepair', () => ({ prepareLocalAudioForPlayback: jest.fn().mockResolvedValue(undefined) }));
 import { prepareLocalAudioForPlayback } from '../localAudioRepair';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as appSettings from '../../settings/appSettings';
 
 import {
   clearPreloadedSource,
@@ -42,6 +43,7 @@ import {
   setRemotePlaybackHandlers,
   unload,
   toAudioSource,
+  setAudioChannelMode,
 } from '../playerService';
 
 const createPlayer = () => ({
@@ -59,6 +61,7 @@ const createPlayer = () => ({
   remove: jest.fn(),
   release: jest.fn(),
   replace: jest.fn(),
+  setChannelMode: jest.fn().mockResolvedValue(undefined),
   clearLockScreenControls: jest.fn(),
 });
 
@@ -68,6 +71,42 @@ const flushMicrotasks = async () => {
 };
 
 describe('playerService fades', () => {
+  it('does not let delayed settings hydration replace a newer play request', async () => {
+    let finishHydration!: (value: appSettings.AppSettings) => void;
+    const hydration = jest.spyOn(appSettings, 'getAppSettings').mockImplementationOnce(
+      () => new Promise((resolve) => { finishHydration = resolve; })
+    );
+    try {
+      const stale = loadAndPlay('file:///stale.m4a');
+      await loadAndPlay('file:///latest.m4a');
+      finishHydration(appSettings.DEFAULT_APP_SETTINGS);
+      expect(await stale).toBe(false);
+      expect(createAudioPlayer).toHaveBeenCalledTimes(1);
+      expect(createAudioPlayer).toHaveBeenCalledWith('file:///latest.m4a', expect.any(Object));
+    } finally { hydration.mockRestore(); }
+  });
+
+  it('applies stereo to the real player before starting playback', async () => {
+    const player = createPlayer();
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+    await loadAndPlay('file:///stereo.m4a');
+    expect(player.setChannelMode).toHaveBeenCalledWith('stereo');
+    expect(player.setChannelMode.mock.invocationCallOrder[0]).toBeLessThan(player.play.mock.invocationCallOrder[0]);
+  });
+
+  it('changes channels on the current engine without seeking or replacing its source', async () => {
+    const player = createPlayer();
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+    await loadAndPlay('file:///channels.m4a');
+    player.setChannelMode.mockClear();
+    player.play.mockClear();
+    await setAudioChannelMode('mono');
+    await setAudioChannelMode('stereo');
+    expect(player.setChannelMode.mock.calls).toEqual([['mono'], ['stereo']]);
+    expect(player.seekTo).not.toHaveBeenCalled();
+    expect(player.replace).not.toHaveBeenCalled();
+    expect(player.play).not.toHaveBeenCalled();
+  });
   it('applies the last lyric scrub target after an in-flight seek completes', async () => {
     const player = createPlayer();
     let finishFirst!: () => void;
@@ -352,7 +391,7 @@ describe('playerService fades', () => {
           'User-Agent': expect.any(String),
         }),
       }),
-      { updateInterval: 100 }
+      { updateInterval: 100, channelMode: 'stereo' }
     );
   });
 

@@ -1,6 +1,9 @@
 import * as React from 'react';
 import {
   Alert,
+  AppState,
+  Linking,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -9,7 +12,7 @@ import {
 } from 'react-native';
 import Constants from 'expo-constants';
 import * as Clipboard from 'expo-clipboard';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
@@ -24,7 +27,10 @@ import {
   type AppSettings,
   type DownloadStorageInfo,
 } from '@services';
-import { AppIcon, LoggedPressable, NativeIconButton } from '../native';
+import { AppIcon, LoggedPressable, NativeIconButton, SheetFrame } from '../native';
+import { AUDIO_QUALITY_LABELS } from '../../services/audio/audioPreferences';
+import { getAudioCapabilities, getAudioOutputDiagnostics, getAudioDiagnosticsSnapshot, getPlayerState } from '../../services/audio/playerService';
+import { usePlayerStore } from '../../stores/usePlayerStore';
 import {
   clearLogBuffer,
   formatLogBuffer,
@@ -32,7 +38,7 @@ import {
   getLogBuffer,
   getPerformanceMetricSummary,
   log,
-  logConfig,
+  sanitizeLogData,
 } from '../../utils/appLogger';
 import { formatStorageSize, StorageManagerModal } from './StorageManagerModal';
 
@@ -44,6 +50,7 @@ type LibrarySummary = {
 
 const EMPTY_SUMMARY: LibrarySummary = { downloads: 0, playlists: 0, tracks: 0 };
 const EMPTY_STORAGE: DownloadStorageInfo = { directory: '', totalBytes: 0, tracks: [] };
+const GITHUB_URL = 'https://github.com/ompo-dev/openfy';
 
 const SettingRow = ({
   description,
@@ -126,19 +133,27 @@ export const Settings = () => {
   const [storageVisible, setStorageVisible] = React.useState(false);
   const [updateStatus, setUpdateStatus] = React.useState('');
   const [checkingUpdate, setCheckingUpdate] = React.useState(false);
-  const [captureLogs, setCaptureLogs] = React.useState(logConfig.capture);
-  const [verboseLogs, setVerboseLogs] = React.useState(logConfig.verbose);
+  const [developerVisible, setDeveloperVisible] = React.useState(false);
+  const [qualityPicker, setQualityPicker] = React.useState<'streamingQuality' | 'downloadQuality' | null>(null);
+  const [diagnosticsText, setDiagnosticsText] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const capabilities = getAudioCapabilities();
   const [performanceMetrics, setPerformanceMetrics] = React.useState(
     getPerformanceMetricSummary
   );
 
-  React.useEffect(() => {
+  useFocusEffect(React.useCallback(() => {
+    if (!developerVisible || !settings.captureLogs) return;
+    setPerformanceMetrics(getPerformanceMetricSummary());
     const timer = setInterval(
-      () => setPerformanceMetrics(getPerformanceMetricSummary()),
+      () => {
+        if (AppState.currentState === 'active') setPerformanceMetrics(getPerformanceMetricSummary());
+      },
       1_500
     );
     return () => clearInterval(timer);
-  }, []);
+  }, [developerVisible, settings.captureLogs]));
 
   React.useEffect(() => {
     let active = true;
@@ -152,14 +167,46 @@ export const Settings = () => {
         });
         setStorage(nextStorage);
       }
-    );
+    ).catch((error) => log.error('settings storage summary failed', error));
     return () => {
       active = false;
     };
   }, []);
 
   const change = <Key extends keyof AppSettings>(key: Key) =>
-    (value: AppSettings[Key]) => void setSetting(key, value);
+    (value: AppSettings[Key]) => {
+      setNotice('');
+      void setSetting(key, value).catch((error) => {
+        setNotice(key === 'audioChannelMode' && Platform.OS === 'web'
+          ? 'Esta fonte externa não permite alterar os canais nesta reprodução. Use uma fonte com CORS ou áudio local.'
+          : `Não foi possível aplicar a preferência: ${String(error)}`);
+      });
+    };
+
+  const changeChannels = async (value: AppSettings['audioChannelMode']) => {
+    if (saving || value === settings.audioChannelMode) return;
+    setSaving(true);
+    setNotice('');
+    try { await setSetting('audioChannelMode', value); }
+    catch (error) {
+      setNotice(Platform.OS === 'web'
+        ? 'Não foi possível processar esta fonte em mono. Permita o áudio no navegador; fontes externas precisam de CORS. A preferência anterior foi mantida.'
+        : String(error));
+    } finally { setSaving(false); }
+  };
+
+  const showAudioDiagnostics = () => {
+    const track = usePlayerStore.getState().currentTrack;
+    const { sourceHost, ...output } = getAudioOutputDiagnostics();
+    setDiagnosticsText(JSON.stringify(sanitizeLogData({
+      app: { version: Constants.expoConfig?.version, platform: Platform.OS },
+      output: { ...output, sourceHost },
+      preferences: { channels: settings.audioChannelMode, streaming: settings.streamingQuality, downloads: settings.downloadQuality },
+      track: track ? { id: track.spotifyId, title: track.title, durationMs: track.duration_ms } : null,
+      playback: getPlayerState(),
+      events: getAudioDiagnosticsSnapshot(),
+    }), null, 2));
+  };
 
   const checkForUpdates = async () => {
     if (checkingUpdate) return;
@@ -208,10 +255,7 @@ export const Settings = () => {
 
   const showRecentLogs = () => {
     const entries = getLogBuffer();
-    Alert.alert(
-      `Logs (${entries.length})`,
-      formatLogBuffer(entries.slice(0, 35)).slice(0, 3900) || 'Nenhum log capturado.'
-    );
+    setDiagnosticsText(formatLogBuffer(entries.slice(0, 100)) || 'Nenhum log capturado.');
   };
 
   const copyLogs = async () => {
@@ -224,7 +268,7 @@ export const Settings = () => {
     ].join('\n');
     try {
       await Clipboard.setStringAsync(text || 'Nenhum log capturado.');
-      Alert.alert('Logs copiados', `${getLogBuffer().length} entradas copiadas.`);
+      setNotice(`${getLogBuffer().length} eventos copiados.`);
     } catch (error) {
       log.error('copy diagnostics failed', error);
       Alert.alert('Não foi possível copiar', 'Tente novamente.');
@@ -233,7 +277,7 @@ export const Settings = () => {
 
   const clearLogs = () => {
     clearLogBuffer();
-    Alert.alert('Logs limpos', 'O buffer local foi apagado.');
+    setNotice('Logs da sessão limpos.');
   };
 
   const resetRecommendations = () => {
@@ -262,7 +306,7 @@ export const Settings = () => {
       'As preferências do app voltarão ao padrão.',
       [
         { text: 'Cancelar', style: 'cancel' },
-        { text: 'Restaurar', onPress: () => void resetSettings() },
+        { text: 'Restaurar', onPress: () => void resetSettings().catch(() => setNotice('Não foi possível restaurar as preferências.')) },
       ]
     );
   };
@@ -304,6 +348,32 @@ export const Settings = () => {
         </Section>
 
         <Section title="REPRODUÇÃO">
+          <View style={styles.audioBlock}>
+            <Text style={styles.settingLabel}>Saída de áudio</Text>
+            <View accessibilityRole="radiogroup" style={styles.segmentedControl}>
+              {(['stereo', 'mono'] as const).map((mode) => (
+                <LoggedPressable key={mode} accessibilityRole="radio"
+                  accessibilityLabel={mode === 'stereo' ? 'Estéreo' : 'Mono'}
+                  accessibilityState={{ checked: settings.audioChannelMode === mode, disabled: saving || (mode === 'mono' && !capabilities.channels) }}
+                  disabled={saving || (mode === 'mono' && !capabilities.channels)}
+                  onPress={() => void changeChannels(mode)}
+                  style={[styles.segment, settings.audioChannelMode === mode && styles.segmentSelected]}>
+                  <AppIcon name={mode === 'stereo' ? 'headset' : 'volume-high'} size={20} color="#FFFFFF" />
+                  <Text style={styles.segmentLabel}>{mode === 'stereo' ? 'Estéreo' : 'Mono'}</Text>
+                </LoggedPressable>
+              ))}
+            </View>
+            <Text style={styles.settingDescription}>
+              {capabilities.channels ? 'Mono combina os canais esquerdo e direito. Estéreo preserva os canais da fonte.'
+                : 'Instale o novo build nativo para ativar o controle de canais.'}
+            </Text>
+          </View>
+          <View style={styles.separator} />
+          <ActionRow icon="musical-notes" label="Qualidade do streaming"
+            detail={AUDIO_QUALITY_LABELS[settings.streamingQuality]}
+            onPress={() => capabilities.quality ? setQualityPicker('streamingQuality') : setNotice('A qualidade nativa requer o novo build do app.')} />
+          <Text style={styles.statusText}>Vale para as próximas músicas. Arquivos baixados mantêm sua qualidade.</Text>
+          <View style={styles.separator} />
           <SettingRow
             description="Prepara as músicas vizinhas da fila para trocas mais rápidas."
             icon="play-skip-forward"
@@ -313,7 +383,17 @@ export const Settings = () => {
           />
         </Section>
 
+        <Section title="APARÊNCIA">
+          <SettingRow icon="eye" label="Blur nas letras inativas"
+            description="Mantém em foco a frase que está tocando."
+            value={settings.blurInactiveLyrics} onValueChange={change('blurInactiveLyrics')} />
+        </Section>
+
         <Section title="DOWNLOADS">
+          <ActionRow icon="download" label="Qualidade dos novos downloads"
+            detail={AUDIO_QUALITY_LABELS[settings.downloadQuality]}
+            onPress={() => capabilities.quality ? setQualityPicker('downloadQuality') : setNotice('A qualidade nativa requer o novo build do app.')} />
+          <View style={styles.separator} />
           <SettingRow
             description="Avisa quando um lote termina, inclusive em segundo plano."
             icon="notifications-outline"
@@ -375,26 +455,24 @@ export const Settings = () => {
         </Section>
 
         <Section title="DIAGNÓSTICOS">
+          <SettingRow icon="code-slash" label="Ferramentas de desenvolvimento"
+            description="Logs, tempos de carregamento e estado do motor de áudio."
+            value={developerVisible} onValueChange={setDeveloperVisible} />
+          {developerVisible ? <>
           <SettingRow
             description="Guarda até 500 eventos nesta sessão, apenas neste aparelho."
             icon="document-text"
             label="Capturar logs"
-            onValueChange={(value) => {
-              logConfig.capture = value;
-              setCaptureLogs(value);
-            }}
-            value={captureLogs}
+            onValueChange={change('captureLogs')}
+            value={settings.captureLogs}
           />
           <View style={styles.separator} />
           <SettingRow
             description="Inclui eventos de digitação e rolagem."
             icon="options"
             label="Logs detalhados"
-            onValueChange={(value) => {
-              logConfig.verbose = value;
-              setVerboseLogs(value);
-            }}
-            value={verboseLogs}
+            onValueChange={change('verboseLogs')}
+            value={settings.verboseLogs}
           />
           <View style={styles.separator} />
           <View style={styles.metricsBlock}>
@@ -418,6 +496,9 @@ export const Settings = () => {
           </View>
           <View style={styles.separator} />
           <ActionRow
+            icon="pulse" label="Inspecionar reprodução" onPress={showAudioDiagnostics} />
+          <View style={styles.separator} />
+          <ActionRow
             detail={`${getLogBuffer().length} eventos`}
             icon="eye"
             label="Ver logs recentes"
@@ -436,6 +517,7 @@ export const Settings = () => {
             label="Limpar logs"
             onPress={clearLogs}
           />
+          </> : null}
         </Section>
 
         <Section title="SOBRE">
@@ -447,12 +529,40 @@ export const Settings = () => {
           </View>
           <View style={styles.separator} />
           <ActionRow
+            icon="logo-github" label="GitHub do Openfy" detail="ompo-dev/openfy"
+            onPress={() => void Linking.openURL(GITHUB_URL).catch(() => setNotice('Não foi possível abrir o GitHub.'))} />
+          <View style={styles.separator} />
+          <ActionRow
             icon="repeat"
             label="Restaurar preferências padrão"
             onPress={restoreDefaults}
           />
         </Section>
       </ScrollView>
+      {notice ? <LoggedPressable accessibilityRole="button" accessibilityLabel="Dispensar aviso"
+        onPress={() => setNotice('')} style={styles.notice}><Text style={styles.noticeText}>{notice}</Text><AppIcon name="close" size={18} color="#FFFFFF" /></LoggedPressable> : null}
+      <SheetFrame visible={qualityPicker !== null} title={qualityPicker === 'downloadQuality' ? 'Qualidade dos downloads' : 'Qualidade do streaming'}
+        onClose={() => setQualityPicker(null)}>
+        {(['high', 'economy'] as const).map((quality) => (
+          <LoggedPressable key={quality} accessibilityRole="radio" accessibilityLabel={AUDIO_QUALITY_LABELS[quality]}
+            accessibilityState={{ checked: qualityPicker ? settings[qualityPicker] === quality : false }}
+            onPress={() => {
+              if (qualityPicker) change(qualityPicker)(quality);
+              setQualityPicker(null);
+            }} style={styles.qualityOption}>
+            <View style={styles.settingCopy}>
+              <Text style={styles.settingLabel}>{AUDIO_QUALITY_LABELS[quality]}</Text>
+              <Text style={styles.settingDescription}>{quality === 'high' ? 'Maior bitrate disponível na fonte.' : 'Menor bitrate disponível na fonte.'}</Text>
+            </View>
+            <AppIcon name={qualityPicker && settings[qualityPicker] === quality ? 'radio-button-on' : 'radio-button-off'} size={24} color="#1DB954" />
+          </LoggedPressable>
+        ))}
+      </SheetFrame>
+      <SheetFrame visible={diagnosticsText !== null} title="Diagnósticos" onClose={() => setDiagnosticsText(null)}
+        headerTrailing={<NativeIconButton iconName="copy" systemImage="doc.on.doc" label="Copiar diagnósticos"
+          onPress={() => void Clipboard.setStringAsync(diagnosticsText || '').then(() => setNotice('Diagnósticos copiados.')).catch(() => setNotice('Não foi possível copiar.'))} />}>
+        <Text selectable style={styles.diagnosticsCode}>{diagnosticsText}</Text>
+      </SheetFrame>
       <StorageManagerModal
         visible={storageVisible}
         onClose={() => setStorageVisible(false)}
@@ -469,6 +579,15 @@ export const Settings = () => {
 };
 
 const styles = StyleSheet.create({
+  audioBlock: { padding: 14, gap: 10 },
+  segmentedControl: { flexDirection: 'row', backgroundColor: '#121212', borderRadius: 8, padding: 3 },
+  segment: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, minHeight: 44, borderRadius: 6 },
+  segmentSelected: { backgroundColor: '#3A3A3C' },
+  segmentLabel: { color: '#FFFFFF', fontFamily: 'SF-Semibold', fontSize: 14 },
+  qualityOption: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 16, minHeight: 64 },
+  diagnosticsCode: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: '#D6E6E1', fontSize: 12, lineHeight: 19 },
+  notice: { position: 'absolute', bottom: BOTTOM_NAVIGATION_HEIGHT + 110, left: 16, right: 16, padding: 14, borderRadius: 8, backgroundColor: '#303033', flexDirection: 'row', alignItems: 'center', gap: 12 },
+  noticeText: { flex: 1, color: '#FFFFFF', fontSize: 13, lineHeight: 19 },
   container: { backgroundColor: '#121212', flex: 1 },
   header: {
     alignItems: 'center',
@@ -541,8 +660,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   rowPressed: { opacity: 0.65 },
-  actionLabel: { color: '#FFFFFF', flex: 1, fontFamily: 'SF-Semibold', fontSize: 15 },
-  actionDetail: { color: '#8E8E93', fontFamily: 'SF-Regular', fontSize: 13 },
+  actionLabel: { color: '#FFFFFF', flex: 1, minWidth: 0, fontFamily: 'SF-Semibold', fontSize: 15 },
+  actionDetail: { color: '#8E8E93', maxWidth: '40%', flexShrink: 1, textAlign: 'right', fontFamily: 'SF-Regular', fontSize: 13 },
   destructiveText: { color: '#FF6B6B' },
   summaryRow: {
     alignItems: 'center',

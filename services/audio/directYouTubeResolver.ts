@@ -31,6 +31,7 @@ import {
   isCurrentCatalogMapping,
   _resetCatalogMappingCacheForTests,
 } from './catalogMappingCache';
+import { getAppSettings, type AudioQuality } from '../settings/appSettings';
 
 // ---------------------------------------------------------------------------
 // Re-exported public types (unchanged for callers)
@@ -41,6 +42,8 @@ export type DirectYouTubeAudio = {
   url: string;
   format: string;
   imageURL?: string;
+  quality?: AudioQuality;
+  bitrate?: number;
 };
 
 export type DirectYouTubeTrack = DirectYouTubeAudio & {
@@ -84,6 +87,7 @@ type DirectYouTubeRequest = {
   videoId?: string;
   fresh?: boolean;
   spotifyId?: string;
+  quality?: AudioQuality;
 };
 
 /**
@@ -101,10 +105,11 @@ export const resolveDirectYouTubeAudio = async (
   request: DirectYouTubeRequest
 ): Promise<DirectYouTubeAudio | null> => {
   const { fresh = false, spotifyId } = request;
+  const quality = request.quality ?? (await getAppSettings()).streamingQuality;
 
   // ── Path 1: direct videoId ────────────────────────────────────────────────
   if (request.videoId) {
-    return resolveStream(request.videoId, undefined, fresh, spotifyId);
+    return resolveStream(request.videoId, undefined, fresh, spotifyId, quality);
   }
 
   // ── Path 2: spotifyId → cached videoId ───────────────────────────────────
@@ -117,7 +122,7 @@ export const resolveDirectYouTubeAudio = async (
           confidence: cached.confidence,
         });
       }
-      return resolveStream(cached.videoId, undefined, false, spotifyId);
+      return resolveStream(cached.videoId, undefined, false, spotifyId, quality);
     }
   }
 
@@ -138,7 +143,8 @@ export const resolveDirectYouTubeAudio = async (
     catalogResult.videoId,
     catalogResult.imageURL,
     fresh,
-    spotifyId
+    spotifyId,
+    quality
   );
 };
 
@@ -205,15 +211,18 @@ const resolveStream = async (
   videoId: string,
   imageURL: string | undefined,
   fresh: boolean,
-  spotifyId: string | undefined
+  spotifyId: string | undefined,
+  quality?: AudioQuality
 ): Promise<DirectYouTubeAudio | null> => {
-  const result = await resolveYouTubeStream(videoId, { fresh, spotifyId });
+  const result = await resolveYouTubeStream(videoId, { fresh, spotifyId, quality });
 
   if (result.status === 'resolved') {
     return {
       videoId,
       url: result.stream.url,
       format: result.stream.format === 'webm' ? 'webm' : 'm4a',
+      quality: result.stream.quality,
+      bitrate: result.stream.bitrate,
       ...(imageURL ? { imageURL } : {}),
     };
   }

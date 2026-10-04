@@ -91,6 +91,7 @@ public final class OpenfyYouTubeModule: Module {
 
   public func definition() -> ModuleDefinition {
     Name("OpenfyYouTube")
+    Constants(["supportsAudioPreferences": true])
     Events(
       "onNativePlaybackEnded",
       "onNativeRemoteNext",
@@ -135,6 +136,20 @@ public final class OpenfyYouTubeModule: Module {
       return ["bytes": bytes]
     }
 
+    AsyncFunction("preloadNativeYouTubeWithQualityAsync") { (videoId: String, quality: String) async throws -> [String: Int] in
+      let bytes = try await Self.preloadNativeYouTube(videoId: videoId, quality: quality)
+      return ["bytes": bytes]
+    }
+
+    AsyncFunction("setNativeChannelModeAsync") { (mode: String) in
+      try await self.nativePlayer.setChannelMode(mode)
+    }
+
+    AsyncFunction("resolveAndDownloadWithQualityAsync") {
+      (videoId: String, destination: String, chunkBytes: Int, quality: String) async throws -> GoogleVideoTransferResult in
+      return try await Self.resolveAndDownload(videoId: videoId, destination: destination, chunkBytes: chunkBytes, quality: quality)
+    }
+
     AsyncFunction("pauseNativeYouTubeAsync") {
       await self.nativePlayer.pause()
     }
@@ -164,15 +179,17 @@ public final class OpenfyYouTubeModule: Module {
       throw Self.transferError("invalid_video_id")
     }
 
-    let staged = await Self.preloadedStreams.take(videoId)
+    let quality = metadata["quality"] ?? "high"
+    let staged = await Self.preloadedStreams.take("\(quality):\(videoId)")
     let descriptor: YouTubeStreamDescriptor
     if let staged {
       descriptor = staged.descriptor
     } else {
-      descriptor = try await Self.resolveAudioDescriptor(videoId: videoId)
+      descriptor = try await Self.resolveAudioDescriptor(videoId: videoId, quality: quality)
     }
     NSLog("[NATIVE] Using %@ stream preparation for %@", staged == nil ? "fresh" : "preloaded", videoId)
 
+    try await self.nativePlayer.setChannelMode(metadata["channelMode"] ?? "stereo")
     try await self.nativePlayer.play(
       descriptor: descriptor,
       rangeClient: Self.rangeClient,
@@ -181,11 +198,11 @@ public final class OpenfyYouTubeModule: Module {
     )
   }
 
-  private static func preloadNativeYouTube(videoId: String) async throws -> Int {
+  private static func preloadNativeYouTube(videoId: String, quality: String = "high") async throws -> Int {
     guard isValidVideoId(videoId) else {
       throw transferError("invalid_video_id")
     }
-    let descriptor = try await resolveAudioDescriptor(videoId: videoId)
+    let descriptor = try await resolveAudioDescriptor(videoId: videoId, quality: quality)
     let prefixLength = min(Int64(512 * 1024), descriptor.contentLength)
     guard prefixLength > 0 else {
       throw StreamTransportError.invalidContentRange
@@ -201,13 +218,13 @@ public final class OpenfyYouTubeModule: Module {
         initialAudio: initialAudio,
         expiresAt: Date().addingTimeInterval(4 * 60)
       ),
-      for: videoId
+      for: "\(quality):\(videoId)"
     )
     NSLog("[NATIVE] Preloaded %ld initial audio bytes for %@", initialAudio.count, videoId)
     return initialAudio.count
   }
 
-  private static func resolveAudioDescriptor(videoId: String) async throws -> YouTubeStreamDescriptor {
+  private static func resolveAudioDescriptor(videoId: String, quality: String = "high") async throws -> YouTubeStreamDescriptor {
     NSLog("[NATIVE] Resolving videoId: %@", videoId)
     let playerRes = try await guestPlayerResponse(videoId: videoId)
 
@@ -225,7 +242,8 @@ public final class OpenfyYouTubeModule: Module {
       videoId: videoId,
       payload: playerRes.payload,
       headers: GuestPlayerClient.mediaHeaders,
-      rangeClient: rangeClient
+      rangeClient: rangeClient,
+      quality: quality
     )
     NSLog(
       "[NATIVE] Selected descriptor itag=%ld mime=%@ bitrate=%ld contentLength=%lld",
@@ -240,7 +258,8 @@ public final class OpenfyYouTubeModule: Module {
   private static func resolveAndDownload(
     videoId: String,
     destination: String,
-    chunkBytes: Int
+    chunkBytes: Int,
+    quality: String = "high"
   ) async throws -> GoogleVideoTransferResult {
     guard isValidVideoId(videoId) else {
       throw transferError("invalid_video_id")
@@ -277,7 +296,7 @@ public final class OpenfyYouTubeModule: Module {
         headers: extra
       )
     }
-    guard let streamURL = bestAudioStreamURL(from: player.payload) else {
+    guard let streamURL = bestAudioStreamURL(from: player.payload, quality: quality) else {
       return transferResult(
         status: 502,
         mimeType: "text/plain",
@@ -531,7 +550,8 @@ public final class OpenfyYouTubeModule: Module {
     videoId: String,
     payload: [String: Any],
     headers: [String: String],
-    rangeClient: YouTubeHTTPRangeClient
+    rangeClient: YouTubeHTTPRangeClient,
+    quality: String = "high"
   ) async throws -> YouTubeStreamDescriptor {
     guard let streamingData = payload["streamingData"] as? [String: Any],
       let formats = streamingData["adaptiveFormats"] as? [[String: Any]] else {
@@ -542,7 +562,7 @@ public final class OpenfyYouTubeModule: Module {
     // for native Apple AVAssetResourceLoader playback compatibility.
     // NOTE: Native POC currently requires a direct deciphered format["url"].
     // Full decipher is handled by youtubei.js on the JS resolver side when needed.
-    let candidates = formats.compactMap { format -> (url: URL, mimeType: String, bitrate: Int, contentLength: Int64?, itag: Int?, durationMs: Double, score: Int)? in
+    let candidates = formats.compactMap { format -> (url: URL, mimeType: String, bitrate: Int, contentLength: Int64?, itag: Int?, durationMs: Double)? in
       guard let rawMimeType = format["mimeType"] as? String,
         rawMimeType.lowercased().hasPrefix("audio/mp4"),
         rawMimeType.lowercased().contains("mp4a"),
@@ -555,7 +575,6 @@ public final class OpenfyYouTubeModule: Module {
         return nil
       }
 
-      let quality = (format["audioQuality"] as? String) == "AUDIO_QUALITY_HIGH" ? 1_000_000 : 0
       let bitrate = format["bitrate"] as? Int ?? 0
       let itag = format["itag"] as? Int
       let contentLength: Int64? = (format["contentLength"] as? String).flatMap(Int64.init)
@@ -563,10 +582,13 @@ public final class OpenfyYouTubeModule: Module {
         (format["approxDurationMs"] as? String).flatMap(Double.init) ??
         (format["approxDurationMs"] as? NSNumber)?.doubleValue ?? 0
 
-      return (url, rawMimeType, bitrate, contentLength, itag, durationMs, quality + bitrate)
+      return (url, rawMimeType, bitrate, contentLength, itag, durationMs)
     }
 
-    guard let best = candidates.max(by: { $0.score < $1.score }) else {
+    let selected = quality == "economy"
+      ? candidates.min(by: { $0.bitrate < $1.bitrate })
+      : candidates.max(by: { $0.bitrate < $1.bitrate })
+    guard let best = selected else {
       throw StreamTransportError.audioTrackUnavailable
     }
 
@@ -594,7 +616,7 @@ public final class OpenfyYouTubeModule: Module {
     )
   }
 
-  private static func bestAudioStreamURL(from payload: [String: Any]) -> URL? {
+  private static func bestAudioStreamURL(from payload: [String: Any], quality: String = "high") -> URL? {
     guard let streamingData = payload["streamingData"] as? [String: Any],
       let formats = streamingData["adaptiveFormats"] as? [[String: Any]] else {
       return nil
@@ -611,11 +633,12 @@ public final class OpenfyYouTubeModule: Module {
         mimeType.lowercased().hasPrefix("audio/mp4") else {
         return nil
       }
-      let quality = (format["audioQuality"] as? String) == "AUDIO_QUALITY_HIGH" ? 1_000_000 : 0
       let bitrate = format["bitrate"] as? Int ?? 0
-      return (url, quality + bitrate)
+      return (url, bitrate)
     }
-    return candidates.max(by: { $0.score < $1.score })?.url
+    return quality == "economy"
+      ? candidates.min(by: { $0.score < $1.score })?.url
+      : candidates.max(by: { $0.score < $1.score })?.url
   }
 
   // `@Field` turns Record properties into property wrappers. Its synthesized

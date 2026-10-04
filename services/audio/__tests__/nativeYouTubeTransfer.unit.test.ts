@@ -1,3 +1,15 @@
+import {
+  downloadYouTubeStreamNatively,
+  getNativeYouTubePlaybackStatus,
+  parseNativeYouTubePlaybackUri,
+  playYouTubeVideoNatively,
+  preloadNativeYouTubeAudio,
+  resolveAndDownloadYouTubeVideoNatively,
+  toNativeYouTubePlaybackUri,
+  setNativeYouTubeChannelMode,
+} from '../nativeYouTubeTransfer';
+import { resetAppSettings, updateAppSettings } from '../../settings/appSettings';
+
 const mockNativeDownload = jest.fn();
 const mockNativeResolveAndDownload = jest.fn();
 const mockNativePlay = jest.fn();
@@ -16,18 +28,13 @@ jest.mock('../../../modules/openfy-youtube', () => ({
   },
 }));
 
-import {
-  downloadYouTubeStreamNatively,
-  getNativeYouTubePlaybackStatus,
-  parseNativeYouTubePlaybackUri,
-  playYouTubeVideoNatively,
-  preloadNativeYouTubeAudio,
-  resolveAndDownloadYouTubeVideoNatively,
-  toNativeYouTubePlaybackUri,
-} from '../nativeYouTubeTransfer';
-
 describe('downloadYouTubeStreamNatively', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await resetAppSettings();
+    const module = jest.requireMock('../../../modules/openfy-youtube').default;
+    delete module.resolveAndDownloadWithQualityAsync;
+    delete module.preloadNativeYouTubeWithQualityAsync;
+    delete module.setNativeChannelModeAsync;
     mockNativeDownload.mockReset();
     mockNativeResolveAndDownload.mockReset();
     mockNativePlay.mockReset();
@@ -148,6 +155,8 @@ describe('downloadYouTubeStreamNatively', () => {
       artworkUrl: 'https://images.example/cover.jpg',
       artworkFallbackUrl: 'https://images.example/cover-fallback.jpg',
       durationMs: '180123',
+      quality: 'high',
+      channelMode: 'stereo',
     });
   });
 
@@ -160,5 +169,31 @@ describe('downloadYouTubeStreamNatively', () => {
     await expect(preloadNativeYouTubeAudio('invalid')).resolves.toBeNull();
     expect(mockNativePreload).toHaveBeenCalledTimes(1);
     expect(mockNativePreload).toHaveBeenCalledWith('V1M1hYxmRvA');
+  });
+
+  it('uses separate stream and download qualities in the upgraded native bridge', async () => {
+    const module = jest.requireMock('../../../modules/openfy-youtube').default;
+    module.resolveAndDownloadWithQualityAsync = jest.fn().mockResolvedValue({ uri: 'file:///audio.m4a' });
+    module.preloadNativeYouTubeWithQualityAsync = jest.fn().mockResolvedValue({ bytes: 512 });
+    await updateAppSettings({ streamingQuality: 'economy', downloadQuality: 'high', audioChannelMode: 'mono' });
+
+    await preloadNativeYouTubeAudio('V1M1hYxmRvA');
+    await resolveAndDownloadYouTubeVideoNatively('V1M1hYxmRvA', 'file:///audio.m4a');
+    await playYouTubeVideoNatively('V1M1hYxmRvA', { title: 'Track', artist: 'Artist' });
+
+    expect(module.preloadNativeYouTubeWithQualityAsync).toHaveBeenCalledWith('V1M1hYxmRvA', 'economy');
+    expect(module.resolveAndDownloadWithQualityAsync).toHaveBeenCalledWith('V1M1hYxmRvA', 'file:///audio.m4a', 1024 * 1024, 'high');
+    expect(mockNativePlay).toHaveBeenCalledWith('V1M1hYxmRvA', expect.objectContaining({ quality: 'economy', channelMode: 'mono' }));
+    expect(mockNativePreload).not.toHaveBeenCalled();
+    expect(mockNativeResolveAndDownload).not.toHaveBeenCalled();
+  });
+
+  it('refuses fake mono on old binaries and forwards it on upgraded binaries', async () => {
+    await expect(setNativeYouTubeChannelMode('mono')).rejects.toThrow('novo build');
+    await expect(setNativeYouTubeChannelMode('stereo')).resolves.toBeUndefined();
+    const module = jest.requireMock('../../../modules/openfy-youtube').default;
+    module.setNativeChannelModeAsync = jest.fn().mockResolvedValue(undefined);
+    await setNativeYouTubeChannelMode('mono');
+    expect(module.setNativeChannelModeAsync).toHaveBeenCalledWith('mono');
   });
 });

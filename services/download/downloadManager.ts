@@ -11,8 +11,6 @@ import { fetchLyrics, saveLyricsOffline } from '../lyrics/lyricsService';
 import {
   getPlayableAudioUrl,
   resolveAudioUrl,
-  resolveViaSoundCloud,
-  resolveViaYouTubeTopic,
 } from '../audio/audioResolver';
 import {
   getDirectYouTubeMediaHeaders,
@@ -34,6 +32,7 @@ import {
   startDownloadDiagnostics,
 } from './downloadDiagnostics';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
+import { getAppSettings, type AudioQuality } from '../settings/appSettings';
 
 export type DownloadStatus = 'idle' | 'downloading' | 'completed' | 'error';
 
@@ -59,6 +58,7 @@ export type DownloadedTrack = TrackCatalogMetadata & {
   downloadedAt: string;
   duration_ms: number;
   audioUrl?: string;
+  audioQuality?: AudioQuality;
   metadataVersion?: number;
 };
 
@@ -1181,6 +1181,8 @@ const downloadTrackInternal = async (
 ): Promise<DownloadedTrack | null> => {
   try {
     if (cancelledDownloads.has(track.spotifyId)) return null;
+    const downloadQuality = (await getAppSettings()).downloadQuality;
+    let resolvedQuality: AudioQuality | undefined;
     await startDownloadDiagnostics(track);
     recordDownloadDiagnostic(track.spotifyId, 'download.queued', {
       hasSuppliedAudioUrl: Boolean(audioUrl || track.audioUrl),
@@ -1224,7 +1226,7 @@ const downloadTrackInternal = async (
         youtubeUrl: `https://www.youtube.com/watch?v=${youtubeVideoId}`,
       };
     }
-    let resolvedUrl = Platform.OS === 'web' && !sourceChanged ? suppliedAudioUrl : undefined;
+    let resolvedUrl = Platform.OS === 'web' && !sourceChanged && !youtubeVideoId ? suppliedAudioUrl : undefined;
     let format =
       Platform.OS === 'web'
         ? audioFormat || track.audioFormat || 'mp3'
@@ -1267,6 +1269,7 @@ const downloadTrackInternal = async (
           (p) => onProgress?.(p * 0.7),
           youtubeVideoId
         );
+        if (localAudioPath) resolvedQuality = downloadQuality;
       }
     }
 
@@ -1278,6 +1281,7 @@ const downloadTrackInternal = async (
           videoId: youtubeVideoId,
           spotifyId: track.spotifyId,
           fresh,
+          quality: downloadQuality,
         });
         return direct
           ? { ...direct, source: 'youtube' as const }
@@ -1289,7 +1293,8 @@ const downloadTrackInternal = async (
         track.spotifyId,
         track.duration_ms,
         undefined,
-        fresh
+        fresh,
+        downloadQuality
       );
     };
 
@@ -1324,6 +1329,7 @@ const downloadTrackInternal = async (
         }
       }
       if (fallbackResult?.url) {
+        resolvedQuality = downloadQuality;
         resolvedUrl = fallbackResult.url;
         format = fallbackResult.format || 'mp3';
         youtubeVideoId = fallbackResult.videoId || youtubeVideoId;
@@ -1389,6 +1395,7 @@ const downloadTrackInternal = async (
       recordDownloadDiagnostic(track.spotifyId, 'audio.resolve.refresh');
       const refreshed = await resolveCurrentAudio(true);
       if (refreshed?.url && refreshed.url !== resolvedUrl) {
+        resolvedQuality = downloadQuality;
         resolvedUrl = refreshed.url;
         format = refreshed.format || format;
         youtubeVideoId = refreshed.videoId || youtubeVideoId;
@@ -1458,6 +1465,7 @@ const downloadTrackInternal = async (
       downloadedAt: new Date().toISOString(),
       duration_ms: effectiveTrack.duration_ms,
       audioUrl: resolvedUrl,
+      audioQuality: resolvedQuality,
       metadataVersion: effectiveTrack.albumId && effectiveTrack.artists?.length &&
         (Platform.OS === 'web' || localImagePath?.startsWith('file:'))
         ? METADATA_VERSION : undefined,

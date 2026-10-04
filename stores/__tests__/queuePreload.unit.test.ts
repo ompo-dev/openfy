@@ -1,8 +1,33 @@
+import {
+  DEFAULT_STATE,
+  beginTrackChange,
+  downloadTrack,
+  getDownloadedTrack,
+  getStatus,
+  loadAndPlay,
+  hasNativeYouTubePlayback,
+  preloadAudio,
+  play,
+  preloadNativeYouTubeAudio,
+  releasePreloadedAudio,
+  resolveNativeYouTubeSource,
+  resolveCatalogYouTubeVideoId,
+  resolveAudioUrl,
+  unload,
+} from '@services';
+import { Platform } from 'react-native';
+import { usePlayerStore, type PlayerTrack } from '../usePlayerStore';
+import { fetchLyrics } from '../../services/lyrics/lyricsService';
+import { prefetchTrackArtistData } from '../../services/library/artistProfilePrefetch';
+import { prefetchTrackAlbumData } from '../../services/library/playerAlbum';
+import { resetAppSettings, updateAppSettings } from '../../services/settings/appSettings';
+
 jest.mock('react-native', () => ({ Platform: { OS: 'web' } }));
 jest.mock('expo-file-system/legacy', () => ({ getInfoAsync: jest.fn() }));
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn().mockResolvedValue(null),
   setItem: jest.fn().mockResolvedValue(undefined),
+  removeItem: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('@services', () => ({
   DEFAULT_STATE: {
@@ -52,29 +77,6 @@ jest.mock('../../services/library/artistProfilePrefetch', () => ({
   prefetchTrackArtistData: jest.fn(),
 }));
 jest.mock('../../services/library/playerAlbum', () => ({ prefetchTrackAlbumData: jest.fn() }));
-
-import {
-  DEFAULT_STATE,
-  beginTrackChange,
-  downloadTrack,
-  getDownloadedTrack,
-  getStatus,
-  loadAndPlay,
-  hasNativeYouTubePlayback,
-  preloadAudio,
-  play,
-  preloadNativeYouTubeAudio,
-  releasePreloadedAudio,
-  resolveNativeYouTubeSource,
-  resolveCatalogYouTubeVideoId,
-  resolveAudioUrl,
-  unload,
-} from '@services';
-import { Platform } from 'react-native';
-import { usePlayerStore, type PlayerTrack } from '../usePlayerStore';
-import { fetchLyrics } from '../../services/lyrics/lyricsService';
-import { prefetchTrackArtistData } from '../../services/library/artistProfilePrefetch';
-import { prefetchTrackAlbumData } from '../../services/library/playerAlbum';
 
 const realPlayTrack = usePlayerStore.getState().playTrack;
 let queueTestRun = 0;
@@ -129,8 +131,10 @@ const flushAsync = async () => {
 };
 
 describe('queue preload window', () => {
-  afterEach(() => {
+  afterEach(async () => {
     Platform.OS = 'web';
+    usePlayerStore.setState({ queue: [], currentTrack: null });
+    await resetAppSettings();
     jest.restoreAllMocks();
   });
 
@@ -171,6 +175,50 @@ describe('queue preload window', () => {
       repeatMode: 'off',
       playTrack: realPlayTrack,
     });
+  });
+
+  it('rebuilds neighbors at the new quality without interrupting the current song', async () => {
+    await usePlayerStore.getState().playWithQueue(tracks, 1, 'library:songs');
+    await flushAsync();
+    jest.clearAllMocks();
+    await updateAppSettings({ streamingQuality: 'economy' });
+    await flushAsync();
+
+    expect(releasePreloadedAudio).toHaveBeenCalled();
+    expect(resolveAudioUrl).toHaveBeenCalledWith(
+      tracks[2].title, tracks[2].artistName, tracks[2].spotifyId,
+      tracks[2].duration_ms, tracks[2].releaseDate, false, 'economy'
+    );
+    expect(loadAndPlay).not.toHaveBeenCalled();
+    expect(beginTrackChange).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().currentTrack).toBe(tracks[1]);
+  });
+
+  it('does not reuse an unlabelled high-quality URL in economy mode', async () => {
+    await updateAppSettings({ streamingQuality: 'economy' });
+    const track = { ...tracks[1], streamUrl: 'https://media.test/high.m4a' };
+    await usePlayerStore.getState().playTrack(track);
+    expect(resolveAudioUrl).toHaveBeenCalledWith(
+      track.title, track.artistName, track.spotifyId, track.duration_ms,
+      track.releaseDate, false, 'economy'
+    );
+    expect(loadAndPlay).toHaveBeenCalledWith(
+      'https://media.test/Atual.m4a', expect.any(Function), expect.any(Object),
+      0, track, { trackChangeAlreadyBegun: true }
+    );
+  });
+
+  it('does not treat a saved remote URL as an immutable offline file', async () => {
+    await updateAppSettings({ streamingQuality: 'economy' });
+    jest.mocked(getDownloadedTrack).mockResolvedValue({
+      ...tracks[1], audioUrl: 'https://media.test/high.m4a',
+      localAudioPath: 'https://media.test/high.m4a', audioQuality: 'high',
+    } as never);
+    await usePlayerStore.getState().playTrack(tracks[1]);
+    expect(resolveAudioUrl).toHaveBeenCalledWith(
+      tracks[1].title, tracks[1].artistName, tracks[1].spotifyId,
+      tracks[1].duration_ms, tracks[1].releaseDate, false, 'economy'
+    );
   });
 
   it('warms a five-track window with forward and backward buffer targets', async () => {
@@ -275,7 +323,7 @@ describe('queue preload window', () => {
     const second = { ...first, title: 'Tres da Madruga', duration_ms: 150000 };
     await usePlayerStore.getState().playWithQueue([first, second], 0, 'album:two-songs');
     await flushAsync();
-    expect(preloadNativeYouTubeAudio).toHaveBeenCalledWith('9ld721cY0Uk');
+    expect(preloadNativeYouTubeAudio).toHaveBeenCalledWith('9ld721cY0Uk', 'high');
     jest.mocked(loadAndPlay).mockClear();
     jest.mocked(resolveCatalogYouTubeVideoId).mockClear();
     await usePlayerStore.getState().playNext();
@@ -356,7 +404,7 @@ describe('queue preload window', () => {
       ].filter((track): track is PlayerTrack => Boolean(track));
       expect(neighbors).toHaveLength(shuffle ? 2 : 4);
       neighbors.forEach((neighbor) => {
-        expect(preloadNativeYouTubeAudio).toHaveBeenCalledWith(neighbor.youtubeVideoId);
+        expect(preloadNativeYouTubeAudio).toHaveBeenCalledWith(neighbor.youtubeVideoId, 'high');
         expect(fetchLyrics).toHaveBeenCalledWith(
           neighbor.title,
           neighbor.artistName,
@@ -451,7 +499,10 @@ describe('queue preload window', () => {
       catalogTrack.title,
       catalogTrack.artistName,
       `yt_${catalogTrack.youtubeVideoId}`,
-      catalogTrack.duration_ms
+      catalogTrack.duration_ms,
+      catalogTrack.releaseDate,
+      false,
+      'high'
     );
     expect(loadAndPlay).toHaveBeenCalledWith(
       streamUrl,
@@ -488,7 +539,10 @@ describe('queue preload window', () => {
       secondTrack.title,
       secondTrack.artistName,
       `yt_${secondTrack.youtubeVideoId}`,
-      secondTrack.duration_ms
+      secondTrack.duration_ms,
+      secondTrack.releaseDate,
+      false,
+      'high'
     );
     expect(loadAndPlay).toHaveBeenLastCalledWith(
       `https://media.test/yt_${secondTrack.youtubeVideoId}.m4a`,

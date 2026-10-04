@@ -82,6 +82,24 @@ describe('resolveYouTubeStream', () => {
     expect(getStreamingData).toHaveBeenCalledTimes(1);
   });
 
+  it('selects real economical streams and isolates their cache from high quality', async () => {
+    const getStreamingData = jest.fn().mockImplementation(async (_video, options) => ({
+      url: `https://rr1.googlevideo.com/${options.quality}.m4a?c=ANDROID_MUSIC`,
+      mime_type: 'audio/mp4', bitrate: options.quality === 'best' ? 128000 : 48000,
+    }));
+    mockCreate.mockResolvedValue({ getStreamingData });
+    const high = await resolveYouTubeStream('V1M1hYxmRvA', { quality: 'high' });
+    const economy = await resolveYouTubeStream('V1M1hYxmRvA', { quality: 'economy' });
+    const cached = await resolveYouTubeStream('V1M1hYxmRvA', { quality: 'high' });
+    expect(getStreamingData).toHaveBeenCalledTimes(2);
+    expect(getStreamingData).toHaveBeenLastCalledWith('V1M1hYxmRvA', {
+      client: 'YTMUSIC_ANDROID', quality: 'bestefficiency', type: 'audio',
+    });
+    expect(high).toMatchObject({ status: 'resolved', stream: { quality: 'high', bitrate: 128000 } });
+    expect(economy).toMatchObject({ status: 'resolved', stream: { quality: 'economy', bitrate: 48000 } });
+    expect(cached).toEqual(high);
+  });
+
   it('returns cached resolved result on second call without re-resolving', async () => {
     const getStreamingData = jest.fn().mockResolvedValue({
       url: 'https://rr1.googlevideo.com/stream.m4a?c=ANDROID_MUSIC',

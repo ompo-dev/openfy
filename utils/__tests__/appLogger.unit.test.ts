@@ -7,6 +7,7 @@ import {
   getPerformanceMetricSummary,
   log,
   logConfig,
+  sanitizeLogData,
 } from '../appLogger';
 
 describe('app logger', () => {
@@ -53,6 +54,16 @@ describe('app logger', () => {
     logConfig.verbose = true;
     log.input('search changed', { length: 3 });
     expect(getLogBuffer()).toHaveLength(1);
+  });
+
+  it('sanitizes copied playback snapshots without exposing signed media URLs', () => {
+    const data = sanitizeLogData({ output: {
+      error: 'failed https://media.example/audio?sig=private-signature',
+      accessToken: 'private-token',
+    } });
+    expect(data).toEqual({ output: {
+      error: 'failed https://media.example/audio', accessToken: '[redacted]',
+    } });
   });
 
   it('can stop capture independently from console output', () => {

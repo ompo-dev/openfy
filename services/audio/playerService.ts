@@ -16,8 +16,11 @@ import { AppState, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
 import { log } from '../../utils/appLogger';
+import { requireNativeModule } from 'expo-modules-core';
+import { getAppSettings, getCachedAppSettings, subscribeAppSettings, type AudioChannelMode } from '../settings/appSettings';
 import { getDirectYouTubeMediaHeaders } from './directYouTubeResolver';
 import { prepareLocalAudioForPlayback } from './localAudioRepair';
+import { unlockBrowserAudioOutput } from './browserAudioOutput';
 import {
   clampPlaybackPositionMs,
   reconcilePlaybackDurationMs,
@@ -31,6 +34,9 @@ import {
   resumeNativeYouTubePlayback,
   seekNativeYouTubePlayback,
   stopNativeYouTubePlayback,
+  hasNativeYouTubePlayback,
+  hasNativeYouTubeAudioPreferences,
+  setNativeYouTubeChannelMode,
 } from './nativeYouTubeTransfer';
 
 export type AudioSourceInput =
@@ -171,9 +177,64 @@ let volumeRamp: {
 const diagnostics: AudioDiagnosticEvent[] = [];
 const MAX_DIAGNOSTICS = 30;
 
-const getPlayerOptions = (durationMs?: number): AudioPlayerOptions =>
+type ChannelPlayer = AudioPlayer & { setChannelMode?: (mode: AudioChannelMode) => Promise<void> };
+let appliedChannelMode: AudioChannelMode = 'stereo';
+let outputError: string | null = null;
+
+export const getAudioCapabilities = () => {
+  let channels = Platform.OS === 'web';
+  if (!channels) {
+    try {
+      channels = requireNativeModule<{ supportsChannelMode?: boolean }>('ExpoAudio').supportsChannelMode === true;
+    } catch { /* Older development binaries keep stereo playback. */ }
+  }
+  const nativePreferences = !hasNativeYouTubePlayback() || hasNativeYouTubeAudioPreferences();
+  return { channels: channels && nativePreferences, quality: nativePreferences };
+};
+
+const applyPlayerChannels = async (player: AudioPlayer, mode: AudioChannelMode) => {
+  const output = player as ChannelPlayer;
+  if (output.setChannelMode) await output.setChannelMode(mode);
+  else if (mode === 'mono') throw new Error('Este build ainda nao possui processamento mono. Instale o novo build.');
+  appliedChannelMode = mode;
+};
+
+export const setAudioChannelMode = async (mode: AudioChannelMode): Promise<void> => {
+  if (mode === 'mono') unlockBrowserAudioOutput();
+  if (mode === 'mono' && !getAudioCapabilities().channels) {
+    throw new Error('O processamento mono requer o novo build nativo do app.');
+  }
+  try {
+    if (nativeYouTubeActive) await setNativeYouTubeChannelMode(mode);
+    else if (playerInstance) await applyPlayerChannels(playerInstance, mode);
+    appliedChannelMode = mode;
+    outputError = null;
+    recordAudioDiagnostic('channel-mode-changed', mode);
+  } catch (error) {
+    outputError = String(error);
+    throw error;
+  }
+};
+
+export const getAudioOutputDiagnostics = () => ({
+  engine: nativeYouTubeActive ? 'AVPlayer / YouTube nativo' : playerInstance ? Platform.OS === 'web' ? 'HTML Audio / Web Audio' : 'Expo Audio' : 'Inativo',
+  channelMode: appliedChannelMode,
+  sourceKind: currentSourceKind,
+  sourceHost: currentSourceHost,
+  error: outputError,
+  capabilities: getAudioCapabilities(),
+});
+
+let observedChannelMode = getCachedAppSettings().audioChannelMode;
+subscribeAppSettings((settings) => {
+  if (settings.audioChannelMode === observedChannelMode) return;
+  observedChannelMode = settings.audioChannelMode;
+  void setAudioChannelMode(settings.audioChannelMode).catch((error) => log.error('audio output preference failed', error));
+});
+
+const getPlayerOptions = (durationMs?: number): AudioPlayerOptions & { channelMode?: AudioChannelMode } =>
   Platform.OS === 'web'
-    ? { updateInterval: 100 }
+    ? { updateInterval: 100, channelMode: getCachedAppSettings().audioChannelMode }
     : {
         updateInterval: 500,
         keepAudioSessionActive: true,
@@ -305,6 +366,7 @@ const runRemoteCommand = (command: keyof RemotePlaybackHandlers): void => {
 
 /** Invalidate pending loads immediately when a different track is selected. */
 export const beginTrackChange = (): void => {
+  if (getCachedAppSettings().audioChannelMode === 'mono') unlockBrowserAudioOutput();
   loadGeneration++;
   pendingSeek = null;
   stopVolumeRamp();
@@ -677,6 +739,8 @@ const loadAndPlayNativeYouTube = async (
       return false;
     }
 
+    appliedChannelMode = hasNativeYouTubeAudioPreferences() ? getCachedAppSettings().audioChannelMode : 'stereo';
+
     nativeYouTubeStatusTimer = setInterval(() => {
       void publishStatus();
     }, 500);
@@ -726,27 +790,26 @@ export const loadAndPlay = async (
   options: { trackChangeAlreadyBegun?: boolean } = {}
 ): Promise<boolean> => {
   const trackChangeAlreadyBegun = options.trackChangeAlreadyBegun === true;
-  const generation = loadGeneration + (trackChangeAlreadyBegun ? 0 : 1);
+  if (!trackChangeAlreadyBegun) beginTrackChange();
+  const generation = loadGeneration;
+  await getAppSettings();
+  if (generation !== loadGeneration) return false;
   const source = toAudioSource(sourceInput);
   const uri = source.uri;
   const nativeYouTubeVideoId = parseNativeYouTubePlaybackUri(uri);
   if (nativeYouTubeVideoId) {
     const resolvedMetadata = await resolveLockScreenMetadata(lockScreenMetadata);
-    if (
-      generation !== loadGeneration + (trackChangeAlreadyBegun ? 0 : 1)
-    ) return false;
+    if (generation !== loadGeneration) return false;
     return loadAndPlayNativeYouTube(
       nativeYouTubeVideoId,
       onStatusUpdate,
       resolvedMetadata,
       diagnosticTrack,
-      trackChangeAlreadyBegun,
+      true,
       generation
     );
   }
   try {
-    if (!trackChangeAlreadyBegun) beginTrackChange();
-
     const callbackForThisPlayer = onStatusUpdate || null;
     await configureAudioSession(diagnosticTrack?.spotifyId);
     if (generation !== loadGeneration) return false;
@@ -883,6 +946,8 @@ export const loadAndPlay = async (
       });
     }
 
+    await applyPlayerChannels(player, getCachedAppSettings().audioChannelMode);
+    if (generation !== loadGeneration || playerInstance !== player) return false;
     player.play();
     recordAudioDiagnostic('play-called');
     if (fadeInDurationMs > 0) {

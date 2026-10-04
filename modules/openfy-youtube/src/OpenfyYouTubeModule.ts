@@ -30,6 +30,10 @@ export type NativeYouTubePlaybackMetadata = {
 export type NativeYouTubePreloadResult = { bytes: number };
 
 declare class OpenfyYouTubeModule extends NativeModule<{}> {
+  supportsAudioPreferences?: boolean;
+  setNativeChannelModeAsync?(mode: 'stereo' | 'mono'): Promise<void>;
+  preloadNativeYouTubeWithQualityAsync?(videoId: string, quality: 'high' | 'economy'): Promise<NativeYouTubePreloadResult>;
+  resolveAndDownloadWithQualityAsync?(videoId: string, destination: string, chunkBytes: number, quality: 'high' | 'economy'): Promise<NativeYouTubeTransferResult>;
   /**
    * Transfers an already-resolved googlevideo stream in deterministic byte
    * ranges. The native implementation owns every range request, so iOS and

@@ -46,6 +46,7 @@ describe('resolveDirectYouTubeAudio', () => {
       videoId: 'V1M1hYxmRvA',
       url: 'https://rr1.googlevideo.com/mafinoso.m4a?c=ANDROID_MUSIC',
       format: 'm4a',
+      quality: 'high',
     });
     expect(getStreamingData).toHaveBeenCalledWith('V1M1hYxmRvA', expect.objectContaining({
       client: 'YTMUSIC_ANDROID',
@@ -515,6 +516,7 @@ describe('resolveDirectYouTubeAudio', () => {
       imageURL: 'https://image.youtube.test/mafinoso.jpg',
       url: 'https://media.youtube.test/mafinoso.m4a',
       format: 'm4a',
+      quality: 'high',
     });
   });
 });

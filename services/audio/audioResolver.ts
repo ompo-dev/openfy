@@ -16,6 +16,8 @@ import {
   getAudioSourceWithHeaders,
 } from './directYouTubeResolver';
 import { resolveCatalogYouTubeVideoId } from './catalogResolver';
+import { getAppSettings, getCachedAppSettings, type AudioQuality } from '../settings/appSettings';
+import { audioQualityCacheKey } from './audioPreferences';
 
 export { getDirectYouTubeMediaHeaders, getAudioSourceWithHeaders };
 
@@ -28,6 +30,7 @@ export type ResolvedAudio = {
   confidence?: number;
   imageURL?: string;
   headers?: Record<string, string>;
+  bitrate?: number;
 };
 
 const AUDIO_RESOLVE_TTL_MS = 8 * 60_000;
@@ -69,13 +72,15 @@ const getYouTubeVideoIdFromTrackId = (trackId?: string): string | null => {
 
 const resolveExactYouTubeVideo = async (
   videoId: string,
-  fresh = false
+  fresh = false,
+  quality?: AudioQuality
 ): Promise<ResolvedAudio | null> => {
-  const direct = await resolveDirectYouTubeAudio({ videoId, fresh });
+  const direct = await resolveDirectYouTubeAudio({ videoId, fresh, quality });
   if (direct) {
     return {
       url: direct.url,
-      quality: 'high',
+      quality: direct.quality || quality || 'high',
+      bitrate: direct.bitrate,
       format: direct.format,
       source: 'youtube',
       videoId: direct.videoId,
@@ -211,7 +216,8 @@ export const refreshSoundCloudClientId = async (): Promise<string> => {
 export const resolveViaYouTubeTopic = async (
   trackName: string,
   artistName: string,
-  expectedDurationMs?: number
+  expectedDurationMs?: number,
+  quality: AudioQuality = getCachedAppSettings().streamingQuality
 ): Promise<ResolvedAudio | null> => {
   const expectedSec =
     expectedDurationMs && expectedDurationMs > 0
@@ -337,7 +343,9 @@ export const resolveViaYouTubeTopic = async (
 
         if (audioFormats.length > 0) {
           const best = audioFormats.sort(
-            (a, b) => (b.bitrate || 0) - (a.bitrate || 0)
+            (a, b) => quality === 'economy'
+              ? (a.bitrate || 0) - (b.bitrate || 0)
+              : (b.bitrate || 0) - (a.bitrate || 0)
           )[0];
           if (best.url && !isPreviewUrl(best.url)) {
             console.log(
@@ -345,7 +353,8 @@ export const resolveViaYouTubeTopic = async (
             );
             return {
               url: getPlayableAudioUrl(best.url),
-              quality: 'high',
+              quality,
+              bitrate: best.bitrate,
               format: 'm4a',
               source: 'youtube',
               confidence: 98,
@@ -512,15 +521,17 @@ export const resolveAudioUrl = async (
   spotifyId?: string,
   durationMs?: number,
   releaseDate?: string,
-  forceFresh = false
+  forceFresh = false,
+  requestedQuality?: AudioQuality
 ): Promise<ResolvedAudio | null> => {
-  const resolveKey = getAudioResolveKey(
+  const quality = requestedQuality ?? (await getAppSettings()).streamingQuality;
+  const resolveKey = audioQualityCacheKey(getAudioResolveKey(
     trackName,
     artistName,
     spotifyId,
     durationMs,
     releaseDate
-  );
+  ), quality);
   const cached = forceFresh ? null : resolvedAudioCache.get(resolveKey);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
   const active = forceFresh ? null : activeAudioResolves.get(resolveKey);
@@ -532,7 +543,8 @@ export const resolveAudioUrl = async (
     spotifyId,
     durationMs,
     releaseDate,
-    forceFresh
+    forceFresh,
+    quality
   )
     .then((result) => {
       if (result?.url && !forceFresh) {
@@ -557,7 +569,8 @@ const resolveAudioUrlInternal = async (
   spotifyId?: string,
   durationMs?: number,
   releaseDate?: string,
-  forceFresh = false
+  forceFresh = false,
+  quality: AudioQuality = 'high'
 ): Promise<ResolvedAudio | null> => {
   const youtubeVideoId = getYouTubeVideoIdFromTrackId(spotifyId);
   if (youtubeVideoId) {
@@ -566,7 +579,7 @@ const resolveAudioUrlInternal = async (
       artists: [artistName], durationMs: durationMs || 0,
     });
     return source.status === 'resolved'
-      ? resolveExactYouTubeVideo(source.videoId, forceFresh)
+      ? resolveExactYouTubeVideo(source.videoId, forceFresh, quality)
       : null;
   }
 
@@ -587,6 +600,7 @@ const resolveAudioUrlInternal = async (
     durationMs,
     fresh: forceFresh,
     spotifyId,
+    quality,
   });
   if (directResult?.url) {
     console.log(
@@ -594,7 +608,8 @@ const resolveAudioUrlInternal = async (
     );
     return {
       url: directResult.url,
-      quality: 'high',
+      quality: directResult.quality || quality,
+      bitrate: directResult.bitrate,
       format: directResult.format,
       source: 'youtube',
       videoId: directResult.videoId,
@@ -608,7 +623,8 @@ const resolveAudioUrlInternal = async (
   const ytResult = await resolveViaYouTubeTopic(
     trackName,
     primaryArtist,
-    durationMs
+    durationMs,
+    quality
   );
   if (ytResult?.url && !isPreviewUrl(ytResult.url)) {
     return { ...ytResult, url: getPlayableAudioUrl(ytResult.url) };

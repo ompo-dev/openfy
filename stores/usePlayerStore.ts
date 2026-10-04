@@ -55,7 +55,8 @@ import type {
   TrackCatalogMetadata,
   DownloadedTrack,
 } from '../services/download/downloadManager';
-import { getCachedAppSettings } from '../services/settings/appSettings';
+import { getAppSettings, getCachedAppSettings, subscribeAppSettings, type AudioQuality } from '../services/settings/appSettings';
+import { audioQualityCacheKey } from '../services/audio/audioPreferences';
 import { log } from '../utils/appLogger';
 import { useConnectivityStore } from './useConnectivityStore';
 import { showOfflineActionMessage } from '../services/network/offlineFeedback';
@@ -77,6 +78,8 @@ export type PlayerTrack = TrackCatalogMetadata & {
   localImagePath?: string;
   streamUrl?: string;
   streamExpiresAt?: number;
+  streamQuality?: AudioQuality;
+  audioQuality?: AudioQuality;
   duration_ms: number;
   videoId?: string;
 };
@@ -264,7 +267,8 @@ export const getExistingLocalAudioPath = async (
 };
 
 const getSavedAudioSource = async (
-  track?: (Partial<PlayerTrack> & { audioUrl?: string }) | null
+  track: (Partial<PlayerTrack> & { audioUrl?: string }) | null | undefined,
+  quality: AudioQuality
 ): Promise<string | null> => {
   if (!track) return null;
 
@@ -274,6 +278,9 @@ const getSavedAudioSource = async (
   if (Platform.OS !== 'web') return null;
 
   const webSource = track.streamUrl || track.audioUrl || track.localAudioPath;
+  // Web "downloads" may just be remote URLs, not immutable offline files.
+  if (/^https?:/i.test(webSource || '') &&
+      (track.streamQuality || track.audioQuality || 'high') !== quality) return null;
   if (
     !webSource ||
     webSource.endsWith('.m3u8') ||
@@ -285,9 +292,9 @@ const getSavedAudioSource = async (
   return getPlayableAudioUrl(webSource);
 };
 
-const getWarmedAudioSource = (track: PlayerTrack): AudioSourceInput | null => {
+const getWarmedAudioSource = (track: PlayerTrack, quality: AudioQuality): AudioSourceInput | null => {
   const now = Date.now();
-  const warmed = warmedAudioSources.get(getCacheKey(track));
+  const warmed = warmedAudioSources.get(audioQualityCacheKey(getCacheKey(track), quality));
   return warmed &&
     warmed.trackId === track.spotifyId &&
     warmed.expiresAt > now + MIN_PRELOADED_SOURCE_LIFETIME_MS
@@ -296,11 +303,13 @@ const getWarmedAudioSource = (track: PlayerTrack): AudioSourceInput | null => {
 };
 
 const getFreshPreloadedSource = (
-  track: PlayerTrack
+  track: PlayerTrack,
+  quality: AudioQuality
 ): AudioSourceInput | null => {
   const now = Date.now();
   if (
     track.streamUrl &&
+    (track.streamQuality || 'high') === quality &&
     (Platform.OS === 'web' ||
       (track.streamExpiresAt || 0) > now + MIN_PRELOADED_SOURCE_LIFETIME_MS)
   ) {
@@ -310,11 +319,11 @@ const getFreshPreloadedSource = (
     return headers ? { uri: track.streamUrl, headers } : track.streamUrl;
   }
 
-  return getWarmedAudioSource(track);
+  return getWarmedAudioSource(track, quality);
 };
 
-const cacheAudioSource = (track: PlayerTrack, source: AudioSourceInput) => {
-  warmedAudioSources.set(getCacheKey(track), {
+const cacheAudioSource = (track: PlayerTrack, source: AudioSourceInput, quality: AudioQuality) => {
+  warmedAudioSources.set(audioQualityCacheKey(getCacheKey(track), quality), {
     source,
     expiresAt: Date.now() + AUDIO_SOURCE_TTL_MS,
     trackId: track.spotifyId,
@@ -381,19 +390,21 @@ const warmTrackLyrics = (track: PlayerTrack, direction: string) => {
 
 const warmNativeYouTubeAudio = (videoId: string): Promise<number | null> => {
   const now = Date.now();
-  const cached = preparedNativeAudio.get(videoId);
+  const quality = getCachedAppSettings().streamingQuality;
+  const cacheKey = audioQualityCacheKey(videoId, quality);
+  const cached = preparedNativeAudio.get(cacheKey);
   if (cached && cached.expiresAt > now) return Promise.resolve(cached.bytes);
-  preparedNativeAudio.delete(videoId);
-  const pending = pendingNativeAudioPreloads.get(videoId);
+  preparedNativeAudio.delete(cacheKey);
+  const pending = pendingNativeAudioPreloads.get(cacheKey);
   if (pending) return pending;
 
   const loading = Promise.resolve()
     .then(() => typeof preloadNativeYouTubeAudio === 'function'
-      ? preloadNativeYouTubeAudio(videoId)
+      ? preloadNativeYouTubeAudio(videoId, quality)
       : null)
     .then((result) => {
       if (!result?.bytes) return null;
-      preparedNativeAudio.set(videoId, {
+      preparedNativeAudio.set(cacheKey, {
         bytes: result.bytes,
         expiresAt: Date.now() + 4 * 60_000,
       });
@@ -405,8 +416,8 @@ const warmNativeYouTubeAudio = (videoId: string): Promise<number | null> => {
       return result.bytes;
     })
     .catch(() => null)
-    .finally(() => pendingNativeAudioPreloads.delete(videoId));
-  pendingNativeAudioPreloads.set(videoId, loading);
+    .finally(() => pendingNativeAudioPreloads.delete(cacheKey));
+  pendingNativeAudioPreloads.set(cacheKey, loading);
   return loading;
 };
 
@@ -419,12 +430,15 @@ const warmTrackAudio = (
   if (!track) return;
   if (!isStillNeeded() || !isAppActiveForPreload()) return;
   if (useConnectivityStore.getState().status === 'offline') return;
-  const cacheKey = getCacheKey(track);
+  const quality = getCachedAppSettings().streamingQuality;
+  const needed = isStillNeeded;
+  isStillNeeded = () => needed() && quality === getCachedAppSettings().streamingQuality;
+  const cacheKey = audioQualityCacheKey(getCacheKey(track), quality);
   const durationSeconds = Math.max(0, track.duration_ms || 0) / 1000;
   const preferredForwardBufferDuration = durationSeconds
     ? Math.max(5, Math.round(durationSeconds * bufferRatio))
     : 5;
-  const suppliedSource = getFreshPreloadedSource(track);
+  const suppliedSource = getFreshPreloadedSource(track, quality);
   if (suppliedSource) {
     const suppliedNativeVideoId = typeof suppliedSource === 'string'
       ? parseNativeYouTubePlaybackUri(suppliedSource)
@@ -471,18 +485,18 @@ const warmTrackAudio = (
   let warmupError: unknown;
   let preparedBytes = 0;
   const warmup = (async () => {
-    const directSavedSource = await getSavedAudioSource(track);
+    const directSavedSource = await getSavedAudioSource(track, quality);
     if (directSavedSource) {
-      cacheAudioSource(track, directSavedSource);
+      cacheAudioSource(track, directSavedSource, quality);
       sourceKind = 'saved-audio';
       if (isStillNeeded()) await preloadAudio(directSavedSource, preferredForwardBufferDuration);
       return;
     }
 
     const downloaded = await getDownloadedTrack(track.spotifyId);
-    const downloadedSavedSource = await getSavedAudioSource(downloaded);
+    const downloadedSavedSource = await getSavedAudioSource(downloaded, quality);
     if (downloadedSavedSource) {
-      cacheAudioSource(track, downloadedSavedSource);
+      cacheAudioSource(track, downloadedSavedSource, quality);
       sourceKind = 'saved-audio';
       if (isStillNeeded()) await preloadAudio(downloadedSavedSource, preferredForwardBufferDuration);
       return;
@@ -500,7 +514,7 @@ const warmTrackAudio = (
         return;
       }
       const videoId = parseNativeYouTubePlaybackUri(nativeSource);
-      cacheAudioSource(track, nativeSource);
+      cacheAudioSource(track, nativeSource, quality);
       sourceKind = 'native-video-id-only';
       if (prioritizeNativeAudio && videoId) {
         preparedBytes = (await warmNativeYouTubeAudio(videoId)) || 0;
@@ -509,19 +523,21 @@ const warmTrackAudio = (
       return;
     }
 
-    if (!isStillNeeded() || !isAppActiveForPreload() || getFreshPreloadedSource(track)) return;
+    if (!isStillNeeded() || !isAppActiveForPreload() || getFreshPreloadedSource(track, quality)) return;
     const resolved = await resolveAudioUrl(
       track.title,
       track.artistName,
       getResolverTrackId(track),
       track.duration_ms,
-      track.releaseDate
+      track.releaseDate,
+      false,
+      quality
     );
     if (resolved?.url && isStillNeeded()) {
       const source = resolved.headers
         ? { uri: resolved.url, headers: resolved.headers }
         : resolved.url;
-      cacheAudioSource(track, source);
+      cacheAudioSource(track, source, quality);
       await preloadAudio(source, preferredForwardBufferDuration);
     } else {
       sourceKind = 'unresolved';
@@ -564,11 +580,12 @@ const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
   const retainedKeys = new Set(
     [currentTrack, ...neighbors.map(({ track }) => track)]
       .filter((track): track is PlayerTrack => Boolean(track))
-      .map(getCacheKey)
+      .map((track) => audioQualityCacheKey(getCacheKey(track), getCachedAppSettings().streamingQuality))
   );
 
   queuePreloadKeys.clear();
-  neighbors.forEach(({ track }) => queuePreloadKeys.add(getCacheKey(track)));
+  const quality = getCachedAppSettings().streamingQuality;
+  neighbors.forEach(({ track }) => queuePreloadKeys.add(audioQualityCacheKey(getCacheKey(track), quality)));
 
   warmedAudioSources.forEach(({ source }, cacheKey) => {
     if (!retainedKeys.has(cacheKey)) {
@@ -592,7 +609,8 @@ const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
     warmTrackLyrics(track, direction);
     warmTrackAudio(
       track,
-      () => isAppActiveForPreload() && queuePreloadKeys.has(getCacheKey(track)),
+      () => isAppActiveForPreload() && quality === getCachedAppSettings().streamingQuality &&
+        queuePreloadKeys.has(audioQualityCacheKey(getCacheKey(track), quality)),
       ratio,
       true
     );
@@ -688,6 +706,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     });
     // 2. CONCURRENT AUDIO STREAM RESOLUTION & PERSISTENT CACHE
     const resolveAudioPromise = (async (): Promise<AudioSourceInput | null> => {
+      await getAppSettings();
+      const quality = getCachedAppSettings().streamingQuality;
       const hasFreshTrackStream = Boolean(
         track.streamUrl &&
         (Platform.OS === 'web' ||
@@ -695,36 +715,36 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
             Date.now() + MIN_PRELOADED_SOURCE_LIFETIME_MS)
       );
       if (hasFreshTrackStream) {
-        const trackStream = getFreshPreloadedSource(track);
+        const trackStream = getFreshPreloadedSource(track, quality);
         if (trackStream) {
-          cacheAudioSource(track, trackStream);
+          cacheAudioSource(track, trackStream, quality);
           return trackStream;
         }
       }
 
-      const preloadedSource = getWarmedAudioSource(track);
+      const preloadedSource = getWarmedAudioSource(track, quality);
       if (preloadedSource) {
         return preloadedSource;
       }
 
-      const directSavedSource = await getSavedAudioSource(track);
+      const directSavedSource = await getSavedAudioSource(track, quality);
       if (directSavedSource) {
-        cacheAudioSource(track, directSavedSource);
+        cacheAudioSource(track, directSavedSource, quality);
         hasSavedWebDownload = Platform.OS === 'web';
         return directSavedSource;
       }
 
-      const activeWarmup = activeAudioWarmups.get(cacheKey);
+      const activeWarmup = activeAudioWarmups.get(audioQualityCacheKey(cacheKey, quality));
       if (activeWarmup) {
         await activeWarmup;
-        const warmedSource = getWarmedAudioSource(track);
+        const warmedSource = getWarmedAudioSource(track, quality);
         if (warmedSource) return warmedSource;
       }
 
       const downloaded = await getDownloadedTrack(track.spotifyId);
-      const downloadedSavedSource = await getSavedAudioSource(downloaded);
+      const downloadedSavedSource = await getSavedAudioSource(downloaded, quality);
       if (downloadedSavedSource) {
-        cacheAudioSource(track, downloadedSavedSource);
+        cacheAudioSource(track, downloadedSavedSource, quality);
         hasSavedWebDownload = Platform.OS === 'web';
         return downloadedSavedSource;
       }
@@ -741,14 +761,17 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         track.title,
         track.artistName,
         getResolverTrackId(track),
-        track.duration_ms
+        track.duration_ms,
+        track.releaseDate,
+        false,
+        quality
       );
 
       if (resolved?.url) {
         const source: AudioSourceInput = resolved.headers
           ? { uri: resolved.url, headers: resolved.headers }
           : resolved.url;
-        cacheAudioSource(track, source);
+        cacheAudioSource(track, source, quality);
         return source;
       }
 
@@ -952,20 +975,22 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
             if (isRefusal && activeStreamUri) {
               await reportDirectYouTubeStreamRefusal(activeStreamUri, 403);
             }
+            const recoveryQuality = getCachedAppSettings().streamingQuality;
             const recovered = await resolveAudioUrl(
               track.title,
               track.artistName,
               getResolverTrackId(track),
               track.duration_ms,
               undefined,
-              true
+              true,
+              recoveryQuality
             );
             if (get().activeRequestId === requestId && recovered?.url) {
               activeStreamUri = recovered.url;
               const newSource: AudioSourceInput = recovered.headers
                 ? { uri: recovered.url, headers: recovered.headers }
                 : recovered.url;
-              cacheAudioSource(track, newSource);
+              cacheAudioSource(track, newSource, recoveryQuality);
               console.log(
                 `[PlayerStore #${requestId}] Auto-recovered stream for "${track.title}"; resuming at ${lastPosMs}ms`
               );
@@ -1086,20 +1111,22 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       if (isRefusal && activeStreamUri) {
         await reportDirectYouTubeStreamRefusal(activeStreamUri, 403);
       }
+      const fallbackQuality = getCachedAppSettings().streamingQuality;
       const fallbackResolved = await resolveAudioUrl(
         track.title,
         track.artistName,
         getResolverTrackId(track),
         track.duration_ms,
         undefined,
-        true
+        true,
+        fallbackQuality
       );
       if (get().activeRequestId === requestId && fallbackResolved?.url) {
         activeStreamUri = fallbackResolved.url;
         const newSource: AudioSourceInput = fallbackResolved.headers
           ? { uri: fallbackResolved.url, headers: fallbackResolved.headers }
           : fallbackResolved.url;
-        cacheAudioSource(track, newSource);
+        cacheAudioSource(track, newSource, fallbackQuality);
         await loadAndPlay(
           newSource,
           handleStatusUpdate,
@@ -1434,4 +1461,22 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 setRemotePlaybackHandlers({
   next: () => usePlayerStore.getState().playNext(),
   previous: () => usePlayerStore.getState().playPrevious(),
+});
+
+let previousStreamingQuality = getCachedAppSettings().streamingQuality;
+let previousPreloading = getCachedAppSettings().preloadNextTrack;
+subscribeAppSettings((settings) => {
+  const changed = settings.streamingQuality !== previousStreamingQuality ||
+    settings.preloadNextTrack !== previousPreloading;
+  previousStreamingQuality = settings.streamingQuality;
+  previousPreloading = settings.preloadNextTrack;
+  if (!changed) return;
+  queuePreloadKeys.clear();
+  warmedAudioSources.forEach(({ source }) => releasePreloadedAudio(source));
+  warmedAudioSources.clear();
+  preparedNativeAudio.clear();
+  if (settings.preloadNextTrack) {
+    const { queue, queueIndex } = usePlayerStore.getState();
+    warmQueueNeighbors(queue, queueIndex);
+  }
 });

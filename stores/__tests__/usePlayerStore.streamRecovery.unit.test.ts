@@ -239,7 +239,8 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       sampleTrack.spotifyId,
       sampleTrack.duration_ms,
       undefined,
-      true
+      true,
+      'high'
     );
 
     // 5. Verify loadAndPlay was called with recovered source including headers
@@ -329,7 +330,8 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       sampleTrack.spotifyId,
       sampleTrack.duration_ms,
       undefined,
-      true
+      true,
+      'high'
     );
 
     expect(loadAndPlay).toHaveBeenCalledTimes(2);

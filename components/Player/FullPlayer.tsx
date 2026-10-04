@@ -79,6 +79,7 @@ import { MiniPlayer } from './MiniPlayer';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { useLyricsArtworkTransition } from './useLyricsArtworkTransition';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
+import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 import { GlassBackdrop, GlassBackdropScope } from '../native/GlassBackdrop';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -297,6 +298,7 @@ function PlayerGlassButton({
 }
 
 export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
+  const blurInactiveLyrics = useAppSettingsStore((state) => state.settings.blurInactiveLyrics);
   const insets = useSafeAreaInsets();
   const artworkProgress = useSharedValue(0);
   const isOffline = useConnectivityStore((state) => state.status === 'offline');
@@ -1685,7 +1687,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                           </Text>
                         ) : null}
                         {!isLyricsEditing && item.kind === 'lyric' ? (
-                          <SyncedLyricText active={isActive} blurred={!isActive && !isLyricsUserScrolling}>
+                          <SyncedLyricText active={isActive} blurred={blurInactiveLyrics && !isActive && !isLyricsUserScrolling}>
                             {item.text}
                           </SyncedLyricText>
                         ) : <Text

@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { getAppSettings, getCachedAppSettings, type AudioChannelMode, type AudioQuality } from '../settings/appSettings';
 
 export type NativeYouTubeTransferResult = {
   uri?: string;
@@ -38,6 +39,10 @@ export type NativeYouTubePlaybackEvent =
 type NativeSubscription = { remove(): void };
 
 type OpenfyYouTubeNativeModule = {
+  supportsAudioPreferences?: boolean;
+  setNativeChannelModeAsync?(mode: AudioChannelMode): Promise<void>;
+  preloadNativeYouTubeWithQualityAsync?(videoId: string, quality: AudioQuality): Promise<unknown>;
+  resolveAndDownloadWithQualityAsync?(videoId: string, destination: string, chunkBytes: number, quality: AudioQuality): Promise<unknown>;
   downloadGoogleVideoAsync(
     url: string,
     destination: string,
@@ -119,11 +124,28 @@ export const hasNativeYouTubePlayback = (): boolean =>
   Platform.OS === 'ios' &&
   typeof getNativeModule()?.playNativeYouTubeAsync === 'function';
 
+export const hasNativeYouTubeAudioPreferences = (): boolean =>
+  getNativeModule()?.supportsAudioPreferences === true;
+
+export const setNativeYouTubeChannelMode = async (mode: AudioChannelMode): Promise<void> => {
+  const module = getNativeModule();
+  if (!module?.setNativeChannelModeAsync) {
+    if (mode === 'mono') throw new Error('Reinstale o app com o novo build para usar mono.');
+    return;
+  }
+  await module.setNativeChannelModeAsync(mode);
+};
+
 export const preloadNativeYouTubeAudio = async (
-  videoId: string
+  videoId: string,
+  requestedQuality?: AudioQuality
 ): Promise<NativeYouTubePreloadResult | null> => {
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
-  const result = await getNativeModule()?.preloadNativeYouTubeAsync?.(videoId);
+  const quality = requestedQuality ?? (await getAppSettings()).streamingQuality;
+  const module = getNativeModule();
+  const result = module?.preloadNativeYouTubeWithQualityAsync
+    ? await module.preloadNativeYouTubeWithQualityAsync(videoId, quality)
+    : await module?.preloadNativeYouTubeAsync?.(videoId);
   if (!isRecord(result) || typeof result.bytes !== 'number') return null;
   return { bytes: result.bytes };
 };
@@ -150,10 +172,11 @@ export const playYouTubeVideoNatively = async (
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return false;
   const nativeModule = getNativeModule();
   if (!nativeModule?.playNativeYouTubeAsync) return false;
+  const settings = await getAppSettings();
   if (nativeModule.playNativeYouTubeWithMetadataAsync) {
     await nativeModule.playNativeYouTubeWithMetadataAsync(
       videoId,
-      metadataRecord(metadata)
+      { ...metadataRecord(metadata), quality: settings.streamingQuality, channelMode: settings.audioChannelMode }
     );
   } else {
     await nativeModule.playNativeYouTubeAsync(videoId);
@@ -255,12 +278,12 @@ export const resolveAndDownloadYouTubeVideoNatively = async (
   }
   const nativeModule = getNativeModule();
   if (!nativeModule?.resolveAndDownloadGoogleVideoAsync) return null;
+  await getAppSettings();
 
-  const rawResult = await nativeModule.resolveAndDownloadGoogleVideoAsync(
-    videoId,
-    destination,
-    NATIVE_TRANSFER_CHUNK_BYTES
-  );
+  const rawResult = nativeModule.resolveAndDownloadWithQualityAsync
+    ? await nativeModule.resolveAndDownloadWithQualityAsync(videoId, destination,
+        NATIVE_TRANSFER_CHUNK_BYTES, getCachedAppSettings().downloadQuality)
+    : await nativeModule.resolveAndDownloadGoogleVideoAsync(videoId, destination, NATIVE_TRANSFER_CHUNK_BYTES);
   if (!isRecord(rawResult)) return null;
 
   return {

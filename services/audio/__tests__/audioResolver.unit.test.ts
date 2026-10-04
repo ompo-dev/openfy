@@ -57,6 +57,7 @@ describe('resolveAudioUrl', () => {
       artist: 'ÉoDan',
       durationMs: 237000,
       fresh: false,
+      quality: 'high',
       title: 'Mafioso',
       spotifyId: 'spotify_id',
     });
@@ -76,6 +77,7 @@ describe('resolveAudioUrl', () => {
     expect(directYouTubeMock).toHaveBeenCalledWith({
       videoId: '12345678901',
       fresh: false,
+      quality: 'high',
     });
     expect(global.fetch).not.toHaveBeenCalled();
   });
@@ -87,7 +89,7 @@ describe('resolveAudioUrl', () => {
     directYouTubeMock.mockResolvedValue({ videoId: '9ld721cY0Uk', url: 'https://media.test/madruga.m4a', format: 'm4a' });
     expect(await resolveAudioUrl('Tres da Madruga', 'Yago Oproprio', 'yt_9jqQYznGl-w', 150000))
       .toMatchObject({ videoId: '9ld721cY0Uk' });
-    expect(directYouTubeMock).toHaveBeenCalledWith({ videoId: '9ld721cY0Uk', fresh: false });
+    expect(directYouTubeMock).toHaveBeenCalledWith({ videoId: '9ld721cY0Uk', fresh: false, quality: 'high' });
   });
 
   it('does not play the film when source verification fails', async () => {

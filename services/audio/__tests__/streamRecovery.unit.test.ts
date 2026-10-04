@@ -19,6 +19,7 @@ jest.mock('react-native', () => ({
 }));
 
 jest.mock('../nativeYouTubeTransfer', () => ({
+  hasNativeYouTubeAudioPreferences: jest.fn(() => false),
   addNativeYouTubePlaybackListener: jest.fn(() => ({ remove: jest.fn() })),
   getNativeYouTubePlaybackStatus: jest.fn().mockResolvedValue({
     isPlaying: true,

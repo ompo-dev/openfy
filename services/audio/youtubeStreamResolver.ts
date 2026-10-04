@@ -7,6 +7,8 @@ import type {
 } from './mediaReference';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
 import { isTransientNetworkError, retryNetworkOperation } from './networkRetry';
+import { getAppSettings, type AudioQuality } from '../settings/appSettings';
+import { audioQualityCacheKey, streamSelectionQuality } from './audioPreferences';
 
 /**
  * YouTubeStreamResolver — videoId → StreamResolveResult
@@ -95,10 +97,10 @@ type InnertubeClient = {
     videoId: string,
     options: {
       client: string;
-      quality: 'best';
+      quality: 'best' | 'bestefficiency';
       type: 'audio';
     }
-  ): Promise<{ url?: string; mime_type?: string }>;
+    ): Promise<{ url?: string; mime_type?: string; bitrate?: number }>;
   getBasicInfo(videoId: string): Promise<{
     basic_info: {
       title?: string;
@@ -434,8 +436,10 @@ const formatFromMime = (mime?: string): 'mp4' | 'webm' =>
 const doResolve = async (
   videoId: string,
   fresh: boolean,
-  spotifyId?: string
+  spotifyId?: string,
+  quality: AudioQuality = 'high'
 ): Promise<StreamResolveResult> => {
+  const cacheKey = audioQualityCacheKey(videoId, quality);
   if (!fresh) {
     const verdict = verdictCache.get(videoId);
     if (verdict && verdict.expiresAt > Date.now()) {
@@ -444,7 +448,7 @@ const doResolve = async (
   }
 
   if (!fresh) {
-    const cached = streamCache.get(videoId);
+    const cached = streamCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return { status: 'resolved', stream: cached.value };
     }
@@ -488,7 +492,7 @@ const doResolve = async (
       const stream = await retryNetworkOperation(() => withTimeout(
         client.getStreamingData(videoId, {
           client: profile.innertubeClient,
-          quality: 'best',
+          quality: streamSelectionQuality(quality),
           type: 'audio',
         }),
         `${profile.id} stream resolution`,
@@ -557,11 +561,13 @@ const doResolve = async (
         url: stream.url,
         headers: getMediaHeaders(stream.url) ?? {},
         format: formatFromMime(stream.mime_type),
+        quality,
+        bitrate: stream.bitrate,
         client: profile.id,
         expiresAt: Date.now() + STREAM_CACHE_TTL_MS,
         sessionKey: `${profile.id}:session`,
       };
-      streamCache.set(videoId, { value: descriptor, expiresAt: descriptor.expiresAt });
+      streamCache.set(cacheKey, { value: descriptor, expiresAt: descriptor.expiresAt });
       urlToClient.set(stream.url, profile.id);
       verdictCache.delete(videoId);
       await recordSuccess(profile.id, Date.now() - startedAt);
@@ -608,21 +614,23 @@ const doResolve = async (
  */
 export const resolveYouTubeStream = async (
   videoId: string,
-  options?: { fresh?: boolean; spotifyId?: string }
+  options?: { fresh?: boolean; spotifyId?: string; quality?: AudioQuality }
 ): Promise<StreamResolveResult> => {
   const fresh = options?.fresh ?? false;
   const spotifyId = options?.spotifyId;
+  const quality = options?.quality ?? (await getAppSettings()).streamingQuality;
+  const cacheKey = audioQualityCacheKey(videoId, quality);
 
   if (spotifyId) {
     recordDownloadDiagnostic(spotifyId, 'audio.youtube.stream.started', { videoId, fresh });
   }
 
-  let promise = fresh ? undefined : inFlight.get(videoId);
+  let promise = fresh ? undefined : inFlight.get(cacheKey);
   if (!promise) {
-    promise = doResolve(videoId, fresh, spotifyId);
+    promise = doResolve(videoId, fresh, spotifyId, quality);
     if (!fresh) {
-      promise = promise.finally(() => { inFlight.delete(videoId); });
-      inFlight.set(videoId, promise);
+      promise = promise.finally(() => { inFlight.delete(cacheKey); });
+      inFlight.set(cacheKey, promise);
     }
   }
 
@@ -651,7 +659,7 @@ export const reportStreamRefusal = async (url: string, status: number): Promise<
   for (const [vid, cached] of streamCache) {
     if (cached.value.url === url) {
       streamCache.delete(vid);
-      verdictCache.delete(vid);
+      verdictCache.delete(cached.value.videoId);
     }
   }
   innertubeClient = null;

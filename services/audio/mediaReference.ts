@@ -60,6 +60,8 @@ export type YouTubeStreamDescriptor = {
   /** HTTP headers that must accompany every range request to GVS. */
   headers: Record<string, string>;
   format: 'mp4' | 'webm';
+  quality?: import('../settings/appSettings').AudioQuality;
+  bitrate?: number;
   /** The internal stream client ID that minted this URL. */
   client: StreamClientId;
   /** Unix ms after which this descriptor should not be used. */

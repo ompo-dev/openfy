@@ -198,6 +198,7 @@ describe('queueDownloads', () => {
       videoId: '12345678901',
       spotifyId: 'yt_12345678901',
       fresh: false,
+      quality: 'high',
     });
     expect(fileSystemMock.createDownloadResumable).toHaveBeenCalledWith(
       'https://rr1.googlevideo.com/fresh-on-device.m4a?c=IOS',
@@ -483,7 +484,7 @@ describe('queueDownloads', () => {
     expect(mockNativePlayerAndDownload).toHaveBeenCalledTimes(1);
     expect(catalogMock).toHaveBeenCalledTimes(1);
     expect(directAudioMock).toHaveBeenCalledWith({
-      videoId: '_MyOuFWnPPY', spotifyId: 'spotify_native_refusal', fresh: false,
+      videoId: '_MyOuFWnPPY', spotifyId: 'spotify_native_refusal', fresh: false, quality: 'high',
     });
     expect(resolveAudioUrlMock).not.toHaveBeenCalled();
     const diagnostic = await getDownloadDiagnostics('spotify_native_refusal');
@@ -521,7 +522,7 @@ describe('queueDownloads', () => {
     expect(mockNativePlayerAndDownload).toHaveBeenCalledTimes(3);
     expect(resolveAudioUrlMock).not.toHaveBeenCalled();
     expect(directAudioMock).toHaveBeenCalledWith({
-      videoId: '_MyOuFWnPPY', spotifyId: 'spotify_native_fallback', fresh: false,
+      videoId: '_MyOuFWnPPY', spotifyId: 'spotify_native_fallback', fresh: false, quality: 'high',
     });
   });
 

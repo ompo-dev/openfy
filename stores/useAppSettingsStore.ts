@@ -9,7 +9,8 @@ import {
   type AppSettings,
 } from '../services/settings/appSettings';
 import { executeCommand } from '../src/application/commandBus';
-import { log } from '../utils/appLogger';
+import { log, logConfig } from '../utils/appLogger';
+import { setAudioChannelMode } from '../services/audio/playerService';
 
 type AppSettingsState = {
   settings: AppSettings;
@@ -32,9 +33,15 @@ export const useAppSettingsStore = create<AppSettingsState>((set, get) => ({
     if (get().isReady) return Promise.resolve();
     if (hydration) return hydration;
     const finish = log.time('ui', 'settings store hydration');
-    unsubscribeSettings ||= subscribeAppSettings((settings) => set({ settings }));
+    unsubscribeSettings ||= subscribeAppSettings((settings) => {
+      logConfig.capture = settings.captureLogs;
+      logConfig.verbose = settings.verboseLogs;
+      set({ settings });
+    });
     hydration = getAppSettings()
       .then((settings) => {
+        logConfig.capture = settings.captureLogs;
+        logConfig.verbose = settings.verboseLogs;
         set({ settings, isReady: true });
         finish({ ok: true });
       })
@@ -54,7 +61,15 @@ export const useAppSettingsStore = create<AppSettingsState>((set, get) => ({
       idempotencyKey: `${key}:${String(value)}`,
       successTtlMs: 0,
       execute: async () => {
-        const settings = await updateAppSettings({ [key]: value });
+        const previousMode = get().settings.audioChannelMode;
+        let settings: AppSettings;
+        try {
+          if (key === 'audioChannelMode') await setAudioChannelMode(value as AppSettings['audioChannelMode']);
+          settings = await updateAppSettings({ [key]: value });
+        } catch (error) {
+          if (key === 'audioChannelMode') await setAudioChannelMode(previousMode).catch(() => {});
+          throw error;
+        }
         set({ settings, isReady: true });
       },
     });
