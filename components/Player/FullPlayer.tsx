@@ -1216,6 +1216,18 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     return next;
   };
 
+  const applyImportedSegments = (segments: LyricSegment[]) => {
+    draftLyricSegmentsRef.current = segments;
+    setDraftLyricSegments(segments);
+    const selectedIndex = selectedLyricTarget.kind === 'lyric'
+      ? Math.min(selectedLyricTarget.index, Math.max(0, segments.length - 1))
+      : Math.max(0, segments.findIndex((segment) =>
+        playerState.positionMs >= segment.startTimeMs && playerState.positionMs < segment.endTimeMs
+      ));
+    setSelectedLyricTarget({ kind: 'lyric', index: selectedIndex });
+    Haptics.selectionAsync().catch(() => {});
+  };
+
   const getEditorRange = (segments: LyricSegment[]) =>
     selectedLyricTarget.kind === 'lyric'
       ? segments[selectedLyricTarget.index] || null
@@ -1489,7 +1501,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               style={styles.playerScroll}
               contentContainerStyle={[
                 styles.playerScrollContent,
-                { paddingBottom: Math.max(24, insets.bottom + 20) },
+                { paddingTop: isLyricsEditing ? 0 : undefined,
+                  paddingBottom: isLyricsEditing
+                  ? Math.max(16, insets.bottom + 8)
+                  : Math.max(24, insets.bottom + 20) },
               ]}
               contentInsetAdjustmentBehavior="never"
               nestedScrollEnabled
@@ -1753,6 +1768,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 isPlaying={playerState.isPlaying}
                 onTogglePlayPause={() => void handleEditorTogglePlayPause()}
                 waveformSeed={currentTrack.title}
+                segments={draftLyricSegments}
+                onApplySegments={applyImportedSegments}
               />
             ) : (
               <>
