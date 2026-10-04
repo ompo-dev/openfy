@@ -2,7 +2,10 @@
 @preconcurrency import MediaPlayer
 @preconcurrency import UIKit
 import Foundation
+// Standalone CI imports this same API through an Objective-C bridging header.
+#if canImport(ExpoAudio)
 import ExpoAudio
+#endif
 
 public struct OpenfyNowPlayingMetadata: Sendable {
   public let title: String
@@ -52,7 +55,9 @@ public final class OpenfyNativeYouTubePlayer {
     guard let track = tracks.first else { throw StreamTransportError.audioTrackUnavailable }
     if channelProcessor?.isTapInstalled != true {
       channelProcessor?.invalidate()
-      let processor = AudioTapProcessor(player: player)
+      guard let processor = AudioTapProcessor(player: player) else {
+        throw StreamTransportError.audioTrackUnavailable
+      }
       processor.mono = true
       guard processor.installTap(track: track) else { throw StreamTransportError.audioTrackUnavailable }
       channelProcessor = processor

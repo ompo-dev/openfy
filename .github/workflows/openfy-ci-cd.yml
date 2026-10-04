@@ -253,11 +253,21 @@ jobs:
             scripts/check-youtube-playback-duration.swift -o "$RUNNER_TEMP/check-youtube-playback-duration"
           "$RUNNER_TEMP/check-youtube-playback-duration"
 
+      - name: Compilar processamento de canais de audio
+        run: |
+          xcrun clang -c -fobjc-arc -fmodules \
+            -target arm64-apple-ios16.4 \
+            -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            node_modules/expo-audio/ios/AudioTapProcessor.m \
+            -o "$RUNNER_TEMP/AudioTapProcessor.o"
+
       - name: Validar player nativo de streaming
         run: |
+          # Use the real patched Objective-C API without building the Expo/React pods.
           xcrun swiftc -typecheck -parse-as-library \
             -target arm64-apple-ios16.4 \
             -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            -import-objc-header node_modules/expo-audio/ios/AudioTapProcessor.h \
             modules/openfy-youtube/ios/YouTubeRequestRetry.swift \
             modules/openfy-youtube/ios/YouTubePlaybackDurationPolicy.swift \
             modules/openfy-youtube/ios/YouTubeStreamDescriptor.swift \
