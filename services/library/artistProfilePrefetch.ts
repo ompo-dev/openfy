@@ -1,5 +1,13 @@
 import { getCachedArtistImage } from './artistImageCache';
 import { toYouTubeMusicArtistRouteId } from '../youtubeMusicClient';
+import { prefetchImage } from '../images/imagePrefetch';
+
+const withPrefetchedPortrait = <T extends { imageURL?: string; artist?: { imageURL?: string } }>(request: Promise<T>): Promise<T> =>
+  request.then((profile) => {
+    const imageURL = profile.artist?.imageURL || profile.imageURL;
+    if (imageURL) void prefetchImage(imageURL);
+    return profile;
+  });
 
 const loadArtistApis = () => Promise.all([
   import('../../api/artists/artist'),
@@ -42,7 +50,7 @@ const normalize = (value: string) => value
   .replace(/\s+/g, ' ')
   .toLocaleLowerCase();
 
-const getTrackArtists = ({ artistName, artists }: TrackArtistData): ArtistRef[] => {
+const getTrackArtists = ({ artistName, artists }: TrackArtistData, limit = MAX_ACTIVE_ARTISTS): ArtistRef[] => {
   const candidates: ArtistRef[] = artists?.length
     ? artists
     : artistName.split(/\s*(?:,|&| feat\.?)\s*/i).map((name) => ({ name }));
@@ -53,7 +61,7 @@ const getTrackArtists = ({ artistName, artists }: TrackArtistData): ArtistRef[] 
     if (!name || seen.has(key)) return false;
     seen.add(key);
     return true;
-  }).slice(0, MAX_ACTIVE_ARTISTS);
+  }).slice(0, limit);
 };
 
 /** Warm only the current track's credited artists; request/result caches are bounded by their API owners. */
@@ -61,6 +69,13 @@ export const prefetchTrackArtistData = (track: TrackArtistData): void => {
   const artists = getTrackArtists(track);
   if (!artists.length) return;
   const artistApis = getArtistApis();
+  // Extra credits need their photos, not another full catalog for each producer.
+  getTrackArtists(track, 16).slice(MAX_ACTIVE_ARTISTS).forEach((artist) => {
+    void artistApis.then((apis) => getCachedArtistImage(
+      artist.name, () => apis.getArtistCatalogImage(artist.id || '', artist.name),
+      [artist.id || ''].filter(Boolean)
+    )).catch(() => {});
+  });
   const nextProfiles = new Map(artists.map((artist) => {
     const id = artist.id?.trim() || '';
     const spotifyId = /^[A-Za-z0-9]{22}$/.test(id) ? id : '';
@@ -110,13 +125,13 @@ export const prefetchTrackArtistData = (track: TrackArtistData): void => {
       // repeat the same catalog request after playback has already started.
       const youtubeNameRoute = toYouTubeMusicArtistRouteId(undefined, name);
       const profileRequests: Promise<unknown>[] = [
-        apis.getYouTubeMusicArtistProfile(youtubeRouteId),
+        withPrefetchedPortrait(apis.getYouTubeMusicArtistProfile(youtubeRouteId)),
         ...(youtubeNameRoute !== youtubeRouteId
-          ? [apis.getYouTubeMusicArtistProfile(youtubeNameRoute)]
+          ? [withPrefetchedPortrait(apis.getYouTubeMusicArtistProfile(youtubeNameRoute))]
           : []),
         ...(spotifyId
           ? [Promise.all([
-              apis.getArtist(spotifyId),
+              withPrefetchedPortrait(apis.getArtist(spotifyId)),
               apis.getArtistTopTracks(spotifyId, 'BR'),
               apis.getArtistDiscography(spotifyId),
             ])]
@@ -182,13 +197,13 @@ export const prefetchArtistData = (artists: ArtistRef[]): void => {
             () => apis.getArtistCatalogImage(spotifyId || youtubeRouteId, artist.name),
             [artist.id, spotifyId, youtubeRouteId].filter(Boolean)
           ),
-          apis.getYouTubeMusicArtistProfile(youtubeRouteId),
+          withPrefetchedPortrait(apis.getYouTubeMusicArtistProfile(youtubeRouteId)),
           ...(youtubeNameRoute !== youtubeRouteId
-            ? [apis.getYouTubeMusicArtistProfile(youtubeNameRoute)]
+            ? [withPrefetchedPortrait(apis.getYouTubeMusicArtistProfile(youtubeNameRoute))]
             : []),
           ...(spotifyId
             ? [Promise.all([
-                apis.getArtist(spotifyId),
+                withPrefetchedPortrait(apis.getArtist(spotifyId)),
                 apis.getArtistTopTracks(spotifyId, 'BR'),
                 apis.getArtistDiscography(spotifyId),
               ])]

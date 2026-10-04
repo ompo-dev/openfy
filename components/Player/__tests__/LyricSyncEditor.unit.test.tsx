@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import * as Clipboard from 'expo-clipboard';
+import { StyleSheet } from 'react-native';
 import { LyricSyncEditor } from '../LyricSyncEditor';
 
 jest.mock('../../Home/FriendActivityStatus/MusicTimelineSelector', () => ({
@@ -51,6 +52,7 @@ describe('LyricSyncEditor', () => {
 
     await fireEvent.press(screen.getByLabelText('Abrir JSON da letra'));
     expect(screen.getByText('JSON da letra')).toBeTruthy();
+    expect(StyleSheet.flatten(screen.getByTestId('lyrics-json-code-frame').props.style)).toMatchObject({ flex: 1, minHeight: 0 });
     await fireEvent.press(screen.getByLabelText('Editar JSON'));
     expect(screen.getByText('"segments"').props.style.color).toBe('#8BD5FF');
     const input = screen.getByLabelText('Conteudo JSON da letra');

@@ -2,8 +2,6 @@ import * as React from 'react';
 import * as Clipboard from 'expo-clipboard';
 import {
   Alert,
-  KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -16,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { LyricSegment } from '../../services/lyrics/lyricsService';
 import { MusicTimelineSelector } from '../Home/FriendActivityStatus/MusicTimelineSelector';
 import { MusicWaveformReel } from '../Home/FriendActivityStatus/MusicWaveformReel';
+import { SheetFrame } from '../native';
 
 type LyricSyncEditorProps = {
   selectedRange: { startTimeMs: number; endTimeMs: number } | null;
@@ -149,22 +148,8 @@ const JsonEditorModal = ({ visible, initialValue, totalDurationMs, onClose, onAp
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.jsonModalRoot}
-      >
-        <View style={styles.jsonModalCard}>
-          <View style={styles.jsonModalHeader}>
-            <View>
-              <Text style={styles.jsonModalTitle}>JSON da letra</Text>
-              <Text style={styles.jsonModalSubtitle}>Edite tempos e frases sem sair do player</Text>
-            </View>
-            <Pressable accessibilityLabel="Fechar editor JSON" onPress={onClose} style={styles.jsonCloseButton}>
-              <Ionicons name="close" size={22} color="#FFFFFF" />
-            </Pressable>
-          </View>
-
+    <SheetFrame visible={visible} title="JSON da letra" onClose={onClose}
+      closeLabel="Fechar editor JSON" scroll={false}>
           <View style={styles.jsonToolbar}>
             <Pressable accessibilityLabel="Colar JSON" onPress={() => void pasteValue()} style={styles.jsonToolButton}>
               <Ionicons name="clipboard-outline" size={17} color="#FFFFFF" />
@@ -180,7 +165,7 @@ const JsonEditorModal = ({ visible, initialValue, totalDurationMs, onClose, onAp
             </Pressable>
           </View>
 
-          <View style={styles.jsonCodeFrame}>
+          <View testID="lyrics-json-code-frame" style={styles.jsonCodeFrame}>
             {editing ? (
               <View style={styles.jsonEditorStack}>
                 <ScrollView
@@ -229,9 +214,7 @@ const JsonEditorModal = ({ visible, initialValue, totalDurationMs, onClose, onAp
               <Text style={styles.jsonApplyText}>Aplicar</Text>
             </Pressable>
           </View>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
+    </SheetFrame>
   );
 };
 
@@ -381,17 +364,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
   },
-  jsonModalRoot: { backgroundColor: 'rgba(0,0,0,0.62)', flex: 1, justifyContent: 'flex-end' },
-  jsonModalCard: { backgroundColor: '#1B1D24', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '88%', padding: 16 },
-  jsonModalHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 14 },
-  jsonModalTitle: { color: '#FFFFFF', fontSize: 20, fontWeight: '800' },
-  jsonModalSubtitle: { color: 'rgba(255,255,255,0.52)', fontSize: 12, marginTop: 3 },
-  jsonCloseButton: { alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 20, height: 40, justifyContent: 'center', width: 40 },
   jsonToolbar: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  jsonToolButton: { alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10, flexDirection: 'row', gap: 6, justifyContent: 'center', minHeight: 38, paddingHorizontal: 12 },
-  jsonToolText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
-  jsonCodeFrame: { backgroundColor: '#101116', borderColor: 'rgba(139,213,255,0.2)', borderRadius: 14, borderWidth: 1, flex: 1, minHeight: 260, overflow: 'hidden', padding: 12 },
-  jsonEditorStack: { flex: 1, minHeight: 240, position: 'relative' },
+  jsonToolButton: { alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10, flex: 1, minWidth: 0, flexDirection: 'row', gap: 4, justifyContent: 'center', minHeight: 38, paddingHorizontal: 4 },
+  jsonToolText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  jsonCodeFrame: { backgroundColor: '#101116', borderColor: 'rgba(139,213,255,0.2)', borderRadius: 14, borderWidth: 1, flex: 1, minHeight: 0, overflow: 'hidden', padding: 12 },
+  jsonEditorStack: { flex: 1, minHeight: 0, position: 'relative' },
   jsonPreviewContent: { paddingBottom: 12 },
   jsonCode: { color: '#D7DCE7', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12, lineHeight: 19 },
   jsonInputOverlay: { ...StyleSheet.absoluteFill, color: 'transparent', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12, lineHeight: 19, padding: 0, textAlignVertical: 'top' },

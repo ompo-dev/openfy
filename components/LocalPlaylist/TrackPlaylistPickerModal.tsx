@@ -259,7 +259,7 @@ const styles = StyleSheet.create({
     height: 260,
     justifyContent: 'center',
   },
-  list: { height: 360 },
+  list: { flex: 1, minHeight: 0 },
   row: {
     alignItems: 'center',
     borderBottomColor: 'rgba(255,255,255,0.08)',

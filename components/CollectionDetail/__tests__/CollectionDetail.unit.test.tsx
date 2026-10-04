@@ -54,6 +54,7 @@ jest.mock('../../native', () => {
     View,
   } = jest.requireActual<typeof import('react-native')>('react-native');
   return {
+    SheetFrame: jest.requireActual('../../native/SheetFrame').SheetFrame,
     GlassSurface: ({ children, ...props }: any) =>
       React.createElement(View, props, children),
     LoggedPressable: Pressable,

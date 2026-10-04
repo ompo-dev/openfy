@@ -14,6 +14,12 @@ import {
   upsertCatalogTracks,
 } from '@services';
 import { FullPlayer } from '../FullPlayer';
+import { getPlayerAlbum } from '../../../services/library/playerAlbum';
+
+jest.mock('../../../services/library/playerAlbum', () => ({
+  getPlayerAlbum: jest.fn(),
+  getTrackAlbumRouteId: jest.requireActual('../../../services/library/playerAlbum').getTrackAlbumRouteId,
+}));
 
 const mockNavigate = jest.fn();
 const mockReplace = jest.fn();
@@ -115,7 +121,11 @@ jest.mock('../SwipeableArtwork', () => ({
 }));
 jest.mock('../../native', () => {
   const { Pressable, View } = require('react-native');
-  return { GlassSurface: View, LoggedPressable: Pressable };
+  return {
+    GlassSurface: View, LoggedPressable: Pressable,
+    PlayerModal: jest.requireActual('../../native/PlayerModal').PlayerModal,
+    SheetFrame: jest.requireActual('../../native/SheetFrame').SheetFrame,
+  };
 });
 jest.mock('@expo/ui/swift-ui', () => {
   const { View, Text } = require('react-native');
@@ -163,6 +173,7 @@ const makePlayer = (track = {}) => ({
   isPlayerVisible: true,
   playerState: { positionMs: 0, durationMs: 180000, isPlaying: false },
   playTrack: jest.fn().mockResolvedValue(undefined),
+  playWithQueue: jest.fn().mockResolvedValue(undefined),
   togglePlayPause: jest.fn().mockResolvedValue(undefined),
   seekToPosition: jest.fn().mockResolvedValue(undefined),
   playQueueIndex: jest.fn().mockResolvedValue(undefined),
@@ -218,6 +229,7 @@ describe('FullPlayer artist row and YouTube source', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.mocked(getPlayerAlbum).mockReset().mockRejectedValue(new Error('No album'));
     mockSwipeableArtwork.mockClear();
     mockTrackPlaylistPicker.mockClear();
     Platform.OS = 'android';
@@ -258,6 +270,46 @@ describe('FullPlayer artist row and YouTube source', () => {
     jest.mocked(usePlayer).mockReturnValue(makePlayerWithoutTrack() as any);
     await screen.rerender(<FullPlayer visible onClose={jest.fn()} />);
     expect(screen.queryByTestId('player-artwork')).toBeNull();
+  });
+
+  it('opens the album card and preserves the current song through album playback', async () => {
+    const tracks = [{ ...sampleTrack }];
+    jest.mocked(getPlayerAlbum).mockResolvedValue({ id: 'ytalbum_MPREtest', name: 'KM2', imageURL: sampleTrack.imageURL, tracks });
+    const player = makePlayer({ albumId: 'MPREtest', albumName: 'KM2' });
+    jest.mocked(usePlayer).mockReturnValue(player as any);
+    const onClose = jest.fn();
+    const screen = await render(<FullPlayer visible onClose={onClose} />);
+    await waitFor(() => expect(screen.getByText('Clique para ouvir')).toBeTruthy());
+    const details = within(screen.getByTestId('player-artist-details'));
+    expect(details.getByText('Sobre o artista')).toBeTruthy();
+    expect(details.getByText('Ouça o álbum')).toBeTruthy();
+    expect(details.getByText('Créditos')).toBeTruthy();
+    const albumSection = screen.getByTestId('player-album-details');
+    expect(screen.getByTestId('player-artist-details').children.indexOf(albumSection)).toBe(0);
+    await fireEvent.press(screen.getByLabelText('Ouvir álbum KM2'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith('/(tabs)/library/album/ytalbum_MPREtest', { dangerouslySingular: true });
+    expect(player.playWithQueue).toHaveBeenCalledWith(tracks, 0, 'album:ytalbum_MPREtest', { continueCurrent: true });
+    expect(player.playTrack).not.toHaveBeenCalled();
+  });
+
+  it('does not offer an album action when no album is associated', async () => {
+    const screen = await mountPlayer({ albumId: undefined });
+    expect(screen.queryByText('Ouça o álbum')).toBeNull();
+    expect(getPlayerAlbum).not.toHaveBeenCalled();
+  });
+
+  it('does not navigate using an album that finished loading after a track change', async () => {
+    let finish!: (album: any) => void;
+    jest.mocked(getPlayerAlbum).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const screen = await mountPlayer({ albumId: 'MPREtest', albumName: 'KM2' });
+    await fireEvent.press(screen.getByLabelText('Ouvir álbum KM2'));
+    jest.mocked(usePlayer).mockReturnValue(makePlayer({ spotifyId: 'new-song', albumId: undefined }) as any);
+    await screen.rerender(<FullPlayer visible onClose={jest.fn()} />);
+    await act(async () => {
+      finish({ id: 'ytalbum_MPREtest', name: 'KM2', imageURL: '', tracks: [sampleTrack] });
+    });
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 
   it('keeps all artist links in one marquee and opens each artist', async () => {

@@ -15,9 +15,7 @@
 
 import * as React from 'react';
 import {
-  Dimensions,
   Image,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -31,8 +29,7 @@ import { usePlayer } from '@context';
 import { NoteLyricBlocks } from './NoteLyricLine';
 import { MusicTimelineSelector } from './MusicTimelineSelector';
 import { MusicWaveformReel } from './MusicWaveformReel';
-
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+import { GlassSurface, PlayerModal } from '../../native';
 
 interface DownloadedTrack {
   spotifyId: string;
@@ -56,7 +53,6 @@ interface MusicSnippetEditorModalProps {
 }
 
 const SNIPPET_DURATION_MS = 30000; // 30 seconds
-const EDITOR_HEIGHT = Math.min(500, SCREEN_HEIGHT - 24);
 
 export const MusicSnippetEditorModal: React.FC<
   MusicSnippetEditorModalProps
@@ -181,10 +177,8 @@ export const MusicSnippetEditorModal: React.FC<
   };
 
   return (
-    <Modal
+    <PlayerModal
       visible={visible}
-      transparent
-      animationType="slide"
       onRequestClose={onClose}
     >
       <GestureHandlerRootView style={S.gestureHandlerRoot}>
@@ -204,7 +198,11 @@ export const MusicSnippetEditorModal: React.FC<
               <View style={S.handle} />
 
               <View style={S.topBar}>
-                <View style={{ width: 38 }} />
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar editor de trecho" onPress={onClose}>
+                  <GlassSurface glass="regular" isInteractive style={S.confirmBtn}>
+                    <Ionicons name="close" size={22} color="#FFF" />
+                  </GlassSurface>
+                </TouchableOpacity>
                 <View style={S.topTrackInfo}>
                   <Text style={S.trackTitle} numberOfLines={1}>
                     {track.title}
@@ -258,7 +256,7 @@ export const MusicSnippetEditorModal: React.FC<
           </Pressable>
         </Pressable>
       </GestureHandlerRootView>
-    </Modal>
+    </PlayerModal>
   );
 };
 
@@ -268,14 +266,11 @@ const S = StyleSheet.create({
   },
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'flex-end',
   },
   sheet: {
     backgroundColor: '#101116',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    height: EDITOR_HEIGHT,
+    flex: 1,
+    minHeight: 0,
     overflow: 'hidden',
   },
   backgroundCover: {

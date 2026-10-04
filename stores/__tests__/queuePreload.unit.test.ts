@@ -51,15 +51,18 @@ jest.mock('../../services/library/artistProfilePrefetch', () => ({
   prefetchArtistData: jest.fn(),
   prefetchTrackArtistData: jest.fn(),
 }));
+jest.mock('../../services/library/playerAlbum', () => ({ prefetchTrackAlbumData: jest.fn() }));
 
 import {
   DEFAULT_STATE,
   beginTrackChange,
   downloadTrack,
   getDownloadedTrack,
+  getStatus,
   loadAndPlay,
   hasNativeYouTubePlayback,
   preloadAudio,
+  play,
   preloadNativeYouTubeAudio,
   releasePreloadedAudio,
   resolveNativeYouTubeSource,
@@ -71,6 +74,7 @@ import { Platform } from 'react-native';
 import { usePlayerStore, type PlayerTrack } from '../usePlayerStore';
 import { fetchLyrics } from '../../services/lyrics/lyricsService';
 import { prefetchTrackArtistData } from '../../services/library/artistProfilePrefetch';
+import { prefetchTrackAlbumData } from '../../services/library/playerAlbum';
 
 const realPlayTrack = usePlayerStore.getState().playTrack;
 let queueTestRun = 0;
@@ -132,6 +136,7 @@ describe('queue preload window', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.mocked(getStatus).mockReturnValue(DEFAULT_STATE);
     queueTestRun += 1;
     tracks.forEach((track, index) => {
       track.spotifyId = `queue-test-${queueTestRun}-${index}`;
@@ -192,6 +197,53 @@ describe('queue preload window', () => {
     expect(releasePreloadedAudio).toHaveBeenCalledWith(
       'https://media.test/Anterior.m4a'
     );
+  });
+
+  it('keeps the current audio and position while queuing the rest of its album', async () => {
+    const current = tracks[2];
+    const state = { ...DEFAULT_STATE, isLoaded: true, isPlaying: true, positionMs: 67000 };
+    usePlayerStore.setState({ currentTrack: current, playerState: state, activeRequestId: 15 });
+    jest.mocked(getStatus).mockReturnValue(state);
+    await usePlayerStore.getState().playWithQueue(tracks, 0, 'album:test', { continueCurrent: true });
+    const next = usePlayerStore.getState();
+    expect(next.queue).toEqual([current, tracks[0], tracks[1], tracks[3], tracks[4]]);
+    expect(next.queueOriginalOrder).toEqual(next.queue);
+    expect(next.queueSourceId).toBe('album:test');
+    expect(next.queueIndex).toBe(0);
+    expect(next.currentTrack).toBe(current);
+    expect(next.playerState).toBe(state);
+    expect(next.activeRequestId).toBe(15);
+    expect(loadAndPlay).not.toHaveBeenCalled();
+    expect(beginTrackChange).not.toHaveBeenCalled();
+  });
+
+  it('recognizes the same song from another catalog without skipping other songs in a shared video', async () => {
+    const current = { ...tracks[1], spotifyId: 'yt_current', youtubeVideoId: 'sharedvideo', artists: [{ id: '', name: 'Artista' }] };
+    const state = { ...DEFAULT_STATE, isLoaded: true, isPlaying: true, positionMs: 30000 };
+    usePlayerStore.setState({ currentTrack: current, playerState: state });
+    jest.mocked(getStatus).mockReturnValue(state);
+    const albumTracks = [tracks[0], { ...tracks[1], spotifyId: 'spotify-current' }, { ...tracks[2], youtubeVideoId: 'sharedvideo' }];
+    await usePlayerStore.getState().playWithQueue(albumTracks, 0, 'album:test', { continueCurrent: true });
+    expect(usePlayerStore.getState().queue).toEqual([current, albumTracks[0], albumTracks[2]]);
+    expect(loadAndPlay).not.toHaveBeenCalled();
+  });
+
+  it('resumes a paused song without reloading it when listening to its album', async () => {
+    const state = { ...DEFAULT_STATE, isLoaded: true, isPlaying: false, positionMs: 45000 };
+    usePlayerStore.setState({ currentTrack: tracks[1], playerState: state });
+    jest.mocked(getStatus).mockReturnValue(state);
+    await usePlayerStore.getState().playWithQueue(tracks, 0, 'album:test', { continueCurrent: true });
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(usePlayerStore.getState().playerState.positionMs).toBe(45000);
+    expect(loadAndPlay).not.toHaveBeenCalled();
+  });
+
+  it('starts the album normally when the current song does not belong to it', async () => {
+    usePlayerStore.setState({ currentTrack: { ...tracks[1], title: 'Other song' }, playerState: { ...DEFAULT_STATE, isLoaded: true } });
+    await usePlayerStore.getState().playWithQueue(tracks, 0, 'album:test', { continueCurrent: true });
+    expect(usePlayerStore.getState().currentTrack?.spotifyId).toBe(tracks[0].spotifyId);
+    expect(loadAndPlay).toHaveBeenCalledTimes(1);
+    expect(prefetchTrackAlbumData).toHaveBeenCalledWith(usePlayerStore.getState().currentTrack);
   });
 
   it('uses a warmed queue source before checking the persisted download registry', async () => {

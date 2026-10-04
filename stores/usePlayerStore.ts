@@ -63,6 +63,7 @@ import {
   prefetchArtistData,
   prefetchTrackArtistData,
 } from '../services/library/artistProfilePrefetch';
+import { prefetchTrackAlbumData } from '../services/library/playerAlbum';
 
 export type PlayerTrack = TrackCatalogMetadata & {
   spotifyId: string;
@@ -112,7 +113,7 @@ export interface PlayerStoreState {
     tracks: PlayerTrack[],
     startIndex?: number,
     sourceId?: string,
-    options?: { shuffle?: boolean }
+    options?: { shuffle?: boolean; continueCurrent?: boolean }
   ) => Promise<void>;
   playDownloadedTrack: (track: DownloadedTrack) => Promise<void>;
   togglePlayPause: (source?: string) => Promise<void>;
@@ -1038,6 +1039,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     if (success) {
       prefetchTrackArtistData(track);
+      prefetchTrackAlbumData(track);
       void ensurePlaybackDiagnostics(track).catch(() => {});
       recordInteraction(track, 'play').catch(() => {});
       warmQueueNeighbors(get().queue, get().queueIndex);
@@ -1123,6 +1125,26 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
     const originalQueue = [...tracks];
     const shouldShuffle = Boolean(options.shuffle);
+    const current = get().currentTrack;
+    if (options.continueCurrent && current && !get().isLoadingAudio &&
+      get().playerState.isLoaded && !get().playerState.error) {
+      const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+      const isCurrent = (track: PlayerTrack) => normalize(track.title) === normalize(current.title) && (
+        track.spotifyId === current.spotifyId ||
+        Boolean(track.youtubeVideoId && track.youtubeVideoId === current.youtubeVideoId) ||
+        (normalize(track.artists?.[0]?.name || track.artistName.split(',')[0]) ===
+          normalize(current.artists?.[0]?.name || current.artistName.split(',')[0]) &&
+          (!track.duration_ms || !current.duration_ms || Math.abs(track.duration_ms - current.duration_ms) < 4000))
+      );
+      if (originalQueue.some(isCurrent)) {
+        const nextQueue = [current, ...originalQueue.filter((track) => !isCurrent(track))];
+        set({ queue: nextQueue, queueOriginalOrder: nextQueue, queueIndex: 0,
+          queueSourceId: sourceId ?? null, isShuffle: false });
+        if (!getStatus().isPlaying) await get().togglePlayPause('listen-album');
+        warmQueueNeighbors(get().queue, get().queueIndex);
+        return;
+      }
+    }
     const playbackQueue = shouldShuffle && tracks.length > 1
       ? shuffleTracks(originalQueue)
       : originalQueue;

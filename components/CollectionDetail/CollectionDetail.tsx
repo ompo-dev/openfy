@@ -2,7 +2,6 @@ import * as React from 'react';
 import {
   FlatList,
   Keyboard,
-  Modal,
   Platform,
   RefreshControl,
   Share,
@@ -22,7 +21,7 @@ import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { useDownloads, usePlayer } from '@context';
 import type { DownloadTrackInput } from '@services';
 import { formatCollectionMeta, log } from '@utils';
-import { GlassSurface, LoggedPressable, NativeIconButton } from '../native';
+import { GlassSurface, LoggedPressable, NativeIconButton, SheetFrame } from '../native';
 import { DownloadActionIcon } from '../native/DownloadActionIcon';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { TrackRow } from '../common/TrackRow';
@@ -889,20 +888,14 @@ export const CollectionDetail = ({
           )
         }
       />
-      <Modal
-        animationType="slide"
-        onRequestClose={() => setIsArtistListVisible(false)}
-        transparent
+      <SheetFrame
+        title="Artistas"
+        closeLabel="Fechar artistas"
+        artworkURL={imageURL}
+        scroll={false}
+        onClose={() => setIsArtistListVisible(false)}
         visible={isArtistListVisible}
       >
-        <View style={styles.artistModalBackdrop}>
-          <View style={styles.artistModal}>
-            <View style={styles.artistModalHeader}>
-              <Text style={styles.artistModalTitle}>Artistas</Text>
-              <LoggedPressable accessibilityLabel="Fechar artistas" onPress={() => setIsArtistListVisible(false)} style={styles.artistModalClose}>
-                <Ionicons name="close" size={22} color="#FFF" />
-              </LoggedPressable>
-            </View>
             {isLoadingAllArtists ? <Text style={styles.artistModalLoading}>Carregando créditos da playlist…</Text> : null}
             <ScrollView
               contentContainerStyle={{ paddingBottom: Math.max(24, insets.bottom + 12) }}
@@ -939,9 +932,7 @@ export const CollectionDetail = ({
                 );
               })}
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      </SheetFrame>
     </View>
   );
 };
@@ -986,13 +977,8 @@ const styles = StyleSheet.create({
   listFooter: { paddingTop: 18 },
   showMoreTracks: { alignSelf: 'center', paddingHorizontal: 20, paddingVertical: 14 },
   showMoreTracksText: { color: '#1ED760', fontFamily: 'SF-Semibold', fontSize: 15 },
-  artistModalBackdrop: { backgroundColor: 'rgba(0,0,0,0.72)', flex: 1, justifyContent: 'flex-end' },
-  artistModal: { backgroundColor: '#171717', borderColor: 'rgba(255,255,255,0.12)', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: StyleSheet.hairlineWidth, elevation: 24, flexShrink: 1, maxHeight: '88%', minHeight: 260, paddingHorizontal: 18, paddingTop: 16 },
   artistModalScroll: { flex: 1, minHeight: 0 },
-  artistModalHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  artistModalTitle: { color: '#FFF', fontFamily: 'SF-Bold', fontSize: 20 },
   artistModalLoading: { color: 'rgba(255,255,255,0.62)', fontFamily: 'SF-Regular', fontSize: 12, paddingBottom: 8 },
-  artistModalClose: { alignItems: 'center', height: 40, justifyContent: 'center', width: 40 },
   artistModalRow: { alignItems: 'center', borderBottomColor: 'rgba(255,255,255,0.1)', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 12, minHeight: 64, paddingVertical: 8 },
   artistModalImage: { borderRadius: 24, height: 46, width: 46 },
   artistModalFallback: { alignItems: 'center', backgroundColor: '#343434', justifyContent: 'center' },

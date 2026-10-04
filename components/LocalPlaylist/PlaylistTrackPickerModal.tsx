@@ -160,7 +160,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   trackList: {
-    height: 390,
+    flex: 1,
+    minHeight: 0,
   },
   trackRow: {
     alignItems: 'center',

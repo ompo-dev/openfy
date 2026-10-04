@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
+import { prefetchImage } from '../images/imagePrefetch';
 
 const STORAGE_KEY_PREFIX = 'openfy_artist_image_verified_v4:';
 const IMAGE_CACHE_TTL_MS = 6 * 60 * 60_000;
@@ -34,6 +35,7 @@ export const rememberCachedArtistImage = async (
 ) => {
   const id = getArtistCacheId(artistName);
   if (!id || !isRemoteImage(imageURL)) return;
+  void prefetchImage(imageURL);
   const cacheIds = uniqueCacheIds(artistName, aliases);
   cacheIds.forEach((cacheId) => imageCache.set(cacheId, imageURL, IMAGE_CACHE_TTL_MS));
   const spotifyArtistId = getSpotifyArtistAlias(aliases);
@@ -81,7 +83,7 @@ export const getCachedArtistImage = async (
       ? [`youtube:${youtubeArtistId}`, youtubeArtistId]
       : cacheIds;
 
-  return imageCache.getOrLoad(cacheKey, async () => {
+  const imageURL = await imageCache.getOrLoad(cacheKey, async () => {
     try {
       const stored = await AsyncStorage.multiGet(storageIds.map((cacheId) =>
         `${STORAGE_KEY_PREFIX}${encodeURIComponent(cacheId)}`
@@ -99,6 +101,8 @@ export const getCachedArtistImage = async (
     await rememberCachedArtistImage(artistName, imageURL, aliases);
     return imageURL;
   }, IMAGE_CACHE_TTL_MS);
+  void prefetchImage(imageURL);
+  return imageURL;
 };
 
 /** Clears only the process cache; persisted artist artwork remains intact. */

@@ -12,9 +12,7 @@ import {
   Animated,
   Alert,
   FlatList,
-  KeyboardAvoidingView,
   Linking,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -67,7 +65,9 @@ import {
   toDownloadTrackInput,
   upsertCatalogTracks,
 } from '@services';
-import { GlassSurface, LoggedPressable } from '../native';
+import { GlassSurface, LoggedPressable, PlayerModal, SheetFrame } from '../native';
+import { getPlayerAlbum, getTrackAlbumRouteId, type PlayerAlbum } from '../../services/library/playerAlbum';
+import { PlayerDetailCard } from './PlayerDetailCard';
 import { TrackPlaylistPickerModal } from '../LocalPlaylist/TrackPlaylistPickerModal';
 import { LyricSyncEditor } from './LyricSyncEditor';
 import { SyncedLyricText } from './SyncedLyricText';
@@ -307,6 +307,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     currentTrack,
     playerState,
     playTrack,
+    playWithQueue,
     togglePlayPause,
     seekToPosition,
     playQueueIndex,
@@ -346,6 +347,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [controlsBottomOffset, setControlsBottomOffset] = React.useState<number | null>(null);
   const [primaryArtistImage, setPrimaryArtistImage] = React.useState('');
   const [artistImages, setArtistImages] = React.useState<Record<string, string>>({});
+  const [playerAlbum, setPlayerAlbum] = React.useState<PlayerAlbum | null>(null);
+  const [isStartingAlbum, setIsStartingAlbum] = React.useState(false);
   const [primaryArtistBiography, setPrimaryArtistBiography] = React.useState('');
   const [isBiographyExpanded, setIsBiographyExpanded] = React.useState(false);
   const [previewCurrentLineCount, setPreviewCurrentLineCount] = React.useState(0);
@@ -426,6 +429,38 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       .map((name) => ({ id: '', name: name.trim() }));
   }, [currentTrack]);
   const primaryArtist = artistLinks[0];
+  const albumRouteId = getTrackAlbumRouteId(currentTrack);
+
+  React.useEffect(() => {
+    let active = true;
+    setPlayerAlbum(null);
+    setIsStartingAlbum(false);
+    if (albumRouteId) {
+      void getPlayerAlbum(albumRouteId).then((album) => {
+        if (active) setPlayerAlbum(album);
+      }).catch(() => {});
+    }
+    return () => { active = false; };
+  }, [albumRouteId]);
+
+  const handleListenAlbum = async () => {
+    if (!albumRouteId || isStartingAlbum) return;
+    const trackKey = currentTrackKey;
+    setIsStartingAlbum(true);
+    void Haptics.selectionAsync().catch(() => {});
+    try {
+      const album = playerAlbum || await getPlayerAlbum(albumRouteId);
+      if (getTrackKey(currentTrackRef.current) !== trackKey) return;
+      if (!album.tracks.length) throw new Error('Album sem faixas');
+      onClose();
+      openDetail('album', album.id);
+      await playWithQueue(album.tracks, 0, `album:${album.id}`, { continueCurrent: true });
+    } catch {
+      Alert.alert('Não foi possível ouvir o álbum', 'Tente novamente em instantes.');
+    } finally {
+      setIsStartingAlbum(false);
+    }
+  };
 
   React.useEffect(() => {
     let active = true;
@@ -461,7 +496,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
   React.useEffect(() => {
     let active = true;
-    if (!visible) return () => { active = false; };
     const loadImages = async () => {
       await Promise.all(artistLinks.map(async (artist) => {
         const key = artist.name;
@@ -475,7 +509,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     };
     void loadImages().catch(() => {});
     return () => { active = false; };
-  }, [currentTrackKey, artistLinks, visible]);
+  }, [currentTrackKey, artistLinks]);
 
   const handleArtistPress = React.useCallback(
     async (artistId: string, artistName: string) => {
@@ -1363,33 +1397,35 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
   const renderArtistDetails = () => (
     <View testID="player-artist-details" style={styles.artistDetailsSection}>
+      {albumRouteId && (playerAlbum?.name || currentTrack.albumName) ? (
+        <View testID="player-album-details" style={styles.albumDetailsSection}>
+          <Text style={styles.artistDetailsHeading}>Ouça o álbum</Text>
+          <PlayerDetailCard
+            label={`Ouvir álbum ${playerAlbum?.name || currentTrack.albumName}`}
+            role="Clique para ouvir"
+            name={playerAlbum?.name || currentTrack.albumName || ''}
+            imageURL={playerAlbum?.imageURL || artworkUrl}
+            fallbackIcon="disc"
+            disabled={isStartingAlbum}
+            onPress={() => void handleListenAlbum()}
+            trailing={
+              <GlassSurface glass="regular" style={styles.headerIconButton}>
+                {isStartingAlbum ? <ActivityIndicator color="#FFF" size="small" /> :
+                  <Ionicons name="play" size={22} color="#FFF" />}
+              </GlassSurface>
+            }
+          />
+        </View>
+      ) : null}
       <Text style={styles.artistDetailsHeading}>Sobre o artista</Text>
-      <LoggedPressable
-        accessibilityLabel={`Abrir perfil de ${primaryArtist?.name || 'artista principal'}`}
+      <PlayerDetailCard
+        label={`Abrir perfil de ${primaryArtist?.name || 'artista principal'}`}
+        role="Artista principal"
+        name={primaryArtist?.name || 'Artista não identificado'}
+        imageURL={primaryArtistImage}
         disabled={!primaryArtist}
         onPress={() => primaryArtist && void handleArtistPress(primaryArtist.id, primaryArtist.name)}
-        style={styles.primaryArtistCard}
-      >
-        {primaryArtistImage ? (
-          <SkeletonImage
-            source={{ uri: primaryArtistImage }}
-            cachePolicy="memory-disk"
-            contentFit="cover"
-            style={styles.primaryArtistImage}
-          />
-        ) : (
-          <View style={[styles.primaryArtistImage, styles.primaryArtistFallback]}>
-            <Ionicons name="person" size={24} color="#DDD" />
-          </View>
-        )}
-        <View style={styles.primaryArtistCopy}>
-          <Text style={styles.artistRole}>Artista principal</Text>
-          <Text numberOfLines={1} style={styles.primaryArtistName}>
-            {primaryArtist?.name || 'Artista não identificado'}
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.6)" />
-      </LoggedPressable>
+      />
       {primaryArtistBiography ? (
         <View style={styles.artistBiography}>
           <Text
@@ -1444,10 +1480,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   );
 
   return (
-    <Modal
+    <PlayerModal
       visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
       onRequestClose={onClose}
       onShow={artworkTransition.captureFrames}
     >
@@ -1917,164 +1951,72 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             visible={isPlaylistPickerVisible}
           />
 
-          {/* =========================================================
-           * YOUTUBE ACTIONS PICKER SHEET MODAL (Web & Cross-Platform)
-           * ========================================================= */}
-          <Modal
+          <SheetFrame
             visible={isActionModalVisible}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setIsActionModalVisible(false)}
+            title={currentTrack.title}
+            artworkURL={artworkUrl}
+            onClose={() => setIsActionModalVisible(false)}
           >
-            <Pressable
-              style={styles.modalOverlay}
-              onPress={() => setIsActionModalVisible(false)}
-            >
-              <View style={styles.actionSheetWrapper}>
-                <GlassSurface glass="thick" style={styles.actionSheetContainer}>
-                  <View style={styles.actionSheetHeader}>
-                    <View style={styles.youtubeCircleBadge}>
-                      <Ionicons name="logo-youtube" size={26} color="#FF0000" />
-                    </View>
-                    <Text style={styles.actionSheetTitle} numberOfLines={1}>
-                      {currentTrack.title}
-                    </Text>
-                    <Text style={styles.actionSheetSubtitle}>
-                      Fonte de áudio correspondente no YouTube
-                    </Text>
-                  </View>
-
-                  <View style={styles.actionSheetDivider} />
-
-                  <LoggedPressable
-                    style={styles.actionSheetItem}
-                    onPress={handleGoToYoutube}
-                  >
-                    <Ionicons name="open-outline" size={20} color="#FFFFFF" />
-                    <Text style={styles.actionSheetItemText}>
-                      Ir para o vídeo do YouTube
-                    </Text>
-                  </LoggedPressable>
-
-                  <View style={styles.actionSheetDivider} />
-
-                  <LoggedPressable
-                    style={styles.actionSheetItem}
-                    onPress={handleOpenEditLinkModal}
-                  >
-                    <Ionicons name="create-outline" size={20} color="#FFFFFF" />
-                    <Text style={styles.actionSheetItemText}>
-                      Editar link do YouTube
-                    </Text>
-                  </LoggedPressable>
-
-                  <View style={styles.actionSheetDivider} />
-
-                  <LoggedPressable
-                    style={[
-                      styles.actionSheetItem,
-                      styles.actionSheetCancelItem,
-                    ]}
-                    onPress={() => setIsActionModalVisible(false)}
-                  >
-                    <Text style={styles.actionSheetCancelText}>Cancelar</Text>
-                  </LoggedPressable>
-                </GlassSurface>
+            <View style={styles.actionSheetHeader}>
+              <View style={styles.youtubeCircleBadge}>
+                <Ionicons name="logo-youtube" size={26} color="#FF0000" />
               </View>
-            </Pressable>
-          </Modal>
-
-          {/* =========================================================
-           * EDIT YOUTUBE LINK MODAL (SwiftUI Glass Style)
-           * ========================================================= */}
-          <Modal
+              <Text style={styles.actionSheetSubtitle}>Fonte de áudio correspondente no YouTube</Text>
+            </View>
+            <LoggedPressable style={styles.actionSheetItem} onPress={handleGoToYoutube}>
+              <Ionicons name="open-outline" size={20} color="#FFFFFF" />
+              <Text style={styles.actionSheetItemText}>Ir para o vídeo do YouTube</Text>
+            </LoggedPressable>
+            <View style={styles.actionSheetDivider} />
+            <LoggedPressable style={styles.actionSheetItem} onPress={handleOpenEditLinkModal}>
+              <Ionicons name="create-outline" size={20} color="#FFFFFF" />
+              <Text style={styles.actionSheetItemText}>Editar link do YouTube</Text>
+            </LoggedPressable>
+            <View style={styles.actionSheetDivider} />
+            <LoggedPressable style={[styles.actionSheetItem, styles.actionSheetCancelItem]}
+              onPress={() => setIsActionModalVisible(false)}>
+              <Text style={styles.actionSheetCancelText}>Cancelar</Text>
+            </LoggedPressable>
+          </SheetFrame>
+          <SheetFrame
             visible={isEditModalVisible}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setIsEditModalVisible(false)}
+            title="Editar link do YouTube"
+            artworkURL={artworkUrl}
+            onClose={() => setIsEditModalVisible(false)}
           >
-            <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-              keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
-              style={styles.editKeyboardAvoidingView}
-            >
-              <Pressable
-                style={[styles.modalOverlay, styles.editModalOverlay]}
-                onPress={() => setIsEditModalVisible(false)}
-              >
-                <Pressable
-                  style={styles.editModalContainer}
-                  onPress={(e) => e.stopPropagation()}
-                >
-                  <GlassSurface glass="thick" style={styles.editModalCard}>
-                    <View style={styles.editModalHeader}>
-                      <View style={styles.youtubeCircleBadge}>
-                        <Ionicons name="logo-youtube" size={28} color="#FF0000" />
-                      </View>
-                      <Text style={styles.editModalTitle}>
-                        Editar Link do YouTube
-                      </Text>
-                      <Text style={styles.editModalSubtitle}>
-                        Altere o link do vídeo para atualizar instantaneamente o
-                        áudio e a reprodução desta música.
-                      </Text>
-                    </View>
-
-                    <View style={styles.inputWrapper}>
-                      <Ionicons
-                        name="link"
-                        size={18}
-                        color="rgba(255,255,255,0.6)"
-                        style={styles.inputIcon}
-                      />
-                      <TextInput
-                        value={customLinkInput}
-                        onChangeText={setCustomLinkInput}
-                        placeholder="https://www.youtube.com/watch?v=..."
-                        placeholderTextColor="rgba(255,255,255,0.4)"
-                        style={styles.textInput}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        selectTextOnFocus
-                        returnKeyType="done"
-                      />
-                    </View>
-
-                    <View style={styles.modalButtonRow}>
-                      <LoggedPressable
-                        style={styles.modalCancelBtn}
-                        onPress={() => setIsEditModalVisible(false)}
-                      >
-                        <Text style={styles.modalCancelBtnText}>Cancelar</Text>
-                      </LoggedPressable>
-
-                      <LoggedPressable
-                        style={styles.modalConfirmBtn}
-                        onPress={handleConfirmEditLink}
-                        disabled={isUpdatingAudio}
-                      >
-                        {isUpdatingAudio ? (
-                          <ActivityIndicator size="small" color="#000000" />
-                        ) : (
-                          <Text style={styles.modalConfirmBtnText}>
-                            Atualizar Áudio
-                          </Text>
-                        )}
-                      </LoggedPressable>
-                    </View>
-                  </GlassSurface>
-                </Pressable>
-              </Pressable>
-            </KeyboardAvoidingView>
-          </Modal>
+            <View style={styles.inputWrapper}>
+              <Ionicons name="link" size={18} color="rgba(255,255,255,0.6)" style={styles.inputIcon} />
+              <TextInput
+                value={customLinkInput}
+                onChangeText={setCustomLinkInput}
+                placeholder="https://www.youtube.com/watch?v=..."
+                placeholderTextColor="rgba(255,255,255,0.4)"
+                style={styles.textInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+                selectTextOnFocus
+                returnKeyType="done"
+              />
+            </View>
+            <View style={styles.modalButtonRow}>
+              <LoggedPressable style={styles.modalCancelBtn} onPress={() => setIsEditModalVisible(false)}>
+                <Text style={styles.modalCancelBtnText}>Cancelar</Text>
+              </LoggedPressable>
+              <LoggedPressable style={styles.modalConfirmBtn} onPress={handleConfirmEditLink} disabled={isUpdatingAudio}>
+                {isUpdatingAudio ? <ActivityIndicator size="small" color="#000000" /> :
+                  <Text style={styles.modalConfirmBtnText}>Atualizar Áudio</Text>}
+              </LoggedPressable>
+            </View>
+          </SheetFrame>
           {artworkTransition.overlay}
         </View>
       </GestureHandlerRootView>
-    </Modal>
+    </PlayerModal>
   );
 };
 
 const styles = StyleSheet.create({
+  albumDetailsSection: { marginBottom: 22 },
   gestureRoot: {
     flex: 1,
   },
@@ -2201,8 +2143,6 @@ const styles = StyleSheet.create({
   lyricPreviewPlaceholder: { color: 'rgba(255,255,255,0.5)', fontSize: 14, lineHeight: 20 },
   artistDetailsSection: { paddingHorizontal: 4, paddingTop: 18 },
   artistDetailsHeading: { color: '#FFFFFF', fontSize: 21, fontWeight: '700', marginBottom: 12 },
-  primaryArtistCard: { alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.11)', borderRadius: 16, flexDirection: 'row', gap: 12, minHeight: 78, padding: 12 },
-  primaryArtistImage: { borderRadius: 12, height: 54, width: 54 },
   primaryArtistFallback: { alignItems: 'center', backgroundColor: '#3A3A3A', justifyContent: 'center' },
   primaryArtistCopy: { flex: 1, gap: 4 },
   artistRole: { color: 'rgba(255,255,255,0.58)', fontSize: 12 },
@@ -2442,27 +2382,6 @@ const styles = StyleSheet.create({
   glassButtonDisabled: {
     opacity: 0.34,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
-  editKeyboardAvoidingView: { flex: 1, justifyContent: 'flex-end' },
-  editModalOverlay: { justifyContent: 'flex-end', paddingBottom: 8 },
-  actionSheetWrapper: {
-    width: '100%',
-    maxWidth: 480,
-    paddingHorizontal: 16,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
-  },
-  actionSheetContainer: {
-    borderRadius: 24,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(20, 24, 33, 0.92)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
-  },
   actionSheetHeader: {
     alignItems: 'center',
     paddingVertical: 18,
@@ -2478,12 +2397,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.16)',
-  },
-  actionSheetTitle: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '700',
-    textAlign: 'center',
   },
   actionSheetSubtitle: {
     color: 'rgba(255, 255, 255, 0.6)',
@@ -2518,42 +2431,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
-  },
-  editModalContainer: {
-    width: '100%',
-    maxWidth: 440,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-  },
-  editModalCard: {
-    borderRadius: 28,
-    padding: 24,
-    backgroundColor: 'rgba(18, 22, 30, 0.94)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.5,
-    shadowRadius: 32,
-    elevation: 20,
-  },
-  editModalHeader: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  editModalTitle: {
-    color: '#FFFFFF',
-    fontSize: 19,
-    fontWeight: '700',
-    letterSpacing: -0.2,
-  },
-  editModalSubtitle: {
-    color: 'rgba(255, 255, 255, 0.65)',
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '500',
-    textAlign: 'center',
-    marginTop: 6,
   },
   inputWrapper: {
     flexDirection: 'row',

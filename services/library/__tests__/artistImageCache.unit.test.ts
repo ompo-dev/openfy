@@ -1,4 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { prefetchImage } from '../../images/imagePrefetch';
+jest.mock('../../images/imagePrefetch', () => ({ prefetchImage: jest.fn().mockResolvedValue(true) }));
 
 import {
   _clearArtistImageMemoryCacheForTests,
@@ -7,6 +9,7 @@ import {
 
 describe('getCachedArtistImage', () => {
   beforeEach(async () => {
+    jest.clearAllMocks();
     await AsyncStorage.clear();
     _clearArtistImageMemoryCacheForTests();
   });
@@ -24,6 +27,17 @@ describe('getCachedArtistImage', () => {
 
     expect(firstLookup).toHaveBeenCalledTimes(1);
     expect(secondLookup).not.toHaveBeenCalled();
+    expect(prefetchImage).toHaveBeenCalledWith('https://images.test/artist.jpg');
+  });
+
+  it('warms the persisted profile image bytes again after a new app launch', async () => {
+    await getCachedArtistImage('Artist', async () => 'https://images.test/portrait.jpg', ['spotifyArtist0000000000']);
+    _clearArtistImageMemoryCacheForTests();
+    jest.mocked(prefetchImage).mockClear();
+    const load = jest.fn();
+    expect(await getCachedArtistImage('Artist', load, ['spotifyArtist0000000000'])).toBe('https://images.test/portrait.jpg');
+    expect(load).not.toHaveBeenCalled();
+    expect(prefetchImage).toHaveBeenCalledWith('https://images.test/portrait.jpg');
   });
 
   it('memoizes a missing photo during the current session', async () => {

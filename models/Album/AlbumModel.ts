@@ -1,3 +1,5 @@
+import type { TrackModel } from '../Track/TrackModel';
+
 export type AlbumModel = {
   id: string;
   type: 'album';
@@ -8,13 +10,7 @@ export type AlbumModel = {
   releaseDate: string;
   tracks: {
     total: number;
-    items: {
-      id: string;
-      title: string;
-      subtitle: string;
-      imageURL?: string;
-      explicit?: boolean;
-    }[];
+    items: TrackModel[];
   };
   duration: number;
   copyrights: { text: string; type: string }[];

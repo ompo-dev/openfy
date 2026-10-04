@@ -15,7 +15,6 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -32,7 +31,7 @@ import { usePlayer } from '@context';
 import { MarqueeText } from '../../common/MarqueeText';
 import { getNoteColorTheme } from '../../../utils/colorContrast';
 import { NativeIconButton } from '../../native/NativeButtons';
-import { GlassSurface } from '../../native/GlassSurface';
+import { PlayerModal, SheetFrame } from '../../native';
 import { MiniPlayer } from '../../Player/MiniPlayer';
 import { MusicSnippetEditorModal } from './MusicSnippetEditorModal';
 import { SoundWaveIcon } from './NoteBubble';
@@ -406,10 +405,8 @@ export const MyNoteModal = ({
       isPlaying;
 
     return (
-      <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-        <Pressable style={S.overlay} onPress={onClose}>
-          <Pressable style={S.publishedSheet} onPress={(e) => e.stopPropagation()}>
-            <View style={S.handle} />
+      <SheetFrame visible={visible} title="Sua nota" onClose={onClose}>
+          <View style={S.publishedSheet}>
 
             {/* Identical note bubble component as in home carousel */}
             <IdenticalNoteBubble
@@ -464,9 +461,8 @@ export const MyNoteModal = ({
             >
               <Text style={S.deleteText}>Excluir nota</Text>
             </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+          </View>
+      </SheetFrame>
     );
   }
 
@@ -474,7 +470,7 @@ export const MyNoteModal = ({
   // SCREEN 2: Note Creator (Spacious Comfortable Height Modal Card)
   // ──────────────────────────────────────────────────────────────────────────
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <PlayerModal visible={visible} onRequestClose={onClose}>
       <Pressable style={S.overlay} onPress={onClose}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -725,10 +721,8 @@ export const MyNoteModal = ({
       {/* ────────────────────────────────────────────────────────────────── */}
       {/* MUSIC PICKER OVERLAY MODAL                                          */}
       {/* ────────────────────────────────────────────────────────────────── */}
-      <Modal
+      <PlayerModal
         visible={isMusicPickerVisible}
-        transparent
-        animationType="slide"
         onRequestClose={() => setIsMusicPickerVisible(false)}
       >
         <View style={S.musicPickerOverlay}>
@@ -839,7 +833,7 @@ export const MyNoteModal = ({
             )}
           </View>
         </View>
-      </Modal>
+      </PlayerModal>
 
       {/* ────────────────────────────────────────────────────────────────── */}
       {/* MUSIC 30-SECOND SNIPPET MINI-EDITOR MODAL                           */}
@@ -860,7 +854,7 @@ export const MyNoteModal = ({
           setIsSnippetEditorVisible(false);
         }}
       />
-    </Modal>
+    </PlayerModal>
   );
 };
 
@@ -870,15 +864,10 @@ export const MyNoteModal = ({
 const S = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'flex-end',
   },
 
   // Published Sheet
   publishedSheet: {
-    backgroundColor: '#1C1C1E',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
     paddingBottom: 40,
     paddingHorizontal: 22,
     alignItems: 'center',
@@ -947,21 +936,16 @@ const S = StyleSheet.create({
 
   // Spacious Comfortable Height Responsive Creator Modal Card
   creatorModalContainer: {
-    justifyContent: 'flex-end',
+    flex: 1,
     width: '100%',
   },
   creatorModalCard: {
-    backgroundColor: '#141416',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    flex: 1,
     paddingTop: 16,
     paddingBottom: Platform.OS === 'ios' ? 32 : 20,
     paddingHorizontal: 20,
     width: '100%',
     minHeight: 330,
-    maxHeight: '88%',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
   },
   creatorModalCardExpanded: {
     minHeight: 440,
@@ -1176,14 +1160,9 @@ const S = StyleSheet.create({
   // Music Picker Sheet
   musicPickerOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'flex-end',
   },
   musicPickerSheet: {
-    backgroundColor: '#1C1C1E',
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    height: '88%',
+    flex: 1,
     paddingTop: 12,
   },
   musicHandleRow: {

@@ -9,9 +9,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Modal,
-  Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -29,6 +26,7 @@ import { resolveNoteTailTuning } from './noteTailTuning';
 import type { NoteTailTuning } from './noteTailTuning';
 import { useConnectivityStore } from '../../../stores/useConnectivityStore';
 import { showOfflineActionMessage } from '../../../services/network/offlineFeedback';
+import { SheetFrame } from '../../native';
 
 const PLAYBACK_BUTTON_SIZE = 36;
 const PLAYBACK_RING_RADIUS = 15;
@@ -260,20 +258,12 @@ export const FriendNoteSheet = ({
     : 0;
 
   return (
-    <Modal
+    <SheetFrame
       visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={handleClose}
+      title={note.user.name}
+      onClose={handleClose}
+      artworkURL={note.note.imageUrl}
     >
-      <Pressable style={S.overlay} onPress={handleClose}>
-        <Pressable style={S.sheet} onPress={(e) => e.stopPropagation()}>
-          <ScrollView
-            contentContainerStyle={S.sheetContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {/* Drag handle */}
-            <View style={S.handle} />
 
             {/* Header: "Flavia Helena · 4 h · Ouvindo no Spotify" */}
             <Text style={S.header} numberOfLines={1}>
@@ -335,10 +325,7 @@ export const FriendNoteSheet = ({
             </View>
 
             <NoteLyricInline text={displayLyric} />
-          </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
+    </SheetFrame>
   );
 };
 
