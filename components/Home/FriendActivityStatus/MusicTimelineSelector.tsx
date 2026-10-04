@@ -96,6 +96,7 @@ function TimelineWindowPicker({
     return (
       <View style={styles.durationBadge}>
         <Text style={styles.durationBadgeText}>{label}</Text>
+        <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.72)" />
       </View>
     );
   }
@@ -115,7 +116,7 @@ function TimelineWindowPicker({
                   swiftFont?.({ size: 11, weight: 'bold' }),
                 ].filter(Boolean)}
               >
-                {label}
+                {label} s
               </SwiftText>
             }
             modifiers={[swiftButtonStyle?.('plain')].filter(Boolean)}
@@ -141,7 +142,8 @@ function TimelineWindowPicker({
         onPress={() => setFallbackMenuVisible(true)}
         style={styles.durationBadge}
       >
-        <Text style={styles.durationBadgeText}>{label}</Text>
+        <Text style={styles.durationBadgeText}>{label} s</Text>
+        <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.72)" />
       </LoggedPressable>
       <Modal
         transparent
@@ -186,21 +188,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
     marginTop: 12,
-    paddingHorizontal: 4,
-    gap: 12,
+    paddingHorizontal: 0,
+    gap: 10,
   },
   durationBadge: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.4)',
+    minWidth: 52,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
+    flexDirection: 'row',
+    gap: 2,
     justifyContent: 'center',
+    paddingHorizontal: 7,
   },
   durationBadgeText: {
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: 'SimplyRounded-Bold',
     fontWeight: '700',
   },
@@ -213,23 +219,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   progressLineBg: {
-    height: 3,
+    height: 6,
     backgroundColor: 'rgba(255, 255, 255, 0.22)',
-    borderRadius: 1.5,
+    borderRadius: 3,
     position: 'relative',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   activeSegment: {
     position: 'absolute',
-    height: 4.5,
+    height: 6,
     backgroundColor: '#FFFFFF',
     borderRadius: 2.25,
   },
   playButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',

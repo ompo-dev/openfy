@@ -34,6 +34,7 @@ import {
 } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import Slider from '@react-native-community/slider';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import {
@@ -90,29 +91,30 @@ type FullPlayerProps = {
 };
 
 const LyricsViewport = ({ children }: React.PropsWithChildren) => {
-  if (Platform.OS === 'web') {
-    return (
-      <View
-        style={[
-          styles.lyricsMainContainer,
-          {
-            maskImage:
-              'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 14%, rgba(0,0,0,1) 86%, transparent 100%)',
-            WebkitMaskImage:
-              'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 14%, rgba(0,0,0,1) 86%, transparent 100%)',
-          } as any,
-        ]}
-      >
-        {children}
-      </View>
-    );
-  }
-
-  // A composited native mask can disappear when Fabric updates the scrolling
-  // lyrics. Keep the list on a normal, bounded native surface instead.
   return (
-    <View testID="player-lyrics-viewport" style={styles.lyricsMainContainer}>
+    <View
+      testID="player-lyrics-viewport"
+      style={[
+        styles.lyricsMainContainer,
+        Platform.OS === 'web' ? {
+          maskImage:
+            'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 14%, rgba(0,0,0,1) 86%, transparent 100%)',
+          WebkitMaskImage:
+            'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 14%, rgba(0,0,0,1) 86%, transparent 100%)',
+        } as any : null,
+      ]}
+    >
       {children}
+      <LinearGradient
+        colors={['rgba(16,17,22,0.94)', 'rgba(16,17,22,0)']}
+        pointerEvents="none"
+        style={styles.lyricsTopFade}
+      />
+      <LinearGradient
+        colors={['rgba(16,17,22,0)', 'rgba(16,17,22,0.94)']}
+        pointerEvents="none"
+        style={styles.lyricsBottomFade}
+      />
     </View>
   );
 };
@@ -2161,6 +2163,8 @@ const styles = StyleSheet.create({
     position: 'relative',
     overflow: 'hidden',
   },
+  lyricsTopFade: { height: 72, left: 0, position: 'absolute', right: 0, top: 0, zIndex: 5 },
+  lyricsBottomFade: { bottom: 0, height: 82, left: 0, position: 'absolute', right: 0, zIndex: 5 },
   lyricsCoverViewport: {
     position: 'absolute',
     top: 0,

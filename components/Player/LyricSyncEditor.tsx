@@ -107,6 +107,7 @@ const JsonEditorModal = ({ visible, initialValue, totalDurationMs, onClose, onAp
   const [value, setValue] = React.useState(initialValue);
   const [editing, setEditing] = React.useState(false);
   const [status, setStatus] = React.useState('');
+  const codePreviewRef = React.useRef<ScrollView>(null);
 
   React.useEffect(() => {
     if (visible) {
@@ -181,21 +182,39 @@ const JsonEditorModal = ({ visible, initialValue, totalDurationMs, onClose, onAp
 
           <View style={styles.jsonCodeFrame}>
             {editing ? (
-              <TextInput
-                accessibilityLabel="Conteudo JSON da letra"
-                autoCapitalize="none"
-                autoCorrect={false}
-                multiline
-                onChangeText={(nextValue) => {
-                  setValue(nextValue);
-                  setStatus('');
-                }}
-                scrollEnabled
-                spellCheck={false}
-                style={styles.jsonInput}
-                textAlignVertical="top"
-                value={value}
-              />
+              <View style={styles.jsonEditorStack}>
+                <ScrollView
+                  ref={codePreviewRef}
+                  contentContainerStyle={styles.jsonPreviewContent}
+                  pointerEvents="none"
+                  scrollEnabled={false}
+                >
+                  <JsonCode value={value} />
+                </ScrollView>
+                <TextInput
+                  accessibilityLabel="Conteudo JSON da letra"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  cursorColor="#FFFFFF"
+                  multiline
+                  onChangeText={(nextValue) => {
+                    setValue(nextValue);
+                    setStatus('');
+                  }}
+                  onScroll={(event) => {
+                    codePreviewRef.current?.scrollTo({
+                      y: event.nativeEvent.contentOffset.y,
+                      animated: false,
+                    });
+                  }}
+                  scrollEnabled
+                  selectionColor="#FFFFFF"
+                  spellCheck={false}
+                  style={styles.jsonInputOverlay}
+                  textAlignVertical="top"
+                  value={value}
+                />
+              </View>
             ) : (
               <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled>
                 <JsonCode value={value} />
@@ -286,25 +305,21 @@ export function LyricSyncEditor({
       <View style={styles.timelineMeta}>
         <View style={styles.timeBadge}>
           <Text style={styles.timeBadgeLabel}>INICIO</Text>
-          <Text style={styles.timeBadgeValue}>{formatTime(selectedRange.startTimeMs)}</Text>
+          <Text style={styles.timeBadgeValue}>{formatSeconds(selectedRange.startTimeMs)}</Text>
         </View>
         <View style={styles.timeBadge}>
           <Text style={styles.timeBadgeLabel}>FIM</Text>
-          <Text style={styles.timeBadgeValue}>{formatTime(selectedRange.endTimeMs)}</Text>
+          <Text style={styles.timeBadgeValue}>{formatSeconds(selectedRange.endTimeMs)}</Text>
         </View>
         <View style={[styles.timeBadge, styles.timeBadgeAccent]}>
           <Text style={styles.timeBadgeLabel}>DURACAO</Text>
-          <Text style={styles.timeBadgeValue}>{formatTime(selectionDurationMs)}</Text>
+          <Text style={styles.timeBadgeValue}>{formatSeconds(selectionDurationMs)}</Text>
         </View>
       </View>
       <View style={styles.editorActions}>
         <Pressable accessibilityLabel="Abrir JSON da letra" onPress={() => setJsonVisible(true)} style={styles.editorActionButton}>
           <Ionicons name="code-slash-outline" size={18} color="#8BD5FF" />
           <Text style={styles.editorActionText}>JSON</Text>
-        </Pressable>
-        <Pressable accessibilityLabel="Ir para o inicio do trecho" onPress={() => onScrubEnd(selectedRange.startTimeMs)} style={styles.editorActionButton}>
-          <Ionicons name="locate-outline" size={18} color="#FFFFFF" />
-          <Text style={styles.editorActionText}>Ouvir trecho</Text>
         </Pressable>
         <Pressable accessibilityLabel="Copiar JSON da letra" onPress={() => void Clipboard.setStringAsync(formatEditorJson(segments))} style={styles.editorActionButton}>
           <Ionicons name="copy-outline" size={18} color="#FFFFFF" />
@@ -323,10 +338,8 @@ export function LyricSyncEditor({
   );
 }
 
-const formatTime = (ms: number) => {
-  const seconds = Math.floor(Math.max(0, ms) / 1000);
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-};
+const formatSeconds = (ms: number) =>
+  `${(Math.max(0, ms) / 1000).toFixed(3).replace('.', ',')} s`;
 
 const styles = StyleSheet.create({
   container: {
@@ -334,11 +347,11 @@ const styles = StyleSheet.create({
     marginTop: 2,
     paddingBottom: 12,
   },
-  timelineMeta: { flexDirection: 'row', gap: 8, marginTop: 2 },
-  timeBadge: { backgroundColor: 'rgba(255,255,255,0.09)', borderRadius: 10, flex: 1, paddingHorizontal: 9, paddingVertical: 7 },
+  timelineMeta: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  timeBadge: { backgroundColor: 'rgba(255,255,255,0.09)', borderRadius: 10, flex: 1, paddingHorizontal: 9, paddingVertical: 6 },
   timeBadgeAccent: { backgroundColor: 'rgba(139,213,255,0.14)' },
-  timeBadgeLabel: { color: 'rgba(255,255,255,0.48)', fontSize: 9, fontWeight: '700', letterSpacing: 0.8 },
-  timeBadgeValue: { color: '#FFFFFF', fontSize: 14, fontVariant: ['tabular-nums'], fontWeight: '700', marginTop: 2 },
+  timeBadgeLabel: { color: 'rgba(255,255,255,0.48)', fontSize: 8, fontWeight: '700', letterSpacing: 0.8 },
+  timeBadgeValue: { color: '#FFFFFF', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 11, fontVariant: ['tabular-nums'], fontWeight: '700', marginTop: 2 },
   editorActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
   editorActionButton: { alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', minHeight: 42, paddingHorizontal: 8 },
   editorActionText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
@@ -358,9 +371,11 @@ const styles = StyleSheet.create({
   jsonToolbar: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   jsonToolButton: { alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10, flexDirection: 'row', gap: 6, justifyContent: 'center', minHeight: 38, paddingHorizontal: 12 },
   jsonToolText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
-  jsonCodeFrame: { backgroundColor: '#101116', borderColor: 'rgba(139,213,255,0.2)', borderRadius: 14, borderWidth: 1, flex: 1, minHeight: 260, padding: 12 },
+  jsonCodeFrame: { backgroundColor: '#101116', borderColor: 'rgba(139,213,255,0.2)', borderRadius: 14, borderWidth: 1, flex: 1, minHeight: 260, overflow: 'hidden', padding: 12 },
+  jsonEditorStack: { flex: 1, minHeight: 240, position: 'relative' },
+  jsonPreviewContent: { paddingBottom: 12 },
   jsonCode: { color: '#D7DCE7', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12, lineHeight: 19 },
-  jsonInput: { color: '#D7DCE7', flex: 1, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12, lineHeight: 19, minHeight: 240 },
+  jsonInputOverlay: { ...StyleSheet.absoluteFill, color: 'transparent', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12, lineHeight: 19, padding: 0, textAlignVertical: 'top' },
   jsonFooter: { alignItems: 'center', flexDirection: 'row', gap: 10, marginTop: 12 },
   jsonStatus: { color: 'rgba(255,255,255,0.52)', flex: 1, fontSize: 11, lineHeight: 16 },
   jsonApplyButton: { alignItems: 'center', backgroundColor: '#A7E3A1', borderRadius: 12, flexDirection: 'row', gap: 5, minHeight: 42, paddingHorizontal: 15 },

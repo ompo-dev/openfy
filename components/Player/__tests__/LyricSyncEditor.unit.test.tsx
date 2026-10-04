@@ -42,12 +42,17 @@ describe('LyricSyncEditor', () => {
     const onApplySegments = jest.fn();
     const screen = await render(<LyricSyncEditor {...props(onApplySegments)} />);
     expect(screen.getByText('INICIO')).toBeTruthy();
+    expect(screen.getByText('5,000 s')).toBeTruthy();
+    expect(screen.getByText('11,000 s')).toBeTruthy();
+    expect(screen.getByText('6,000 s')).toBeTruthy();
     expect(screen.getByLabelText('Abrir JSON da letra')).toBeTruthy();
     expect(screen.getByLabelText('Copiar JSON da letra')).toBeTruthy();
+    expect(screen.queryByLabelText('Ir para o inicio do trecho')).toBeNull();
 
     await fireEvent.press(screen.getByLabelText('Abrir JSON da letra'));
     expect(screen.getByText('JSON da letra')).toBeTruthy();
     await fireEvent.press(screen.getByLabelText('Editar JSON'));
+    expect(screen.getByText('"segments"').props.style.color).toBe('#8BD5FF');
     const input = screen.getByLabelText('Conteudo JSON da letra');
     await fireEvent.changeText(input, JSON.stringify({ segments: [
       { startTimeMs: 0, endTimeMs: 1000, text: 'Importada' },
