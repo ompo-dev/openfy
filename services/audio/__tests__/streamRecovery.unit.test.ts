@@ -47,14 +47,17 @@ jest.mock('../directYouTubeResolver', () => {
   };
 });
 
-import { createAudioPlayer } from 'expo-audio';
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import { reportDirectYouTubeStreamRefusal } from '../directYouTubeResolver';
 import {
   getNativeYouTubePlaybackStatus,
+  pauseNativeYouTubePlayback,
   playYouTubeVideoNatively,
+  stopNativeYouTubePlayback,
 } from '../nativeYouTubeTransfer';
 import {
   loadAndPlay,
+  beginTrackChange,
   toAudioSource,
   seekTo as playerSeekTo,
   unload,
@@ -169,6 +172,29 @@ describe('Stream Recovery & Refusal Tests', () => {
     expect(onStatus).toHaveBeenCalledWith(
       expect.objectContaining({ isPlaying: true, durationMs: 180000 })
     );
+  });
+
+  it('does not wait for Expo session configuration when the native engine owns playback', async () => {
+    jest.mocked(setAudioModeAsync).mockRejectedValue(new Error('Expo session is unavailable'));
+    const success = await loadAndPlay('openfy-youtube://video/V1M1hYxmRvA');
+    expect(success).toBe(true);
+    expect(setAudioModeAsync).not.toHaveBeenCalled();
+    expect(playYouTubeVideoNatively).toHaveBeenCalledTimes(1);
+  });
+
+  it('pauses the old native track synchronously while teardown is pending', async () => {
+    await loadAndPlay('openfy-youtube://video/V1M1hYxmRvA');
+    let finishStop!: () => void;
+    jest.mocked(stopNativeYouTubePlayback).mockImplementationOnce(() => new Promise<void>((resolve) => { finishStop = resolve; }));
+    beginTrackChange();
+    expect(pauseNativeYouTubePlayback).toHaveBeenCalledTimes(1);
+    const replacement = loadAndPlay('openfy-youtube://video/BBBBBBBBBBB', undefined, undefined, 0, undefined, { trackChangeAlreadyBegun: true });
+    for (let index = 0; index < 8; index++) await Promise.resolve();
+    expect(stopNativeYouTubePlayback).toHaveBeenCalledTimes(1);
+    expect(playYouTubeVideoNatively).toHaveBeenCalledTimes(1);
+    finishStop();
+    expect(await replacement).toBe(true);
+    expect(playYouTubeVideoNatively).toHaveBeenLastCalledWith('BBBBBBBBBBB', expect.any(Object));
   });
 
   // ── 2. toState() error propagation ───────────────────────────────────────

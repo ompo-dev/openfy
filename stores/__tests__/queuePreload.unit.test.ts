@@ -44,9 +44,14 @@ jest.mock('../../services/lyrics/lyricsService', () => ({
   fetchLyrics: jest.fn().mockResolvedValue(null),
   saveLyricsOffline: jest.fn().mockResolvedValue(undefined),
 }));
+jest.mock('../../services/library/artistProfilePrefetch', () => ({
+  prefetchArtistData: jest.fn(),
+  prefetchTrackArtistData: jest.fn(),
+}));
 
 import {
   DEFAULT_STATE,
+  beginTrackChange,
   downloadTrack,
   getDownloadedTrack,
   loadAndPlay,
@@ -61,6 +66,7 @@ import {
 import { Platform } from 'react-native';
 import { usePlayerStore, type PlayerTrack } from '../usePlayerStore';
 import { fetchLyrics } from '../../services/lyrics/lyricsService';
+import { prefetchTrackArtistData } from '../../services/library/artistProfilePrefetch';
 
 const realPlayTrack = usePlayerStore.getState().playTrack;
 let queueTestRun = 0;
@@ -411,6 +417,26 @@ describe('queue preload window', () => {
       secondTrack,
       { trackChangeAlreadyBegun: true }
     );
+  });
+
+  it.each([false, true])('prioritizes artist collection playback before profile warmup (shuffle=%s)', async (shuffle) => {
+    let finishLoad!: (success: boolean) => void;
+    jest.mocked(loadAndPlay).mockImplementationOnce(() => new Promise((resolve) => { finishLoad = resolve; }));
+    usePlayerStore.setState({ currentTrack: tracks[4], playerState: { ...DEFAULT_STATE, isPlaying: true } });
+    const transition = usePlayerStore.getState().playWithQueue(tracks, 0, 'artist:target', { shuffle });
+
+    expect(beginTrackChange).toHaveBeenCalledTimes(1);
+    expect(usePlayerStore.getState().currentTrack).toBe(usePlayerStore.getState().queue[0]);
+    expect(usePlayerStore.getState().playerState.isPlaying).toBe(false);
+    expect(usePlayerStore.getState().isLoadingAudio).toBe(true);
+    await flushAsync();
+    expect(loadAndPlay).toHaveBeenCalledTimes(1);
+    expect(prefetchTrackArtistData).not.toHaveBeenCalled();
+
+    finishLoad(true);
+    await transition;
+    expect(prefetchTrackArtistData).toHaveBeenCalledWith(usePlayerStore.getState().currentTrack);
+    expect(usePlayerStore.getState().queueSourceId).toBe('artist:target');
   });
 
   it('fully unloads the old engine when the selected track has no valid source', async () => {

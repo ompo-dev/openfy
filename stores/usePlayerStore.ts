@@ -674,7 +674,6 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           }
         : {}),
     });
-    prefetchTrackArtistData(track);
     // 2. CONCURRENT AUDIO STREAM RESOLUTION & PERSISTENT CACHE
     const resolveAudioPromise = (async (): Promise<AudioSourceInput | null> => {
       const hasFreshTrackStream = Boolean(
@@ -1028,6 +1027,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     if (get().activeRequestId !== requestId) return;
 
     if (success) {
+      prefetchTrackArtistData(track);
       void ensurePlaybackDiagnostics(track).catch(() => {});
       recordInteraction(track, 'play').catch(() => {});
       warmQueueNeighbors(get().queue, get().queueIndex);

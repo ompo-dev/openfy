@@ -27,7 +27,6 @@ import {
   isTrackParticipantArtist,
   isTrackPrimaryArtist,
   mergeArtistProfileTracks,
-  prefetchArtistData,
   rememberCachedArtistImage,
   type LibraryTrack,
 } from '@services';
@@ -221,6 +220,8 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
   const currentTrackArtistName = currentTrack?.artists?.find(
     (candidate) => candidate.id === artistId
   )?.name || '';
+  const playbackArtistNameRef = React.useRef(currentTrackArtistName);
+  playbackArtistNameRef.current = currentTrackArtistName;
 
   // Release cards only contain the release id. Warm their credited artists
   // after the profile shell is visible so opening an album can render avatars
@@ -266,7 +267,6 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           const ref = artistRefs[cursor++];
           try {
             if (ref.name) {
-              prefetchArtistData([ref as { id?: string; name: string }]);
               await getCachedArtistImage(
                 ref.name,
                 () => getArtistCatalogImage(ref.id, ref.name || ''),
@@ -276,7 +276,6 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             }
             const artistData = await getArtist(ref.id);
             if (!artistData?.name) continue;
-            prefetchArtistData([{ id: ref.id, name: artistData.name }]);
             await getCachedArtistImage(
               artistData.name,
               () => Promise.resolve(artistData.imageURL || '')
@@ -301,6 +300,8 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     let active = true;
     let hasRemoteArtistProfile = false;
     let waitingForSupplement = false;
+    // Playback can supply a fallback name, but must not reload this route.
+    const playbackArtistName = playbackArtistNameRef.current;
     setArtistError('');
     setIsProfileReady(false);
     const searchSeed = isYouTubeArtist
@@ -335,7 +336,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
 
     const earlyArtistName = isYouTubeArtist
       ? getYouTubeMusicArtistRouteName(artistId) || searchSeed?.artist.name || ''
-      : localArtistName || searchSeed?.artist.name || currentTrackArtistName;
+      : localArtistName || searchSeed?.artist.name || playbackArtistName;
     const earlyArtistImage = earlyArtistName
       ? getCachedArtistImage(
           earlyArtistName,
@@ -793,7 +794,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             setIsProfileReady(false);
             supplementFromPublicCatalog(localProfile.artist.name, artistId, localProfile);
         } else {
-          const currentArtistName = currentTrackArtistName;
+          const currentArtistName = playbackArtistName;
           if (currentArtistName) {
             setArtist({ id: artistId, type: 'artist', name: currentArtistName, imageURL: '' });
             setTopTracks([]);
@@ -920,7 +921,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     return () => {
       active = false;
     };
-  }, [artistId, currentTrackArtistName, isYouTubeArtist, localArtistName, refreshSequence]);
+  }, [artistId, isYouTubeArtist, localArtistName, refreshSequence]);
 
   const mergedTracks = React.useMemo(() => {
     if (!artist) {

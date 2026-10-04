@@ -308,6 +308,8 @@ export const beginTrackChange = (): void => {
   loadGeneration++;
   pendingSeek = null;
   stopVolumeRamp();
+  // Send pause before React updates or the serialized native teardown queue.
+  if (nativeYouTubeActive) void pauseNativeYouTubePlayback().catch(() => {});
   void stopNativeYouTubeEngine();
   // Silence the engine before touching listeners: a listener cleanup failure
   // must never orphan an audible player.
@@ -593,7 +595,7 @@ const loadAndPlayNativeYouTube = async (
     // dormant Expo player so one tap cannot be delivered to both engines.
     disposeCurrentPlayer();
     await nativeStopPromise;
-    await configureAudioSession(diagnosticTrack?.spotifyId);
+    // The native engine configures and activates its own AVAudioSession.
     if (generation !== loadGeneration) return false;
 
     currentSourceKind = 'remote';

@@ -3,12 +3,15 @@ import { render, waitFor } from '@testing-library/react-native';
 import {
   findArtistIdByName,
   getArtist,
+  getArtistCatalogImage,
   getArtistDiscography,
   getArtistTopTracks,
   getCachedArtistSearchSeed,
   getYouTubeMusicArtistBiography,
   getYouTubeMusicArtistImage,
   getYouTubeMusicArtistProfile,
+  getYouTubeMusicAlbum,
+  isYouTubeMusicAlbumId,
 } from '@api';
 import { usePlayer } from '@context';
 import { useDetailNavigation } from '@hooks';
@@ -21,6 +24,7 @@ import {
   isTrackParticipantArtist,
   isTrackPrimaryArtist,
   mergeArtistProfileTracks,
+  prefetchArtistData,
   rememberCachedArtistImage,
 } from '@services';
 import { ArtistScreen } from '../ArtistScreen';
@@ -34,6 +38,8 @@ jest.mock('@api', () => ({
   getYouTubeMusicArtistImage: jest.fn(),
   getYouTubeMusicArtistBiography: jest.fn().mockResolvedValue(''),
   getYouTubeMusicArtistProfile: jest.fn(),
+  getYouTubeMusicAlbum: jest.fn(),
+  isYouTubeMusicAlbumId: jest.fn(() => false),
   getCachedArtistSearchSeed: jest.fn(),
 }));
 jest.mock('@context', () => ({ usePlayer: jest.fn() }));
@@ -48,6 +54,7 @@ jest.mock('@services', () => ({
   isTrackParticipantArtist: jest.fn(),
   isTrackPrimaryArtist: jest.fn(),
   mergeArtistProfileTracks: jest.fn(),
+  prefetchArtistData: jest.fn(),
 }));
 jest.mock('@components', () => {
   const React = jest.requireActual('react');
@@ -106,6 +113,8 @@ describe('ArtistScreen', () => {
     jest.mocked(getYouTubeMusicArtistImage).mockResolvedValue('');
     jest.mocked(getYouTubeMusicArtistBiography).mockResolvedValue('');
     jest.mocked(getCachedArtistSearchSeed).mockReturnValue(null);
+    jest.mocked(isYouTubeMusicAlbumId).mockReturnValue(false);
+    jest.mocked(getArtistCatalogImage).mockResolvedValue('');
     jest.mocked(rememberCachedArtistImage).mockResolvedValue(undefined);
     jest.mocked(getYouTubeMusicArtistProfile).mockRejectedValue(new Error('YTM profile unavailable'));
     jest.mocked(getUserProfile).mockResolvedValue({ recentlyPlayedTracks: [] } as never);
@@ -135,6 +144,63 @@ describe('ArtistScreen', () => {
   });
 
   afterEach(() => consoleError.mockRestore());
+
+  it('keeps the loaded profile visible when playback enters and leaves its artist', async () => {
+    const artistId = 'ytartist_UCstable~Stable%20artist';
+    const profile = {
+      artist: {
+        id: artistId,
+        type: 'artist',
+        name: 'Stable artist',
+        imageURL: 'https://images.example/stable.jpg',
+      },
+      tracks: [{ id: 'yt_stable', title: 'Stable song', artists: [{ id: artistId, name: 'Stable artist' }] }],
+      participationTracks: [],
+      albums: [],
+      singlesAndEps: [],
+    };
+    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue(profile as never);
+    const view = await render(<ArtistScreen artistId={artistId} />);
+    await waitFor(() => expect(view.getByText('track-count:1')).toBeTruthy());
+    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledTimes(1);
+
+    // A new load would stall and replace the already interactive profile.
+    jest.mocked(getYouTubeMusicArtistProfile).mockImplementation(() => new Promise(() => {}));
+    jest.mocked(usePlayer).mockReturnValue({
+      currentTrack: { ...localTrack, artists: [{ id: artistId, name: 'Stable artist' }] },
+    } as never);
+    await view.rerender(<ArtistScreen artistId={artistId} />);
+    expect(view.getByText('track-count:1')).toBeTruthy();
+    expect(view.getByTestId('artist-image').props.children).toBe(profile.artist.imageURL);
+    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledTimes(1);
+
+    jest.mocked(usePlayer).mockReturnValue({ currentTrack: localTrack } as never);
+    await view.rerender(<ArtistScreen artistId={artistId} />);
+    expect(view.getByText('track-count:1')).toBeTruthy();
+    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('warms release participant portraits without loading their full profiles', async () => {
+    const artistId = 'ytartist_UCowner~Release%20owner';
+    jest.mocked(isYouTubeMusicAlbumId).mockReturnValue(true);
+    jest.mocked(getCachedArtistImage).mockImplementation(async (_name, loader) => loader());
+    jest.mocked(getArtistCatalogImage).mockResolvedValue('https://images.example/participant.jpg');
+    jest.mocked(getYouTubeMusicAlbum).mockResolvedValue({
+      artists: [{ id: 'ytartist_UCguest~Guest', name: 'Guest' }],
+    } as never);
+    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
+      artist: { id: artistId, type: 'artist', name: 'Release owner', imageURL: 'owner.jpg' },
+      tracks: [],
+      participationTracks: [],
+      albums: [{ id: 'ytalbum_release', type: 'album', title: 'Release' }],
+      singlesAndEps: [],
+    } as never);
+    await render(<ArtistScreen artistId={artistId} />);
+    await waitFor(() => expect(getArtistCatalogImage).toHaveBeenCalledWith('ytartist_UCguest~Guest', 'Guest'));
+    expect(getYouTubeMusicAlbum).toHaveBeenCalledWith('ytalbum_release');
+    expect(prefetchArtistData).not.toHaveBeenCalled();
+    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledTimes(1);
+  });
 
   it('keeps existing local artist profiles visible when remote Spotify data fails', async () => {
     const view = await render(<ArtistScreen artistId="existing-artist-id" />);
