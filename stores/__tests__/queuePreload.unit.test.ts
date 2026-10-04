@@ -30,6 +30,9 @@ jest.mock('@services', () => ({
   preloadNativeYouTubeAudio: jest.fn().mockResolvedValue({ bytes: 512 * 1024 }),
   releasePreloadedAudio: jest.fn(),
   hasNativeYouTubePlayback: jest.fn(() => false),
+  resolveCatalogYouTubeVideoId: jest.fn(async ({ videoId }: { videoId: string }) => ({
+    status: 'resolved', videoId, confidence: 100,
+  })),
   toNativeYouTubePlaybackUri: jest.fn((videoId: string) => `openfy-youtube://video/${videoId}`),
   parseNativeYouTubePlaybackUri: jest.fn((uri: string) =>
     uri.match(/^openfy-youtube:\/\/video\/([A-Za-z0-9_-]{11})$/)?.[1] || null
@@ -60,6 +63,7 @@ import {
   preloadNativeYouTubeAudio,
   releasePreloadedAudio,
   resolveNativeYouTubeSource,
+  resolveCatalogYouTubeVideoId,
   resolveAudioUrl,
   unload,
 } from '@services';
@@ -140,6 +144,9 @@ describe('queue preload window', () => {
     (preloadAudio as jest.Mock).mockResolvedValue(undefined);
     (preloadNativeYouTubeAudio as jest.Mock).mockResolvedValue({ bytes: 512 * 1024 });
     (hasNativeYouTubePlayback as jest.Mock).mockReturnValue(false);
+    jest.mocked(resolveCatalogYouTubeVideoId).mockReset().mockImplementation(async ({ videoId }) => ({
+      status: 'resolved', videoId, confidence: 100,
+    }));
     (resolveNativeYouTubeSource as jest.Mock).mockImplementation(async (track: PlayerTrack) =>
       track.youtubeVideoId ? `openfy-youtube://video/${track.youtubeVideoId}` : null
     );
@@ -204,6 +211,28 @@ describe('queue preload window', () => {
     expect(
       jest.mocked(getDownloadedTrack).mock.calls.filter(([trackId]) => trackId === fastTracks[2].spotifyId)
     ).toHaveLength(targetDownloadLookupsAfterWarmup);
+  });
+
+  it('preloads the corrected source and keeps two songs sharing a film id separate', async () => {
+    Platform.OS = 'ios';
+    jest.mocked(hasNativeYouTubePlayback).mockReturnValue(true);
+    jest.mocked(resolveCatalogYouTubeVideoId).mockImplementation(async ({ title }) => ({
+      status: 'resolved', videoId: title === 'Tres da Madruga' ? '9ld721cY0Uk' : 'aaaaaaaaaaa', confidence: 100,
+    }));
+    const first = { ...tracks[0], spotifyId: 'yt_9jqQYznGl-w', title: 'Vagabundo Nato', duration_ms: 144000 };
+    const second = { ...first, title: 'Tres da Madruga', duration_ms: 150000 };
+    await usePlayerStore.getState().playWithQueue([first, second], 0, 'album:two-songs');
+    await flushAsync();
+    expect(preloadNativeYouTubeAudio).toHaveBeenCalledWith('9ld721cY0Uk');
+    jest.mocked(loadAndPlay).mockClear();
+    jest.mocked(resolveCatalogYouTubeVideoId).mockClear();
+    await usePlayerStore.getState().playNext();
+    expect(loadAndPlay).toHaveBeenCalledWith(
+      'openfy-youtube://video/9ld721cY0Uk', expect.any(Function), expect.any(Object),
+      0, second, { trackChangeAlreadyBegun: true }
+    );
+    expect(resolveCatalogYouTubeVideoId).not.toHaveBeenCalled();
+    expect(resolveAudioUrl).not.toHaveBeenCalled();
   });
 
   it('warms the same five-track window in the stable shuffled order', async () => {

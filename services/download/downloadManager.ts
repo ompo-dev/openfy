@@ -19,7 +19,7 @@ import {
   reportDirectYouTubeStreamRefusal,
   resolveDirectYouTubeAudio,
 } from '../audio/directYouTubeResolver';
-import { resolveSpotifyTrackVideoId } from '../audio/catalogResolver';
+import { resolveCatalogYouTubeVideoId, resolveSpotifyTrackVideoId } from '../audio/catalogResolver';
 import { getCatalogMapping, isCurrentCatalogMapping } from '../audio/catalogMappingCache';
 import { repairLocalAudioFile } from '../audio/localAudioRepair';
 import { retryNetworkOperation } from '../audio/networkRetry';
@@ -1209,7 +1209,22 @@ const downloadTrackInternal = async (
         effectiveTrack = { ...effectiveTrack, youtubeVideoId: undefined, youtubeUrl: undefined };
       }
     }
-    let resolvedUrl = Platform.OS === 'web' ? suppliedAudioUrl : undefined;
+    let sourceChanged = false;
+    if (youtubeVideoId) {
+      const source = await resolveCatalogYouTubeVideoId({
+        videoId: youtubeVideoId, title: track.title,
+        artists: track.artists?.map((artist) => artist.name) || [track.artistName],
+        durationMs: track.duration_ms,
+      });
+      if (source.status !== 'resolved') throw new Error(source.reason);
+      sourceChanged = source.videoId !== youtubeVideoId;
+      youtubeVideoId = source.videoId;
+      effectiveTrack = {
+        ...effectiveTrack, youtubeVideoId,
+        youtubeUrl: `https://www.youtube.com/watch?v=${youtubeVideoId}`,
+      };
+    }
+    let resolvedUrl = Platform.OS === 'web' && !sourceChanged ? suppliedAudioUrl : undefined;
     let format =
       Platform.OS === 'web'
         ? audioFormat || track.audioFormat || 'mp3'

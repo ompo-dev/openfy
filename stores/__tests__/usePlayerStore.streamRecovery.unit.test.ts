@@ -46,6 +46,7 @@ jest.mock('@services', () => ({
       : null
   ),
   resolveSpotifyTrackVideoId: jest.fn(),
+  resolveCatalogYouTubeVideoId: jest.fn(),
   toNativeYouTubePlaybackUri: jest.fn(
     (videoId: string) => `openfy-youtube://video/${videoId}`
   ),
@@ -62,6 +63,7 @@ import {
   reportDirectYouTubeStreamRefusal,
   resolveAudioUrl,
   resolveSpotifyTrackVideoId,
+  resolveCatalogYouTubeVideoId,
   seekTo,
   type PlayerState,
 } from '@services';
@@ -86,6 +88,7 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
     jest.mocked(loadAndPlay).mockReset();
     jest.mocked(resolveAudioUrl).mockReset();
     jest.mocked(resolveSpotifyTrackVideoId).mockReset();
+    jest.mocked(resolveCatalogYouTubeVideoId).mockReset();
     const { ensurePlaybackDiagnostics } = jest.requireMock('@services');
     (ensurePlaybackDiagnostics as jest.Mock)
       .mockReset()
@@ -127,6 +130,25 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       sampleTrack,
       { trackChangeAlreadyBegun: true }
     );
+    expect(resolveAudioUrl).not.toHaveBeenCalled();
+  });
+
+  it('validates a YouTube catalog song before starting native playback', async () => {
+    jest.mocked(hasNativeYouTubePlayback).mockReturnValue(true);
+    jest.mocked(resolveCatalogYouTubeVideoId).mockResolvedValue({
+      status: 'resolved', videoId: '9ld721cY0Uk', confidence: 100,
+    });
+    jest.mocked(loadAndPlay).mockResolvedValue(true);
+    const track = { ...sampleTrack, spotifyId: 'yt_9jqQYznGl-w', title: 'Tres da Madruga',
+      artistName: 'Yago Oproprio, Ro Rosa', duration_ms: 150000 };
+    await usePlayerStore.getState().playTrack(track);
+    expect(loadAndPlay).toHaveBeenCalledWith(
+      'openfy-youtube://video/9ld721cY0Uk', expect.any(Function),
+      expect.any(Object), 0, track, { trackChangeAlreadyBegun: true }
+    );
+    expect(resolveCatalogYouTubeVideoId).toHaveBeenCalledWith({
+      videoId: '9jqQYznGl-w', title: track.title, artists: [track.artistName], durationMs: 150000,
+    });
     expect(resolveAudioUrl).not.toHaveBeenCalled();
   });
 

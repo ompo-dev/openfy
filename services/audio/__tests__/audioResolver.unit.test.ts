@@ -2,9 +2,15 @@ jest.mock('../directYouTubeResolver', () => ({
   resolveDirectYouTubeAudio: jest.fn(),
   getDirectYouTubeMediaHeaders: jest.fn().mockReturnValue(null),
 }));
+jest.mock('../catalogResolver', () => ({
+  resolveCatalogYouTubeVideoId: jest.fn(async ({ videoId }: { videoId: string }) => ({
+    status: 'resolved', videoId, confidence: 100,
+  })),
+}));
 
 import { getPlayableAudioUrl, resolveAudioUrl } from '../audioResolver';
 import { resolveDirectYouTubeAudio } from '../directYouTubeResolver';
+import { resolveCatalogYouTubeVideoId } from '../catalogResolver';
 
 const directYouTubeMock = resolveDirectYouTubeAudio as jest.Mock;
 
@@ -29,6 +35,9 @@ describe('resolveAudioUrl', () => {
     directYouTubeMock.mockReset();
     directYouTubeMock.mockResolvedValue(null);
     global.fetch = jest.fn();
+    jest.mocked(resolveCatalogYouTubeVideoId).mockReset().mockImplementation(async ({ videoId }) => ({
+      status: 'resolved', videoId, confidence: 100,
+    }));
   });
 
   it('uses a client-resolved stream directly', async () => {
@@ -69,5 +78,21 @@ describe('resolveAudioUrl', () => {
       fresh: false,
     });
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('plays the corrected individual source rather than the catalog film id', async () => {
+    jest.mocked(resolveCatalogYouTubeVideoId).mockResolvedValue({
+      status: 'resolved', videoId: '9ld721cY0Uk', confidence: 100,
+    });
+    directYouTubeMock.mockResolvedValue({ videoId: '9ld721cY0Uk', url: 'https://media.test/madruga.m4a', format: 'm4a' });
+    expect(await resolveAudioUrl('Tres da Madruga', 'Yago Oproprio', 'yt_9jqQYznGl-w', 150000))
+      .toMatchObject({ videoId: '9ld721cY0Uk' });
+    expect(directYouTubeMock).toHaveBeenCalledWith({ videoId: '9ld721cY0Uk', fresh: false });
+  });
+
+  it('does not play the film when source verification fails', async () => {
+    jest.mocked(resolveCatalogYouTubeVideoId).mockResolvedValue({ status: 'not_found', reason: 'no_canonical_match' });
+    expect(await resolveAudioUrl('Tres da Madruga', 'Yago Oproprio', 'yt_9jqQYznGl-w', 150001)).toBeNull();
+    expect(directYouTubeMock).not.toHaveBeenCalled();
   });
 });

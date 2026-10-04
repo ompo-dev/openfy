@@ -32,7 +32,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { resolveAudioUrl } from '../../audio/audioResolver';
 import { resolveDirectYouTubeAudio } from '../../audio/directYouTubeResolver';
-import { resolveSpotifyTrackVideoId } from '../../audio/catalogResolver';
+import { resolveCatalogYouTubeVideoId, resolveSpotifyTrackVideoId } from '../../audio/catalogResolver';
 import { getDownloadDiagnostics } from '../downloadDiagnostics';
 import { fetchSpotifyTrackMetadata } from '../../metadata/spotifyMetadata';
 import { getCatalogMapping } from '../../audio/catalogMappingCache';
@@ -71,6 +71,9 @@ jest.mock('../../audio/directYouTubeResolver', () => ({
 jest.mock('../../audio/catalogResolver', () => ({
   ...jest.requireActual('../../audio/catalogResolver'),
   resolveSpotifyTrackVideoId: jest.fn(),
+  resolveCatalogYouTubeVideoId: jest.fn(async ({ videoId }: { videoId: string }) => ({
+    status: 'resolved', videoId, confidence: 100,
+  })),
 }));
 
 jest.mock('../../lyrics/lyricsService', () => ({
@@ -94,6 +97,9 @@ describe('queueDownloads', () => {
     directAudioMock.mockReset();
     catalogMock.mockReset();
     catalogMock.mockResolvedValue({ status: 'not_found', reason: 'no_canonical_match' });
+    jest.mocked(resolveCatalogYouTubeVideoId).mockReset().mockImplementation(async ({ videoId }) => ({
+      status: 'resolved', videoId, confidence: 100,
+    }));
     jest.requireMock('../../../modules/openfy-youtube').default
       .resolveAndDownloadGoogleVideoAsync = mockNativePlayerAndDownload;
     fileSystemMock.getInfoAsync.mockReset();
@@ -341,6 +347,33 @@ describe('queueDownloads', () => {
     );
     expect(fileSystemMock.createDownloadResumable).not.toHaveBeenCalled();
     expect(fileSystemMock.downloadAsync).toHaveBeenCalledTimes(0);
+  });
+
+  it('downloads and persists the individual song instead of the combined film', async () => {
+    jest.mocked(resolveCatalogYouTubeVideoId).mockResolvedValue({
+      status: 'resolved', videoId: '9ld721cY0Uk', confidence: 100,
+    });
+    mockNativePlayerAndDownload.mockResolvedValue({
+      uri: 'file:///mock_dir/madruga.m4a', status: 206, mimeType: 'audio/mp4', totalBytes: 100000,
+    });
+    const track = { spotifyId: 'yt_9jqQYznGl-w', title: 'Tres da Madruga',
+      artistName: 'Yago Oproprio, Ro Rosa', albumName: 'Vagabundo Nato', imageURL: '', duration_ms: 150000 };
+    expect(await downloadTrack(track)).toMatchObject({
+      spotifyId: track.spotifyId, youtubeVideoId: '9ld721cY0Uk',
+      youtubeUrl: 'https://www.youtube.com/watch?v=9ld721cY0Uk', localAudioPath: 'file:///mock_dir/madruga.m4a',
+    });
+    expect(mockNativePlayerAndDownload).toHaveBeenCalledWith(
+      '9ld721cY0Uk', expect.any(String), 1024 * 1024
+    );
+    expect(await getDownloadedTracks()).toEqual([expect.objectContaining({ youtubeVideoId: '9ld721cY0Uk' })]);
+  });
+
+  it('never saves a known wrong film when individual-song resolution fails', async () => {
+    jest.mocked(resolveCatalogYouTubeVideoId).mockResolvedValue({ status: 'not_found', reason: 'no_canonical_match' });
+    expect(await downloadTrack({ spotifyId: 'yt_9jqQYznGl-w', title: 'Tres da Madruga',
+      artistName: 'Yago Oproprio', albumName: 'Vagabundo Nato', imageURL: '', duration_ms: 150000 })).toBeNull();
+    expect(mockNativePlayerAndDownload).not.toHaveBeenCalled();
+    expect(resolveAudioUrlMock).not.toHaveBeenCalled();
   });
 
   it('downloads a Spotify catalog match on iPhone without requiring a JS stream URL', async () => {

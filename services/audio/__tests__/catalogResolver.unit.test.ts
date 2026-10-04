@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   parseYouTubeVideoId,
   resolveSpotifyTrackVideoId,
+  resolveCatalogYouTubeVideoId,
   _resetCatalogResolverForTests,
 } from '../catalogResolver';
 import {
@@ -46,6 +47,95 @@ describe('parseYouTubeVideoId', () => {
     expect(parseYouTubeVideoId('')).toBeNull();
     expect(parseYouTubeVideoId('invalid_id')).toBeNull();
     expect(parseYouTubeVideoId('https://open.spotify.com/track/123')).toBeNull();
+  });
+});
+
+describe('catalog songs referencing a multi-song YouTube film', () => {
+  const source = {
+    videoId: '9jqQYznGl-w', title: 'Tr\u00eas da Madruga',
+    artists: ['Yago Oproprio', 'R\u00f4 Rosa'], durationMs: 150_000,
+  };
+  const filmTitle = 'Yago Oproprio - Vagabundo Nato ft. LK O Marroquino / Tr\u00eas da Madruga ft. R\u00f4 Rosa (Filme Oficial)';
+  const makeVideo = (videoId: string, title: string, seconds: number) => ({
+    video_id: videoId, title: { toString: () => title },
+    author: { name: 'Yago Oproprio', is_verified_artist: true },
+    duration: { seconds },
+  });
+  let getBasicInfo: jest.Mock;
+  let search: jest.Mock;
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    _resetCatalogResolverForTests();
+    _resetCatalogMappingCacheForTests();
+    mockCreate.mockReset();
+    getBasicInfo = jest.fn().mockResolvedValue({ basic_info: { title: filmTitle, duration: 308 } });
+    search = jest.fn().mockResolvedValue({ videos: [
+      { ...makeVideo(source.videoId, filmTitle, 308), view_count: { toString: () => '10M views' } },
+      makeVideo('9ld721cY0Uk', source.title, 149),
+      makeVideo('aaaaaaaaaaa', 'Vagabundo Nato', 144),
+    ] });
+    mockCreate.mockResolvedValue({ getBasicInfo, search });
+  });
+
+  it('replaces the combined film with the matching standalone official recording', async () => {
+    expect(await resolveCatalogYouTubeVideoId(source))
+      .toMatchObject({ status: 'resolved', videoId: '9ld721cY0Uk' });
+    expect(getBasicInfo).toHaveBeenCalledWith(source.videoId);
+    expect(search).toHaveBeenCalled();
+  });
+
+  it('coalesces player, queue and download checks and persists the correction across sessions', async () => {
+    const results = await Promise.all(Array.from({ length: 3 }, () => resolveCatalogYouTubeVideoId(source)));
+    expect(results.every((result) => result.status === 'resolved' && result.videoId === '9ld721cY0Uk')).toBe(true);
+    expect(getBasicInfo).toHaveBeenCalledTimes(1);
+    const searchCount = search.mock.calls.length;
+    _resetCatalogResolverForTests();
+    _resetCatalogMappingCacheForTests();
+    expect(await resolveCatalogYouTubeVideoId(source)).toMatchObject({ videoId: '9ld721cY0Uk' });
+    expect(getBasicInfo).toHaveBeenCalledTimes(1);
+    expect(search).toHaveBeenCalledTimes(searchCount);
+  });
+
+  it('keeps the two songs separate even when both reference the same film id', async () => {
+    expect(await resolveCatalogYouTubeVideoId(source)).toMatchObject({ videoId: '9ld721cY0Uk' });
+    expect(await resolveCatalogYouTubeVideoId({
+      ...source, title: 'Vagabundo Nato', durationMs: 144_000,
+      artists: ['Yago Oproprio', 'LK O Marroquino'],
+    })).toMatchObject({ videoId: 'aaaaaaaaaaa' });
+    expect(getBasicInfo).toHaveBeenCalledTimes(1);
+    expect(await resolveCatalogYouTubeVideoId(source)).toMatchObject({ videoId: '9ld721cY0Uk' });
+  });
+
+  it('does not search again for a valid individual source', async () => {
+    getBasicInfo.mockResolvedValue({ basic_info: { title: source.title, duration: 149 } });
+    expect(await resolveCatalogYouTubeVideoId({ ...source, videoId: '9ld721cY0Uk' }))
+      .toMatchObject({ status: 'resolved', videoId: '9ld721cY0Uk' });
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it('preserves a full film explicitly imported with its own title and duration', async () => {
+    expect(await resolveCatalogYouTubeVideoId({ ...source, title: filmTitle, durationMs: 308_000 }))
+      .toMatchObject({ status: 'resolved', videoId: source.videoId });
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it('refuses the known wrong source if no standalone recording can be verified', async () => {
+    search.mockResolvedValue({ videos: [makeVideo(source.videoId, filmTitle, 308)] });
+    expect(await resolveCatalogYouTubeVideoId(source)).toMatchObject({ status: 'not_found' });
+  });
+
+  it('does not replace an exact source after a metadata transport error', async () => {
+    getBasicInfo.mockRejectedValue(new Error('network connection lost'));
+    expect(await resolveCatalogYouTubeVideoId(source)).toMatchObject({
+      status: 'not_found', reason: expect.stringContaining('source_metadata_unavailable'),
+    });
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it('rejects a same-length but unrelated source and finds the actual song', async () => {
+    getBasicInfo.mockResolvedValue({ basic_info: { title: 'Outra Musica', duration: 150 } });
+    expect(await resolveCatalogYouTubeVideoId(source)).toMatchObject({ videoId: '9ld721cY0Uk' });
   });
 });
 

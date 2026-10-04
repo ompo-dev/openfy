@@ -51,6 +51,7 @@ export {
 export {
   parseYouTubeVideoId,
   resolveSpotifyTrackVideoId,
+  resolveCatalogYouTubeVideoId,
 } from './audio/catalogResolver';
 export type { CatalogResolveResult } from './audio/catalogResolver';
 export {

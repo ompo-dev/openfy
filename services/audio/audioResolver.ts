@@ -15,6 +15,7 @@ import {
   getDirectYouTubeMediaHeaders,
   getAudioSourceWithHeaders,
 } from './directYouTubeResolver';
+import { resolveCatalogYouTubeVideoId } from './catalogResolver';
 
 export { getDirectYouTubeMediaHeaders, getAudioSourceWithHeaders };
 
@@ -560,9 +561,13 @@ const resolveAudioUrlInternal = async (
 ): Promise<ResolvedAudio | null> => {
   const youtubeVideoId = getYouTubeVideoIdFromTrackId(spotifyId);
   if (youtubeVideoId) {
-    // An exact YouTube video URL/ID is an authoritative source. Never fall through
-    // to title/artist search if the specific video cannot be resolved.
-    return resolveExactYouTubeVideo(youtubeVideoId, forceFresh);
+    const source = await resolveCatalogYouTubeVideoId({
+      videoId: youtubeVideoId, title: trackName,
+      artists: [artistName], durationMs: durationMs || 0,
+    });
+    return source.status === 'resolved'
+      ? resolveExactYouTubeVideo(source.videoId, forceFresh)
+      : null;
   }
 
   const isUnknownArtist =

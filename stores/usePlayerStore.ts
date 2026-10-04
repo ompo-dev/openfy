@@ -41,6 +41,7 @@ import {
   clampPlaybackPositionMs,
   reconcilePlaybackDurationMs,
   resolveSpotifyTrackVideoId,
+  resolveCatalogYouTubeVideoId,
   toNativeYouTubePlaybackUri,
 } from '@services';
 import {
@@ -194,7 +195,14 @@ const resolveNativeYouTubeSource = async (
   const exactVideoId = track.youtubeVideoId ||
     track.spotifyId.match(/^yt_([A-Za-z0-9_-]{11})$/)?.[1];
   if (exactVideoId && /^[A-Za-z0-9_-]{11}$/.test(exactVideoId)) {
-    return toNativeYouTubePlaybackUri(exactVideoId);
+    const source = await resolveCatalogYouTubeVideoId({
+      videoId: exactVideoId, title: track.title,
+      artists: track.artists?.map((artist) => artist.name) || [track.artistName],
+      durationMs: track.duration_ms,
+    });
+    return source.status === 'resolved'
+      ? toNativeYouTubePlaybackUri(source.videoId)
+      : null;
   }
   if (typeof resolveSpotifyTrackVideoId !== 'function') return null;
 
@@ -209,11 +217,13 @@ const resolveNativeYouTubeSource = async (
     : null;
 };
 
-// Every imported catalog id is authoritative, including yt_* ids. Falling
-// back to artist/title for valid ids can make two different recordings share
-// a warmed source.
+// A film's yt_* id can appear on multiple catalog songs. Include the song
+// identity so neither audio nor lyrics warmups leak into the other song.
 const getCacheKey = (track: PlayerTrack) => {
   const trackId = track.spotifyId?.trim();
+  if (trackId?.startsWith('yt_')) {
+    return `track:${JSON.stringify([trackId, track.title, track.artistName, track.duration_ms])}`;
+  }
   if (trackId) return `track:${trackId}`;
   const cleanTitle = (track.title || '')
     .toLowerCase()

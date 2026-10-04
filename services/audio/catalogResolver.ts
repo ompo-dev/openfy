@@ -1,8 +1,10 @@
 ﻿import {
   hasCanonicalTitleMatch,
   hasUnwantedForbiddenWords,
+  normalizeString,
   splitCanonicalArtists,
 } from '../canonical/canonicalMatcher';
+import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 import { parseYouTubeCount, rankYouTubeCandidate, type YouTubeCandidate } from './youtubeCandidateRanking';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
 import { retryNetworkOperation } from './networkRetry';
@@ -87,6 +89,9 @@ type SearchVideo = {
 
 type SearchClient = {
   search(query: string, options: { type: 'video' }): Promise<{ videos?: unknown[] }>;
+  getBasicInfo(videoId: string): Promise<{
+    basic_info: { title?: string; duration?: number };
+  }>;
   getChannel?(channelId: string): Promise<{
     metadata?: { external_id?: string };
     header?: {
@@ -129,13 +134,13 @@ const getSearchClient = (): Promise<SearchClient> => {
   return searchClient;
 };
 
-const withTimeout = async <T>(p: Promise<T>, label: string): Promise<T> => {
+const withTimeout = async <T>(p: Promise<T>, label: string, timeoutMs = 10_000): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       p,
       new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timed out`)), 10_000);
+        timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
       }),
     ]);
   } finally {
@@ -150,6 +155,74 @@ const withTimeout = async <T>(p: Promise<T>, label: string): Promise<T> => {
 export type CatalogResolveResult =
   | { status: 'resolved'; videoId: string; confidence: number; imageURL?: string }
   | { status: 'not_found'; reason: string };
+
+type CatalogYouTubeSource = {
+  videoId: string;
+  title: string;
+  artists: string[];
+  durationMs: number;
+};
+
+const sourceInfoCache = createAsyncResourceCache<{ title: string; durationMs: number }>({
+  name: 'youtube source metadata', category: 'player', maxEntries: 128,
+});
+const sourceMatchCache = createAsyncResourceCache<CatalogResolveResult>({
+  name: 'youtube source identity', category: 'player', maxEntries: 128,
+  ttlFor: (result) => result.status === 'resolved' ? 6 * 60 * 60_000 : 10_000,
+});
+
+/** A music catalog can point one short song at a film containing several songs. */
+export const resolveCatalogYouTubeVideoId = (
+  source: CatalogYouTubeSource
+): Promise<CatalogResolveResult> => {
+  if (!YT_VIDEO_ID_RE.test(source.videoId)) {
+    return Promise.resolve({ status: 'not_found', reason: 'invalid_video_id' });
+  }
+  if (!source.title || !Number.isFinite(source.durationMs) || source.durationMs <= 0) {
+    return Promise.resolve({ status: 'resolved', videoId: source.videoId, confidence: 100 });
+  }
+  const artists = splitCanonicalArtists(source.artists).map(normalizeString).sort();
+  // Two catalog songs may reference the same film; never share their mappings.
+  const key = `yt-source-v1:${JSON.stringify([
+    source.videoId, normalizeString(source.title), artists, Math.round(source.durationMs / 1000),
+  ])}`;
+  return sourceMatchCache.getOrLoad(key, async () => {
+    const cached = await getCatalogMapping(key);
+    if (cached && isCurrentCatalogMapping(cached)) {
+      return { status: 'resolved', videoId: cached.videoId, confidence: cached.confidence };
+    }
+    try {
+      const info = await sourceInfoCache.getOrLoad(source.videoId, async () => {
+        const client = await withTimeout(getSearchClient(), 'YouTube metadata client', 5_000);
+        const response = await withTimeout(client.getBasicInfo(source.videoId), 'YouTube source metadata', 5_000);
+        const title = response.basic_info.title?.trim() || '';
+        const durationMs = Number(response.basic_info.duration) * 1000;
+        if (!title || !Number.isFinite(durationMs) || durationMs <= 0) {
+          throw new Error('Missing YouTube source identity');
+        }
+        return { title, durationMs };
+      }, 6 * 60 * 60_000);
+
+      if (hasCanonicalTitleMatch(info.title, source.title) &&
+          Math.abs(info.durationMs - source.durationMs) <= 40_000) {
+        await setCatalogMapping(key, {
+          videoId: source.videoId, confirmedAt: Date.now(), confidence: 100,
+          source: 'ytmusic', policyVersion: CATALOG_MATCH_POLICY_VERSION,
+        });
+        return { status: 'resolved', videoId: source.videoId, confidence: 100 };
+      }
+
+      recordDownloadDiagnostic(`yt_${source.videoId}`, 'audio.youtube.catalog_source_mismatch', {
+        expectedTitle: source.title, expectedDurationMs: source.durationMs,
+        sourceTitle: info.title, sourceDurationMs: info.durationMs,
+      });
+      // Search only after a proven content mismatch, never after a transport failure.
+      return resolveSpotifyTrackVideoId(key, source.title, source.artists, source.durationMs);
+    } catch (error) {
+      return { status: 'not_found', reason: `source_metadata_unavailable: ${String(error)}` };
+    }
+  }, 6 * 60 * 60_000);
+};
 
 // ---------------------------------------------------------------------------
 // Spotify track → videoId
@@ -311,4 +384,6 @@ export const resolveSpotifyTrackVideoId = async (
 export const _resetCatalogResolverForTests = (): void => {
   searchClient = null;
   channelCounts.clear();
+  sourceInfoCache.clear();
+  sourceMatchCache.clear();
 };
