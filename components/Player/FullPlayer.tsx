@@ -92,29 +92,8 @@ type FullPlayerProps = {
 
 const LyricsViewport = ({ children }: React.PropsWithChildren) => {
   return (
-    <View
-      testID="player-lyrics-viewport"
-      style={[
-        styles.lyricsMainContainer,
-        Platform.OS === 'web' ? {
-          maskImage:
-            'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 14%, rgba(0,0,0,1) 86%, transparent 100%)',
-          WebkitMaskImage:
-            'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 14%, rgba(0,0,0,1) 86%, transparent 100%)',
-        } as any : null,
-      ]}
-    >
+    <View testID="player-lyrics-viewport" style={styles.lyricsMainContainer}>
       {children}
-      <LinearGradient
-        colors={['rgba(16,17,22,0.94)', 'rgba(16,17,22,0)']}
-        pointerEvents="none"
-        style={styles.lyricsTopFade}
-      />
-      <LinearGradient
-        colors={['rgba(16,17,22,0)', 'rgba(16,17,22,0.94)']}
-        pointerEvents="none"
-        style={styles.lyricsBottomFade}
-      />
     </View>
   );
 };
@@ -1494,6 +1473,11 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 }
               />
             </PlayerGlassButton>
+            <LinearGradient
+              colors={['rgba(8,10,16,0.38)', 'rgba(8,10,16,0)']}
+              pointerEvents="none"
+              style={styles.headerBottomFade}
+            />
           </View>
 
           <GestureDetector gesture={playerScrollGesture}>
@@ -1758,23 +1742,38 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               ) : null}
             </View>
             {isLyricsEditing ? (
-              <LyricSyncEditor
-                currentPositionMs={playerState.positionMs}
-                selectedRange={selectedEditorRange}
-                totalDurationMs={editorDurationMs}
-                onMove={moveSelectedEditorRange}
-                onResizeStart={resizeSelectedEditorRangeStart}
-                onResizeEnd={resizeSelectedEditorRangeEnd}
-                onScrubStart={handleEditorScrubStart}
-                onScrubEnd={handleEditorScrubEnd}
-                isPlaying={playerState.isPlaying}
-                onTogglePlayPause={() => void handleEditorTogglePlayPause()}
-                waveformSeed={currentTrack.title}
-                segments={draftLyricSegments}
-                onApplySegments={applyImportedSegments}
-              />
+              <View style={styles.controlsBoundaryMarker}>
+                <LinearGradient
+                  colors={['rgba(8,10,16,0)', 'rgba(8,10,16,0.34)']}
+                  pointerEvents="none"
+                  style={styles.controlsTopFade}
+                />
+                <LyricSyncEditor
+                  currentPositionMs={playerState.positionMs}
+                  selectedRange={selectedEditorRange}
+                  totalDurationMs={editorDurationMs}
+                  onMove={moveSelectedEditorRange}
+                  onResizeStart={resizeSelectedEditorRangeStart}
+                  onResizeEnd={resizeSelectedEditorRangeEnd}
+                  onScrubStart={handleEditorScrubStart}
+                  onScrubEnd={handleEditorScrubEnd}
+                  isPlaying={playerState.isPlaying}
+                  onTogglePlayPause={() => void handleEditorTogglePlayPause()}
+                  waveformSeed={currentTrack.title}
+                  segments={draftLyricSegments}
+                  onApplySegments={applyImportedSegments}
+                />
+              </View>
             ) : (
               <>
+                {showLyricsFull ? (
+                  <View pointerEvents="none" style={styles.controlsBoundaryMarker}>
+                    <LinearGradient
+                      colors={['rgba(8,10,16,0)', 'rgba(8,10,16,0.34)']}
+                      style={styles.controlsTopFade}
+                    />
+                  </View>
+                ) : null}
                 <View style={styles.actionPillRow}>
                   {!showLyricsFull ? <PlayerGlassButton
                     accessibilityLabel="Abrir letras sincronizadas"
@@ -2058,7 +2057,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 12,
+    position: 'relative',
+    zIndex: 20,
   },
+  headerBottomFade: { bottom: -28, height: 42, left: 0, position: 'absolute', right: 0, zIndex: -1 },
   headerIconButton: {
     width: 40,
     height: 40,
@@ -2163,8 +2165,8 @@ const styles = StyleSheet.create({
     position: 'relative',
     overflow: 'hidden',
   },
-  lyricsTopFade: { height: 72, left: 0, position: 'absolute', right: 0, top: 0, zIndex: 5 },
-  lyricsBottomFade: { bottom: 0, height: 82, left: 0, position: 'absolute', right: 0, zIndex: 5 },
+  controlsBoundaryMarker: { height: 0, position: 'relative', width: '100%', zIndex: 5 },
+  controlsTopFade: { height: 48, left: 0, position: 'absolute', right: 0, top: -42 },
   lyricsCoverViewport: {
     position: 'absolute',
     top: 0,

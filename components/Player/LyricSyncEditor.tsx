@@ -305,15 +305,15 @@ export function LyricSyncEditor({
       <View style={styles.timelineMeta}>
         <View style={styles.timeBadge}>
           <Text style={styles.timeBadgeLabel}>INICIO</Text>
-          <Text style={styles.timeBadgeValue}>{formatSeconds(selectedRange.startTimeMs)}</Text>
+          <SecondsValue milliseconds={selectedRange.startTimeMs} />
         </View>
         <View style={styles.timeBadge}>
           <Text style={styles.timeBadgeLabel}>FIM</Text>
-          <Text style={styles.timeBadgeValue}>{formatSeconds(selectedRange.endTimeMs)}</Text>
+          <SecondsValue milliseconds={selectedRange.endTimeMs} />
         </View>
         <View style={[styles.timeBadge, styles.timeBadgeAccent]}>
           <Text style={styles.timeBadgeLabel}>DURACAO</Text>
-          <Text style={styles.timeBadgeValue}>{formatSeconds(selectionDurationMs)}</Text>
+          <SecondsValue milliseconds={selectionDurationMs} />
         </View>
       </View>
       <View style={styles.editorActions}>
@@ -338,8 +338,24 @@ export function LyricSyncEditor({
   );
 }
 
-const formatSeconds = (ms: number) =>
-  `${(Math.max(0, ms) / 1000).toFixed(3).replace('.', ',')} s`;
+const getSecondsParts = (milliseconds: number) => {
+  const safeMilliseconds = Math.round(Math.max(0, milliseconds));
+  return {
+    fraction: String(safeMilliseconds % 1000).padStart(3, '0'),
+    whole: String(Math.floor(safeMilliseconds / 1000)),
+  };
+};
+
+function SecondsValue({ milliseconds }: { milliseconds: number }) {
+  const { fraction, whole } = getSecondsParts(milliseconds);
+  return (
+    <Text style={styles.timeBadgeValue}>
+      {whole}
+      <Text style={styles.timeBadgeFraction}>,{fraction}</Text>
+      <Text style={styles.timeBadgeUnit}> s</Text>
+    </Text>
+  );
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -351,7 +367,9 @@ const styles = StyleSheet.create({
   timeBadge: { backgroundColor: 'rgba(255,255,255,0.09)', borderRadius: 10, flex: 1, paddingHorizontal: 9, paddingVertical: 6 },
   timeBadgeAccent: { backgroundColor: 'rgba(139,213,255,0.14)' },
   timeBadgeLabel: { color: 'rgba(255,255,255,0.48)', fontSize: 8, fontWeight: '700', letterSpacing: 0.8 },
-  timeBadgeValue: { color: '#FFFFFF', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 11, fontVariant: ['tabular-nums'], fontWeight: '700', marginTop: 2 },
+  timeBadgeValue: { color: '#FFFFFF', fontSize: 15, fontVariant: ['tabular-nums'], fontWeight: '700', marginTop: 2 },
+  timeBadgeFraction: { color: 'rgba(255,255,255,0.72)', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 10, fontWeight: '700' },
+  timeBadgeUnit: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   editorActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
   editorActionButton: { alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', minHeight: 42, paddingHorizontal: 8 },
   editorActionText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
