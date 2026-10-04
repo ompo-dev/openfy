@@ -276,7 +276,7 @@ export function LyricSyncEditor({
   );
 
   return (
-    <View style={styles.container}>
+    <View testID="lyric-sync-editor" style={styles.container}>
       <MusicTimelineSelector
         isPlaying={isPlaying}
         onTogglePlayPause={onTogglePlayPause}
@@ -302,7 +302,7 @@ export function LyricSyncEditor({
         totalDurationMs={totalDurationMs}
         viewportDurationMs={viewportDurationMs}
       />
-      <View style={styles.timelineMeta}>
+      <View testID="lyric-sync-times" style={styles.timelineMeta}>
         <View style={styles.timeBadge}>
           <Text style={styles.timeBadgeLabel}>INICIO</Text>
           <SecondsValue milliseconds={selectedRange.startTimeMs} />
@@ -360,14 +360,15 @@ function SecondsValue({ milliseconds }: { milliseconds: number }) {
 const styles = StyleSheet.create({
   container: {
     width: '100%',
+    flexShrink: 0,
     marginTop: 2,
     paddingBottom: 12,
   },
-  timelineMeta: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  timeBadge: { backgroundColor: 'rgba(255,255,255,0.09)', borderRadius: 10, flex: 1, paddingHorizontal: 9, paddingVertical: 6 },
+  timelineMeta: { flexDirection: 'row', flexShrink: 0, gap: 8, marginTop: 4, minHeight: 48 },
+  timeBadge: { backgroundColor: 'rgba(255,255,255,0.09)', borderRadius: 8, flex: 1, minHeight: 48, paddingHorizontal: 9, paddingVertical: 6 },
   timeBadgeAccent: { backgroundColor: 'rgba(139,213,255,0.14)' },
-  timeBadgeLabel: { color: 'rgba(255,255,255,0.48)', fontSize: 8, fontWeight: '700', letterSpacing: 0.8 },
-  timeBadgeValue: { color: '#FFFFFF', fontSize: 15, fontVariant: ['tabular-nums'], fontWeight: '700', marginTop: 2 },
+  timeBadgeLabel: { color: 'rgba(255,255,255,0.48)', fontSize: 9, lineHeight: 12, fontWeight: '700', letterSpacing: 0 },
+  timeBadgeValue: { color: '#FFFFFF', fontSize: 15, lineHeight: 22, fontVariant: ['tabular-nums'], fontWeight: '700', marginTop: 2 },
   timeBadgeFraction: { color: 'rgba(255,255,255,0.72)', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 10, fontWeight: '700' },
   timeBadgeUnit: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   editorActions: { flexDirection: 'row', gap: 8, marginTop: 10 },

@@ -34,6 +34,8 @@ import {
 } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import Slider from '@react-native-community/slider';
+import MaskedView from '@react-native-masked-view/masked-view';
+import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -84,6 +86,7 @@ const COVER_VIEWPORT_WIDTH = SCREEN_WIDTH;
 const COVER_GAP = -16;
 const PREVIEW_SCRUB_LINE_HEIGHT = 21;
 const PLAYER_MEDIA_HEIGHT = COVER_SIZE + 18 + 42;
+const CHROME_OVERLAP = 36;
 
 type FullPlayerProps = {
   visible: boolean;
@@ -97,6 +100,50 @@ const LyricsViewport = ({ children }: React.PropsWithChildren) => {
     </View>
   );
 };
+
+const PlayerChromeFade = React.memo(function PlayerChromeFade({ edge }: { edge: 'header' | 'controls' }) {
+  const isHeader = edge === 'header';
+  const style = isHeader ? styles.headerBackdrop : styles.controlsBackdrop;
+  const mask = isHeader
+    ? 'linear-gradient(to bottom, black 0%, black calc(100% - 36px), transparent 100%)'
+    : 'linear-gradient(to bottom, transparent 0px, black 36px, black 100%)';
+
+  // Mask only the stationary glass; the scrolling list stays on a native surface.
+  if (Platform.OS === 'web') {
+    return (
+      <View
+        testID={`player-${edge}-backdrop`}
+        pointerEvents="none"
+        style={[style, {
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          maskImage: mask,
+          WebkitMaskImage: mask,
+        } as any]}
+      />
+    );
+  }
+
+  return (
+    <MaskedView
+      testID={`player-${edge}-backdrop`}
+      pointerEvents="none"
+      style={style}
+      maskElement={
+        <View style={StyleSheet.absoluteFill}>
+          {isHeader ? <View style={styles.chromeMaskFill} /> : null}
+          <LinearGradient
+            colors={isHeader ? ['#000000', 'transparent'] : ['transparent', '#000000']}
+            style={isHeader ? styles.chromeMaskBottom : styles.chromeMaskTop}
+          />
+          {!isHeader ? <View style={styles.chromeMaskFill} /> : null}
+        </View>
+      }
+    >
+      <BlurView intensity={70} tint="systemUltraThinMaterialDark" style={StyleSheet.absoluteFill} />
+    </MaskedView>
+  );
+});
 
 const formatTime = (ms: number): string => {
   const totalSeconds = Math.floor(ms / 1000);
@@ -1409,7 +1456,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           </View>
 
           {/* Top Navigation Bar */}
-          <View style={styles.header}>
+          <View testID="player-header" style={styles.header}>
+            {showLyricsFull ? <PlayerChromeFade edge="header" /> : null}
             <PlayerGlassButton
               accessibilityLabel={
                 isLyricsEditing ? 'Cancelar edição da letra' : 'Fechar player'
@@ -1473,21 +1521,16 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 }
               />
             </PlayerGlassButton>
-            <LinearGradient
-              colors={['rgba(8,10,16,0.38)', 'rgba(8,10,16,0)']}
-              pointerEvents="none"
-              style={styles.headerBottomFade}
-            />
           </View>
 
           <GestureDetector gesture={playerScrollGesture}>
             <ScrollView
               ref={playerScrollRef}
               testID="player-scroll-view"
-              style={styles.playerScroll}
+              style={[styles.playerScroll, showLyricsFull && styles.playerScrollUnderHeader]}
               contentContainerStyle={[
                 styles.playerScrollContent,
-                { paddingTop: isLyricsEditing ? 0 : undefined,
+                { paddingTop: showLyricsFull ? CHROME_OVERLAP : undefined,
                   paddingBottom: isLyricsEditing
                   ? Math.max(16, insets.bottom + 8)
                   : Math.max(24, insets.bottom + 20) },
@@ -1507,7 +1550,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               {hasOpenedLyrics ? (
                 <View
                   testID="player-lyrics-panel"
-                  style={[styles.lyricsCoverViewport, !showLyricsFull && styles.hiddenLyricsPanel]}
+                  style={[styles.lyricsCoverViewport, showLyricsFull && styles.lyricsBehindChrome, !showLyricsFull && styles.hiddenLyricsPanel]}
                   pointerEvents={showLyricsFull ? 'auto' : 'none'}
                   accessibilityElementsHidden={!showLyricsFull}
                   importantForAccessibility={showLyricsFull ? 'auto' : 'no-hide-descendants'}
@@ -1741,13 +1784,17 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               </>
               ) : null}
             </View>
+            <View
+              testID="player-controls-block"
+              style={styles.playerControlsBlock}
+              onLayout={(event) => {
+                if (isLyricsEditing) return;
+                const { y, height } = event.nativeEvent.layout;
+                setControlsBottomOffset(y + height);
+              }}
+            >
+            {showLyricsFull ? <PlayerChromeFade edge="controls" /> : null}
             {isLyricsEditing ? (
-              <View style={styles.controlsBoundaryMarker}>
-                <LinearGradient
-                  colors={['rgba(8,10,16,0)', 'rgba(8,10,16,0.34)']}
-                  pointerEvents="none"
-                  style={styles.controlsTopFade}
-                />
                 <LyricSyncEditor
                   currentPositionMs={playerState.positionMs}
                   selectedRange={selectedEditorRange}
@@ -1763,17 +1810,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                   segments={draftLyricSegments}
                   onApplySegments={applyImportedSegments}
                 />
-              </View>
             ) : (
               <>
-                {showLyricsFull ? (
-                  <View pointerEvents="none" style={styles.controlsBoundaryMarker}>
-                    <LinearGradient
-                      colors={['rgba(8,10,16,0)', 'rgba(8,10,16,0.34)']}
-                      style={styles.controlsTopFade}
-                    />
-                  </View>
-                ) : null}
                 <View style={styles.actionPillRow}>
                   {!showLyricsFull ? <PlayerGlassButton
                     accessibilityLabel="Abrir letras sincronizadas"
@@ -1821,10 +1859,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               <View
                 testID="player-controls-row"
                 style={styles.controlsRow}
-                onLayout={(event) => {
-                  const { y, height } = event.nativeEvent.layout;
-                  setControlsBottomOffset(y + height);
-                }}
               >
                 <PlayerGlassButton
                   accessibilityLabel={isCurrentTrackDownloading ? `Baixando ${currentDownloadProgress}%` : isCurrentTrackDownloaded ? 'Excluir download' : isOffline ? 'Offline: download indisponível' : 'Baixar música'}
@@ -1848,6 +1882,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 </PlayerGlassButton>
               </View>
             ) : null}
+
+            </View>
 
             {!isLyricsEditing ? renderArtistDetails() : null}
             </ScrollView>
@@ -2060,7 +2096,11 @@ const styles = StyleSheet.create({
     position: 'relative',
     zIndex: 20,
   },
-  headerBottomFade: { bottom: -28, height: 42, left: 0, position: 'absolute', right: 0, zIndex: -1 },
+  headerBackdrop: { position: 'absolute', top: -36, bottom: -CHROME_OVERLAP, left: -24, right: -24 },
+  controlsBackdrop: { position: 'absolute', top: -CHROME_OVERLAP, bottom: 0, left: -24, right: -24 },
+  chromeMaskFill: { backgroundColor: '#000000', flex: 1 },
+  chromeMaskTop: { height: CHROME_OVERLAP },
+  chromeMaskBottom: { height: CHROME_OVERLAP },
   headerIconButton: {
     width: 40,
     height: 40,
@@ -2097,6 +2137,8 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   playerScroll: { flex: 1, minHeight: 0, marginHorizontal: -24 },
+  playerScrollUnderHeader: { marginTop: -CHROME_OVERLAP },
+  playerControlsBlock: { position: 'relative', flexShrink: 0, width: '100%', zIndex: 10 },
   playerScrollContent: { paddingHorizontal: 24, paddingBottom: Platform.OS === 'ios' ? 136 : 96 },
   mainPlayerSection: {
     alignItems: 'center',
@@ -2165,8 +2207,6 @@ const styles = StyleSheet.create({
     position: 'relative',
     overflow: 'hidden',
   },
-  controlsBoundaryMarker: { height: 0, position: 'relative', width: '100%', zIndex: 5 },
-  controlsTopFade: { height: 48, left: 0, position: 'absolute', right: 0, top: -42 },
   lyricsCoverViewport: {
     position: 'absolute',
     top: 0,
@@ -2176,6 +2216,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   hiddenLyricsPanel: { opacity: 0 },
+  lyricsBehindChrome: { top: -CHROME_OVERLAP, height: PLAYER_MEDIA_HEIGHT + CHROME_OVERLAP * 2 },
   lyricsList: { flex: 1, width: '100%' },
   lyricsScrollContent: {
     paddingTop: 48,

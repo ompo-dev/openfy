@@ -117,13 +117,16 @@ jest.mock('../../native', () => {
   const { Pressable, View } = require('react-native');
   return { GlassSurface: View, LoggedPressable: Pressable };
 });
-jest.mock('../LyricSyncEditor', () => ({ LyricSyncEditor: () => null }));
 jest.mock('@expo/ui/swift-ui', () => {
   const { View, Text } = require('react-native');
   return { Host: View, VStack: View, Text };
 });
 jest.mock('@react-native-masked-view/masked-view', () => {
-  return require('react-native').View;
+  const React = require('react');
+  const { View } = require('react-native');
+  return function MockMaskedView({ maskElement, ...props }: any) {
+    return React.createElement(View, props);
+  };
 });
 jest.mock('@react-native-community/slider', () => {
   return require('react-native').View;
@@ -450,7 +453,7 @@ describe('FullPlayer artist row and YouTube source', () => {
 
   it('replaces the title with a sticky mini-player after the player scrolls away', async () => {
     const screen = await mountPlayer();
-    await fireEvent(screen.getByTestId('player-controls-row'), 'layout', {
+    await fireEvent(screen.getByTestId('player-controls-block'), 'layout', {
       nativeEvent: { layout: { y: 900, height: 100, width: 390, x: 0 } },
     });
     await fireEvent.scroll(screen.getByTestId('player-scroll-view'), {
@@ -474,7 +477,7 @@ describe('FullPlayer artist row and YouTube source', () => {
 
   it('resets the sticky mini-player when the full player is reopened', async () => {
     const screen = await mountPlayer();
-    await fireEvent(screen.getByTestId('player-controls-row'), 'layout', {
+    await fireEvent(screen.getByTestId('player-controls-block'), 'layout', {
       nativeEvent: { layout: { y: 900, height: 100, width: 390, x: 0 } },
     });
     await fireEvent.scroll(screen.getByTestId('player-scroll-view'), {
@@ -650,6 +653,10 @@ describe('FullPlayer artist row and YouTube source', () => {
     const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
     await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
     expect(screen.getByTestId('player-lyrics-viewport')).toBeTruthy();
+    expect(within(screen.getByTestId('player-header')).getByTestId('player-header-backdrop')).toBeTruthy();
+    expect(within(screen.getByTestId('player-controls-block')).getByTestId('player-controls-backdrop')).toBeTruthy();
+    expect(within(screen.getByTestId('player-lyrics-viewport')).queryByTestId('player-header-backdrop')).toBeNull();
+    expect(within(screen.getByTestId('player-lyrics-viewport')).queryByTestId('player-controls-backdrop')).toBeNull();
     expect(
       screen.getByTestId('player-synced-lyrics').props.removeClippedSubviews
     ).toBe(false);
@@ -661,6 +668,31 @@ describe('FullPlayer artist row and YouTube source', () => {
     await screen.rerender(<FullPlayer visible onClose={jest.fn()} />);
     expect(screen.getByText('Second lyric line')).toBeTruthy();
     expect(screen.getByLabelText('Fechar letras sincronizadas')).toBeTruthy();
+  });
+
+  it('keeps the timing editor in a controls block that can grow to fit its content', async () => {
+    Platform.OS = 'ios';
+    jest.mocked(usePlayer).mockReturnValue({
+      ...makePlayer(),
+      playerState: { positionMs: 9000, durationMs: 30000, isPlaying: false },
+      lyricsData: { segments: [
+        { index: 0, startTimeMs: 8110, endTimeMs: 16220, text: 'Selected line' },
+      ] },
+    } as any);
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+    await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
+    await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
+    const block = screen.getByTestId('player-controls-block');
+    expect(StyleSheet.flatten(block.props.style).height).toBeUndefined();
+    expect(within(block).getByTestId('lyric-sync-times')).toBeTruthy();
+    expect(within(block).getByText('INICIO')).toBeTruthy();
+    expect(within(block).getByText('FIM')).toBeTruthy();
+    expect(within(block).getByText('DURACAO')).toBeTruthy();
+    expect(within(block).getByText('16,220 s')).toBeTruthy();
+    expect(within(block).getByLabelText('Abrir JSON da letra')).toBeTruthy();
+    expect(screen.queryByTestId('player-artist-details')).toBeNull();
+    await fireEvent.press(screen.getByLabelText('Cancelar edição da letra'));
+    expect(screen.getByTestId('player-artist-details')).toBeTruthy();
   });
 
   it('shows plain lyrics instead of treating an empty synced list as an instrumental gap', async () => {
