@@ -104,12 +104,15 @@ jest.mock('react-native-reanimated', () => {
       ScrollView: AnimatedScrollView,
       createAnimatedComponent: (Component) => Component,
     },
-    Easing: { linear: (value) => value, out: (value) => value },
+    Easing: { linear: (value) => value, out: (value) => value, bezier: () => (value) => value },
+    cancelAnimation: jest.fn(),
+    runOnJS: (callback) => callback,
     interpolate: (value) => value,
     interpolateColor: (_value, _input, output) => output?.[0],
     useAnimatedScrollHandler: () => jest.fn(),
     useAnimatedStyle: (style) => style(),
-    useSharedValue: (value) => ({ value }),
+    useReducedMotion: () => false,
+    useSharedValue: (value) => React.useRef({ value }).current,
     withTiming: (value) => value,
   };
 });

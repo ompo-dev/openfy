@@ -13,7 +13,6 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
-  LayoutAnimation,
   Linking,
   Modal,
   Platform,
@@ -26,7 +25,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useSharedValue } from 'react-native-reanimated';
+import Motion, { useSharedValue } from 'react-native-reanimated';
 import {
   Gesture,
   GestureDetector,
@@ -78,6 +77,7 @@ import { SwipeableArtwork } from './SwipeableArtwork';
 import { ArtworkBackground } from './ArtworkBackground';
 import { MiniPlayer } from './MiniPlayer';
 import { SkeletonImage } from '../common/SkeletonImage';
+import { useLyricsArtworkTransition } from './useLyricsArtworkTransition';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -390,6 +390,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     Math.min(100, Math.round((currentDownloadJob?.progress || 0) * 100))
   );
   const artworkUrl = getTrackArtworkUri(currentTrack);
+  const artworkTransition = useLyricsArtworkTransition(
+    visible, currentTrackKey, artworkUrl, COVER_SIZE, showLyricsFull
+  );
+  const transitionArtwork = artworkTransition.transition;
   const queueHasMultipleTracks = queue.length > 1;
   const previousQueueIndex =
     queueIndex > 0
@@ -515,6 +519,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           onPress={toggleLyricsView}
           style={styles.lyricsPillArtworkButton}
         >
+          <View style={{ opacity: artworkTransition.transitioning ? 0 : 1 }}>
           {artworkUrl ? (
             <SkeletonImage
               source={{ uri: artworkUrl }}
@@ -527,9 +532,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               <Ionicons name="musical-note" size={17} color="#FFFFFF" />
             </View>
           )}
+          </View>
         </LoggedPressable>
       ) : null}
-      <View style={styles.lyricsTrackPillCopy}>
+      <Motion.View style={[styles.lyricsTrackPillCopy, artworkTransition.copyStyle]}>
         <MarqueeText
           testID="player-artists"
           text={artistLinks.map((artist) => artist.name).join(' · ')}
@@ -562,7 +568,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           speed={30}
           active={visible}
         />
-      </View>
+      </Motion.View>
     </GlassSurface>
   );
 
@@ -885,9 +891,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   }, [activeLineIndex, isLyricsEditing, scrollLyricsToActive, showLyricsFull]);
 
   const openLyricsView = React.useCallback(() => {
-    if (Platform.OS !== 'web') {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    }
     Haptics.selectionAsync().catch(() => {});
     if (manualLyricsFollowTimerRef.current) {
       clearTimeout(manualLyricsFollowTimerRef.current);
@@ -898,17 +901,14 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     shouldScrollLyricsOnOpenRef.current = true;
     setIsLyricsUserScrolling(false);
     setHasOpenedLyrics(true);
-    setShowLyricsFull(true);
-  }, []);
+    transitionArtwork(true, () => setShowLyricsFull(true));
+  }, [transitionArtwork]);
 
   const toggleLyricsView = () => {
-    if (Platform.OS !== 'web') {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    }
     Haptics.selectionAsync().catch(() => {});
     if (showLyricsFull) {
       shouldScrollLyricsOnOpenRef.current = false;
-      setShowLyricsFull(false);
+      artworkTransition.transition(false, () => setShowLyricsFull(false));
       return;
     }
     openLyricsView();
@@ -1449,9 +1449,11 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       animationType="slide"
       presentationStyle="pageSheet"
       onRequestClose={onClose}
+      onShow={artworkTransition.captureFrames}
     >
       <GestureHandlerRootView style={styles.gestureRoot}>
-        <View style={styles.container}>
+        <View ref={artworkTransition.containerRef} collapsable={false}
+          onLayout={artworkTransition.captureFrames} style={styles.container}>
           <ArtworkBackground current={artworkUrl}
             previous={getTrackArtworkUri(previousTrack)}
             next={getTrackArtworkUri(nextTrack)} progress={artworkProgress} />
@@ -1552,11 +1554,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               scrollEventThrottle={100}
               showsVerticalScrollIndicator={false}
             >
-            <View testID="player-media-section" style={styles.mainPlayerSection}>
+            <View ref={artworkTransition.mediaRef} collapsable={false}
+              onLayout={artworkTransition.captureFrames} testID="player-media-section" style={styles.mainPlayerSection}>
               {hasOpenedLyrics ? (
-                <View
+                <Motion.View
                   testID="player-lyrics-panel"
-                  style={[styles.lyricsCoverViewport, showLyricsFull && styles.lyricsBehindChrome, !showLyricsFull && styles.hiddenLyricsPanel]}
+                  style={[styles.lyricsCoverViewport, showLyricsFull && styles.lyricsBehindChrome, !showLyricsFull && styles.hiddenLyricsPanel, artworkTransition.lyricsStyle]}
                   pointerEvents={showLyricsFull ? 'auto' : 'none'}
                   accessibilityElementsHidden={!showLyricsFull}
                   importantForAccessibility={showLyricsFull ? 'auto' : 'no-hide-descendants'}
@@ -1696,10 +1699,11 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 </View>
               )}
                   </LyricsViewport>
-                </View>
+                </Motion.View>
               ) : null}
               {!showLyricsFull ? (
               <>
+              <View style={[styles.coverContainer, { opacity: artworkTransition.transitioning ? 0 : 1 }]}>
               <SwipeableArtwork
                 trackKey={currentTrackKey}
                 artworkUri={artworkUrl}
@@ -1724,9 +1728,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 nextFallbackSource={
                   getLocalArtworkFallback(nextTrack)
                 }
-                style={styles.coverContainer}
                 testID="player-artwork"
               />
+              </View>
 
               <GestureDetector gesture={lyricPreviewGesture}>
                 <View
@@ -1818,17 +1822,23 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 />
             ) : (
               <>
-                <View style={styles.actionPillRow}>
-                  {!showLyricsFull ? <PlayerGlassButton
+                <View ref={artworkTransition.rowRef} collapsable={false}
+                  onLayout={artworkTransition.captureFrames} style={styles.actionPillRow}>
+                  <Motion.View style={[styles.lyricsToggleSlot, artworkTransition.toggleStyle]}
+                    pointerEvents={showLyricsFull ? 'none' : 'auto'}
+                    accessibilityElementsHidden={showLyricsFull}
+                    importantForAccessibility={showLyricsFull ? 'no-hide-descendants' : 'auto'}>
+                  <PlayerGlassButton
                     accessibilityLabel="Abrir letras sincronizadas"
                     onPress={toggleLyricsView}
                     style={styles.circleActionBtn}
                     testID="player-lyrics-toggle"
                   >
                     <Ionicons name="chatbubble-ellipses-outline" size={20} color="rgba(255,255,255,0.75)" />
-                  </PlayerGlassButton> : null}
+                  </PlayerGlassButton>
+                  </Motion.View>
                   {renderArtistPill(showLyricsFull)}
-                  <PlayerGlassButton accessibilityLabel="Opções do YouTube" onPress={handleOpenYoutubeMenu} style={styles.circleActionBtn}>
+                  <PlayerGlassButton accessibilityLabel="Opções do YouTube" onPress={handleOpenYoutubeMenu} style={[styles.circleActionBtn, { marginLeft: 12 }]}>
                     <Ionicons name="logo-youtube" size={20} color="rgba(255,255,255,0.85)" />
                   </PlayerGlassButton>
                 </View>
@@ -2057,6 +2067,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               </Pressable>
             </KeyboardAvoidingView>
           </Modal>
+          {artworkTransition.overlay}
         </View>
       </GestureHandlerRootView>
     </Modal>
@@ -2305,8 +2316,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginVertical: 12,
-    gap: 12,
   },
+  lyricsToggleSlot: { width: 56, overflow: 'hidden' },
   circleActionBtn: {
     width: 44,
     height: 44,
