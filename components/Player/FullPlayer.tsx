@@ -289,6 +289,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [seeking, setSeeking] = React.useState(false);
   const [seekValue, setSeekValue] = React.useState(0);
   const [showLyricsFull, setShowLyricsFull] = React.useState(false);
+  const [hasOpenedLyrics, setHasOpenedLyrics] = React.useState(false);
   const [isLyricsEditing, setIsLyricsEditing] = React.useState(false);
   const [draftLyricSegments, setDraftLyricSegments] = React.useState<
     LyricSegment[]
@@ -323,7 +324,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
   const lyricsListRef = React.useRef<FlatList>(null);
   const playerScrollRef = React.useRef<ScrollView>(null);
-  const lyricScrollRetriedRef = React.useRef(false);
+  const lyricScrollRetriesRef = React.useRef(0);
+  const lyricScrollRetryTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldScrollLyricsOnOpenRef = React.useRef(false);
   const manualLyricsFollowUntilRef = React.useRef(0);
   const manualLyricsFollowTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -785,6 +787,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     [activeLineIndex, isLyricsEditing, lyricTimeline.length, showLyricsFull]
   );
 
+  const scrollLyricsToActiveRef = React.useRef(scrollLyricsToActive);
+  scrollLyricsToActiveRef.current = scrollLyricsToActive;
   const pauseLyricsAutoFollow = React.useCallback(() => {
     manualLyricsFollowUntilRef.current = Date.now() + 2500;
     if (manualLyricsFollowTimerRef.current) {
@@ -797,9 +801,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       lyricsListDraggingRef.current = false;
       setIsLyricsUserScrolling(false);
       setScrubbedLyricTimelineIndex(null);
-      scrollLyricsToActive(true);
+      scrollLyricsToActiveRef.current(true);
     }, 2500);
-  }, [scrollLyricsToActive]);
+  }, []);
   const pauseLyricsAutoFollowRef = React.useRef(pauseLyricsAutoFollow);
   const seekToPositionRef = React.useRef(seekToPosition);
   pauseLyricsAutoFollowRef.current = pauseLyricsAutoFollow;
@@ -807,7 +811,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
   React.useEffect(() => {
     if (showLyricsFull) return;
-    lyricScrollRetriedRef.current = false;
+    lyricScrollRetriesRef.current = 0;
     shouldScrollLyricsOnOpenRef.current = false;
     manualLyricsFollowUntilRef.current = 0;
     lyricsListDraggingRef.current = false;
@@ -816,16 +820,20 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       manualLyricsFollowTimerRef.current = null;
     }
     setScrubbedLyricTimelineIndex(null);
+    setIsLyricsUserScrolling(false);
   }, [showLyricsFull]);
 
   React.useEffect(() => () => {
     if (manualLyricsFollowTimerRef.current) {
       clearTimeout(manualLyricsFollowTimerRef.current);
     }
+    if (lyricScrollRetryTimerRef.current) clearTimeout(lyricScrollRetryTimerRef.current);
   }, []);
 
   // Follow timing changes unless the listener is exploring another part.
   React.useEffect(() => {
+    lyricScrollRetriesRef.current = 0;
+    if (lyricScrollRetryTimerRef.current) clearTimeout(lyricScrollRetryTimerRef.current);
     if (
       !showLyricsFull ||
       isLyricsEditing ||
@@ -834,7 +842,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       return;
     }
 
-    const animated = shouldScrollLyricsOnOpenRef.current;
+    const animated = !shouldScrollLyricsOnOpenRef.current;
     const frame = requestAnimationFrame(() => {
       scrollLyricsToActive(animated);
       shouldScrollLyricsOnOpenRef.current = false;
@@ -852,8 +860,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       manualLyricsFollowTimerRef.current = null;
     }
     manualLyricsFollowUntilRef.current = 0;
-    lyricScrollRetriedRef.current = false;
+    lyricScrollRetriesRef.current = 0;
     shouldScrollLyricsOnOpenRef.current = true;
+    setIsLyricsUserScrolling(false);
+    setHasOpenedLyrics(true);
     setShowLyricsFull(true);
   }, []);
 
@@ -1493,12 +1503,19 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               showsVerticalScrollIndicator={false}
             >
             <View testID="player-media-section" style={styles.mainPlayerSection}>
-              {showLyricsFull ? (
-                <View style={styles.lyricsCoverViewport}>
+              {hasOpenedLyrics ? (
+                <View
+                  testID="player-lyrics-panel"
+                  style={[styles.lyricsCoverViewport, !showLyricsFull && styles.hiddenLyricsPanel]}
+                  pointerEvents={showLyricsFull ? 'auto' : 'none'}
+                  accessibilityElementsHidden={!showLyricsFull}
+                  importantForAccessibility={showLyricsFull ? 'auto' : 'no-hide-descendants'}
+                >
                   <LyricsViewport>
               {lyricTimeline.length > 0 ? (
                 <FlatList
                   testID="player-synced-lyrics"
+                  key={currentTrackKey}
                   style={styles.lyricsList}
                   removeClippedSubviews={false}
                   ref={lyricsListRef}
@@ -1528,9 +1545,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                     lyricsListDraggingRef.current = false;
                     pauseLyricsAutoFollow();
                   }}
-                  onScrollToIndexFailed={({ averageItemLength }) => {
-                    if (lyricScrollRetriedRef.current) return;
-                    lyricScrollRetriedRef.current = true;
+                  onScrollToIndexFailed={({ index, averageItemLength }) => {
+                    if (!showLyricsFull || isLyricsEditing || index !== activeLineIndex ||
+                      Date.now() < manualLyricsFollowUntilRef.current || lyricScrollRetriesRef.current >= 8) return;
+                    lyricScrollRetriesRef.current += 1;
                     lyricsListRef.current?.scrollToOffset({
                       offset: Math.max(
                         0,
@@ -1538,7 +1556,9 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                       ),
                       animated: false,
                     });
-                    requestAnimationFrame(() => scrollLyricsToActive(false));
+                    // Native lyric heights arrive asynchronously; wait for the target batch to mount.
+                    if (lyricScrollRetryTimerRef.current) clearTimeout(lyricScrollRetryTimerRef.current);
+                    lyricScrollRetryTimerRef.current = setTimeout(() => scrollLyricsToActiveRef.current(false), 100);
                   }}
                   renderItem={({ item, index }) => {
                     const isActive = index === activeLineIndex;
@@ -1627,7 +1647,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               )}
                   </LyricsViewport>
                 </View>
-              ) : (
+              ) : null}
+              {!showLyricsFull ? (
               <>
               <SwipeableArtwork
                 trackKey={currentTrackKey}
@@ -1717,7 +1738,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 </View>
               </GestureDetector>
               </>
-              )}
+              ) : null}
             </View>
             {isLyricsEditing ? (
               <LyricSyncEditor
@@ -1810,7 +1831,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               </View>
             ) : null}
 
-            {renderArtistDetails()}
+            {!isLyricsEditing ? renderArtistDetails() : null}
             </ScrollView>
             </GestureDetector>
 
@@ -2124,11 +2145,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   lyricsCoverViewport: {
+    position: 'absolute',
+    top: 0,
     flexGrow: 0,
     flexShrink: 0,
     height: PLAYER_MEDIA_HEIGHT,
     width: '100%',
   },
+  hiddenLyricsPanel: { opacity: 0 },
   lyricsList: { flex: 1, width: '100%' },
   lyricsScrollContent: {
     paddingTop: 48,
@@ -2232,8 +2256,9 @@ const styles = StyleSheet.create({
     maxWidth: SCREEN_WIDTH - 138,
   },
   lyricsTrackPillExpanded: {
-    maxWidth: undefined,
-    paddingHorizontal: 64,
+    maxWidth: '100%',
+    paddingLeft: 68,
+    paddingRight: 14,
   },
   lyricsPillArtworkButton: {
     alignItems: 'center',

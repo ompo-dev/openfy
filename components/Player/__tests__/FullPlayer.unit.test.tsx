@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
-import { ActionSheetIOS, Alert, Linking, Platform, StyleSheet } from 'react-native';
+import { ActionSheetIOS, Alert, FlatList, Linking, Platform, StyleSheet } from 'react-native';
 import { Gesture } from 'react-native-gesture-handler';
 import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
 import { findArtistIdByName } from '@api';
@@ -519,12 +519,78 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(screen.getByText('Créditos')).toBeTruthy();
     const pillStyle = StyleSheet.flatten(screen.getByTestId('player-artists-pill').props.style);
     const artworkStyle = StyleSheet.flatten(screen.getByLabelText('Fechar letras sincronizadas').props.style);
-    expect(pillStyle.paddingHorizontal).toBeGreaterThan(artworkStyle.left + artworkStyle.width);
+    expect(pillStyle.maxWidth).toBe('100%');
+    expect(pillStyle.flex).toBe(1);
+    expect(pillStyle.paddingLeft).toBeGreaterThan(artworkStyle.left + artworkStyle.width);
     expect(artworkStyle.position).toBe('absolute');
-    expect(pillStyle.paddingLeft).toBeUndefined();
-    expect(pillStyle.paddingRight).toBeUndefined();
+    expect(pillStyle.paddingRight).toBe(14);
     await fireEvent.press(screen.getByLabelText('Fechar letras sincronizadas'));
     verifyOrder();
+  });
+
+  it('reopens at the current line without remounting or retaining manual scroll suppression', async () => {
+    jest.useFakeTimers();
+    const scroll = jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(() => {});
+    try {
+      const state = {
+        ...makePlayer(),
+        playerState: { positionMs: 12000, durationMs: 30000, isPlaying: true },
+        lyricsData: { segments: [
+          { index: 0, startTimeMs: 0, endTimeMs: 10000, text: 'First line' },
+          { index: 1, startTimeMs: 10000, endTimeMs: 20000, text: 'Second line' },
+          { index: 2, startTimeMs: 20000, endTimeMs: 30000, text: 'Third line' },
+        ] },
+      };
+      jest.mocked(usePlayer).mockReturnValue(state as any);
+      const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+      await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
+      await act(async () => { jest.advanceTimersByTime(120); });
+      expect(scroll).toHaveBeenLastCalledWith({ index: 1, animated: false, viewPosition: 0.35 });
+      await fireEvent(screen.getByTestId('player-synced-lyrics'), 'scrollBeginDrag');
+      await fireEvent.press(screen.getByLabelText('Fechar letras sincronizadas'));
+      expect(screen.getByTestId('player-synced-lyrics', { includeHiddenElements: true })).toBeTruthy();
+      jest.mocked(usePlayer).mockReturnValue({ ...state, playerState: { ...state.playerState, positionMs: 23000 } } as any);
+      await screen.rerender(<FullPlayer visible onClose={jest.fn()} />);
+      await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
+      await act(async () => { jest.advanceTimersByTime(120); });
+      expect(scroll).toHaveBeenLastCalledWith({ index: 2, animated: false, viewPosition: 0.35 });
+      expect(screen.getByText('First line').props.modifiers.find((modifier: { $type: string }) => modifier.$type === 'blur').radius).toBe(3);
+      await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
+      expect(screen.queryByTestId('player-artist-details')).toBeNull();
+      await fireEvent.press(screen.getByLabelText('Cancelar edição da letra'));
+      expect(screen.getByTestId('player-artist-details')).toBeTruthy();
+      await screen.unmount();
+    } finally {
+      scroll.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
+  it('retries an unmeasured distant lyric after native layout instead of remaining at the start', async () => {
+    jest.useFakeTimers();
+    let attempts = 0;
+    const scroll = jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(function (this: FlatList, request) {
+      attempts += 1;
+      if (attempts <= 2) this.props.onScrollToIndexFailed?.({ index: request.index, averageItemLength: 90, highestMeasuredFrameIndex: 2 });
+    });
+    try {
+      jest.mocked(usePlayer).mockReturnValue({
+        ...makePlayer(),
+        playerState: { positionMs: 142000, durationMs: 180000, isPlaying: true },
+        lyricsData: { segments: Array.from({ length: 18 }, (_, index) => ({
+          index, startTimeMs: index * 10000, endTimeMs: (index + 1) * 10000, text: `Lyric ${index}`,
+        })) },
+      } as any);
+      const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+      await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
+      await act(async () => { jest.advanceTimersByTime(500); });
+      expect(attempts).toBeGreaterThanOrEqual(3);
+      expect(scroll).toHaveBeenLastCalledWith({ index: 14, animated: false, viewPosition: 0.35 });
+      await screen.unmount();
+    } finally {
+      scroll.mockRestore();
+      jest.useRealTimers();
+    }
   });
 
   it('unblurs inactive lyrics while scrolling and restores the blur after idle', async () => {

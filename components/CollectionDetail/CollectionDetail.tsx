@@ -88,6 +88,7 @@ const toPlayerTrack = (track: CollectionTrack, collectionName: string) => ({
   artists: track.artists,
   albumId: track.albumId,
   albumArtists: track.albumArtists,
+  trackNumber: track.trackNumber,
   youtubeVideoId: track.youtubeVideoId,
   youtubeUrl: track.youtubeUrl,
 });
@@ -160,6 +161,7 @@ const toDownloadInput = (
   artists: track.artists,
   albumId: track.albumId,
   albumArtists: track.albumArtists,
+  trackNumber: track.trackNumber,
   youtubeVideoId: track.youtubeVideoId,
   youtubeUrl: track.youtubeUrl,
 });

@@ -14,6 +14,7 @@ import { useDetailNavigation } from '@hooks';
 import { AlbumModel, ArtistModel } from '@models';
 import { getDisplayTime } from '@utils';
 import { prefetchArtistData } from '@services';
+import { withLibraryAlbumTracks } from '../services/library/albumMetadata';
 
 export type AlbumScreenPropsType = {
   albumId: string;
@@ -76,6 +77,7 @@ const YouTubeMusicAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
     let active = true;
     setError('');
     void getYouTubeMusicAlbum(albumId)
+      .then(withLibraryAlbumTracks)
       .then((albumData) => {
         if (active) setAlbum(albumData);
         prefetchArtistData(albumData.artists);

@@ -8,6 +8,7 @@ import {
 } from '../../services/youtubeMusicClient';
 import { toYouTubeMusicTrackModel } from '../search/catalog';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
+import { rememberAlbumMetadata } from '../../services/library/albumMetadata';
 
 export type YouTubeMusicAlbum = {
   id: string;
@@ -85,16 +86,29 @@ const loadYouTubeMusicAlbum = async (
       name: headerAuthorName,
     });
   }
+  const strapline = asRecord(header.strapline_text_one);
+  const authorRuns = Array.isArray(strapline.runs) ? strapline.runs : [];
+  for (const run of authorRuns) {
+    const value = asRecord(run);
+    const id = getYouTubeMusicText(asRecord(asRecord(value.endpoint).payload).browseId);
+    const artistName = getYouTubeMusicText(value.text);
+    if (id.startsWith('UC') && artistName && !headerArtists.some((artist) => artist.name === artistName)) {
+      headerArtists.push({ id: toYouTubeMusicArtistRouteId(id, artistName), name: artistName });
+    }
+  }
   const contents = page.contents || (asRecord(page).items as YouTubeMusicItem[] | undefined) || [];
   const releaseType = releaseTypeFrom(`${subtitle} ${secondSubtitle}`);
   const tracks = contents
     .map((item) => toYouTubeMusicTrackModel(item as YouTubeMusicItem))
     .filter((track): track is TrackModel => Boolean(track))
-    .map((track) => ({
+    .map((track, index) => ({
       ...track,
       albumId,
       albumName: name,
       albumArtists: track.albumArtists?.length ? track.albumArtists : headerArtists,
+      artists: track.artists?.length ? track.artists : headerArtists,
+      subtitle: track.subtitle || headerArtists.map((artist) => artist.name).join(', '),
+      trackNumber: index + 1,
       imageURL: imageURL || track.imageURL,
       releaseType,
     }));
@@ -110,9 +124,10 @@ const loadYouTubeMusicAlbum = async (
     if (!artists.has(key)) artists.set(key, { id, name: artistName });
   };
   if (author.name) addArtist(author as { name?: unknown; id?: unknown; channel_id?: unknown });
+  headerArtists.forEach(addArtist);
   tracks.forEach((track) => track.artists?.forEach((artist) => addArtist(artist)));
 
-  return {
+  const album: YouTubeMusicAlbum = {
     id: routeId,
     name,
     imageURL,
@@ -121,6 +136,8 @@ const loadYouTubeMusicAlbum = async (
     tracks,
     artists: [...artists.values()],
   };
+  await rememberAlbumMetadata(album).catch(() => {});
+  return album;
 };
 
 export const getYouTubeMusicAlbum = (routeId: string): Promise<YouTubeMusicAlbum> =>

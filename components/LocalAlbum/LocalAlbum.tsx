@@ -1,47 +1,41 @@
 import * as React from 'react';
-import { View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
 import {
-  getLibraryTracks,
-  groupLocalAlbums,
   prefetchArtistData,
-  type LocalAlbumCollection,
 } from '@services';
 import { useDetailNavigation } from '@hooks';
 import { CollectionDetail } from '../CollectionDetail';
+import { resolveLocalAlbum } from '../../services/library/resolveLocalAlbum';
 
 export const LocalAlbum = ({ albumId }: { albumId: string }) => {
   const { openDetail } = useDetailNavigation();
-  const [album, setAlbum] = React.useState<LocalAlbumCollection | null>(null);
-
-  const loadAlbum = React.useCallback(async () => {
-    const tracks = await getLibraryTracks();
-    const nextAlbum = groupLocalAlbums(tracks).find((candidate) => candidate.id === albumId) || null;
-    setAlbum(nextAlbum);
-    if (nextAlbum) {
-      const artists = new Map<string, { id?: string; name: string }>();
-      nextAlbum.tracks.forEach((track) => {
-        const refs = track.artists?.length
-          ? track.artists
-          : [{ id: '', name: track.artistName }];
-        refs.forEach((artist) => {
-          if (artist.name && !artists.has(artist.id || artist.name.toLocaleLowerCase())) {
-            artists.set(artist.id || artist.name.toLocaleLowerCase(), artist);
-          }
-        });
-      });
-      prefetchArtistData([...artists.values()]);
-    }
-  }, [albumId]);
+  const [album, setAlbum] = React.useState<Awaited<ReturnType<typeof resolveLocalAlbum>> | null>(null);
+  const [error, setError] = React.useState('');
+  const loadedId = React.useRef('');
 
   useFocusEffect(
     React.useCallback(() => {
-      void loadAlbum();
-    }, [loadAlbum])
+      let active = true;
+      if (loadedId.current !== albumId) setAlbum(null);
+      setError('');
+      void resolveLocalAlbum(albumId).then((nextAlbum) => {
+        if (!active) return;
+        loadedId.current = albumId;
+        setAlbum(nextAlbum);
+        prefetchArtistData(nextAlbum.artists);
+      }).catch(() => {
+        if (active) setError('Não foi possível carregar este álbum.');
+      });
+      return () => { active = false; };
+    }, [albumId])
   );
 
-  if (!album) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
+  if (!album) return <View style={{ flex: 1, backgroundColor: '#101010', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+    {!error ? <ActivityIndicator color="#1ED760" /> : null}
+    <Text style={{ color: '#FFFFFF' }}>{error || 'Carregando álbum...'}</Text>
+  </View>;
 
   const handleArtistPress = (artistId: string, artistName: string) => {
     const targetArtistId = artistId
@@ -54,25 +48,16 @@ export const LocalAlbum = ({ albumId }: { albumId: string }) => {
     <CollectionDetail
       kind="album"
       collectionId={album.id}
-      title={album.title}
+      title={album.name}
       imageURL={album.imageURL}
-      metadata={`${album.subtitle} • ${album.tracks.length} ${
+      metadata={`${album.partial ? 'Na biblioteca' : album.artists.map((artist) => artist.name).join(', ')} • ${album.tracks.length} ${
         album.tracks.length === 1 ? 'música' : 'músicas'
       }`}
       trackCount={album.tracks.length}
       disableTrackArtistLinks
       onArtistPress={handleArtistPress}
-      tracks={album.tracks.map((track) => ({
-        ...track,
-        id: track.spotifyId,
-        title: track.title,
-        subtitle: track.artistName,
-        albumName: track.albumName,
-        imageURL: track.localImagePath || track.imageURL,
-        durationMs: track.duration_ms,
-        isDownloaded: track.isDownloaded,
-        localAudioPath: track.localAudioPath,
-      }))}
+      artists={album.artists}
+      tracks={album.tracks}
     />
   );
 };

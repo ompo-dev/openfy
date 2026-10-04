@@ -6,6 +6,7 @@ export type TrackModel = {
   albumName?: string;
   albumId?: string;
   albumArtists?: { id: string; name: string }[];
+  trackNumber?: number;
   releaseType?: 'album' | 'single' | 'ep' | 'compilation' | 'release';
   youtubeVideoId?: string;
   youtubeUrl?: string;

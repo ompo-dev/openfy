@@ -4,7 +4,7 @@ import {
   getYouTubeMusicClient,
   toYouTubeMusicArtistRouteId,
   YOUTUBE_MUSIC_ARTIST_PREFIX,
-  getYouTubeMusicArtistRouteName,
+  parseYouTubeMusicArtistRoute,
   getYouTubeMusicText,
   withYouTubeMusicTimeout,
   type YouTubeMusicClient,
@@ -58,41 +58,10 @@ const artistReferencesFromValue = (value: unknown) => asArray(value).map((entry)
 }).filter((artist) => artist.name);
 const validVideoId = (id?: string) => Boolean(id && /^[A-Za-z0-9_-]{11}$/.test(id));
 
-const decodeRoutePart = (value: string) => {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-};
-
 const normalizeArtistName = (value: string) =>
   value.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase();
 
-const parseArtistRoute = (artistRouteId: string) => {
-  const routeValue = artistRouteId.slice(YOUTUBE_MUSIC_ARTIST_PREFIX.length);
-  const legacyName = routeValue.startsWith('name_');
-  const separator = legacyName ? -1 : routeValue.indexOf('~');
-  const encodedBrowseId = legacyName
-    ? routeValue
-    : separator >= 0
-      ? routeValue.slice(0, separator)
-      : routeValue;
-  const encodedName = legacyName
-    ? ''
-    : separator >= 0
-      ? routeValue.slice(separator + 1)
-      : '';
-  let browseId = legacyName ? '' : decodeRoutePart(encodedBrowseId);
-  let routeName = decodeRoutePart(encodedName) || getYouTubeMusicArtistRouteName(artistRouteId);
-
-  if (browseId.startsWith('name_')) {
-    if (!routeName) routeName = decodeRoutePart(browseId.slice('name_'.length));
-    browseId = '';
-  }
-
-  return { browseId, routeName };
-};
+const parseArtistRoute = parseYouTubeMusicArtistRoute;
 
 const largestImage = (item: YouTubeMusicItem | unknown, preferredSize?: number) =>
   getBestYouTubeMusicThumbnail(item, preferredSize || 720);

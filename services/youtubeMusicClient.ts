@@ -6,33 +6,45 @@ export type YouTubeMusicArtistRef = {
 
 export const YOUTUBE_MUSIC_ARTIST_PREFIX = 'ytartist_';
 
-export const toYouTubeMusicArtistRouteId = (
-  browseId: string | undefined,
-  name: string
-) =>
-  `${YOUTUBE_MUSIC_ARTIST_PREFIX}${encodeURIComponent(browseId?.trim() || '')}~${encodeURIComponent(name.trim())}`;
-
-export const getYouTubeMusicArtistRouteName = (artistRouteId: string) => {
-  if (!artistRouteId.startsWith(YOUTUBE_MUSIC_ARTIST_PREFIX)) return '';
-  const routeValue = artistRouteId.slice(YOUTUBE_MUSIC_ARTIST_PREFIX.length);
-  if (routeValue.startsWith('name_')) {
-    const legacyName = routeValue.slice('name_'.length);
-    try {
-      return decodeURIComponent(legacyName);
-    } catch {
-      return legacyName;
-    }
-  }
-  const separator = routeValue.indexOf('~');
-  const encodedName = separator >= 0
-    ? routeValue.slice(separator + 1)
-    : '';
+const decodeRoutePart = (value: string) => {
   try {
-    return decodeURIComponent(encodedName);
+    return decodeURIComponent(value);
   } catch {
-    return encodedName;
+    return value;
   }
 };
+
+export const parseYouTubeMusicArtistRoute = (routeId: string) => {
+  let browseId = routeId.trim();
+  let routeName = '';
+  // Repair previously persisted, doubly wrapped artist routes as well.
+  for (let depth = 0; depth < 8 && browseId.startsWith(YOUTUBE_MUSIC_ARTIST_PREFIX); depth += 1) {
+    const value = browseId.slice(YOUTUBE_MUSIC_ARTIST_PREFIX.length);
+    if (value.startsWith('name_')) {
+      return { browseId: '', routeName: decodeRoutePart(value.slice('name_'.length)) };
+    }
+    const separator = value.indexOf('~');
+    if (separator >= 0) {
+      const name = value.slice(separator + 1);
+      routeName = decodeRoutePart(value.startsWith(YOUTUBE_MUSIC_ARTIST_PREFIX)
+        ? name.split('~').at(-1) || name
+        : name) || routeName;
+    }
+    browseId = decodeRoutePart(separator >= 0 ? value.slice(0, separator) : value);
+  }
+  if (browseId.startsWith('name_')) {
+    return { browseId: '', routeName: routeName || decodeRoutePart(browseId.slice('name_'.length)) };
+  }
+  return { browseId, routeName };
+};
+
+export const toYouTubeMusicArtistRouteId = (browseId: string | undefined, name: string) => {
+  const parsed = parseYouTubeMusicArtistRoute(browseId || '');
+  return `${YOUTUBE_MUSIC_ARTIST_PREFIX}${encodeURIComponent(parsed.browseId)}~${encodeURIComponent(name.trim() || parsed.routeName)}`;
+};
+
+export const getYouTubeMusicArtistRouteName = (routeId: string) =>
+  routeId.startsWith(YOUTUBE_MUSIC_ARTIST_PREFIX) ? parseYouTubeMusicArtistRoute(routeId).routeName : '';
 
 export type YouTubeMusicItem = {
   id?: string;

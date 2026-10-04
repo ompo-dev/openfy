@@ -37,6 +37,7 @@ import {
   toYouTubeMusicArtistRouteId,
 } from '../services/youtubeMusicClient';
 import { log } from '../utils/appLogger';
+import { mergeArtistReleases, normalizeReleaseTitle } from '../services/library/artistReleases';
 
 export type ArtistScreenPropsType = {
   artistId: string;
@@ -107,18 +108,6 @@ const uniqueTracksById = (tracks: TrackModel[]) => {
     if (track.id && !unique.has(track.id)) unique.set(track.id, track);
   });
   return [...unique.values()];
-};
-
-const mergeArtistReleases = (
-  current: LibraryItemModel[],
-  incoming: LibraryItemModel[]
-) => {
-  const releases = new Map<string, LibraryItemModel>();
-  [...current, ...incoming].forEach((release) => {
-    const key = release.id || `${release.title.toLocaleLowerCase()}|${release.subtitle}`;
-    if (!releases.has(key)) releases.set(key, release);
-  });
-  return [...releases.values()];
 };
 
 const splitArtistReleases = (releases: LibraryItemModel[]) => ({
@@ -413,15 +402,16 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         }));
         setTopTracks(merged.primaryTracks);
         setParticipationTracks(merged.participationTracks);
-        const publicReleases = splitArtistReleases(catalogProfile.albums || []);
-        setAlbums((current) => mergeArtistReleases(
-          current,
-          [...(localProfile?.albums || []), ...publicReleases.albums]
+        const publicReleases = splitArtistReleases(mergeArtistReleases(
+          [...(localProfile?.albums || []), ...(localProfile?.singlesAndEps || [])],
+          [...(catalogProfile.albums || []), ...(catalogProfile.singlesAndEps || [])]
         ));
-        setSinglesAndEps((current) => mergeArtistReleases(
-          current,
-          [...(localProfile?.singlesAndEps || []), ...publicReleases.singlesAndEps]
-        ));
+        setAlbums((current) => mergeArtistReleases(current, publicReleases.albums)
+          .filter((release) => !release.id.startsWith('local_album_') ||
+            !publicReleases.singlesAndEps.some((single) => normalizeReleaseTitle(single.title) === normalizeReleaseTitle(release.title))));
+        setSinglesAndEps((current) => mergeArtistReleases(current, publicReleases.singlesAndEps)
+          .filter((release) => !release.id.startsWith('local_album_') ||
+            !publicReleases.albums.some((album) => normalizeReleaseTitle(album.title) === normalizeReleaseTitle(release.title))));
         setIsProfileReady(true);
         setArtistError('');
         log.artist('public artist catalog supplemented local profile', {
