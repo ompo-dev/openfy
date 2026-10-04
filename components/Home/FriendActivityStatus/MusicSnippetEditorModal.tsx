@@ -181,7 +181,8 @@ export const MusicSnippetEditorModal: React.FC<
       visible={visible}
       onRequestClose={onClose}
     >
-      <GestureHandlerRootView style={S.gestureHandlerRoot}>
+      <GestureHandlerRootView style={[S.gestureHandlerRoot,
+        { height: 320 + Math.min(3, lyricSegments.length) * 100 }]}>
         <Pressable style={S.overlay} onPress={onClose}>
           <Pressable style={S.sheet} onPress={(e) => e.stopPropagation()}>
             {imageUri ? (
@@ -262,7 +263,8 @@ export const MusicSnippetEditorModal: React.FC<
 
 const S = StyleSheet.create({
   gestureHandlerRoot: {
-    flex: 1,
+    flexShrink: 1,
+    minHeight: 0,
   },
   overlay: {
     flex: 1,

@@ -74,7 +74,8 @@ export const PlaylistTrackPickerModal = ({
   }`;
 
   return (
-    <SheetFrame visible={visible} title="Adicionar músicas" onClose={onClose} scroll={false}>
+    <SheetFrame visible={visible} title="Adicionar músicas" onClose={onClose} scroll={false}
+      contentHeight={42 + 46 + 40 + Math.max(1, visibleTracks.length) * 62}>
       <TextInput
         autoCapitalize="none"
         autoCorrect={false}

@@ -1481,6 +1481,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
   return (
     <PlayerModal
+      fullScreen
       visible={visible}
       onRequestClose={onClose}
       onShow={artworkTransition.captureFrames}

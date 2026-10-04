@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
-import { Keyboard } from 'react-native';
+import { Keyboard, StyleSheet } from 'react-native';
 
 import { useDownloads, usePlayer } from '@context';
 import { CollectionDetail } from '../CollectionDetail';
@@ -135,6 +135,19 @@ describe('CollectionDetail', () => {
       enqueueDownloads: jest.fn(),
     } as any);
     jest.mocked(usePlayer).mockReturnValue(playerValue() as any);
+  });
+
+  it('immediately highlights the playing song when the album uses a different catalog ID', async () => {
+    jest.mocked(usePlayer).mockReturnValue(playerValue({
+      currentTrack: { spotifyId: 'spotify-alias', title: tracks[0].title,
+        artistName: tracks[0].subtitle, duration_ms: tracks[0].durationMs },
+      isPlaying: true,
+      queueSourceId: 'album:album-test',
+    }) as any);
+    const screen = await renderCollection();
+    expect(StyleSheet.flatten(screen.getByText(tracks[0].title).props.style).color).toBe('#1ED760');
+    expect(StyleSheet.flatten(screen.getByText(tracks[1].title).props.style).color).not.toBe('#1ED760');
+    expect(playWithQueue).not.toHaveBeenCalled();
   });
 
   it('expands search inline and filters tracks without navigating away', async () => {

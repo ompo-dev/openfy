@@ -125,6 +125,7 @@ export function TrackPlaylistPickerModal({
     <SheetFrame
       onClose={onClose}
       scroll={false}
+      contentHeight={104 + (isLoading ? 260 : Math.max(96, playlists.length * 62))}
       title="Adicionar à playlist"
       visible={visible}
     >

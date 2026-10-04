@@ -149,7 +149,8 @@ const JsonEditorModal = ({ visible, initialValue, totalDurationMs, onClose, onAp
 
   return (
     <SheetFrame visible={visible} title="JSON da letra" onClose={onClose}
-      closeLabel="Fechar editor JSON" scroll={false}>
+      closeLabel="Fechar editor JSON" scroll={false}
+      contentHeight={Math.min(640, 140 + Math.max(8, value.split('\n').length) * 20)}>
           <View style={styles.jsonToolbar}>
             <Pressable accessibilityLabel="Colar JSON" onPress={() => void pasteValue()} style={styles.jsonToolButton}>
               <Ionicons name="clipboard-outline" size={17} color="#FFFFFF" />

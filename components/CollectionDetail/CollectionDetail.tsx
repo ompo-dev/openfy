@@ -30,6 +30,7 @@ import { SkeletonImage } from '../common/SkeletonImage';
 import { findArtistIdByName, getArtistCatalogImage } from '@api';
 import { getCachedArtistImage } from '@services';
 import { useDetailNavigation } from '@hooks';
+import { isSameRecording } from '../../services/library/trackIdentity';
 
 type CollectionTrack = TrackModel & {
   localAudioPath?: string;
@@ -548,7 +549,7 @@ export const CollectionDetail = ({
       sourceTracks: CollectionTrack[],
       sourceId: string
     ) => {
-      const active = currentTrack?.spotifyId === item.id;
+      const active = isSameRecording(currentTrack, item);
       const download = downloadsById.get(item.id);
       const downloadState = item.isDownloaded || download?.status === 'completed'
         ? 'completed'
@@ -578,7 +579,7 @@ export const CollectionDetail = ({
       );
     },
     [
-      currentTrack?.spotifyId,
+      currentTrack,
       disableTrackArtistLinks,
       kind,
       downloadsById,
@@ -977,7 +978,7 @@ const styles = StyleSheet.create({
   listFooter: { paddingTop: 18 },
   showMoreTracks: { alignSelf: 'center', paddingHorizontal: 20, paddingVertical: 14 },
   showMoreTracksText: { color: '#1ED760', fontFamily: 'SF-Semibold', fontSize: 15 },
-  artistModalScroll: { flex: 1, minHeight: 0 },
+  artistModalScroll: { flexGrow: 0, flexShrink: 1, minHeight: 0 },
   artistModalLoading: { color: 'rgba(255,255,255,0.62)', fontFamily: 'SF-Regular', fontSize: 12, paddingBottom: 8 },
   artistModalRow: { alignItems: 'center', borderBottomColor: 'rgba(255,255,255,0.1)', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 12, minHeight: 64, paddingVertical: 8 },
   artistModalImage: { borderRadius: 24, height: 46, width: 46 },

@@ -14,7 +14,6 @@ import {
   Dimensions,
   FlatList,
   Image,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -472,8 +471,8 @@ export const MyNoteModal = ({
   return (
     <PlayerModal visible={visible} onRequestClose={onClose}>
       <Pressable style={S.overlay} onPress={onClose}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
           style={S.creatorModalContainer}
         >
           <Pressable
@@ -715,7 +714,7 @@ export const MyNoteModal = ({
               </View>
             )}
           </Pressable>
-        </KeyboardAvoidingView>
+        </ScrollView>
       </Pressable>
 
       {/* ────────────────────────────────────────────────────────────────── */}
@@ -725,7 +724,8 @@ export const MyNoteModal = ({
         visible={isMusicPickerVisible}
         onRequestClose={() => setIsMusicPickerVisible(false)}
       >
-        <View style={S.musicPickerOverlay}>
+        <View style={[S.musicPickerOverlay,
+          { height: 92 + Math.max(1, filteredTracks.length) * 74 + (previewTrack ? 90 : 20) }]}>
           <View style={S.musicPickerSheet}>
             {/* Top Handle */}
             <View style={S.musicHandleRow}>
@@ -863,7 +863,8 @@ export const MyNoteModal = ({
 // ──────────────────────────────────────────────────────────────────────────────
 const S = StyleSheet.create({
   overlay: {
-    flex: 1,
+    flexShrink: 1,
+    minHeight: 0,
   },
 
   // Published Sheet
@@ -936,11 +937,11 @@ const S = StyleSheet.create({
 
   // Spacious Comfortable Height Responsive Creator Modal Card
   creatorModalContainer: {
-    flex: 1,
+    flexGrow: 0,
+    flexShrink: 1,
     width: '100%',
   },
   creatorModalCard: {
-    flex: 1,
     paddingTop: 16,
     paddingBottom: Platform.OS === 'ios' ? 32 : 20,
     paddingHorizontal: 20,
@@ -1159,7 +1160,8 @@ const S = StyleSheet.create({
 
   // Music Picker Sheet
   musicPickerOverlay: {
-    flex: 1,
+    flexShrink: 1,
+    minHeight: 0,
   },
   musicPickerSheet: {
     flex: 1,

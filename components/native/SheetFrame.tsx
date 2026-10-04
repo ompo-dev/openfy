@@ -1,7 +1,5 @@
 import React, { type ReactNode } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -27,6 +25,8 @@ interface SheetFrameProps {
   scroll?: boolean;
   artworkURL?: string;
   closeLabel?: string;
+  /** Preferred space for virtualized lists/editors, capped by the modal viewport. */
+  contentHeight?: number;
 }
 
 export function SheetFrame({
@@ -40,6 +40,7 @@ export function SheetFrame({
   scroll = true,
   artworkURL,
   closeLabel = 'Fechar',
+  contentHeight,
 }: SheetFrameProps) {
   const insets = useSafeAreaInsets();
 
@@ -85,7 +86,8 @@ export function SheetFrame({
       {children}
     </ScrollView>
   ) : (
-    <View style={[styles.content, styles.fixedContent]}>{children}</View>
+    <View testID="sheet-frame-content" style={[styles.content, styles.fixedContent,
+      contentHeight !== undefined && { height: contentHeight }]}>{children}</View>
   );
 
   return (
@@ -97,32 +99,29 @@ export function SheetFrame({
         contentFit="cover" blurRadius={28} pointerEvents="none"
         style={[StyleSheet.absoluteFill, styles.artwork]} /> : null}
       <BlurView intensity={45} tint="systemUltraThinMaterialDark" pointerEvents="none" style={StyleSheet.absoluteFill} />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboard}>
-        <View testID="sheet-frame-body" style={[styles.sheet, { paddingBottom: Math.max(16, insets.bottom) }]}>
-          {handle}
-          {header}
-          {content}
-        </View>
-      </KeyboardAvoidingView>
+      <View testID="sheet-frame-body" style={[styles.sheet, { paddingBottom: Math.max(16, insets.bottom) }]}>
+        {handle}
+        {header}
+        {content}
+      </View>
     </PlayerModal>
   );
 }
 
 const styles = StyleSheet.create({
-  keyboard: { flex: 1, minHeight: 0 },
   artwork: { opacity: 0.64, transform: [{ scale: 1.1 }] },
   sheetScroll: {
-    flex: 1,
+    flexGrow: 0,
     flexShrink: 1,
   },
   sheet: {
-    flex: 1,
+    flexShrink: 1,
     minHeight: 0,
     paddingHorizontal: 24,
     paddingTop: 12,
   },
   handle: {
+    flexShrink: 0,
     alignSelf: 'center',
     width: 36,
     height: 5,
@@ -131,6 +130,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   header: {
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -165,5 +165,5 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     gap: 16,
   },
-  fixedContent: { flex: 1, minHeight: 0 },
+  fixedContent: { flexShrink: 1, minHeight: 0 },
 });
