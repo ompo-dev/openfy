@@ -1,9 +1,11 @@
 import { Tabs } from 'expo-router';
 import { BottomTabBar } from '@navigators';
+import { GlassScreenBackdrop } from '../../components/native/GlassScreenBackdrop';
 
 export default function Layout() {
   return (
     <Tabs
+      screenLayout={({ children }) => <GlassScreenBackdrop>{children}</GlassScreenBackdrop>}
       screenOptions={{
         headerShown: false,
         sceneStyle: {

@@ -1,11 +1,12 @@
 /** Floating three-tab GlassSurface navigation for Android and web. */
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { Pages } from '@config';
 import { translations } from '@data';
-import { GlassSurface } from '../../components/native';
+import { GlassSurface, LoggedPressable } from '../../components/native';
 
 type BottomTabBarProps = any;
 
@@ -46,17 +47,20 @@ export const BottomTabBar = ({ state, descriptors, navigation }: BottomTabBarPro
       if (!isActive && !event.defaultPrevented) navigation.navigate(route.name);
     };
 
-    const color = isActive ? '#FFFFFF' : '#8E8E93';
+    const color = isActive ? '#0A84FF' : '#D0D0D4';
 
     return (
-      <Pressable
+      <LoggedPressable
         key={route.key}
         accessibilityRole="button"
         accessibilityState={isActive ? { selected: true } : {}}
-        accessibilityLabel={options.tabBarAccessibilityLabel}
+        accessibilityLabel={options.tabBarAccessibilityLabel ?? meta?.label ?? route.name}
         onPress={onPress}
         style={({ pressed }) => [styles.tab, { opacity: pressed ? 0.7 : 1 }]}
       >
+        {isActive ? <LinearGradient pointerEvents="none"
+          colors={['rgba(255,255,255,0.14)', 'rgba(255,255,255,0.035)']}
+          style={styles.selection} /> : null}
         <Ionicons
           name={((isActive ? meta?.iconActive : meta?.icon) ?? 'home') as any}
           size={22}
@@ -65,7 +69,7 @@ export const BottomTabBar = ({ state, descriptors, navigation }: BottomTabBarPro
         <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
           {meta?.label ?? route.name}
         </Text>
-      </Pressable>
+      </LoggedPressable>
     );
   };
 
@@ -111,6 +115,8 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: 'SF-Regular',
     lineHeight: 12,
-    letterSpacing: 0.2,
+    letterSpacing: 0,
   },
+  selection: { ...StyleSheet.absoluteFill, borderRadius: 999,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
 });

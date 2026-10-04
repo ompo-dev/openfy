@@ -22,6 +22,7 @@ import { useDownloads, usePlayer } from '@context';
 import type { DownloadTrackInput } from '@services';
 import { formatCollectionMeta, log } from '@utils';
 import { GlassSurface, LoggedPressable, NativeIconButton, SheetFrame } from '../native';
+import { GlassBackdrop, GlassBackdropScope } from '../native/GlassBackdrop';
 import { DownloadActionIcon } from '../native/DownloadActionIcon';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { TrackRow } from '../common/TrackRow';
@@ -626,6 +627,8 @@ export const CollectionDetail = ({
         ListHeaderComponent={
           <>
             <View style={[styles.hero, { paddingTop: insets.top + 8 }]}>
+            <GlassBackdropScope>
+            <GlassBackdrop pointerEvents="none" style={StyleSheet.absoluteFill}>
             {kind === 'playlist' && imageURLs?.length ? (
               <PlaylistMosaic imageURLs={imageURLs} style={styles.heroArtwork} />
             ) : imageURL ? (
@@ -652,6 +655,7 @@ export const CollectionDetail = ({
               locations={[0, 0.3, 0.74, 1]}
               style={StyleSheet.absoluteFill}
             />
+            </GlassBackdrop>
             <View style={styles.topBar}>
               <NativeIconButton
                 systemImage="chevron.left"
@@ -825,6 +829,7 @@ export const CollectionDetail = ({
                 onPress={() => void handlePrimaryPlay()}
               />
             </View>
+            </GlassBackdropScope>
             </View>
             <View style={styles.contentTopSpacer} />
             {sectionTitle && visibleTracks.length ? <Text style={styles.sectionTitle}>{sectionTitle}</Text> : null}

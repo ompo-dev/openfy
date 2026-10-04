@@ -1,6 +1,7 @@
 import React from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, View, type ModalProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { WithoutGlassBackdrop } from './GlassBackdrop';
 
 type PlayerModalProps = Omit<ModalProps, 'animationType' | 'presentationStyle' | 'transparent'> & {
   fullScreen?: boolean;
@@ -16,7 +17,7 @@ export function PlayerModal({ children, fullScreen = false, ...props }: PlayerMo
           style={[styles.layout, { paddingTop: insets.top + 12 }]}>
           <Pressable testID="player-modal-backdrop" style={styles.backdrop} onPress={props.onRequestClose} />
           <View testID="player-modal-surface" style={[styles.surface, styles.fittedSurface]}>
-            {children}
+            <WithoutGlassBackdrop>{children}</WithoutGlassBackdrop>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -25,7 +26,7 @@ export function PlayerModal({ children, fullScreen = false, ...props }: PlayerMo
   return (
     <Modal {...props} testID="player-modal" animationType="slide" presentationStyle="pageSheet">
       <View testID="player-modal-surface" style={[styles.surface, styles.fullSurface]}>
-        {children}
+        <WithoutGlassBackdrop>{children}</WithoutGlassBackdrop>
       </View>
     </Modal>
   );

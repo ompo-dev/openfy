@@ -4,7 +4,7 @@
  */
 
 import * as React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from 'react-native';
+import { ScrollView, StyleSheet, Text, View, useColorScheme } from 'react-native';
 import {
   IOS_NATIVE_ENABLED,
   SwiftHost,
@@ -12,6 +12,8 @@ import {
   SwiftText,
   swiftPickerStyle,
   swiftTag,
+  GlassSurface,
+  LoggedPressable,
 } from '../../native';
 
 const CATEGORIES = ['Tudo', 'Músicas', 'Podcasts', 'Audiobooks'];
@@ -67,14 +69,13 @@ export const HomeCategories = ({
         {CATEGORIES.map((category) => {
           const isSelected = selected === category;
           return (
-            <Pressable
+            <LoggedPressable
               key={category}
               onPress={() => handlePress(category)}
-              style={[
-                styles.pill,
-                isSelected ? styles.pillSelected : styles.pillUnselected,
-              ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isSelected }}
             >
+              <GlassSurface glass={isSelected ? 'regular' : 'clear'} isInteractive style={styles.pill}>
               <Text
                 style={[
                   styles.pillText,
@@ -85,7 +86,8 @@ export const HomeCategories = ({
               >
                 {category}
               </Text>
-            </Pressable>
+              </GlassSurface>
+            </LoggedPressable>
           );
         })}
       </ScrollView>
@@ -115,15 +117,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 8,
     borderRadius: 20,
-    borderWidth: 1,
-  },
-  pillSelected: {
-    backgroundColor: '#2A2A2A',
-    borderColor: '#404040',
-  },
-  pillUnselected: {
-    backgroundColor: '#181818',
-    borderColor: '#282828',
   },
   pillText: {
     fontSize: 13,

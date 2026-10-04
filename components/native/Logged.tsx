@@ -60,6 +60,7 @@ export function LoggedPressable({
           onPressOut?.(event);
         }}
         style={(state) => [
+          { transitionProperty: 'transform', transitionDuration: '160ms' } as any,
           typeof style === 'function' ? style(state) : style,
           state.pressed ? { transform: [{ scale: 0.97 }] } : undefined,
         ]}

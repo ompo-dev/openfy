@@ -12,6 +12,7 @@ import { Categories, COLORS } from '@config';
 import { translations } from '@data';
 
 import { styles } from './styles';
+import { GlassSurface } from '../../../native';
 
 export type CategoryPressablePropsType = {
   currentCategory: Exclude<Categories, Categories.ALL>;
@@ -47,7 +48,7 @@ const CategoryPressable = React.memo(
       backgroundColor: interpolateColor(
         currentCategory === librarySelectedCategory ? animatedValue.value : 0,
         [0, 1],
-        [COLORS.SECONDARY, COLORS.TINT]
+        ['rgba(30,30,32,0.12)', 'rgba(29,185,84,0.28)']
       ),
     }));
 
@@ -55,7 +56,7 @@ const CategoryPressable = React.memo(
       color: interpolateColor(
         currentCategory === librarySelectedCategory ? animatedValue.value : 0,
         [0, 0.2, 1],
-        [COLORS.WHITE, COLORS.PRIMARY, COLORS.PRIMARY]
+        [COLORS.WHITE, COLORS.WHITE, COLORS.WHITE]
       ),
     }));
 
@@ -64,12 +65,17 @@ const CategoryPressable = React.memo(
 
     return (
       <AnimatedPressable
-        style={[styles.category, animatedPressableStyles]}
+        style={[styles.pressable, animatedPressableStyles]}
+        accessibilityRole="button"
+        accessibilityState={{ selected: currentCategory === librarySelectedCategory }}
         onPress={() => handleCategoryChange(currentCategory)}
       >
+        <GlassSurface glass={currentCategory === librarySelectedCategory ? 'regular' : 'clear'}
+          isInteractive style={styles.category}>
         <AnimatedText style={[styles.categoryText, animatedTextStyles]}>
           {translations.libraryCategories[currentCategory]}
         </AnimatedText>
+        </GlassSurface>
       </AnimatedPressable>
     );
   }

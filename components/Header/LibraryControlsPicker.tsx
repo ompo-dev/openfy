@@ -32,6 +32,7 @@ import {
   swiftTint,
   glassCircleModifiers,
 } from '../native';
+import { WithoutGlassBackdrop } from '../native/GlassBackdrop';
 
 type LibrarySort = 'recent' | 'title';
 type LibraryView = 'songs' | 'playlists' | 'albums' | 'artists';
@@ -251,6 +252,7 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
           action?.();
         }}
       >
+        <WithoutGlassBackdrop>
         <View style={styles.menuOverlay}>
           <LoggedPressable
             accessibilityLabel="Fechar seleção"
@@ -273,7 +275,7 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
               maxHeight: height - 16,
             }]}
           >
-            <GlassSurface glass="regular" tintColor="#252525" style={styles.menuSurface}>
+            <GlassSurface glass="thick" tintColor="#252525" style={styles.menuSurface}>
               <ScrollView keyboardShouldPersistTaps="handled">
                 {props.kind === 'filter' ? (
                   <>
@@ -316,6 +318,7 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
             </GlassSurface>
           </View>
         </View>
+        </WithoutGlassBackdrop>
       </Modal>
     </>
   );

@@ -23,6 +23,7 @@ import { registerBackgroundDownloadTask } from '@services';
 import { useOTAUpdates } from '@hooks';
 import { installErrorLogging, log } from '@utils';
 import { usePlayerStore } from '../stores/usePlayerStore';
+import { GlassBackdropProvider } from '../components/native/GlassBackdrop';
 
 import 'react-native-reanimated';
 
@@ -103,6 +104,7 @@ export default function RootLayout() {
             <DownloadProvider>
               <PlayerProvider>
                 <GestureHandlerRootView style={styles.gestureHandlerRootView}>
+                  <GlassBackdropProvider>
                   <View style={styles.gestureHandlerRootView}>
                     <NavigationDiagnostics />
                     <Stack
@@ -128,6 +130,7 @@ export default function RootLayout() {
                     <GlobalConnectivity />
                     <OTAUpdateOverlay visible={isDownloadingUpdate} />
                   </View>
+                  </GlassBackdropProvider>
                   <StatusBar style="light" />
                 </GestureHandlerRootView>
               </PlayerProvider>

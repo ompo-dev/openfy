@@ -79,6 +79,7 @@ import { MiniPlayer } from './MiniPlayer';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { useLyricsArtworkTransition } from './useLyricsArtworkTransition';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
+import { GlassBackdrop, GlassBackdropScope } from '../native/GlassBackdrop';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COVER_SIZE = Math.min(Math.max(240, SCREEN_WIDTH * 0.82), 340);
@@ -1487,12 +1488,15 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       onShow={artworkTransition.captureFrames}
     >
       <GestureHandlerRootView style={styles.gestureRoot}>
+        <GlassBackdropScope>
         <View ref={artworkTransition.containerRef} collapsable={false}
           onLayout={artworkTransition.captureFrames} style={styles.container}>
+          <GlassBackdrop pointerEvents="none" style={StyleSheet.absoluteFill}>
           <ArtworkBackground current={artworkUrl}
             previous={getTrackArtworkUri(previousTrack)}
             next={getTrackArtworkUri(nextTrack)} progress={artworkProgress} />
           <View style={[styles.backgroundScrim, { pointerEvents: 'none' }]} />
+          </GlassBackdrop>
           {/* Grab Handle Header */}
           <View style={styles.topGrabRow}>
             <View style={styles.grabBar} />
@@ -2011,6 +2015,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
           </SheetFrame>
           {artworkTransition.overlay}
         </View>
+        </GlassBackdropScope>
       </GestureHandlerRootView>
     </PlayerModal>
   );

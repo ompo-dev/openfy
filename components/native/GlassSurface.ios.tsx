@@ -11,6 +11,7 @@ export function GlassSurface({
   glass = 'regular',
   tintColor,
   isInteractive,
+  edgeEffects,
   style,
   children,
   ...rest
@@ -21,6 +22,7 @@ export function GlassSurface({
         glass={glass}
         tintColor={tintColor}
         isInteractive={isInteractive}
+        edgeEffects={edgeEffects}
         style={style}
         {...rest}
       >

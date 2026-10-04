@@ -1,6 +1,7 @@
 import React, { type ReactNode } from 'react';
 import {
   ScrollView,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -12,6 +13,8 @@ import { AppIcon } from './AppIcon';
 import { GlassSurface } from './GlassSurface';
 import { PlayerModal } from './PlayerModal';
 import { BlurView } from 'expo-blur';
+import { GlassSurfaceFallback } from './GlassSurfaceFallback';
+import { GlassBackdrop, GlassBackdropScope } from './GlassBackdrop';
 import { Image } from 'expo-image';
 
 interface SheetFrameProps {
@@ -95,15 +98,21 @@ export function SheetFrame({
       visible={visible}
       onRequestClose={onClose}
     >
-      {artworkURL ? <Image source={{ uri: artworkURL }} cachePolicy="memory-disk"
-        contentFit="cover" blurRadius={28} pointerEvents="none"
-        style={[StyleSheet.absoluteFill, styles.artwork]} /> : null}
-      <BlurView intensity={45} tint="systemUltraThinMaterialDark" pointerEvents="none" style={StyleSheet.absoluteFill} />
-      <View testID="sheet-frame-body" style={[styles.sheet, { paddingBottom: Math.max(16, insets.bottom) }]}>
-        {handle}
-        {header}
-        {content}
-      </View>
+      <GlassBackdropScope>
+        <GlassBackdrop pointerEvents="none" style={StyleSheet.absoluteFill}>
+          {artworkURL ? <Image source={{ uri: artworkURL }} cachePolicy="memory-disk"
+            contentFit="cover" blurRadius={28} pointerEvents="none"
+            style={[StyleSheet.absoluteFill, styles.artwork]} /> : null}
+        </GlassBackdrop>
+        {Platform.OS === 'ios' ? (
+          <BlurView intensity={45} tint="systemUltraThinMaterialDark" pointerEvents="none" style={StyleSheet.absoluteFill} />
+        ) : <GlassSurfaceFallback glass="thick" edgeEffects={false} pointerEvents="none" style={StyleSheet.absoluteFill} />}
+        <View testID="sheet-frame-body" style={[styles.sheet, { paddingBottom: Math.max(16, insets.bottom) }]}>
+          {handle}
+          {header}
+          {content}
+        </View>
+      </GlassBackdropScope>
     </PlayerModal>
   );
 }

@@ -21,6 +21,7 @@ import * as Haptics from 'expo-haptics';
 import { useLibrarySelectedCategory, usePlayer } from '@context';
 import { upsertCatalogTracks } from '@services';
 import { GlassSurface, LoggedPressable } from '../../native';
+import { GlassBackdrop, GlassBackdropScope } from '../../native/GlassBackdrop';
 import { SkeletonImage } from '../../common/SkeletonImage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -196,6 +197,8 @@ export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] })
               ]}
             >
               <View style={styles.cardImage}>
+                <GlassBackdropScope>
+                <GlassBackdrop pointerEvents="none" style={StyleSheet.absoluteFill}>
                 <SkeletonImage
                   cachePolicy="memory-disk"
                   priority="high"
@@ -203,6 +206,7 @@ export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] })
                   contentFit="cover"
                   style={StyleSheet.absoluteFill}
                 />
+                </GlassBackdrop>
                 {/* Dark gradient overlay */}
                 <LinearGradient
                   colors={['rgba(0,0,0,0.45)', 'transparent', 'rgba(0,0,0,0.92)']}
@@ -264,6 +268,7 @@ export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] })
                     </LoggedPressable>
                   </View>
                 </LinearGradient>
+                </GlassBackdropScope>
               </View>
             </Animated.View>
           );

@@ -1,9 +1,9 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, Shapes } from '@config';
+import { COLORS } from '@config';
 
 export const styles = StyleSheet.create({
+  pressable: { borderRadius: 20 },
   category: {
-    backgroundColor: COLORS.SECONDARY,
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 20,

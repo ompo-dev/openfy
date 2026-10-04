@@ -30,6 +30,7 @@ import { NoteLyricBlocks } from './NoteLyricLine';
 import { MusicTimelineSelector } from './MusicTimelineSelector';
 import { MusicWaveformReel } from './MusicWaveformReel';
 import { GlassSurface, PlayerModal } from '../../native';
+import { GlassBackdrop, GlassBackdropScope } from '../../native/GlassBackdrop';
 
 interface DownloadedTrack {
   spotifyId: string;
@@ -185,6 +186,8 @@ export const MusicSnippetEditorModal: React.FC<
         { height: 320 + Math.min(3, lyricSegments.length) * 100 }]}>
         <Pressable style={S.overlay} onPress={onClose}>
           <Pressable style={S.sheet} onPress={(e) => e.stopPropagation()}>
+            <GlassBackdropScope>
+            <GlassBackdrop pointerEvents="none" style={StyleSheet.absoluteFill}>
             {imageUri ? (
               <Image
                 source={{ uri: imageUri }}
@@ -194,6 +197,7 @@ export const MusicSnippetEditorModal: React.FC<
               />
             ) : null}
             <View style={[S.backgroundScrim, { pointerEvents: 'none' }]} />
+            </GlassBackdrop>
 
             <View style={S.content}>
               <View style={S.handle} />
@@ -254,6 +258,7 @@ export const MusicSnippetEditorModal: React.FC<
                 totalDurationMs={totalDurationMs}
               />
             </View>
+            </GlassBackdropScope>
           </Pressable>
         </Pressable>
       </GestureHandlerRootView>

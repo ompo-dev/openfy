@@ -14,6 +14,7 @@ import {
   swiftFont,
   swiftForegroundStyle,
 } from '../../native';
+import { WithoutGlassBackdrop } from '../../native/GlassBackdrop';
 
 type MusicTimelineSelectorProps = {
   totalDurationMs: number;
@@ -140,10 +141,11 @@ function TimelineWindowPicker({
         accessibilityLabel="Alterar janela do waveform"
         accessibilityRole="button"
         onPress={() => setFallbackMenuVisible(true)}
-        style={styles.durationBadge}
       >
+        <GlassSurface glass="clear" isInteractive style={[styles.durationBadge, styles.glassBadge]}>
         <Text style={styles.durationBadgeText}>{label} s</Text>
         <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.72)" />
+        </GlassSurface>
       </LoggedPressable>
       <Modal
         transparent
@@ -151,13 +153,14 @@ function TimelineWindowPicker({
         animationType="fade"
         onRequestClose={() => setFallbackMenuVisible(false)}
       >
+        <WithoutGlassBackdrop>
         <View style={styles.menuOverlay}>
           <LoggedPressable
             accessibilityLabel="Fechar seleção"
             onPress={() => setFallbackMenuVisible(false)}
             style={StyleSheet.absoluteFill}
           />
-          <GlassSurface glass="regular" style={styles.optionMenu}>
+          <GlassSurface glass="thick" style={styles.optionMenu}>
             {WINDOW_OPTIONS.map((option) => (
               <LoggedPressable
                 key={option}
@@ -177,6 +180,7 @@ function TimelineWindowPicker({
             ))}
           </GlassSurface>
         </View>
+        </WithoutGlassBackdrop>
       </Modal>
     </>
   );
@@ -210,6 +214,7 @@ const styles = StyleSheet.create({
     fontFamily: 'SimplyRounded-Bold',
     fontWeight: '700',
   },
+  glassBadge: { borderWidth: 0, backgroundColor: 'transparent' },
   durationMenuHost: {
     alignItems: 'center',
     justifyContent: 'center',
