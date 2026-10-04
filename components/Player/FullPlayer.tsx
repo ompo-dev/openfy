@@ -86,7 +86,7 @@ const COVER_VIEWPORT_WIDTH = SCREEN_WIDTH;
 const COVER_GAP = -16;
 const PREVIEW_SCRUB_LINE_HEIGHT = 21;
 const PLAYER_MEDIA_HEIGHT = COVER_SIZE + 18 + 42;
-const CHROME_OVERLAP = 36;
+const CHROME_OVERLAP = 52;
 
 type FullPlayerProps = {
   visible: boolean;
@@ -105,8 +105,8 @@ const PlayerChromeFade = React.memo(function PlayerChromeFade({ edge }: { edge: 
   const isHeader = edge === 'header';
   const style = isHeader ? styles.headerBackdrop : styles.controlsBackdrop;
   const mask = isHeader
-    ? 'linear-gradient(to bottom, black 0%, black calc(100% - 36px), transparent 100%)'
-    : 'linear-gradient(to bottom, transparent 0px, black 36px, black 100%)';
+    ? `linear-gradient(to bottom, black 0%, black calc(100% - ${CHROME_OVERLAP}px), transparent 100%)`
+    : `linear-gradient(to bottom, transparent 0px, black ${CHROME_OVERLAP}px, black calc(100% - ${CHROME_OVERLAP}px), transparent 100%)`;
 
   // Mask only the stationary glass; the scrolling list stays on a native surface.
   if (Platform.OS === 'web') {
@@ -137,6 +137,12 @@ const PlayerChromeFade = React.memo(function PlayerChromeFade({ edge }: { edge: 
             style={isHeader ? styles.chromeMaskBottom : styles.chromeMaskTop}
           />
           {!isHeader ? <View style={styles.chromeMaskFill} /> : null}
+          {!isHeader ? (
+            <LinearGradient
+              colors={['#000000', 'transparent']}
+              style={styles.chromeMaskBottom}
+            />
+          ) : null}
         </View>
       }
     >
