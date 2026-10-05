@@ -10,6 +10,7 @@ const MIME_TYPES = {
   jpeg: 'image/jpeg',
   jpg: 'image/jpeg',
   json: 'application/json',
+  otf: 'font/otf',
   png: 'image/png',
   svg: 'image/svg+xml',
   ttf: 'font/ttf',

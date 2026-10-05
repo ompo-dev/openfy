@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,20 +7,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createExpoUpdateServer } from '../temporary-expo-update-server.mjs';
 
-const makeExport = async (directory) => {
+const makeExport = async (directory, extraAssets = []) => {
   await mkdir(path.join(directory, '_expo', 'static', 'js', 'ios'), { recursive: true });
   await mkdir(path.join(directory, '_expo', 'static', 'js', 'android'), { recursive: true });
   await mkdir(path.join(directory, 'assets'), { recursive: true });
   await writeFile(path.join(directory, '_expo/static/js/ios/main.js'), 'ios bundle');
   await writeFile(path.join(directory, '_expo/static/js/android/main.js'), 'android bundle');
   await writeFile(path.join(directory, 'assets/cover.png'), Buffer.from([1, 2, 3]));
+  for (const asset of extraAssets) {
+    await writeFile(path.join(directory, asset.path), asset.body);
+  }
+  const assets = [
+    { path: 'assets/cover.png', ext: 'png' },
+    ...extraAssets.map(({ path: assetPath, ext }) => ({ path: assetPath, ext })),
+  ];
   await writeFile(
     path.join(directory, 'metadata.json'),
     JSON.stringify({
       version: 0,
       fileMetadata: {
-        ios: { bundle: '_expo/static/js/ios/main.js', assets: [{ path: 'assets/cover.png', ext: 'png' }] },
-        android: { bundle: '_expo/static/js/android/main.js', assets: [{ path: 'assets/cover.png', ext: 'png' }] },
+        ios: { bundle: '_expo/static/js/ios/main.js', assets },
+        android: { bundle: '_expo/static/js/android/main.js', assets },
       },
     })
   );
@@ -70,6 +78,58 @@ test('serves a platform-specific Expo manifest and its verified assets', async (
     assert.equal(health.createdAt, manifest.createdAt);
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('serves OpenType and TrueType fonts with correct MIME types, extensions and hashes on both platforms', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'openfy-ota-fonts-'));
+  const fonts = [
+    { path: 'assets/sf-pro.otf', ext: 'otf', contentType: 'font/otf', body: Buffer.from('OTTO font fixture') },
+    { path: 'assets/icons.ttf', ext: 'ttf', contentType: 'font/ttf', body: Buffer.from('TrueType font fixture') },
+  ];
+  let server;
+  try {
+    await makeExport(directory, fonts);
+    const running = await startServer(directory);
+    server = running.server;
+    for (const platform of ['ios', 'android']) {
+      const response = await fetch(`${running.origin}/api/manifest`, {
+        headers: {
+          'x-forwarded-host': 'ota-test.trycloudflare.com',
+          'expo-platform': platform,
+          'expo-protocol-version': '1',
+          'expo-runtime-version': '1.0.2',
+        },
+      });
+      assert.equal(response.status, 200);
+      const manifest = await response.json();
+      for (const font of fonts) {
+        const asset = manifest.assets.find((item) => item.fileExtension === `.${font.ext}`);
+        assert.ok(asset, `${platform} manifest includes ${font.ext}`);
+        assert.equal(asset.contentType, font.contentType);
+        const assetUrl = new URL(asset.url);
+        const downloaded = await fetch(`${running.origin}${assetUrl.pathname}${assetUrl.search}`);
+        assert.equal(downloaded.status, 200);
+        assert.equal(downloaded.headers.get('content-type'), font.contentType);
+        assert.equal(downloaded.headers.get('content-length'), String(font.body.length));
+        const body = Buffer.from(await downloaded.arrayBuffer());
+        assert.deepEqual(body, font.body);
+        assert.equal(asset.hash, createHash('sha256').update(body).digest('base64url'));
+      }
+    }
+  } finally {
+    if (server) await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('still rejects unknown exported asset formats', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'openfy-ota-unsupported-'));
+  try {
+    await makeExport(directory, [{ path: 'assets/unknown.xyz', ext: 'xyz', body: Buffer.from('unknown') }]);
+    await assert.rejects(startServer(directory), /Unsupported exported asset type: xyz/);
+  } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
