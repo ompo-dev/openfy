@@ -22,7 +22,6 @@ import { rememberCachedArtistImage, upsertCatalogTracks } from '@services';
 import type { ArtistModel, TrackModel } from '@models';
 
 import { ListeningHome } from './ListeningHome';
-import { ImportModal } from '../ImportModal';
 import { LoggedPressable } from '../native';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { TrackRow } from '../common/TrackRow';
@@ -66,7 +65,6 @@ export const Home = () => {
   const [searchError, setSearchError] = React.useState('');
   const [savedTrackIds, setSavedTrackIds] = React.useState<Set<string>>(new Set());
   const [savingTrackIds, setSavingTrackIds] = React.useState<Set<string>>(new Set());
-  const [importVisible, setImportVisible] = React.useState(false);
   const searchGeneration = React.useRef(0);
 
   useFocusEffect(
@@ -211,21 +209,6 @@ export const Home = () => {
           />
         }
       >
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.eyebrow}>OPENFY MUSIC</Text>
-            <Text style={styles.title}>Início</Text>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Importar música, álbum ou playlist"
-            onPress={() => setImportVisible(true)}
-            style={({ pressed }) => [styles.importButton, pressed && styles.pressed]}
-          >
-            <Ionicons name="add" size={26} color="#FFFFFF" />
-          </Pressable>
-        </View>
-
         <View style={styles.searchBox}>
           <Ionicons name="search" size={19} color="#9B9BA0" />
           <TextInput
@@ -337,7 +320,6 @@ export const Home = () => {
           </>
         )}
       </ScrollView>
-      <ImportModal visible={importVisible} onClose={() => setImportVisible(false)} />
     </View>
   );
 };
@@ -345,29 +327,6 @@ export const Home = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#121212', width: '100%', maxWidth: 1100, alignSelf: 'center' },
   content: { paddingBottom: BOTTOM_NAVIGATION_HEIGHT + 76 },
-  header: {
-    paddingHorizontal: 18,
-    paddingBottom: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  eyebrow: {
-    color: '#8E8E93',
-    fontSize: 10,
-    fontFamily: 'SF-Bold',
-    marginBottom: 3,
-  },
-  title: { color: '#FFFFFF', fontSize: 25, fontFamily: 'SF-Bold' },
-  importButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#242428',
-  },
-  pressed: { opacity: 0.72 },
   searchBox: {
     height: 48,
     marginHorizontal: 16,

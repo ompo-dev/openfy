@@ -179,7 +179,7 @@ export const Feed = () => {
         alwaysBounceVertical
         bounces
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.content, { paddingTop: top + 12 }]}
+        contentContainerStyle={[styles.content, { paddingTop: top + 16 }]}
         refreshControl={
           <RefreshControl
             tintColor="#FFFFFF"
@@ -190,7 +190,6 @@ export const Feed = () => {
           />
         }
       >
-        <Text style={styles.title}>Feed</Text>
         <FriendActivityStatus notes={notes} />
         <ListeningFeed
           lyricTrack={lyricTrack ? toPlayerTrack(lyricTrack) : undefined}
@@ -216,13 +215,6 @@ export const Feed = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#121212' },
   content: { paddingBottom: BOTTOM_NAVIGATION_HEIGHT + 72 },
-  title: {
-    color: '#FFFFFF',
-    fontSize: 25,
-    fontFamily: 'SF-Bold',
-    paddingHorizontal: 18,
-    marginBottom: 6,
-  },
   loading: { marginTop: 48 },
   empty: {
     color: '#8E8E93',

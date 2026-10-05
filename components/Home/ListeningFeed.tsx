@@ -195,7 +195,7 @@ const MusicShelfPost = ({
       <PostHeader author={author} />
       <Text style={styles.postTitle}>{title}</Text>
       <View style={styles.postCards}>
-        <CompactMusicCards tracks={tracks} />
+        <CompactMusicCards tracks={tracks} size="compact" />
       </View>
       <PostActions track={compactToPlayerTrack(tracks[0])} />
     </View>
@@ -461,26 +461,24 @@ export const ListeningFeed = ({
 
 const styles = StyleSheet.create({
   feed: {
-    marginTop: 8,
+    marginTop: 12,
   },
   post: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#29292C',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
+    marginTop: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 2,
   },
   postHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 42,
+    minHeight: 38,
   },
   authorAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 2,
-    borderColor: '#D78036',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1.5,
+    borderColor: 'rgba(30,215,96,0.62)',
   },
   authorAvatarFallback: {
     alignItems: 'center',
@@ -494,7 +492,7 @@ const styles = StyleSheet.create({
   },
   authorName: {
     color: '#F4F4F5',
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: 'SF-Bold',
     fontWeight: '700',
   },
@@ -508,7 +506,7 @@ const styles = StyleSheet.create({
   authorListening: {
     flex: 1,
     color: '#8E8E93',
-    fontSize: 12.5,
+    fontSize: 12,
     fontFamily: 'SF-Regular',
   },
   moreButton: {
@@ -516,22 +514,22 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   postTitle: {
-    color: '#E4E4E7',
-    fontSize: 15,
-    lineHeight: 20,
-    fontFamily: 'SF-Regular',
-    marginTop: 12,
-    marginBottom: 10,
+    color: '#FFFFFF',
+    fontSize: 18,
+    lineHeight: 23,
+    fontFamily: 'SF-Bold',
+    marginTop: 14,
+    marginBottom: 12,
   },
   postCards: {
-    marginHorizontal: -16,
+    marginHorizontal: -18,
   },
   playIconOffset: {
     marginLeft: 2,
   },
   postActions: {
-    minHeight: 48,
-    marginTop: 8,
+    minHeight: 42,
+    marginTop: 6,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -539,7 +537,7 @@ const styles = StyleSheet.create({
   actionGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 18,
+    gap: 16,
   },
   actionButton: {
     flexDirection: 'row',
@@ -577,15 +575,15 @@ const styles = StyleSheet.create({
     fontFamily: 'SF-Regular',
   },
   partyCard: {
-    marginTop: 12,
-    borderRadius: 14,
+    marginTop: 14,
+    borderRadius: 12,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.15)',
   },
   partyGradient: {
-    minHeight: 110,
-    padding: 14,
+    minHeight: 104,
+    padding: 12,
   },
   partySummaryRow: {
     flexDirection: 'row',
@@ -616,7 +614,7 @@ const styles = StyleSheet.create({
   },
   partyTitle: {
     color: '#FFFFFF',
-    fontSize: 17,
+    fontSize: 16,
     fontFamily: 'SF-Bold',
     fontWeight: '800',
     marginTop: 3,
@@ -659,7 +657,7 @@ const styles = StyleSheet.create({
     fontFamily: 'SF-Semibold',
   },
   lyricCard: {
-    borderRadius: 14,
+    borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#071617',
     borderWidth: StyleSheet.hairlineWidth,
@@ -675,7 +673,7 @@ const styles = StyleSheet.create({
   },
   lyricGradient: {
     flex: 1,
-    padding: 14,
+    padding: 12,
   },
   lyricGradientExpanded: {
     minHeight: 250,
@@ -686,9 +684,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   lyricCover: {
-    width: 46,
-    height: 46,
-    borderRadius: 7,
+    width: 42,
+    height: 42,
+    borderRadius: 6,
   },
   lyricTrackCopy: {
     flex: 1,

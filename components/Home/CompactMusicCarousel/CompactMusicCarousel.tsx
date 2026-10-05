@@ -20,6 +20,7 @@ import { usePlayer } from '@context';
 import { LoggedPressable } from '../../native';
 import { MarqueeText } from '../../common/MarqueeText';
 import { SkeletonImage } from '../../common/SkeletonImage';
+import { getHomeCardScale, type HomeCardSize } from '../homeCardSizing';
 
 export interface CompactTrackItem {
   id: string;
@@ -41,14 +42,14 @@ export interface CompactTrackItem {
   localImagePath?: string;
 }
 
-const CARD_SNAP_WIDTH = 168; // 154 width + 14 gap
-
 export const CompactMusicCarousel = ({
   title = 'Em Alta Agora',
   tracks,
+  size = 'large',
 }: {
   title?: string;
   tracks: CompactTrackItem[];
+  size?: HomeCardSize;
 }) => {
   if (!tracks.length) return null;
 
@@ -58,15 +59,17 @@ export const CompactMusicCarousel = ({
         <Text style={styles.sectionTitle}>{title}</Text>
         <Text style={styles.seeAllText}>Ver tudo</Text>
       </View>
-      <CompactMusicCards tracks={tracks} />
+      <CompactMusicCards tracks={tracks} size={size} />
     </View>
   );
 };
 
 export const CompactMusicCards = ({
   tracks,
+  size = 'large',
 }: {
   tracks: CompactTrackItem[];
+  size?: HomeCardSize;
 }) => {
   const { currentTrack, playWithQueue, isPlaying: playerIsPlaying, togglePlayPause } = usePlayer((state) => ({
     currentTrack: state.currentTrack,
@@ -75,6 +78,11 @@ export const CompactMusicCards = ({
     togglePlayPause: state.togglePlayPause,
   }));
   const scrollX = React.useRef(new Animated.Value(0)).current;
+  const scaleFactor = getHomeCardScale(size);
+  const cardWidth = Math.round(156 * scaleFactor);
+  const cardHeight = Math.round(195 * scaleFactor);
+  const cardRadius = Math.round(18 * scaleFactor);
+  const snapWidth = cardWidth + 14;
 
   const queue = React.useMemo(
     () => tracks.map((item) => ({
@@ -129,9 +137,9 @@ export const CompactMusicCards = ({
 
           // Physics scroll inertia animation
           const inputRange = [
-            (index - 1) * CARD_SNAP_WIDTH,
-            index * CARD_SNAP_WIDTH,
-            (index + 1) * CARD_SNAP_WIDTH,
+            (index - 1) * snapWidth,
+            index * snapWidth,
+            (index + 1) * snapWidth,
           ];
 
           const scale = scrollX.interpolate({
@@ -154,7 +162,7 @@ export const CompactMusicCards = ({
               }}
             >
               <LoggedPressable
-                style={[styles.card, isPlaying && styles.cardActive]}
+                style={[styles.card, { width: cardWidth, height: cardHeight, borderRadius: cardRadius }, isPlaying && styles.cardActive]}
                 onPress={() => handlePlay(item, index)}
                 accessibilityRole="button"
                 accessibilityLabel={`Tocar ${item.title} de ${item.artist}`}
@@ -175,7 +183,7 @@ export const CompactMusicCards = ({
                       'rgba(0,0,0,0.92)',
                     ]}
                     locations={[0, 0.35, 1.0]}
-                    style={styles.gradientOverlay}
+                    style={[styles.gradientOverlay, { padding: Math.round(10 * scaleFactor), borderRadius: cardRadius }]}
                   >
                     {/* Top Row: Explicit Badge */}
                     <View style={styles.topRow}>
@@ -191,23 +199,27 @@ export const CompactMusicCards = ({
                       <View style={styles.infoContainer}>
                         <MarqueeText
                           text={item.title}
-                          style={styles.titleText}
+                          style={[styles.titleText, { fontSize: size === 'compact' ? 11.5 : 14 }]}
                           align="left"
                           fadeWidth={8}
                         />
                         <MarqueeText
                           text={item.artist}
-                          style={styles.artistText}
+                          style={[styles.artistText, { fontSize: size === 'compact' ? 10 : 11.5 }]}
                           align="left"
                           fadeWidth={8}
                         />
                       </View>
 
                       {/* Circular White Play Button */}
-                      <View style={styles.playButton}>
+                      <View style={[styles.playButton, {
+                        width: Math.round(32 * scaleFactor),
+                        height: Math.round(32 * scaleFactor),
+                        borderRadius: Math.round(16 * scaleFactor),
+                      }]}>
                         <Ionicons
                           name={isPlaying ? 'pause' : 'play'}
-                          size={15}
+                          size={Math.round(15 * scaleFactor)}
                           color="#000000"
                           style={{ marginLeft: isPlaying ? 0 : 2 }}
                         />
@@ -251,9 +263,6 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   card: {
-    width: 156,
-    height: 195,
-    borderRadius: 18,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.12)',
@@ -274,8 +283,6 @@ const styles = StyleSheet.create({
   gradientOverlay: {
     ...(StyleSheet.absoluteFill as any),
     justifyContent: 'space-between',
-    padding: 10,
-    borderRadius: 18,
   },
   topRow: {
     flexDirection: 'row',
