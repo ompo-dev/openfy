@@ -34,8 +34,7 @@ import Slider from '@react-native-community/slider';
 import MaskedView from '@react-native-masked-view/masked-view';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { AppIcon as Ionicons, AppIcon as MaterialCommunityIcons } from '../native/AppIcon';
 import {
   findArtistIdByName,
   getArtistCatalogImage,
@@ -2297,7 +2296,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginVertical: 12,
   },
-  lyricsToggleSlot: { width: 56, overflow: 'hidden' },
+  lyricsToggleSlot: { width: 56 },
   circleActionBtn: {
     width: 44,
     height: 44,

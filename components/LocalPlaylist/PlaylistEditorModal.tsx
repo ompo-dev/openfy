@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
+import { AppIcon as Ionicons } from "../native/AppIcon";
 
 import {
   updateLocalPlaylist,

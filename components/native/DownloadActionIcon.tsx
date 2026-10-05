@@ -1,5 +1,5 @@
 import * as React from 'react';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { AppIcon as Ionicons } from "./AppIcon";
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
 
 type DownloadActionIconProps = {

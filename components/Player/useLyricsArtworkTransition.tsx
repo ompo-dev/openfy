@@ -132,7 +132,9 @@ export const useLyricsArtworkTransition = (
     };
   }, [flight, coverSize]);
   const lyricsStyle = useAnimatedStyle(() => ({ opacity: modeProgress.value }));
-  const toggleStyle = useAnimatedStyle(() => ({ width: 56 * (1 - modeProgress.value), opacity: 1 - modeProgress.value }));
+  // Animate geometry rather than alpha so UIKit keeps the glass material active.
+  const toggleStyle = useAnimatedStyle(() => ({ width: 56 * (1 - modeProgress.value),
+    transform: [{ scale: Math.max(0.001, 1 - modeProgress.value) }] }));
   const copyStyle = useAnimatedStyle(() => ({ marginLeft: 54 * modeProgress.value - (lyricsVisible ? 54 : 0) }));
 
   // Match the source on the first mount, before the UI worklet attaches.

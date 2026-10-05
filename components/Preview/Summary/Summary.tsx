@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { Entypo } from '@expo/vector-icons';
+import { AppIcon as Entypo } from "../../native/AppIcon";
 
 import { AnimatedPressable } from './AnimatedPressable';
 

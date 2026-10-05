@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
+import { AppIcon as Ionicons } from "../native/AppIcon";
 import { useFocusEffect } from 'expo-router';
 import { Swipeable } from 'react-native-gesture-handler';
 import { getArtistCatalogImage, getYouTubeMusicArtistProfile } from '@api';

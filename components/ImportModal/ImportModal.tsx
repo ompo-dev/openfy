@@ -14,8 +14,7 @@ import {
   Image,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { Ionicons } from '@expo/vector-icons';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { AppIcon as Ionicons, AppIcon as MaterialCommunityIcons } from '../native/AppIcon';
 
 import {
   getDownloadedTracks,

@@ -1,7 +1,6 @@
 import * as React from 'react';
-import { ActivityIndicator, Alert, FlatList, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { Clock3, Disc3, Headphones, ListMusic, Pin, Radio, Sparkles, ChevronRight, Play } from 'lucide-react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { AppIcon as Ionicons } from "../native/AppIcon";
 import { usePlayer, useDownloads } from '@context';
 import { useDetailNavigation } from '@hooks';
 import { getArtistCatalogImage } from '@api';
@@ -10,7 +9,8 @@ import { getPlayerAlbum } from '../../services/library/playerAlbum';
 import type { HomeRelease } from '../../services/home/personalizedHome';
 import { prefetchDetail } from '../../services/navigation/detailPrefetch';
 import { PlaylistMosaic } from '../PlaylistMosaic';
-import { GlassSurface, LoggedPressable, SheetFrame } from '../native';
+import { GlassSurface, LoggedPressable, AppIcon } from '../native';
+import { homeRadioPlaylistId, publishHomePlaylists } from '../../services/home/temporaryPlaylists';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { TrackRow } from '../common/TrackRow';
 
@@ -32,7 +32,7 @@ function Section({ title, icon, onShowAll, children }: {
       {icon}
       <Text style={styles.sectionTitle}>{title}</Text>
       {onShowAll ? <LoggedPressable onPress={onShowAll} accessibilityLabel={`Mostrar tudo: ${title}`} style={styles.showAll}>
-        <ChevronRight size={20} color="#A4A4A4" />
+        <AppIcon name="chevron-forward" size={20} color="#A4A4A4" />
       </LoggedPressable> : null}
     </View>
     {children}
@@ -44,16 +44,16 @@ function Rail({ children }: { children: React.ReactNode }) {
 }
 
 export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapshot; loading: boolean }) {
-  const { width, height } = useWindowDimensions();
-  const tileSize = Math.min(174, Math.max(124, (width - 52) / 2.2));
-  const releaseSize = Math.min(208, Math.max(150, (width - 52) / 1.85));
+  const { width } = useWindowDimensions();
+  const tileSize = Math.min(136, Math.max(108, (width - 52) / 2.75));
+  const releaseSize = tileSize;
   const { currentTrack, isPlaying, playWithQueue, togglePlayPause } = usePlayer((state) => ({
     currentTrack: state.currentTrack, isPlaying: state.playerState.isPlaying,
     playWithQueue: state.playWithQueue, togglePlayPause: state.togglePlayPause,
   }));
   const { downloads, enqueueDownloads } = useDownloads();
   const { openDetail } = useDetailNavigation();
-  const [expanded, setExpanded] = React.useState<{ title: string; tracks: PersonalizedHomeTrack[] } | null>(null);
+  React.useEffect(() => { if (!loading) publishHomePlaylists(home); }, [home, loading]);
   const [artistImages, setArtistImages] = React.useState<Record<string, string>>({});
   const [startingRelease, setStartingRelease] = React.useState<string | null>(null);
   const recent = home.continueListening;
@@ -125,7 +125,7 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
   </View>;
 
   return <>
-    {pinnedTracks.length || pinnedArtists.length ? <Section title="Pinados" icon={<Pin size={22} color="#1ED760" />}>
+    {pinnedTracks.length || pinnedArtists.length ? <Section title="Pinados" icon={<AppIcon name="pin" size={22} color="#1ED760" />}>
       <Rail>
         {trackTiles(pinnedTracks.slice(0, 2), 'home:pinned')}
         {pinnedArtists.map((artist) => <LoggedPressable key={artist.artistId} style={[styles.tile, { width: tileSize }]} accessibilityLabel={`Abrir artista ${artist.title}`}
@@ -135,10 +135,10 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
         </LoggedPressable>)}
       </Rail>
     </Section> : null}
-    {recent.length ? <Section title="Tocados recentemente" icon={<Clock3 size={22} color="#1ED760" />} onShowAll={() => setExpanded({ title: 'Tocados recentemente', tracks: recent })}>
+    {recent.length ? <Section title="Tocados recentemente" icon={<AppIcon name="time" size={22} color="#1ED760" />} onShowAll={() => openDetail('playlist', 'home_mix_recent', 'home')}>
       <Rail>{trackTiles(recent, 'home:recent')}</Rail>
     </Section> : null}
-    {playlists.length ? <Section title="Playlists recentes" icon={<ListMusic size={22} color="#1ED760" />}>
+    {playlists.length ? <Section title="Playlists recentes" icon={<AppIcon name="musical-notes" size={22} color="#1ED760" />}>
       <Rail>{playlists.map((playlist) => {
         const covers = [...new Set([...playlist.trackIds.map((id) => {
           const track = home.tracksById.get(id); return track?.localImagePath || track?.imageURL || '';
@@ -149,11 +149,11 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
         </LoggedPressable>;
       })}</Rail>
     </Section> : null}
-    {releases.length ? <Section title="Novos lançamentos para você" icon={<Sparkles size={22} color="#1ED760" />}>
+    {releases.length ? <Section title="Novos lançamentos para você" icon={<AppIcon name="sparkles" size={22} color="#1ED760" />}>
       <Rail>{releases.map((release) => <LoggedPressable key={release.id} style={[styles.tile, { width: releaseSize }]} accessibilityLabel={`Abrir ${releaseLabel(release)} ${release.title}`}
         onPressIn={() => prefetchDetail('album', release.id)} onPress={() => openDetail('album', release.id, 'home')}>
         <Artwork uri={release.imageURL} size={releaseSize} />
-        <Text numberOfLines={2} style={styles.releaseTitle}>{release.title}</Text>
+        <Text numberOfLines={1} style={styles.tileTitle}>{release.title}</Text>
         <Text numberOfLines={1} style={styles.subtitle}>{release.artistName}</Text>
         <Text style={styles.releaseMeta}>{[releaseLabel(release), release.releaseDate.slice(0, 4)].filter(Boolean).join(' · ')}</Text>
       </LoggedPressable>)}</Rail>
@@ -164,7 +164,7 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
         <View style={styles.flexCopy}><Text style={styles.subtitle}>Lançamento de</Text><Text numberOfLines={1} style={styles.artistTitle}>{releases[0].artistName}</Text></View>
       </LoggedPressable>
       <View style={styles.spotlight}>
-        <LoggedPressable style={{ width: Math.min(150, (width - 36) * 0.42), minHeight: 150 }}
+        <LoggedPressable style={{ width: Math.min(126, (width - 36) * 0.38), minHeight: 126 }}
           accessibilityLabel={`Abrir álbum ${releases[0].title}`} onPress={() => openDetail('album', releases[0].id, 'home')}>
           <SkeletonImage source={{ uri: releases[0].imageURL }} cachePolicy="memory-disk" contentFit="cover" style={StyleSheet.absoluteFill} />
         </LoggedPressable>
@@ -174,26 +174,26 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
           <LoggedPressable accessibilityLabel={`Tocar ${releases[0].title}`} disabled={Boolean(startingRelease)} onPress={() => void startRelease(releases[0])} style={styles.spotlightPlay}>
             <GlassSurface isInteractive style={styles.playButton}>
               <View style={styles.playForeground}>
-                {startingRelease ? <ActivityIndicator color="#FFFFFF" /> : <Play size={22} fill="#FFFFFF" color="#FFFFFF" />}
+                {startingRelease ? <ActivityIndicator color="#FFFFFF" /> : <AppIcon name="play" size={22} color="#FFFFFF" />}
               </View>
             </GlassSurface>
           </LoggedPressable>
         </View>
       </View>
     </View> : null}
-    {mostPlayed.length ? <Section title="Não sai do seu fone" icon={<Headphones size={22} color="#1ED760" />} onShowAll={() => setExpanded({ title: 'Não sai do seu fone', tracks: mostPlayed })}>
+    {mostPlayed.length ? <Section title="Não sai do seu fone" icon={<AppIcon name="headset" size={22} color="#1ED760" />} onShowAll={() => openDetail('playlist', 'home_mix_most_played', 'home')}>
       {mostPlayed.slice(0, 5).map((track, index) => renderTrack(track, index, mostPlayed, 'home:most-played'))}
     </Section> : null}
-    {seed && similar.length ? <Section title={`Parecido com ${seed.name}`} icon={<Radio size={22} color="#1ED760" />}>
+    {seed && similar.length ? <Section title={`Parecido com ${seed.name}`} icon={<AppIcon name="radio" size={22} color="#1ED760" />}>
       <Rail>
-        <LoggedPressable style={[styles.tile, { width: releaseSize }]} accessibilityLabel={`Abrir rádio de ${seed.name}`} onPress={() => setExpanded({ title: `Rádio de ${seed.name}`, tracks: similar })}>
-          <PlaylistMosaic imageURLs={[...new Set(similar.map((track) => track.imageURL).filter(Boolean))]} size={releaseSize} />
-          <Text style={styles.releaseTitle} numberOfLines={1}>Rádio de {seed.name}</Text><Text style={styles.subtitle}>Playlist</Text>
+        <LoggedPressable style={[styles.tile, { width: tileSize }]} accessibilityLabel={`Abrir rádio de ${seed.name}`} onPress={() => openDetail('playlist', homeRadioPlaylistId(seed.name), 'home')}>
+          <PlaylistMosaic imageURLs={[...new Set(similar.map((track) => track.imageURL).filter(Boolean))]} size={tileSize} />
+          <Text style={styles.tileTitle} numberOfLines={1}>Rádio de {seed.name}</Text><Text style={styles.subtitle}>Playlist</Text>
         </LoggedPressable>
         {trackTiles(similar.slice(0, 8), 'home:similar')}
       </Rail>
     </Section> : null}
-    {discoveryArtists.length ? <Section title="Artistas para descobrir" icon={<Sparkles size={22} color="#1ED760" />}>
+    {discoveryArtists.length ? <Section title="Artistas para descobrir" icon={<AppIcon name="sparkles" size={22} color="#1ED760" />}>
       <Rail>{discoveryArtists.map((artist) => <LoggedPressable key={artist.artistId} style={[styles.tile, { width: tileSize }]}
         accessibilityLabel={`Abrir artista ${artist.title}`} onPressIn={() => prefetchDetail('artist', artist.artistId)}
         onPress={() => openDetail('artist', artist.artistId, 'home')}>
@@ -201,25 +201,20 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
         <Text numberOfLines={1} style={styles.tileTitle}>{artist.title}</Text><Text style={styles.subtitle}>Artista</Text>
       </LoggedPressable>)}</Rail>
     </Section> : null}
-    {home.discoveries.length ? <Section title={home.discoveryTitle} icon={<Disc3 size={22} color="#1ED760" />} onShowAll={() => setExpanded({ title: home.discoveryTitle, tracks: home.discoveries })}>
+    {home.discoveries.length ? <Section title={home.discoveryTitle} icon={<AppIcon name="disc" size={22} color="#1ED760" />} onShowAll={() => openDetail('playlist', 'home_mix_discover', 'home')}>
       <Rail>{trackTiles(home.discoveries, 'home:discover')}</Rail>
     </Section> : null}
-    {expanded ? <SheetFrame visible title={expanded.title} onClose={() => setExpanded(null)} scroll={false} contentHeight={Math.min(height * 0.66, expanded.tracks.length * 66 + 12)}>
-      <FlatList data={expanded.tracks} keyExtractor={(track) => track.spotifyId} showsVerticalScrollIndicator={false}
-        renderItem={({ item, index }) => renderTrack(item, index, expanded.tracks, `home:${expanded.title}`)} />
-    </SheetFrame> : null}
   </>;
 }
 
 const styles = StyleSheet.create({
   section: { marginTop: 28 },
   sectionHeader: { paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
-  sectionTitle: { flex: 1, color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 22, lineHeight: 27, letterSpacing: 0 },
+  sectionTitle: { flex: 1, color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 20, lineHeight: 25, letterSpacing: 0 },
   showAll: { width: 36, height: 32, alignItems: 'flex-end', justifyContent: 'center' },
-  rail: { gap: 16, paddingHorizontal: 18, paddingBottom: 2 },
+  rail: { gap: 12, paddingHorizontal: 18, paddingBottom: 2, alignItems: 'flex-start' },
   tile: { gap: 5 },
   tileTitle: { color: '#FFFFFF', fontFamily: 'SF-Semibold', fontSize: 15, lineHeight: 20, marginTop: 4 },
-  releaseTitle: { color: '#FFFFFF', fontFamily: 'SF-Semibold', fontSize: 17, lineHeight: 22, marginTop: 5, minHeight: 44 },
   subtitle: { color: '#A3A3A6', fontFamily: 'SF-Regular', fontSize: 14, lineHeight: 19 },
   releaseMeta: { color: '#858589', fontFamily: 'SF-Regular', fontSize: 12, lineHeight: 16 },
   active: { color: '#1ED760' },

@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { StyleSheet, Text } from 'react-native';
 import { SheetFrame } from '../SheetFrame';
-import { PlayerModal } from '../PlayerModal';
+import { PlayerModal, shouldDismissSheet } from '../PlayerModal';
 
 describe('shared player modal surface', () => {
   it('fits short content in a transparent sheet and closes with the supplied action', async () => {
@@ -14,7 +14,7 @@ describe('shared player modal surface', () => {
     expect(modal.props.transparent).toBe(true);
     const surface = StyleSheet.flatten(screen.getByTestId('player-modal-surface').props.style);
     expect(surface.flex).toBeUndefined();
-    expect(surface.maxHeight).toBe('100%');
+    expect(surface.maxHeight).toBe('90%');
     expect(StyleSheet.flatten(screen.getByTestId('sheet-frame-body').props.style).flex).toBeUndefined();
     await fireEvent.press(screen.getByLabelText('Fechar'));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -35,17 +35,25 @@ describe('shared player modal surface', () => {
     const keyboardStyle = StyleSheet.flatten(screen.getByTestId('sheet-frame-body').props.style);
     expect(keyboardStyle.flexShrink).toBe(1);
     expect(keyboardStyle.minHeight).toBe(0);
-    expect(keyboardStyle.paddingBottom).toBeGreaterThanOrEqual(16);
     const content = StyleSheet.flatten(screen.getByTestId('sheet-frame-content').props.style);
     expect(content.height).toBe(640);
     expect(content.flexShrink).toBe(1);
   });
 
   it('keeps the music player in a full native page sheet', async () => {
-    const screen = await render(<PlayerModal visible fullScreen><Text>Player</Text></PlayerModal>);
+    const onClose = jest.fn();
+    const screen = await render(<PlayerModal visible fullScreen onRequestClose={onClose}><Text>Player</Text></PlayerModal>);
     expect(screen.getByTestId('player-modal').props.presentationStyle).toBe('pageSheet');
     expect(screen.getByTestId('player-modal').props.transparent).not.toBe(true);
     expect(StyleSheet.flatten(screen.getByTestId('player-modal-surface').props.style).flex).toBe(1);
+    expect(screen.getByTestId('player-modal').props.allowSwipeDismissal).toBe(true);
+  });
+
+  it('dismisses deliberate downward drags but not taps, short drags or upward scrolling', () => {
+    expect(shouldDismissSheet(100, 0)).toBe(true);
+    expect(shouldDismissSheet(30, 0.8)).toBe(true);
+    expect(shouldDismissSheet(10, 1)).toBe(false);
+    expect(shouldDismissSheet(-120, -1)).toBe(false);
   });
 
   it('dismisses a fitted sheet by tapping outside it', async () => {

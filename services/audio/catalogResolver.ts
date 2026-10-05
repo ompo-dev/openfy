@@ -3,6 +3,7 @@
   hasUnwantedForbiddenWords,
   normalizeString,
   splitCanonicalArtists,
+  titleWithoutFeaturedCredits,
 } from '../canonical/canonicalMatcher';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 import { parseYouTubeCount, rankYouTubeCandidate, type YouTubeCandidate } from './youtubeCandidateRanking';
@@ -284,11 +285,12 @@ export const resolveSpotifyTrackVideoId = async (
 
   const canonicalArtists = splitCanonicalArtists(artists.join(', '));
   const primaryArtist = canonicalArtists[0] ?? '';
+  const searchTitle = titleWithoutFeaturedCredits(title);
 
   const queries = Array.from(new Set([
-    `${canonicalArtists.slice(0, 2).join(' ')} ${title}`.trim(),
-    `${primaryArtist} ${title} Official Audio`.trim(),
-    `${canonicalArtists.join(' ')} ${title}`.trim(),
+    `${primaryArtist} ${searchTitle}`.trim(),
+    `${primaryArtist} ${searchTitle} Official Audio`.trim(),
+    `${canonicalArtists.join(' ')} ${searchTitle}`.trim(),
   ]));
 
   try {

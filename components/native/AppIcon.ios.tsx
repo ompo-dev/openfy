@@ -1,11 +1,11 @@
-import { SymbolView, type SymbolWeight } from 'expo-symbols';
-import type { StyleProp, ViewStyle } from 'react-native';
+import { SymbolView, type SymbolWeight, type SFSymbol } from 'expo-symbols';
+import { StyleSheet, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 
 import type { AppIconName } from './AppIcon';
 
 // Each Ionicons name mapped to its closest SF Symbol.
 // iOS renders these native symbols; Android/web keep Ionicons in AppIcon.tsx.
-const SF: Record<AppIconName, string> = {
+export const APP_SF_SYMBOLS: Record<AppIconName, SFSymbol> = {
   'home': 'house',
   'home-outline': 'house',
   'library': 'books.vertical.fill',
@@ -70,6 +70,50 @@ const SF: Record<AppIconName, string> = {
   'logo-github': 'link',
   'radio-button-on': 'largecircle.fill.circle',
   'radio-button-off': 'circle',
+  'add-circle-outline': 'plus.circle',
+  'alert-circle': 'exclamationmark.circle.fill',
+  'arrow-down-bold': 'arrow.down',
+  'arrow-forward': 'arrow.right',
+  'arrow-undo': 'arrow.uturn.backward',
+  'chatbubble-ellipses-outline': 'quote.bubble',
+  'check': 'checkmark',
+  'checkmark': 'checkmark',
+  'clipboard-outline': 'clipboard',
+  'clipboard-text-outline': 'clipboard',
+  'cloud-offline-outline': 'icloud.slash',
+  'color-wand-outline': 'wand.and.stars',
+  'copy-outline': 'doc.on.doc',
+  'create-outline': 'square.and.pencil',
+  'disc': 'opticaldisc',
+  'document-text-outline': 'doc.text',
+  'dots-three-horizontal': 'ellipsis',
+  'eye-outline': 'eye',
+  'keyboard-arrow-left': 'chevron.left',
+  'link': 'link',
+  'logo-youtube': 'play.rectangle.fill',
+  'microphone-outline': 'mic',
+  'music': 'music.note',
+  'musical-notes-outline': 'music.note.list',
+  'open-outline': 'arrow.up.right.square',
+  'options-outline': 'slider.horizontal.3',
+  'palette': 'paintpalette',
+  'pencil-outline': 'pencil',
+  'playlist-plus': 'text.badge.plus',
+  'podcast': 'dot.radiowaves.left.and.right',
+  'refresh': 'arrow.clockwise',
+  'remove-circle-outline': 'minus.circle',
+  'share-outline': 'square.and.arrow.up',
+  'sparkles': 'sparkles',
+  'stats-chart-sharp': 'waveform',
+  'swap-vertical': 'arrow.up.arrow.down',
+  'time-outline': 'clock',
+  'trash-outline': 'trash',
+  'user': 'person.fill',
+  'pin': 'pin.fill',
+  'radio': 'dot.radiowaves.left.and.right',
+  'code-slash-outline': 'chevron.left.forwardslash.chevron.right',
+  'arrow-down': 'arrow.down',
+  'plus': 'plus',
 };
 
 interface AppIconProps {
@@ -78,25 +122,27 @@ interface AppIconProps {
   size?: number;
   fill?: string;
   weight?: SymbolWeight;
-  style?: StyleProp<ViewStyle>;
+  style?: StyleProp<ViewStyle | TextStyle>;
 }
 
 export function AppIcon({
   name,
   color,
-  size = 24,
+  size,
   weight = 'medium',
   style,
 }: AppIconProps) {
-  const symbol = SF[name] ?? 'questionmark';
+  const symbol = APP_SF_SYMBOLS[name];
+  const { fontSize, color: styleColor, ...viewStyle } = (StyleSheet.flatten(style) || {}) as TextStyle;
+  const resolvedSize = size || fontSize || 24;
   return (
     <SymbolView
-      name={symbol as any}
-      size={size}
-      tintColor={color}
+      name={symbol}
+      size={resolvedSize}
+      tintColor={color || styleColor || '#FFFFFF'}
       type="monochrome"
       weight={weight}
-      style={[{ width: size, height: size }, style]}
+      style={[{ width: resolvedSize, height: resolvedSize }, viewStyle as ViewStyle]}
     />
   );
 }

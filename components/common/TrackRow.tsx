@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { AppIcon as Ionicons } from "../native/AppIcon";
 
 import { LoggedPressable } from '../native';
 import { DownloadActionIcon } from '../native/DownloadActionIcon';
@@ -19,11 +19,12 @@ type TrackRowProps = {
   onDownload: () => void;
   artists?: { id: string; name: string }[];
   onArtistPress?: (id: string, name: string) => void | Promise<void>;
+  trailingAction?: React.ReactNode;
 };
 
 export const TrackRow = React.memo(function TrackRow({
   title, subtitle, imageURL, trackNumber, active, playing, downloadState,
-  onPress, onDownload, artists, onArtistPress,
+  onPress, onDownload, artists, onArtistPress, trailingAction,
 }: TrackRowProps) {
   return (
     <LoggedPressable
@@ -73,7 +74,7 @@ export const TrackRow = React.memo(function TrackRow({
           <Text numberOfLines={1} style={styles.subtitle}>{subtitle}</Text>
         )}
       </View>
-      <LoggedPressable
+      {trailingAction || <LoggedPressable
         accessibilityRole="button"
         accessibilityLabel={downloadState === 'completed' ? `${title} está baixada` : `Baixar ${title}`}
         disabled={downloadState !== 'idle'}
@@ -92,14 +93,14 @@ export const TrackRow = React.memo(function TrackRow({
             color={downloadState === 'completed' ? '#1ED760' : '#CACACA'}
           />
         )}
-      </LoggedPressable>
+      </LoggedPressable>}
     </LoggedPressable>
   );
 });
 
 const styles = StyleSheet.create({
   row: { alignItems: 'center', flexDirection: 'row', gap: 11, minHeight: 64, paddingHorizontal: 16, paddingVertical: 8 },
-  rowActive: { backgroundColor: 'rgba(255,255,255,0.085)' },
+  rowActive: { backgroundColor: 'rgba(255,255,255,0.085)', borderRadius: 6 },
   artwork: { borderRadius: 3, height: 42, width: 42 },
   artworkFallback: { alignItems: 'center', backgroundColor: '#292929', justifyContent: 'center' },
   trackNumber: { color: 'rgba(255,255,255,0.68)', fontFamily: 'SF-Regular', fontSize: 13, textAlign: 'center', width: 22 },

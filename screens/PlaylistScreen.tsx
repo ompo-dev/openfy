@@ -9,13 +9,17 @@ import {
   getPlaylistItems,
 } from '@api';
 import { formatCollectionMeta } from '@utils';
+import { TemporaryPlaylistScreen } from './TemporaryPlaylistScreen';
+import { HOME_PLAYLIST_PREFIX } from '../services/home/temporaryPlaylists';
 
 export type PlaylistScreenPropsType = {
   playlistId: string;
 };
 
 export const PlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) =>
-  playlistId.startsWith('local_') ? (
+  playlistId.startsWith(HOME_PLAYLIST_PREFIX) ? (
+    <TemporaryPlaylistScreen playlistId={playlistId} />
+  ) : playlistId.startsWith('local_') ? (
     <LocalPlaylist playlistId={playlistId} />
   ) : (
     <RemotePlaylistScreen playlistId={playlistId} />

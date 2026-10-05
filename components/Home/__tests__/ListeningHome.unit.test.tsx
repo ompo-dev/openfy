@@ -29,7 +29,7 @@ jest.mock('../../common/TrackRow', () => ({ TrackRow: () => null }));
 jest.mock('../../native', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { Pressable, View } = require('react-native');
-  return { LoggedPressable: Pressable, GlassSurface: View, SheetFrame: View };
+  return { LoggedPressable: Pressable, GlassSurface: View, AppIcon: () => null };
 });
 
 const home: PersonalizedHomeSnapshot = {
@@ -73,5 +73,13 @@ describe('ListeningHome', () => {
   it('shows a skeleton while initial data is loading', async () => {
     const view = await render(<ListeningHome home={EMPTY_PERSONALIZED_HOME} loading />);
     expect(view.getByTestId('home-skeleton')).toBeTruthy();
+  });
+
+  it('opens dynamic listening collections as playlist pages, not modals', async () => {
+    const view = await render(<ListeningHome home={home} loading={false} />);
+    await fireEvent.press(view.getByLabelText('Mostrar tudo: Tocados recentemente'));
+    expect(mockOpen).toHaveBeenCalledWith('playlist', 'home_mix_recent', 'home');
+    await fireEvent.press(view.getByLabelText('Mostrar tudo: Não sai do seu fone'));
+    expect(mockOpen).toHaveBeenCalledWith('playlist', 'home_mix_most_played', 'home');
   });
 });

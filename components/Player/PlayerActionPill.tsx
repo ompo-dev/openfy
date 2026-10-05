@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { AppIcon as Ionicons } from "../native/AppIcon";
 
 import { GlassSurface, LoggedPressable } from '../native';
 

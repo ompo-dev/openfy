@@ -9,7 +9,7 @@ import {
   useColorScheme,
   useWindowDimensions,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { AppIcon as Ionicons } from "../native/AppIcon";
 
 import {
   IOS_NATIVE_ENABLED,

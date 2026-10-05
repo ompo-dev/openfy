@@ -1,8 +1,7 @@
 import * as React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { Image } from 'expo-image';
-import Foundation from '@expo/vector-icons/Foundation';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { AppIcon as Foundation, AppIcon as FontAwesome } from '../native/AppIcon';
 
 import { COLORS, Shapes, Sizes } from '@config';
 import { useDetailNavigation } from '@hooks';

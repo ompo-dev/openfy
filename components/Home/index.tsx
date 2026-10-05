@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { AppIcon as Ionicons } from "../native/AppIcon";
 
 import { searchCatalog } from '@api';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
@@ -25,6 +25,8 @@ import { ListeningHome } from './ListeningHome';
 import { ImportModal } from '../ImportModal';
 import { LoggedPressable } from '../native';
 import { SkeletonImage } from '../common/SkeletonImage';
+import { TrackRow } from '../common/TrackRow';
+import { isSameRecording } from '../../services/library/trackIdentity';
 import { log } from '../../utils/appLogger';
 
 export { FriendActivityStatus } from './FriendActivityStatus';
@@ -49,7 +51,10 @@ const artistNames = (artist: ArtistModel) => artist.genres?.slice(0, 2).join(' �
 export const Home = () => {
   const { top } = useSafeAreaInsets();
   const { home, isLoading, isRefreshing, refresh } = usePersonalizedHome();
-  const { playTrack } = usePlayer((state) => ({ playTrack: state.playTrack }));
+  const { currentTrack, isPlaying, playWithQueue, togglePlayPause } = usePlayer((state) => ({
+    currentTrack: state.currentTrack, isPlaying: state.playerState.isPlaying,
+    playWithQueue: state.playWithQueue, togglePlayPause: state.togglePlayPause,
+  }));
   const { refreshLibrary } = useLibrarySelectedCategory();
   const { openDetail } = useDetailNavigation();
   const [query, setQuery] = React.useState('');
@@ -286,33 +291,22 @@ export const Home = () => {
             {results.tracks.length ? (
               <View style={styles.resultSection}>
                 <Text style={styles.sectionTitle}>Músicas</Text>
-                {results.tracks.map((track) => {
+                {results.tracks.map((track, index) => {
                   const isSaved = savedTrackIds.has(track.id) || home.tracksById.has(track.id);
                   const isSaving = savingTrackIds.has(track.id);
                   return (
-                    <View key={track.id} style={styles.trackResult}>
-                      <LoggedPressable
-                        accessibilityLabel={`Tocar ${track.title}, ${track.subtitle}`}
-                        onPress={() => void playTrack(toPlayerTrackFromSearch(track))}
-                        style={styles.trackPressable}
-                      >
-                        {track.imageURL ? (
-                          <SkeletonImage cachePolicy="memory-disk" priority="high" source={{ uri: track.imageURL }} contentFit="cover" style={styles.trackImage} />
-                        ) : (
-                          <View style={[styles.trackImage, styles.imageFallback]}>
-                            <Ionicons name="musical-note" size={21} color="#8E8E93" />
-                          </View>
-                        )}
-                        <View style={styles.resultCopy}>
-                          <Text numberOfLines={1} style={styles.resultTitle}>{track.title}</Text>
-                          <Text numberOfLines={1} style={styles.resultSubtitle}>{track.subtitle}</Text>
-                        </View>
-                      </LoggedPressable>
+                    <TrackRow key={track.id} title={track.title} subtitle={track.subtitle} imageURL={track.imageURL}
+                      active={isSameRecording(currentTrack, toPlayerTrackFromSearch(track))} playing={isPlaying}
+                      downloadState="idle" onDownload={() => {}}
+                      onPress={() => {
+                        if (isSameRecording(currentTrack, toPlayerTrackFromSearch(track))) void togglePlayPause();
+                        else void playWithQueue(results.tracks.map(toPlayerTrackFromSearch), index, 'home:search');
+                      }} trailingAction={
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={isSaved ? 'Na Biblioteca' : `Adicionar ${track.title} à Biblioteca`}
                         disabled={isSaved || isSaving}
-                        onPress={() => void saveTrack(track)}
+                        onPress={(event) => { event.stopPropagation(); void saveTrack(track); }}
                         style={styles.saveButton}
                       >
                         {isSaving ? (
@@ -324,8 +318,8 @@ export const Home = () => {
                             color={isSaved ? '#1DB954' : '#D8D8DA'}
                           />
                         )}
-                      </Pressable>
-                    </View>
+                      </Pressable>}
+                    />
                   );
                 })}
               </View>
@@ -409,15 +403,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  trackResult: {
-    minHeight: 72,
-    paddingHorizontal: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  trackPressable: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12 },
   artistImage: { width: 52, height: 52, borderRadius: 26 },
-  trackImage: { width: 52, height: 52, borderRadius: 5 },
   imageFallback: { backgroundColor: '#242428', alignItems: 'center', justifyContent: 'center' },
   resultCopy: { flex: 1, minWidth: 0, gap: 4 },
   resultTitle: { color: '#FFFFFF', fontSize: 15, fontFamily: 'SF-Semibold' },

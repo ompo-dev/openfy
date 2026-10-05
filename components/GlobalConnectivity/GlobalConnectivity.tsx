@@ -2,7 +2,7 @@ import * as React from 'react';
 import { AppState, Platform, StyleSheet, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { AppIcon as Ionicons } from "../native/AppIcon";
 
 import { ImportModal } from '../ImportModal';
 import { findMediaLinkInText } from '../../services/spotify/linkParser';

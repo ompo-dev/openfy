@@ -7,7 +7,7 @@
 import * as React from 'react';
 import { Animated, Platform, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
+import { AppIcon as Ionicons } from "../native/AppIcon";
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
 import { LoggedPressable } from '../native';

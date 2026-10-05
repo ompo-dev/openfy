@@ -18,7 +18,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { AppIcon as Ionicons } from "../../native/AppIcon";
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePlayer } from '@context';

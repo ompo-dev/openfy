@@ -10,7 +10,7 @@ import Animated, {
 import { useNavigation } from 'expo-router';
 
 import { Background } from '../../Background';
-import { MaterialIcons } from '@expo/vector-icons';
+import { AppIcon as MaterialIcons } from "../../native/AppIcon";
 
 import { COVER_SIZE } from '@config';
 

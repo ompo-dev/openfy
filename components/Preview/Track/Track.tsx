@@ -2,10 +2,7 @@ import * as React from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import Entypo from '@expo/vector-icons/Entypo';
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { FontAwesome5 } from '@expo/vector-icons';
+import { AppIcon as MaterialCommunityIcons, AppIcon as Entypo, AppIcon as Ionicons, AppIcon as FontAwesome5 } from '../../native/AppIcon';
 
 import { useApplicationDimensions } from '@hooks';
 import { explicit_SIGN, TRACK_COVER_SIZE } from '@config';

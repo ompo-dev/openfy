@@ -13,7 +13,7 @@ const pending = new Map<string, Promise<unknown>>();
 const isSpotifyId = (value: string) => /^[A-Za-z0-9]{22}$/.test(value);
 
 const loadDetail = (type: DetailType, id: string): Promise<unknown> | null => {
-  if (!id || id.startsWith('local_') || id.startsWith('local_album_')) return null;
+  if (!id || id.startsWith('local_') || id.startsWith('home_mix_')) return null;
   if (type === 'album') {
     return isYouTubeMusicAlbumId(id) ? getYouTubeMusicAlbum(id) : getAlbum(id);
   }

@@ -67,6 +67,13 @@ describe('lyrics artwork transition', () => {
     expect(hook.result.current.overlay).toBeNull();
   });
 
+  it('does not fade a parent of the native lyrics glass button', async () => {
+    const hook = await mount();
+    expect(hook.result.current.toggleStyle.opacity).toBeUndefined();
+    await act(() => hook.result.current.transition(true, jest.fn()));
+    expect(hook.result.current.toggleStyle.opacity).toBeUndefined();
+  });
+
   it('refreshes positions at the tap after the modal or scroll position moves', async () => {
     const hook = await mount();
     hook.result.current.containerRef.current = measure(0, 80, 393, 700);

@@ -1,7 +1,7 @@
 import React, { type ReactNode } from 'react';
 import {
   ScrollView,
-  Platform,
+  FlatList,
   StyleSheet,
   Text,
   View,
@@ -12,8 +12,6 @@ import { LoggedPressable } from './Logged';
 import { AppIcon } from './AppIcon';
 import { GlassSurface } from './GlassSurface';
 import { PlayerModal } from './PlayerModal';
-import { BlurView } from 'expo-blur';
-import { GlassSurfaceFallback } from './GlassSurfaceFallback';
 import { GlassBackdrop, GlassBackdropScope } from './GlassBackdrop';
 import { Image } from 'expo-image';
 
@@ -30,6 +28,9 @@ interface SheetFrameProps {
   closeLabel?: string;
   /** Preferred space for virtualized lists/editors, capped by the modal viewport. */
   contentHeight?: number;
+  size?: 'sheet' | 'full';
+  nested?: ReactNode;
+  onDismiss?: () => void;
 }
 
 export function SheetFrame({
@@ -44,8 +45,27 @@ export function SheetFrame({
   artworkURL,
   closeLabel = 'Fechar',
   contentHeight,
+  size = 'sheet',
+  nested,
+  onDismiss,
 }: SheetFrameProps) {
   const insets = useSafeAreaInsets();
+  const scrollOffset = React.useRef(0);
+  const hasDirectScroll = React.Children.toArray(children).some((child) =>
+    React.isValidElement(child) && (child.type === ScrollView || child.type === FlatList));
+  React.useEffect(() => { scrollOffset.current = scroll || hasDirectScroll ? 0 : Infinity; }, [visible, scroll, hasDirectScroll]);
+  const bottomPadding = size === 'full' ? Math.max(16, insets.bottom) : 16;
+  const reportScroll = (event: any) => { scrollOffset.current = event.nativeEvent.contentOffset.y; };
+  // Self-scrolling lists must shrink as well as report their position for drag dismissal.
+  const fittedChildren = React.Children.map(children, (child) => {
+    if (!React.isValidElement<any>(child) || (child.type !== ScrollView && child.type !== FlatList)) return child;
+    const element = child as React.ReactElement<any>;
+    return React.cloneElement(element, {
+      style: [element.props.style, { flexGrow: 0, flexShrink: 1, minHeight: 0 }],
+      onScroll: (event: any) => { reportScroll(event); element.props.onScroll?.(event); },
+      scrollEventThrottle: 16,
+    });
+  });
 
   const handle = <View style={styles.handle} />;
   const closeWithFeedback = () => {
@@ -82,21 +102,27 @@ export function SheetFrame({
   const content = scroll ? (
     <ScrollView
       style={styles.sheetScroll}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingBottom: bottomPadding }]}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+      onScroll={reportScroll}
+      scrollEventThrottle={16}
     >
-      {children}
+      {fittedChildren}
     </ScrollView>
   ) : (
     <View testID="sheet-frame-content" style={[styles.content, styles.fixedContent,
-      contentHeight !== undefined && { height: contentHeight }]}>{children}</View>
+      { paddingBottom: bottomPadding }, contentHeight !== undefined && { height: contentHeight }]}>{fittedChildren}</View>
   );
 
   return (
     <PlayerModal
       visible={visible}
       onRequestClose={onClose}
+      onDismiss={onDismiss}
+      fullScreen={size === 'full'}
+      scrollOffset={scrollOffset}
     >
       <GlassBackdropScope>
         <GlassBackdrop pointerEvents="none" style={StyleSheet.absoluteFill}>
@@ -104,14 +130,14 @@ export function SheetFrame({
             contentFit="cover" blurRadius={28} pointerEvents="none"
             style={[StyleSheet.absoluteFill, styles.artwork]} /> : null}
         </GlassBackdrop>
-        {Platform.OS === 'ios' ? (
-          <BlurView intensity={45} tint="systemUltraThinMaterialDark" pointerEvents="none" style={StyleSheet.absoluteFill} />
-        ) : <GlassSurfaceFallback glass="thick" edgeEffects={false} pointerEvents="none" style={StyleSheet.absoluteFill} />}
-        <View testID="sheet-frame-body" style={[styles.sheet, { paddingBottom: Math.max(16, insets.bottom) }]}>
+        <GlassSurface glass="regular" edgeEffects={false} pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { borderRadius: size === 'full' ? 0 : 28 }]} />
+        <View testID="sheet-frame-body" style={[styles.sheet, size === 'full' && { flex: 1 }]}>
           {handle}
           {header}
           {content}
         </View>
+        {nested}
       </GlassBackdropScope>
     </PlayerModal>
   );
@@ -126,7 +152,7 @@ const styles = StyleSheet.create({
   sheet: {
     flexShrink: 1,
     minHeight: 0,
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     paddingTop: 12,
   },
   handle: {

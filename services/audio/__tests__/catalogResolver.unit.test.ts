@@ -114,6 +114,29 @@ describe('catalog songs referencing a multi-song YouTube film', () => {
     expect(search).not.toHaveBeenCalled();
   });
 
+  it('accepts Festas e Manequins when the official video omits the featured credit', async () => {
+    getBasicInfo.mockResolvedValue({ basic_info: { title: 'EBONY - Festas e Manequins (Letra)', duration: 124 } });
+    expect(await resolveCatalogYouTubeVideoId({ videoId: '2XR5tOOsm40',
+      title: 'Festas e Manequins (feat. AG Beatz)', artists: ['Ebony', 'AG Beatz'], durationMs: 125000 }))
+      .toMatchObject({ status: 'resolved', videoId: '2XR5tOOsm40' });
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it('resolves KIA to the official lyric video instead of the longer tour video for play and download', async () => {
+    getBasicInfo.mockResolvedValue({ basic_info: { title: 'Ebony - KIA (KM2 Tour Video)', duration: 218 } });
+    search.mockResolvedValue({ videos: [
+      { ...makeVideo('Eo1AJhqXaGE', 'Ebony - KIA (KM2 Tour Video)', 218), author: { name: 'EBONY', is_verified_artist: true } },
+      { ...makeVideo('OZphib375D0', 'EBONY - KIA (Letra)', 140), author: { name: 'EBONY', is_verified_artist: true } },
+    ] });
+    const track = { videoId: 'Eo1AJhqXaGE', title: 'KIA (feat. AG Beatz)',
+      artists: ['Ebony', 'AG Beatz'], durationMs: 140000 };
+    const [player, download] = await Promise.all([resolveCatalogYouTubeVideoId(track), resolveCatalogYouTubeVideoId(track)]);
+    expect(player).toMatchObject({ status: 'resolved', videoId: 'OZphib375D0' });
+    expect(download).toEqual(player);
+    expect(search).toHaveBeenCalledWith('Ebony KIA', { type: 'video' });
+    expect(getBasicInfo).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ['4iKtTmnHojU', 'Samba in Paris (feat. Gl\u00f3ria Groove)', '06. Baco Exu do Blues - Samba in Paris [ft. Gloria Groove]', 267000, 266],
     ['IwRZP9V-gYE', 'L\u00e1grimas (feat. Gal Costa)', '09. Baco Exu do Blues - L\u00e1grimas [ft. Gal Costa]', 178000, 176],

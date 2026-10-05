@@ -10,7 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { AppIcon as Ionicons } from "../native/AppIcon";
 import type { LyricSegment } from '../../services/lyrics/lyricsService';
 import { MusicTimelineSelector } from '../Home/FriendActivityStatus/MusicTimelineSelector';
 import { MusicWaveformReel } from '../Home/FriendActivityStatus/MusicWaveformReel';

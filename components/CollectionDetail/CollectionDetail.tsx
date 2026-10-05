@@ -11,7 +11,7 @@ import {
   View,
   ScrollView,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { AppIcon as Ionicons } from "../native/AppIcon";
 import { LinearGradient } from 'expo-linear-gradient';
 import { Href, useRouter, useSegments } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -904,7 +904,7 @@ export const CollectionDetail = ({
       >
             {isLoadingAllArtists ? <Text style={styles.artistModalLoading}>Carregando créditos da playlist…</Text> : null}
             <ScrollView
-              contentContainerStyle={{ paddingBottom: Math.max(24, insets.bottom + 12) }}
+              contentContainerStyle={{ paddingBottom: 4 }}
               keyboardShouldPersistTaps="handled"
               onScroll={(event) => {
                 const { contentOffset, layoutMeasurement } = event.nativeEvent;

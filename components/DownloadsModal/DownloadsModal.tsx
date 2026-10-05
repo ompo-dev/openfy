@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { AppIcon as Ionicons } from "../native/AppIcon";
 import * as Clipboard from 'expo-clipboard';
 
 import { useDownloads, type DownloadJobStatus } from '@context';

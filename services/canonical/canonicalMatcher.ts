@@ -92,6 +92,11 @@ const isKnownArtist = (artist: string): boolean => {
   );
 };
 
+/** Publisher titles may omit featured-artist credits, but not recording/version names. */
+export const titleWithoutFeaturedCredits = (title: string): string =>
+  title.replace(/\s*[([]\s*(?:feat\.?|ft\.?|featuring)\s+[^)\]]*[)\]]\s*$/i, '')
+    .replace(/\s+(?:feat\.?|ft\.?|featuring)\s+.+$/i, '').trim();
+
 export const hasCanonicalTitleMatch = (
   candidateTitle: string,
   canonicalTitle: string
@@ -104,9 +109,11 @@ export const hasCanonicalTitleMatch = (
       .replace(/([a-z])(\d)/g, '$1 $2');
   const candidate = normalizeTitle(candidateTitle);
   const candidateWords = candidate.split(' ');
-  const canonicalVariants = [normalizeTitle(canonicalTitle)];
-  const withoutFreestyleSuffix = canonicalTitle.replace(/\s*[-–—:]\s*freestyle\s*$/i, '');
-  if (withoutFreestyleSuffix !== canonicalTitle) {
+  const coreTitle = titleWithoutFeaturedCredits(canonicalTitle);
+  const candidateHasCredits = /(?:^|\s|[[(])(?:feat\.?|ft\.?|featuring)\s+\S/i.test(candidateTitle);
+  const canonicalVariants = [normalizeTitle(candidateHasCredits ? canonicalTitle : coreTitle)];
+  const withoutFreestyleSuffix = coreTitle.replace(/\s*[-–—:]\s*freestyle\s*$/i, '');
+  if (withoutFreestyleSuffix !== coreTitle) {
     canonicalVariants.push(normalizeTitle(withoutFreestyleSuffix));
   }
 
