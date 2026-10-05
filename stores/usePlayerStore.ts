@@ -341,6 +341,8 @@ const loadLyricsForTrack = (track: PlayerTrack): Promise<LyricsData | null> => {
   const loading = (async () => {
     try {
       const stored = await AsyncStorage.getItem(`${STORAGE_LYRICS_PREFIX}${cacheKey}`);
+      const edited = lyricsCache.get(lyricsCacheKey);
+      if (edited?.source === 'user') return edited;
       if (stored) {
         const lyrics = JSON.parse(stored) as LyricsData;
         lyricsCache.set(lyricsCacheKey, lyrics);
@@ -357,6 +359,8 @@ const loadLyricsForTrack = (track: PlayerTrack): Promise<LyricsData | null> => {
         track.duration_ms ? track.duration_ms / 1000 : undefined,
         track.albumName
       );
+      const edited = lyricsCache.get(lyricsCacheKey);
+      if (edited?.source === 'user') return edited;
       if (lyrics) {
         lyricsCache.set(lyricsCacheKey, lyrics);
         void AsyncStorage.setItem(
@@ -781,7 +785,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const startLyricsLoading = () => {
       if (cachedLyrics) return;
       void loadLyricsForTrack(track).then((lyrics) => {
-        if (get().activeRequestId === requestId) {
+        if (get().activeRequestId === requestId && get().lyricsData?.source !== 'user') {
           set({ lyricsData: lyrics, isLoadingLyrics: false });
         }
       });
@@ -1406,6 +1410,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     );
 
     if (get().activeRequestId === activeRequestId) {
+      if (get().lyricsData?.source === 'user') {
+        set({ isLoadingLyrics: false });
+        return;
+      }
       const cacheKey = getCacheKey(currentTrack);
       if (lyrics) {
         lyricsCache.set(getLyricsCacheKey(currentTrack), lyrics);
@@ -1423,16 +1431,26 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
   updateLyricsSegments: async (segments: LyricSegment[]) => {
     const { currentTrack, lyricsData, activeRequestId } = get();
-    if (!currentTrack || !lyricsData) return false;
+    if (!currentTrack || !segments.length || segments.some((segment) =>
+      !segment.text.trim() || !Number.isFinite(segment.startTimeMs) ||
+      !Number.isFinite(segment.endTimeMs) || segment.startTimeMs < 0 ||
+      segment.endTimeMs <= segment.startTimeMs
+    )) return false;
 
+    const normalizedSegments = normalizeLyricSegments(segments);
     const updatedLyrics: LyricsData = {
       ...lyricsData,
+      trackName: currentTrack.title,
+      artistName: currentTrack.artistName,
+      plainLyrics: normalizedSegments.map((segment) => segment.text).join('\n'),
+      syncedLyrics: undefined,
+      source: 'user',
       isSynced: true,
-      segments: normalizeLyricSegments(segments),
+      segments: normalizedSegments,
     };
     const cacheKey = getCacheKey(currentTrack);
     lyricsCache.set(getLyricsCacheKey(currentTrack), updatedLyrics);
-    set({ lyricsData: updatedLyrics });
+    set({ lyricsData: updatedLyrics, isLoadingLyrics: false });
 
     try {
       await AsyncStorage.setItem(
@@ -1449,9 +1467,13 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       return true;
     } catch (error) {
       console.warn('[PlayerStore] Could not save edited lyrics:', error);
-      if (get().activeRequestId === activeRequestId) {
+      if (get().activeRequestId === activeRequestId && get().lyricsData === updatedLyrics) {
         set({ lyricsData });
-        lyricsCache.set(getLyricsCacheKey(currentTrack), lyricsData);
+      }
+      const lyricsCacheKey = getLyricsCacheKey(currentTrack);
+      if (lyricsCache.get(lyricsCacheKey) === updatedLyrics) {
+        if (lyricsData) lyricsCache.set(lyricsCacheKey, lyricsData);
+        else lyricsCache.delete(lyricsCacheKey);
       }
       return false;
     }

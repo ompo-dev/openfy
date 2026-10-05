@@ -79,7 +79,7 @@ jobs:
         run: npm test -- --runInBand --silent
 
       - name: Validar servidor OTA temporario
-        run: node --test scripts/__tests__/temporary-expo-update-server.test.mjs
+        run: node --test scripts/__tests__/temporary-expo-update-server.test.mjs scripts/__tests__/wait-for-ota-health.test.mjs
 
   publicar-ota:
     needs:
@@ -122,7 +122,35 @@ jobs:
           set -euo pipefail
           OTA_DIR="$RUNNER_TEMP/openfy-ota"
           mkdir -p "$OTA_DIR"
+          SERVER_PID=""
+          TUNNEL_PID=""
+          POINTER="$OTA_DIR/openfy-ota-pointer.json"
+          POINTER_PUBLISHED=false
+          TAG=ota-window
+          cleanup() {
+            EXIT_STATUS=$?
+            trap - EXIT INT TERM
+            if [ "$EXIT_STATUS" -ne 0 ]; then
+              for LOG in "$OTA_DIR"/*.log; do
+                [ -f "$LOG" ] || continue
+                echo "--- $LOG ---"
+                tail -80 "$LOG" || true
+              done
+            fi
+            if [ "$POINTER_PUBLISHED" = true ]; then
+              node scripts/write-temporary-ota-pointer.mjs --output "$POINTER" --active false || true
+              gh release upload "$TAG" "$POINTER" --clobber || true
+            fi
+            if [ -n "$TUNNEL_PID" ]; then kill "$TUNNEL_PID" 2>/dev/null || true; fi
+            if [ -n "$SERVER_PID" ]; then kill "$SERVER_PID" 2>/dev/null || true; fi
+            exit "$EXIT_STATUS"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
           curl --fail --location --silent --show-error \
+            --connect-timeout 5 --max-time 60 --retry 3 --retry-all-errors --retry-max-time 120 \
             "https://github.com/cloudflare/cloudflared/releases/download/2026.9.3/cloudflared-linux-amd64" \
             --output "$OTA_DIR/cloudflared"
           echo "77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2  $OTA_DIR/cloudflared" | sha256sum --check
@@ -134,29 +162,37 @@ jobs:
             --expo-config "$RUNNER_TEMP/expo-config.json" \
             --port 8787 > "$OTA_DIR/server.log" 2>&1 &
           SERVER_PID=$!
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:8787/health >/dev/null; then break; fi
-            if ! kill -0 "$SERVER_PID" 2>/dev/null; then cat "$OTA_DIR/server.log"; exit 1; fi
-            sleep 1
-          done
-          HEALTH_JSON="$(curl --fail --silent http://127.0.0.1:8787/health)"
+          HEALTH_JSON="$(node scripts/wait-for-ota-health.mjs \
+            --url http://127.0.0.1:8787 --runtime-version "$RUNTIME_VERSION" \
+            --timeout-ms 30000 --process-id "$SERVER_PID")"
           OTA_UPDATE_ID="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).updateId)' "$HEALTH_JSON")"
           OTA_CREATED_AT="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).createdAt)' "$HEALTH_JSON")"
 
-          "$OTA_DIR/cloudflared" tunnel --no-autoupdate --url http://127.0.0.1:8787 \
-            > "$OTA_DIR/cloudflared.log" 2>&1 &
-          TUNNEL_PID=$!
           PUBLIC_TUNNEL_URL=""
-          for attempt in $(seq 1 60); do
-            PUBLIC_TUNNEL_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$OTA_DIR/cloudflared.log" | head -1 || true)"
-            if [ -n "$PUBLIC_TUNNEL_URL" ] && curl --fail --silent "$PUBLIC_TUNNEL_URL/health" >/dev/null; then break; fi
-            if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then cat "$OTA_DIR/cloudflared.log"; exit 1; fi
-            sleep 1
+          for attempt in $(seq 1 3); do
+            echo "Starting OTA tunnel, attempt $attempt/3 (HTTP/2 over IPv4)."
+            TUNNEL_LOG="$OTA_DIR/cloudflared-$attempt.log"
+            "$OTA_DIR/cloudflared" tunnel --no-autoupdate --protocol http2 --edge-ip-version 4 \
+              --url http://127.0.0.1:8787 > "$TUNNEL_LOG" 2>&1 &
+            TUNNEL_PID=$!
+            if PUBLIC_HEALTH_JSON="$(node scripts/wait-for-ota-health.mjs \
+              --tunnel-log "$TUNNEL_LOG" --runtime-version "$RUNTIME_VERSION" \
+              --expected-update-id "$OTA_UPDATE_ID" --timeout-ms 90000 \
+              --process-id "$SERVER_PID" --process-id "$TUNNEL_PID")"; then
+              PUBLIC_TUNNEL_URL="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).origin)' "$PUBLIC_HEALTH_JSON")"
+              break
+            fi
+            tail -80 "$TUNNEL_LOG" || true
+            kill "$TUNNEL_PID" 2>/dev/null || true
+            wait "$TUNNEL_PID" 2>/dev/null || true
+            TUNNEL_PID=""
+            sleep 2
           done
-          if [ -z "$PUBLIC_TUNNEL_URL" ]; then cat "$OTA_DIR/cloudflared.log"; exit 1; fi
-          curl --fail --silent "$PUBLIC_TUNNEL_URL/health" >/dev/null
+          if [ -z "$PUBLIC_TUNNEL_URL" ]; then
+            echo "OTA tunnel did not serve this update after three attempts."
+            exit 1
+          fi
 
-          POINTER="$OTA_DIR/openfy-ota-pointer.json"
           node scripts/write-temporary-ota-pointer.mjs \
             --output "$POINTER" \
             --active true \
@@ -167,7 +203,7 @@ jobs:
             --run-id "${{ github.run_id }}" \
             --commit-sha "${{ github.sha }}" \
             --duration-seconds 605
-          TAG=ota-window
+          POINTER_PUBLISHED=true
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$POINTER" --clobber
           else
@@ -178,12 +214,6 @@ jobs:
               --latest=false
           fi
 
-          deactivate_pointer() {
-            node scripts/write-temporary-ota-pointer.mjs --output "$POINTER" --active false || true
-            gh release upload "$TAG" "$POINTER" --clobber || true
-            kill "$TUNNEL_PID" "$SERVER_PID" 2>/dev/null || true
-          }
-          trap deactivate_pointer EXIT INT TERM
           echo "Temporary OTA endpoint active for commit $GITHUB_SHA until the CI window closes."
           for second in $(seq 1 600); do
             if ! kill -0 "$TUNNEL_PID" 2>/dev/null || ! kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -192,6 +222,15 @@ jobs:
             fi
             sleep 1
           done
+
+      - name: Enviar diagnosticos OTA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Openfy-OTA-logs
+          path: ${{ runner.temp }}/openfy-ota/*.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   validar-audio-local:
     needs: validar

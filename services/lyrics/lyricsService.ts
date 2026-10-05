@@ -30,7 +30,7 @@ export type LyricsData = {
   syncedLyrics?: string;
   segments: LyricSegment[];
   isSynced: boolean;
-  source?: 'backend' | 'lrclib' | 'letras' | 'vagalume';
+  source?: 'backend' | 'lrclib' | 'letras' | 'vagalume' | 'user';
   timeOffsetMs?: number;
 };
 

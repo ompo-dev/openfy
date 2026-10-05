@@ -44,6 +44,7 @@ import {
 import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
 import { useDetailNavigation } from '@hooks';
 import {
+  createEstimatedLyricSegments,
   deleteDownloadedTrack,
   getCatalogMapping,
   getLyricGapRange,
@@ -1215,9 +1216,14 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   };
 
   const beginLyricsEditing = () => {
-    if (!lyricsData?.segments.length) return;
-
-    const nextDraft = lyricsData.segments.map((segment) => ({ ...segment }));
+    const plainLyrics = lyricsData?.plainLyrics?.trim() || '';
+    const draftDurationMs = totalDurationMs || Math.max(3000, plainLyrics.split('\n').filter(Boolean).length * 3000);
+    const nextDraft = lyricsData?.segments.length
+      ? lyricsData.segments.map((segment) => ({ ...segment }))
+      : createEstimatedLyricSegments(plainLyrics, draftDurationMs);
+    if (!nextDraft.length) {
+      nextDraft.push({ index: 0, startTimeMs: 0, endTimeMs: Math.min(5000, draftDurationMs), text: plainLyrics });
+    }
     const editTimeline = getLyricTimelineBlocks(nextDraft, totalDurationMs);
     const activeTimelineIndex = editTimeline.findIndex(
       (block) =>
@@ -1225,14 +1231,14 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
         playerState.positionMs < block.endTimeMs
     );
     const activeBlock = editTimeline[activeTimelineIndex];
-    const followingSegmentIndex = lyricsData.segments.findIndex(
+    const followingSegmentIndex = nextDraft.findIndex(
       (segment) => segment.startTimeMs >= playerState.positionMs
     );
     if (playerState.isPlaying) void togglePlayPause();
     draftLyricSegmentsRef.current = nextDraft;
     setDraftLyricSegments(nextDraft);
     setSelectedLyricTarget(
-      activeBlock?.kind === 'gap'
+      activeBlock?.kind === 'gap' && !!lyricsData?.segments.length
         ? {
             kind: 'gap',
             target: getGapTarget(editTimeline, activeTimelineIndex),
@@ -1244,7 +1250,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 ? activeBlock.index
                 : followingSegmentIndex >= 0
                   ? followingSegmentIndex
-                  : lyricsData.segments.length - 1,
+                  : nextDraft.length - 1,
           }
     );
     setIsLyricsEditing(true);
@@ -1261,6 +1267,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const confirmLyricsEditing = async () => {
     const nextSegments = draftLyricSegmentsRef.current;
     if (!nextSegments.length) return cancelLyricsEditing();
+    if (nextSegments.some((segment) => !segment.text.trim())) {
+      Alert.alert('Letra incompleta', 'Preencha o texto dos trechos antes de salvar.');
+      return;
+    }
 
     const wasSaved = await updateLyricsSegments(nextSegments);
     if (!wasSaved) {
@@ -1297,6 +1307,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       ));
     setSelectedLyricTarget({ kind: 'lyric', index: selectedIndex });
     Haptics.selectionAsync().catch(() => {});
+  };
+
+  const updateDraftLyricText = (index: number, text: string) => {
+    updateDraftSegments((segments) => segments.map((segment) =>
+      segment.index === index ? { ...segment, text } : segment
+    ));
   };
 
   const getEditorRange = (segments: LyricSegment[]) =>
@@ -1686,7 +1702,18 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                             {formatTime(item.endTimeMs)}
                           </Text>
                         ) : null}
-                        {!isLyricsEditing && item.kind === 'lyric' ? (
+                        {isLyricsEditing && item.kind === 'lyric' &&
+                          selectedLyricTarget.kind === 'lyric' && selectedLyricTarget.index === item.index ? (
+                          <TextInput
+                            accessibilityLabel={`Texto do trecho ${item.index + 1}`}
+                            multiline
+                            placeholder="Texto da letra"
+                            placeholderTextColor="rgba(255,255,255,0.4)"
+                            onChangeText={(text) => updateDraftLyricText(item.index, text)}
+                            style={[styles.lyricText, styles.lyricEditorText, styles.lyricTextActive, { paddingVertical: 0 }]}
+                            value={item.text}
+                          />
+                        ) : !isLyricsEditing && item.kind === 'lyric' ? (
                           <SyncedLyricText active={isActive} blurred={blurInactiveLyrics && !isActive && !isLyricsUserScrolling}>
                             {item.text}
                           </SyncedLyricText>

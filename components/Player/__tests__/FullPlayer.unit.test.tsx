@@ -101,6 +101,7 @@ jest.mock('react-native-gesture-handler', () => {
   };
 });
 jest.mock('@services', () => ({
+  createEstimatedLyricSegments: jest.requireActual('../../../services/lyrics/lyricsService').createEstimatedLyricSegments,
   ...jest.requireActual('../../../services/lyrics/lyricTimeline'),
   ...jest.requireActual('../../../services/spotify/linkParser'),
   getCatalogMapping: jest.fn(),
@@ -185,6 +186,7 @@ const makePlayer = (track = {}) => ({
   isLoadingLyrics: false,
   isShuffle: false,
   repeatMode: 'off',
+  updateLyricsSegments: jest.fn().mockResolvedValue(true),
 });
 
 const makePlayerWithoutTrack = () => ({
@@ -760,6 +762,61 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(screen.getByTestId('player-plain-lyrics')).toBeTruthy();
     expect(screen.getByText('Plain first line')).toBeTruthy();
     expect(screen.queryByTestId('player-synced-lyrics')).toBeNull();
+  });
+
+  it('creates lyrics from an unavailable track and saves the typed text', async () => {
+    const player = makePlayer();
+    player.playerState.positionMs = 15000;
+    jest.mocked(usePlayer).mockReturnValue(player as any);
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+    await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
+    await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
+    expect(screen.getByTestId('lyric-sync-editor')).toBeTruthy();
+    expect(screen.getByLabelText('Abrir JSON da letra')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText('Confirmar sincronização da letra'));
+    expect(player.updateLyricsSegments).not.toHaveBeenCalled();
+    await fireEvent.changeText(screen.getByLabelText('Texto do trecho 1'), 'Letra criada');
+    await fireEvent.press(screen.getByLabelText('Confirmar sincronização da letra'));
+    expect(player.updateLyricsSegments).toHaveBeenCalledWith([
+      { index: 0, startTimeMs: 0, endTimeMs: 5000, text: 'Letra criada' },
+    ]);
+  });
+
+  it('imports JSON into a new lyric and preserves a cancelled empty draft', async () => {
+    const player = makePlayer();
+    jest.mocked(usePlayer).mockReturnValue(player as any);
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+    await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
+    await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
+    await fireEvent.press(screen.getByLabelText('Cancelar edição da letra'));
+    expect(player.updateLyricsSegments).not.toHaveBeenCalled();
+    expect(screen.getByText('Letra não disponível para esta faixa.')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
+    await fireEvent.press(screen.getByLabelText('Abrir JSON da letra'));
+    await fireEvent.press(screen.getByLabelText('Editar JSON'));
+    await fireEvent.changeText(screen.getByLabelText('Conteudo JSON da letra'), JSON.stringify({ segments: [
+      { startTimeMs: 2000, endTimeMs: 10000, text: 'Criada no JSON' },
+    ] }));
+    await fireEvent.press(screen.getByLabelText('Aplicar JSON da letra'));
+    await fireEvent.press(screen.getByLabelText('Confirmar sincronização da letra'));
+    expect(player.updateLyricsSegments).toHaveBeenCalledWith([
+      { index: 0, startTimeMs: 2000, endTimeMs: 10000, text: 'Criada no JSON' },
+    ]);
+  });
+
+  it.each(['Primeiro verso\nSegundo verso', 'Uma única frase'])('edits untimed lyrics with a selectable draft: %s', async (plainLyrics) => {
+    const player = { ...makePlayer(), lyricsData: { segments: [], plainLyrics } };
+    jest.mocked(usePlayer).mockReturnValue(player as any);
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+    await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
+    await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
+    expect(screen.getByTestId('lyric-sync-times')).toBeTruthy();
+    expect(screen.getByLabelText('Texto do trecho 1').props.value).toBe(plainLyrics.split('\n')[0]);
+    await fireEvent.press(screen.getByLabelText('Confirmar sincronização da letra'));
+    const [draft] = player.updateLyricsSegments.mock.calls[0];
+    expect(draft.map((segment: any) => segment.text)).toEqual(plainLyrics.split('\n'));
+    draft.forEach((segment: any) => expect(segment.endTimeMs).toBeGreaterThan(segment.startTimeMs));
+    expect(player.lyricsData.segments).toEqual([]);
   });
 
   it('replaces the loading state when lyrics arrive without closing the lyrics view', async () => {

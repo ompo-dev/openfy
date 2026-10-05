@@ -13,6 +13,12 @@ stays available for 10 minutes after that pointer is published; CI then marks th
 pointer inactive and stops both processes. The pointer is polled by the app while
 it is open, and is also checked when the app launches or returns to the foreground.
 
+Startup verifies the local server and then the public tunnel against the same
+runtime and update ID. The CI tunnel uses HTTP/2 over IPv4 and retries startup up
+to three times, with bounded network requests. A hostname alone is not enough to
+publish the pointer. Failures print the server/tunnel diagnostics and upload them
+as the `Openfy-OTA-logs` artifact; both processes are cleaned up even if startup fails.
+
 The stable pointer is hosted as a GitHub Release asset. The app only accepts HTTPS
 manifest URLs under `*.trycloudflare.com`, the expected Expo Updates path, the
 installed runtime version, and an unexpired window. The server only returns iOS or
