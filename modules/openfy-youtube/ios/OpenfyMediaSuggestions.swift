@@ -18,7 +18,7 @@ public enum OpenfyMediaSuggestions {
     for entry in entries {
       guard let id = entry["id"], let title = entry["title"], let track = entry["trackJSON"] else { continue }
       stored[id] = track
-      let artwork = entry["artworkURL"].flatMap(URL.init(string:)).map { INImage(url: $0) }
+      let artwork = entry["artworkURL"].flatMap(URL.init(string:)).flatMap { INImage(url: $0) }
       let item = INMediaItem(identifier: id, title: title, type: .song, artwork: artwork)
       let intent = INPlayMediaIntent(mediaItems: nil, mediaContainer: item,
         playShuffled: nil, playbackRepeatMode: .unknown, resumePlayback: nil,
@@ -39,7 +39,7 @@ public enum OpenfyMediaSuggestions {
     UserDefaults.standard.set(stored, forKey: storageKey)
     if !played {
       INUpcomingMediaManager.shared.setPredictionMode(.default, for: .song)
-      INUpcomingMediaManager.shared.setSuggestedMediaIntents(intents)
+      INUpcomingMediaManager.shared.setSuggestedMediaIntents(NSOrderedSet(array: intents))
     }
   }
 
