@@ -4,5 +4,6 @@ export const createYouTubeMusicClient = (options: object): Promise<YouTubeMusicC
   // The vendor's web bundle avoids its ESM initialization cycle under Metro.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { Innertube } = require('youtubei.js/web.bundle');
-  return Innertube.create(options);
+  // The client stores fetch on an object; Window.fetch requires its original receiver.
+  return Innertube.create({ ...options, fetch: globalThis.fetch.bind(globalThis) });
 };
