@@ -55,6 +55,7 @@ import {
   LyricTimelineBlock,
   moveLyricGap,
   moveLyricSegment,
+  normalizeLyricSegments,
   parseSpotifyLink,
   resolveDirectYouTubeTrack,
   resolveSpotifyTrackVideoId,
@@ -1217,9 +1218,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
   const beginLyricsEditing = () => {
     const plainLyrics = lyricsData?.plainLyrics?.trim() || '';
+    // Persisted plain/empty provider responses may not contain a segment list.
+    const syncedSegments = Array.isArray(lyricsData?.segments)
+      ? normalizeLyricSegments(lyricsData.segments)
+      : [];
     const draftDurationMs = totalDurationMs || Math.max(3000, plainLyrics.split('\n').filter(Boolean).length * 3000);
-    const nextDraft = lyricsData?.segments.length
-      ? lyricsData.segments.map((segment) => ({ ...segment }))
+    const nextDraft = syncedSegments.length
+      ? syncedSegments
       : createEstimatedLyricSegments(plainLyrics, draftDurationMs);
     if (!nextDraft.length) {
       nextDraft.push({ index: 0, startTimeMs: 0, endTimeMs: Math.min(5000, draftDurationMs), text: plainLyrics });
@@ -1238,7 +1243,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     draftLyricSegmentsRef.current = nextDraft;
     setDraftLyricSegments(nextDraft);
     setSelectedLyricTarget(
-      activeBlock?.kind === 'gap' && !!lyricsData?.segments.length
+      activeBlock?.kind === 'gap' && syncedSegments.length > 0
         ? {
             kind: 'gap',
             target: getGapTarget(editTimeline, activeTimelineIndex),

@@ -819,6 +819,30 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(player.lyricsData.segments).toEqual([]);
   });
 
+  it.each([
+    { label: 'empty cached response without segments', lyrics: { isSynced: false } },
+    { label: 'plain cached lyrics without segments', lyrics: { isSynced: false, plainLyrics: 'Primeiro verso\nSegundo verso' } },
+    { label: 'plain cached lyrics with null segments', lyrics: { isSynced: false, plainLyrics: 'Primeiro verso\nSegundo verso', segments: null } },
+    { label: 'cached segments with non-contiguous indices', lyrics: { isSynced: true, segments: [
+      { index: 14, startTimeMs: 0, endTimeMs: 5000, text: 'Verso salvo' },
+    ] } },
+  ])('opens the pencil editor for $label', async ({ lyrics }) => {
+    const player = { ...makePlayer(), lyricsData: lyrics };
+    jest.mocked(usePlayer).mockReturnValue(player as any);
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+    await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
+    await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
+    expect(screen.getByLabelText('Confirmar sincronização da letra')).toBeTruthy();
+    expect(screen.getByTestId('lyric-sync-editor')).toBeTruthy();
+    expect(screen.getByLabelText('Texto do trecho 1')).toBeTruthy();
+    expect(screen.getByLabelText('Abrir JSON da letra')).toBeTruthy();
+    await fireEvent.changeText(screen.getByLabelText('Texto do trecho 1'), 'Texto ajustado');
+    await fireEvent.press(screen.getByLabelText('Confirmar sincronização da letra'));
+    expect(player.updateLyricsSegments).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ index: 0, text: 'Texto ajustado' }),
+    ]));
+  });
+
   it('replaces the loading state when lyrics arrive without closing the lyrics view', async () => {
     jest
       .mocked(usePlayer)
