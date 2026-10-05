@@ -44,6 +44,7 @@ jest.mock('@expo/vector-icons/Ionicons', () => ({
 jest.mock('../CompactMusicCarousel', () => ({ CompactMusicCarousel: () => null }));
 jest.mock('../HeroBanner/HeroBanner', () => ({ HeroBanner: () => null }));
 jest.mock('../CatalogHome', () => ({ CatalogHome: () => null }));
+jest.mock('../ListeningHome', () => ({ ListeningHome: () => null }));
 jest.mock('../../ImportModal', () => ({ ImportModal: () => null }));
 jest.mock('../../native', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports

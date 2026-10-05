@@ -1,3 +1,5 @@
+import { createYouTubeMusicClient } from './youtubeMusicRuntime';
+
 export type YouTubeMusicArtistRef = {
   id?: string;
   channel_id?: string;
@@ -195,11 +197,7 @@ let clientPromise: Promise<YouTubeMusicClient> | null = null;
 export const getYouTubeMusicClient = (): Promise<YouTubeMusicClient> => {
   if (!clientPromise) {
     // Keep discovery's heavier client out of eager module and player initialization.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { Innertube } = require('youtubei.js') as {
-      Innertube: { create: (options: object) => Promise<YouTubeMusicClient> };
-    };
-    clientPromise = Innertube.create({
+    clientPromise = createYouTubeMusicClient({
       generate_session_locally: false,
       retrieve_innertube_config: true,
       retrieve_player: false,

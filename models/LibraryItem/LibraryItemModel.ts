@@ -6,5 +6,6 @@ export type LibraryItemModel = {
   subtitle: string;
   /** Provider classification. Keep this separate from the display subtitle. */
   releaseType?: 'album' | 'single' | 'ep' | 'compilation' | 'release';
+  releaseDate?: string;
   ownerId?: string;
 };

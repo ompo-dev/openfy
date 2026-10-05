@@ -52,6 +52,26 @@ const library = [
 ];
 
 describe('personalizedHome', () => {
+  it('ranks pinned songs and artists by actual listens, while recents use playback order', () => {
+    const history: UserProfile = { ...profile, recentlyPlayedTracks: library.slice(0, 3).map((item, index) => ({
+      track: { id: item.spotifyId, spotifyId: item.spotifyId, title: item.title, artists: [item.artistName],
+        primaryArtist: item.artistName, albumName: item.albumName, imageURL: item.imageURL,
+        durationMs: item.duration_ms, createdAt: item.addedAt, updatedAt: item.updatedAt },
+      lastPlayedAt: [10, 30, 20][index], playCount: [12, 2, 5][index],
+    })) };
+    const home = buildPersonalizedHome({ tracks: library, playlists, profile: history, personalized: true, allowExplicitRecommendations: true });
+    expect(home.continueListening.map((item) => item.title)).toEqual(['Segunda', 'Terceira', 'Primeira']);
+    expect(home.pinnedTracks.map((item) => item.title)).toEqual(['Primeira', 'Terceira', 'Segunda']);
+    expect(home.pinnedArtists.map((item) => [item.title, item.appearances])).toEqual([['Sotam', 14], ['Pedro Qualy', 5]]);
+    expect(home.pinnedArtists[0].artistId).toBe('artist-sotam');
+  });
+
+  it('does not fabricate pinned items when there is no listening history', () => {
+    const home = buildPersonalizedHome({ tracks: library, playlists, profile, personalized: true, allowExplicitRecommendations: true });
+    expect(home.pinnedArtists).toEqual([]);
+    expect(home.pinnedTracks).toEqual([]);
+  });
+
   it('builds deterministic, diverse recommendations from local signals', () => {
     const first = buildPersonalizedHome({
       allowExplicitRecommendations: true,

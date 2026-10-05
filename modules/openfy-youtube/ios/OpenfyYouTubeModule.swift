@@ -74,6 +74,7 @@ public final class OpenfyYouTubeModule: Module {
 
   private static let rangeClient = YouTubeHTTPRangeClient(session: session)
   private static let preloadedStreams = NativeYouTubePreloadStore()
+  private var mediaSuggestionObserver: NSObjectProtocol?
   @MainActor
   private lazy var nativePlayer: OpenfyNativeYouTubePlayer = {
     let player = OpenfyNativeYouTubePlayer()
@@ -95,8 +96,34 @@ public final class OpenfyYouTubeModule: Module {
     Events(
       "onNativePlaybackEnded",
       "onNativeRemoteNext",
-      "onNativeRemotePrevious"
+      "onNativeRemotePrevious",
+      "onSuggestedMediaPlayback"
     )
+
+    OnCreate {
+      self.mediaSuggestionObserver = NotificationCenter.default.addObserver(
+        forName: OpenfyMediaSuggestions.playbackRequested, object: nil, queue: .main
+      ) { [weak self] _ in
+        self?.sendEvent("onSuggestedMediaPlayback")
+      }
+    }
+    OnDestroy {
+      if let observer = self.mediaSuggestionObserver {
+        NotificationCenter.default.removeObserver(observer)
+      }
+    }
+    AsyncFunction("setSuggestedMediaAsync") { (entries: [[String: String]]) in
+      await OpenfyMediaSuggestions.update(entries)
+    }
+    AsyncFunction("donatePlayedMediaAsync") { (entry: [String: String]) in
+      await OpenfyMediaSuggestions.update([entry], played: true)
+    }
+    AsyncFunction("getPendingSuggestedMediaAsync") { () -> [String: String]? in
+      await OpenfyMediaSuggestions.getPending()
+    }
+    AsyncFunction("acknowledgeSuggestedMediaAsync") { (requestId: String, success: Bool) in
+      await OpenfyMediaSuggestions.acknowledge(requestId, success: success)
+    }
 
     AsyncFunction("downloadGoogleVideoAsync") {
       (url: String, destination: String, headers: [String: String], chunkBytes: Int) async throws -> GoogleVideoTransferResult in

@@ -54,6 +54,22 @@ export type PersonalizedHomeArtist = {
   appearances: number;
 };
 
+export type HomeRelease = {
+  id: string;
+  title: string;
+  artistName: string;
+  artistId: string;
+  artistImageURL: string;
+  imageURL: string;
+  releaseDate: string;
+  releaseType: 'album' | 'single' | 'ep' | 'compilation' | 'release';
+};
+
+export type HomeCatalog = {
+  releases: HomeRelease[];
+  similarTracks: PersonalizedHomeTrack[];
+};
+
 export type PersonalizedHomeSnapshot = {
   albums: LocalAlbumCollection[];
   artists: PersonalizedHomeArtist[];
@@ -63,6 +79,11 @@ export type PersonalizedHomeSnapshot = {
   featured: PersonalizedHomeTrack[];
   playlists: LocalPlaylist[];
   quickPicks: PersonalizedHomeTrack[];
+  mostPlayed: PersonalizedHomeTrack[];
+  pinnedTracks: PersonalizedHomeTrack[];
+  pinnedArtists: PersonalizedHomeArtist[];
+  releases: HomeRelease[];
+  similarTracks: PersonalizedHomeTrack[];
   seeds: RecommendationSeed[];
   tracksById: Map<string, LibraryTrack>;
 };
@@ -76,6 +97,11 @@ export const EMPTY_PERSONALIZED_HOME: PersonalizedHomeSnapshot = {
   featured: [],
   playlists: [],
   quickPicks: [],
+  mostPlayed: [],
+  pinnedTracks: [],
+  pinnedArtists: [],
+  releases: [],
+  similarTracks: [],
   seeds: [],
   tracksById: new Map(),
 };
@@ -162,6 +188,7 @@ const canonicalToHomeTrack = (
   albumName: entry.track.albumName || 'Single',
   imageURL: entry.track.localImagePath || entry.track.imageURL || '',
   duration_ms: entry.track.durationMs || 0,
+  youtubeVideoId: entry.track.spotifyId.startsWith('yt_') ? entry.track.spotifyId.slice(3) : undefined,
   localAudioPath: entry.track.localAudioPath,
   localImagePath: entry.track.localImagePath,
   isDownloaded: Boolean(entry.track.localAudioPath),
@@ -238,6 +265,7 @@ export const buildRecommendationSeeds = (
 export const buildPersonalizedHome = ({
   allowExplicitRecommendations,
   discoveries = [],
+  catalog,
   personalized,
   playlists,
   profile,
@@ -246,6 +274,7 @@ export const buildPersonalizedHome = ({
 }: {
   allowExplicitRecommendations: boolean;
   discoveries?: PersonalizedHomeTrack[];
+  catalog?: HomeCatalog;
   personalized: boolean;
   playlists: LocalPlaylist[];
   profile: UserProfile;
@@ -263,6 +292,28 @@ export const buildPersonalizedHome = ({
       return saved ? libraryTrackToHomeTrack(saved) : canonicalToHomeTrack(entry);
     })
   ).slice(0, 10);
+  const mostPlayed = uniqueTracks([...recentEntries]
+    .filter((entry) => entry.playCount > 0)
+    .sort((first, second) => second.playCount - first.playCount || second.lastPlayedAt - first.lastPlayedAt)
+    .map((entry) => {
+      const saved = tracksById.get(entry.track.spotifyId);
+      return saved ? libraryTrackToHomeTrack(saved) : canonicalToHomeTrack(entry);
+    })).slice(0, 20);
+  // Pinned artists reflect actual listens, not how many songs were imported.
+  const listenedArtists = new Map<string, PersonalizedHomeArtist>();
+  recentEntries.forEach((entry) => entry.track.artists.forEach((name) => {
+    const key = normalize(name);
+    const savedArtist = tracksById.get(entry.track.spotifyId)?.artists?.find((artist) => normalize(artist.name) === key);
+    const artistId = savedArtist?.id || toYouTubeMusicArtistRouteId(undefined, name);
+    const current = listenedArtists.get(key);
+    listenedArtists.set(key, {
+      id: artistId, artistId, spotifyArtistId: artistId, title: name,
+      imageURL: '', appearances: (current?.appearances || 0) + entry.playCount,
+    });
+  }));
+  const pinnedArtists = [...listenedArtists.values()]
+    .sort((first, second) => second.appearances - first.appearances)
+    .slice(0, 4);
   const recentIds = new Set(continueListening.slice(0, 5).map((track) => track.spotifyId));
   const playlistFrequency = new Map<string, number>();
   playlists.forEach((playlist) => playlist.trackIds.forEach((id) =>
@@ -388,6 +439,13 @@ export const buildPersonalizedHome = ({
     featured,
     playlists: orderedPlaylists,
     quickPicks,
+    mostPlayed,
+    pinnedTracks: mostPlayed.slice(0, 4),
+    pinnedArtists,
+    releases: catalog?.releases || [],
+    similarTracks: diverseTracks((catalog?.similarTracks || remoteDiscoveries).filter((track) =>
+      allowExplicitRecommendations || !track.explicit
+    ), 16),
     seeds: recommendationSeeds,
     tracksById,
   };
@@ -500,15 +558,17 @@ const queueItemToHomeTrack = (
   };
 };
 
-const loadYouTubeMusicRadio = async (
+export const loadYouTubeMusicRadio = async (
   seed: RecommendationSeed,
   anchorTracks: PersonalizedHomeTrack[]
 ): Promise<PersonalizedHomeTrack[]> => {
-  const anchor = anchorTracks.find((track) => track.youtubeVideoId);
-  if (!anchor?.youtubeVideoId) return [];
   try {
     const client = await withDiscoveryTimeout(getYouTubeMusicClient());
     if (!client) return [];
+    const matchesSeed = (track: PersonalizedHomeTrack) => track.youtubeVideoId &&
+      trackArtistNames(track).some((name) => normalize(name) === normalize(seed.name));
+    const anchor = anchorTracks.find(matchesSeed) || (await searchYouTubeMusic(seed)).find(matchesSeed);
+    if (!anchor?.youtubeVideoId) return [];
     const panel = await withDiscoveryTimeout(
       client.music.getUpNext(anchor.youtubeVideoId, true)
     );

@@ -18,6 +18,7 @@ import {
 } from '@context';
 import { MiniPlayer, FullPlayer } from '@components';
 import { PlayerWidgetSync } from '../components/Player/PlayerWidgetSync';
+import { PlayerMediaSuggestionsSync } from '../components/Player/PlayerMediaSuggestionsSync';
 import { GlobalConnectivity } from '../components/GlobalConnectivity/GlobalConnectivity';
 import { registerBackgroundDownloadTask } from '@services';
 import { useOTAUpdates } from '@hooks';
@@ -47,6 +48,7 @@ function PlayerOverlay() {
   return (
     <>
       <PlayerWidgetSync />
+      <PlayerMediaSuggestionsSync />
       <MiniPlayer onPress={() => setFullPlayerVisible(true)} />
       {fullPlayerVisible ? <FullPlayer
         visible
@@ -69,14 +71,14 @@ function OTAUpdateOverlay({ visible }: { visible: boolean }) {
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
-    'SF-Regular': require('@assets/fonts/Simply Rounded.ttf'),
-    'SF-Semibold': require('@assets/fonts/Simply Rounded Bold.ttf'),
-    'SF-Bold': require('@assets/fonts/Simply Rounded Bold.ttf'),
-    'SF-Thin': require('@assets/fonts/Simply Rounded.ttf'),
-    SimplyRounded: require('@assets/fonts/Simply Rounded.ttf'),
-    'SimplyRounded-Bold': require('@assets/fonts/Simply Rounded Bold.ttf'),
-    'SimplyRounded-Italic': require('@assets/fonts/Simply Rounded Italic.ttf'),
-    'SimplyRounded-BoldItalic': require('@assets/fonts/Simply Rounded Bold Italic.ttf'),
+    'SF-Regular': require('@assets/fonts/SF-Pro-Display-Regular.otf'),
+    'SF-Semibold': require('@assets/fonts/SF-Pro-Display-Semibold.otf'),
+    'SF-Bold': require('@assets/fonts/SF-Pro-Display-Semibold.otf'),
+    'SF-Thin': require('@assets/fonts/SF-Pro-Display-Thin.otf'),
+    SimplyRounded: require('@assets/fonts/SF-Pro-Display-Regular.otf'),
+    'SimplyRounded-Bold': require('@assets/fonts/SF-Pro-Display-Semibold.otf'),
+    'SimplyRounded-Italic': require('@assets/fonts/SF-Pro-Display-Regular.otf'),
+    'SimplyRounded-BoldItalic': require('@assets/fonts/SF-Pro-Display-Semibold.otf'),
   });
 
   const { isDownloading: isDownloadingUpdate } = useOTAUpdates();

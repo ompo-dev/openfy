@@ -16,6 +16,8 @@ import type { LibraryTrack } from '../services/library/catalogLibrary';
 import type { LocalPlaylist } from '../services/library/localPlaylistManager';
 import type { UserProfile } from '../services/recommendation/recommendationEngine';
 import { log } from '../utils/appLogger';
+import { loadHomeCatalog } from '../services/home/homeCatalog';
+import type { HomeCatalog } from '../services/home/personalizedHome';
 
 const MIN_REFRESH_INDICATOR_MS = 350;
 const HOME_DATA_TTL_MS = 60_000;
@@ -173,10 +175,15 @@ export const usePersonalizedHome = () => {
           libraryRevision,
           forceRefresh
         );
+        let catalog: HomeCatalog = {
+          releases: cachedSnapshot?.snapshot.releases || [],
+          similarTracks: cachedSnapshot?.snapshot.similarTracks || [],
+        };
         const build = (discoveries: PersonalizedHomeTrack[]) =>
           buildPersonalizedHome({
             allowExplicitRecommendations: settings.allowExplicitRecommendations,
             discoveries,
+            catalog,
             personalized: settings.personalizedHome,
             playlists,
             profile,
@@ -213,6 +220,15 @@ export const usePersonalizedHome = () => {
               { name: 'músicas populares Brasil', score: 0, matchArtist: false },
               { name: 'lançamentos música brasileira', score: 0, matchArtist: false },
             ];
+        let latestDiscoveries = localSnapshot.discoveries;
+        const catalogRequest = loadHomeCatalog(
+          seeds,
+          [...localSnapshot.continueListening, ...localSnapshot.quickPicks],
+          forceRefresh
+        ).then((next) => {
+          catalog = next;
+          publish(build(latestDiscoveries));
+        }).catch(() => {});
         const finishDiscoveries = log.time('home', 'youtube recommendations load', {
           seedCount: seeds.length,
           savedTrackCount: tracks.length,
@@ -228,9 +244,8 @@ export const usePersonalizedHome = () => {
           );
           finishDiscoveries({ ok: true, tracks: discoveries.length });
           if (active && request === generation.current) {
-            publish(build(
-              discoveries.length ? discoveries : localSnapshot.discoveries
-            ));
+            latestDiscoveries = discoveries.length ? discoveries : localSnapshot.discoveries;
+            publish(build(latestDiscoveries));
           }
         } catch (error) {
           finishDiscoveries({ ok: false, error: String(error) });
@@ -246,6 +261,7 @@ export const usePersonalizedHome = () => {
           });
         }
         if (active && request === generation.current) setIsRefreshing(false);
+        void catalogRequest;
       })().catch((error) => {
         if (forceRefresh) finishRefreshMetric?.({ ok: false, error: String(error) });
         if (active && request === generation.current) {

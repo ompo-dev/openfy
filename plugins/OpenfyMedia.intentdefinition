@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>INIntentDefinitionModelVersion</key><string>1.2</string>
+  <key>INIntentDefinitionNamespace</key><string>Openfy</string>
+  <key>INIntentDefinitionToolsVersion</key><string>26.0</string>
+  <key>INEnums</key><array/>
+  <key>INTypes</key><array/>
+  <key>INIntents</key>
+  <array><dict>
+    <key>INIntentCategory</key><string>system</string>
+    <key>INIntentClassName</key><string>INPlayMediaIntent</string>
+    <key>INIntentClassPrefix</key><string>IN</string>
+    <key>INIntentCustomizable</key><true/>
+    <key>INIntentDomain</key><string>Media</string>
+    <key>INIntentName</key><string>PlayMedia</string>
+    <key>INIntentType</key><string>System</string>
+    <key>INIntentTitle</key><string>Play Media</string>
+    <key>INIntentTitleID</key><string>OpenfyPlay</string>
+    <key>INIntentDescription</key><string>Play music in Openfy.</string>
+    <key>INIntentDescriptionID</key><string>OpenfyDescription</string>
+    <key>INIntentInput</key><string>mediaContainer</string>
+    <key>INIntentKeyParameter</key><string>mediaContainer</string>
+    <key>INIntentLastParameterTag</key><integer>17</integer>
+    <key>INIntentParameterCombinations</key>
+    <dict><key>mediaContainer</key><dict>
+      <key>INIntentParameterCombinationIsPrimary</key><true/>
+      <key>INIntentParameterCombinationSupportsBackgroundExecution</key><true/>
+      <key>INIntentParameterCombinationTitle</key><string>Play ${mediaContainer}</string>
+      <key>INIntentParameterCombinationTitleID</key><string>OpenfyContainer</string>
+    </dict></dict>
+    <key>INIntentParameters</key>
+    <array><dict>
+      <key>INIntentParameterDisplayName</key><string>Music</string>
+      <key>INIntentParameterDisplayNameID</key><string>OpenfyMusic</string>
+      <key>INIntentParameterDisplayPriority</key><integer>2</integer>
+      <key>INIntentParameterName</key><string>mediaContainer</string>
+      <key>INIntentParameterObjectType</key><string>MediaItem</string>
+      <key>INIntentParameterObjectTypeNamespace</key><string>System</string>
+      <key>INIntentParameterTag</key><integer>2</integer>
+      <key>INIntentParameterType</key><string>Object</string>
+    </dict></array>
+  </dict></array>
+</dict>
+</plist>

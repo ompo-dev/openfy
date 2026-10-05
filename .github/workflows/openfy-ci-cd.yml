@@ -300,6 +300,14 @@ jobs:
             node_modules/expo-audio/ios/AudioTapProcessor.m \
             -o "$RUNNER_TEMP/AudioTapProcessor.o"
 
+      - name: Validar sugestoes nativas de midia
+        run: |
+          xcrun swiftc -typecheck -parse-as-library \
+            -target arm64-apple-ios16.4 \
+            -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            modules/openfy-youtube/ios/OpenfyMediaSuggestions.swift \
+            targets/media-intent/IntentHandler.swift
+
       - name: Validar player nativo de streaming
         run: |
           # Use the real patched Objective-C API without building the Expo/React pods.

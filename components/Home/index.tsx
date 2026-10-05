@@ -18,16 +18,10 @@ import { searchCatalog } from '@api';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { useLibrarySelectedCategory, usePlayer, type PlayerTrack } from '@context';
 import { useDetailNavigation, usePersonalizedHome } from '@hooks';
-import {
-  rememberCachedArtistImage,
-  upsertCatalogTracks,
-  type PersonalizedHomeTrack,
-} from '@services';
+import { rememberCachedArtistImage, upsertCatalogTracks } from '@services';
 import type { ArtistModel, TrackModel } from '@models';
 
-import { CompactMusicCarousel, type CompactTrackItem } from './CompactMusicCarousel';
-import { HeroBanner, type FeaturedItem } from './HeroBanner/HeroBanner';
-import { CatalogHome } from './CatalogHome';
+import { ListeningHome } from './ListeningHome';
 import { ImportModal } from '../ImportModal';
 import { LoggedPressable } from '../native';
 import { SkeletonImage } from '../common/SkeletonImage';
@@ -35,28 +29,6 @@ import { log } from '../../utils/appLogger';
 
 export { FriendActivityStatus } from './FriendActivityStatus';
 export { CompactMusicCarousel } from './CompactMusicCarousel';
-
-const HERO_COLORS = ['#38BDF8', '#FF5C7A', '#F7B955', '#63D9A0', '#C08BFF'];
-
-const toCompactTrack = (track: PersonalizedHomeTrack): CompactTrackItem => ({
-  id: track.id,
-  spotifyId: track.spotifyId,
-  title: track.title,
-  artist: track.artistName,
-  albumName: track.albumName,
-  imageUrl: track.localImagePath || track.imageURL,
-  duration_ms: track.duration_ms,
-  explicit: track.explicit,
-  artists: track.artists,
-  albumId: track.albumId,
-  albumArtists: track.albumArtists,
-  youtubeVideoId: track.youtubeVideoId,
-  youtubeUrl: track.youtubeUrl,
-  localAudioPath: track.localAudioPath,
-  localImagePath: track.localImagePath,
-  streamUrl: track.streamUrl,
-  streamExpiresAt: track.streamExpiresAt,
-});
 
 const toPlayerTrackFromSearch = (track: TrackModel): PlayerTrack => ({
   spotifyId: track.id,
@@ -211,28 +183,8 @@ export const Home = () => {
   };
 
   const discoveries = home.discoveries.length ? home.discoveries : home.quickPicks;
-  const compactTracks = discoveries.slice(0, 10).map(toCompactTrack);
-  const featuredItems: FeaturedItem[] = home.featured.slice(0, 5).map((track, index) => ({
-    id: track.id,
-    spotifyId: track.spotifyId,
-    artist: track.artistName,
-    title: track.title,
-    albumName: track.albumName,
-    imageUrl: track.localImagePath || track.imageURL,
-    titleColor: HERO_COLORS[index % HERO_COLORS.length],
-    duration_ms: track.duration_ms,
-    streamUrl: track.streamUrl,
-    streamExpiresAt: track.streamExpiresAt,
-    artists: track.artists,
-    albumId: track.albumId,
-    albumArtists: track.albumArtists,
-    youtubeVideoId: track.youtubeVideoId,
-    youtubeUrl: track.youtubeUrl,
-    localAudioPath: track.localAudioPath,
-    localImagePath: track.localImagePath,
-    isSaved: home.tracksById.has(track.spotifyId),
-  }));
-  const hasDiscovery = discoveries.length > 0 || home.artists.length > 0;
+  const hasDiscovery = discoveries.length > 0 || home.artists.length > 0 || home.continueListening.length > 0 ||
+    Boolean(home.playlists?.length || home.releases?.length || home.pinnedTracks?.length);
   const searching = query.trim().length > 0;
   const queryTooShort = query.trim().length === 1;
 
@@ -257,7 +209,7 @@ export const Home = () => {
         <View style={styles.header}>
           <View>
             <Text style={styles.eyebrow}>OPENFY MUSIC</Text>
-            <Text style={styles.title}>Descobrir</Text>
+            <Text style={styles.title}>Início</Text>
           </View>
           <Pressable
             accessibilityRole="button"
@@ -384,20 +336,7 @@ export const Home = () => {
           </View>
         ) : (
           <>
-            {home.continueListening.length ? (
-              <CompactMusicCarousel
-                title="Continue ouvindo"
-                tracks={home.continueListening.slice(0, 8).map(toCompactTrack)}
-              />
-            ) : null}
-            {compactTracks.length ? (
-              <CompactMusicCarousel title={home.discoveryTitle} tracks={compactTracks} />
-            ) : null}
-            <CatalogHome home={home} />
-            {featuredItems.length ? <HeroBanner featuredItems={featuredItems} /> : null}
-            {isLoading && !hasDiscovery ? (
-              <ActivityIndicator color="#1DB954" style={styles.loading} />
-            ) : null}
+            <ListeningHome home={home} loading={isLoading} />
             {!isLoading && !hasDiscovery ? (
               <Text style={styles.emptyText}>Pesquise uma música ou artista para começar.</Text>
             ) : null}
@@ -410,7 +349,7 @@ export const Home = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#121212' },
+  container: { flex: 1, backgroundColor: '#121212', width: '100%', maxWidth: 1100, alignSelf: 'center' },
   content: { paddingBottom: BOTTOM_NAVIGATION_HEIGHT + 76 },
   header: {
     paddingHorizontal: 18,

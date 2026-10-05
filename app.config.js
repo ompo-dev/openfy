@@ -26,9 +26,13 @@ module.exports = {
       buildNumber: process.env.IOS_BUILD_NUMBER || '1',
       entitlements: {
         'com.apple.security.application-groups': ['group.com.openfy.app'],
+        'com.apple.developer.siri': true,
       },
       infoPlist: {
         UIBackgroundModes: ['audio'],
+        NSUserActivityTypes: ['INPlayMediaIntent'],
+        INIntentsSupported: ['INPlayMediaIntent'],
+        INSupportedMediaCategories: ['INMediaCategoryMusic'],
         NSAppTransportSecurity: {
           NSAllowsLocalNetworking: true,
         },
@@ -63,6 +67,7 @@ module.exports = {
       favicon: './assets/images/app-icon/openfy-light.png',
     },
     plugins: [
+      './plugins/withMediaSuggestions',
       'expo-router',
       '@bacons/apple-targets',
       'expo-asset',

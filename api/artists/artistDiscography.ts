@@ -139,6 +139,7 @@ const loadDiscography = async (artistId: string): Promise<ArtistDiscography> => 
         .join(' · '),
       imageURL: album.images?.[0]?.url || '',
       releaseType,
+      releaseDate: album.release_date,
     };
   });
 

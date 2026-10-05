@@ -275,6 +275,7 @@ const toYouTubeMusicReleaseModel = (
       subtitle: [year, displayReleaseType].filter(Boolean).join(' · '),
       imageURL: largestImage(item, 720),
       releaseType,
+      releaseDate: year || undefined,
     },
   };
 };
