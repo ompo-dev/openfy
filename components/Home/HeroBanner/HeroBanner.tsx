@@ -44,6 +44,7 @@ export type FeaturedItem = {
   streamExpiresAt?: number;
   artists?: { id: string; name: string }[];
   albumId?: string;
+  albumAssociations?: { id: string; name: string; imageURL?: string }[];
   albumArtists?: { id: string; name: string }[];
   youtubeVideoId?: string;
   youtubeUrl?: string;
@@ -86,6 +87,7 @@ export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] })
       streamExpiresAt: item.streamExpiresAt,
       artists: item.artists,
       albumId: item.albumId,
+      albumAssociations: item.albumAssociations,
       albumArtists: item.albumArtists,
       youtubeVideoId: item.youtubeVideoId,
       youtubeUrl: item.youtubeUrl,
@@ -127,6 +129,7 @@ export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] })
         duration_ms: item.duration_ms,
         artists: item.artists,
         albumId: item.albumId,
+        albumAssociations: item.albumAssociations,
         albumArtists: item.albumArtists,
         youtubeVideoId: item.youtubeVideoId,
         youtubeUrl: item.youtubeUrl,

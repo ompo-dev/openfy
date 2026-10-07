@@ -1,4 +1,4 @@
-import type { ArtistModel, LibraryItemModel, TrackModel } from '@models';
+import { mergeAlbumAssociations, type ArtistModel, type LibraryItemModel, type TrackAlbumRef, type TrackModel } from '@models';
 import {
   getBestYouTubeMusicThumbnail,
   getYouTubeMusicClient,
@@ -196,6 +196,9 @@ export const toYouTubeMusicTrackModel = (item: YouTubeMusicItem): TrackModel | n
     data.album_type,
     data.albumType,
   ].map(asString).find(Boolean);
+  const releaseType = explicitReleaseType
+    ? getYouTubeMusicReleaseType(explicitReleaseType)
+    : undefined;
 
   return {
     id: `yt_${videoId}`,
@@ -204,10 +207,17 @@ export const toYouTubeMusicTrackModel = (item: YouTubeMusicItem): TrackModel | n
     imageURL: albumId ? albumImage || largestImage(item, 720) : largestImage(item, 720) || albumImage,
     albumName: albumName || 'YouTube Music',
     albumId: albumId || undefined,
-    albumArtists: albumArtists.length ? albumArtists : undefined,
-    releaseType: explicitReleaseType
-      ? getYouTubeMusicReleaseType(explicitReleaseType)
+    albumAssociations: albumId && albumName
+      ? [{
+          id: albumId,
+          name: albumName,
+          imageURL: albumImage,
+          albumArtists: albumArtists.length ? albumArtists : undefined,
+          releaseType,
+        }]
       : undefined,
+    albumArtists: albumArtists.length ? albumArtists : undefined,
+    releaseType,
     youtubeVideoId: videoId,
     youtubeUrl: `https://www.youtube.com/watch?v=${videoId}`,
     durationMs: Number.isFinite(durationSeconds)
@@ -246,6 +256,56 @@ const getExplicitYouTubeMusicReleaseType = (item: Record<string, unknown>) => {
 type YouTubeMusicReleaseModel = {
   item: LibraryItemModel;
   kind: 'album' | 'single' | 'ep' | 'release';
+};
+
+const releaseBrowseId = (routeId: string) => {
+  const encoded = routeId.startsWith('ytalbum_')
+    ? routeId.slice('ytalbum_'.length)
+    : routeId;
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return encoded;
+  }
+};
+
+const loadProfileReleaseAssociations = async (
+  client: Awaited<ReturnType<typeof getYouTubeMusicClient>>,
+  releases: YouTubeMusicReleaseModel[],
+): Promise<Map<string, TrackAlbumRef[]>> => {
+  const associations = new Map<string, TrackAlbumRef[]>();
+  const candidates = releases.slice(0, 36);
+  let cursor = 0;
+  const loadNext = async () => {
+    while (cursor < candidates.length) {
+      const release = candidates[cursor++];
+      const browseId = releaseBrowseId(release.item.id);
+      if (!browseId) continue;
+      if (!client.music.getAlbum) continue;
+      const page = await withYouTubeMusicTimeout(client.music.getAlbum(browseId), 6_000).catch(() => null);
+      if (!page) continue;
+      const header = asRecord(page.header);
+      const imageURL = release.item.imageURL || getBestYouTubeMusicThumbnail({
+        thumbnail: header.thumbnail,
+        thumbnails: header.thumbnails,
+      });
+      const albumRef: TrackAlbumRef = {
+        id: browseId,
+        name: release.item.title,
+        imageURL,
+        releaseType: release.item.releaseType,
+        releaseDate: release.item.releaseDate,
+      };
+      for (const item of page.contents || []) {
+        const track = toYouTubeMusicTrackModel(item);
+        if (!track) continue;
+        const current = associations.get(track.id) || [];
+        associations.set(track.id, mergeAlbumAssociations(current, [albumRef]) || []);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, loadNext));
+  return associations;
 };
 
 const toYouTubeMusicReleaseModel = (
@@ -661,6 +721,10 @@ const loadYouTubeMusicArtistProfile = async (
       pageAndCatalogSongs.set(id, item);
     }
   }
+  // A profile song shelf exposes one copy of a recording, while the same
+  // recording can be present in an album, a single, and a deluxe release.
+  // Read the release tracklists once so the profile keeps every membership.
+  const releaseAssociations = await loadProfileReleaseAssociations(client, uniqueReleases);
   const tracks: TrackModel[] = [];
   const participationTracks: TrackModel[] = [];
   const releaseByTitle = new Map(
@@ -683,15 +747,35 @@ const loadYouTubeMusicArtistProfile = async (
     const matchingRelease = (parsedTrack.albumName && parsedTrack.albumName !== 'YouTube Music'
       ? releaseByTitle.get(normalizeArtistName(parsedTrack.albumName))
       : undefined) || (imageKey ? releaseByImage.get(imageKey) || undefined : undefined);
+    const matchingAlbumId = matchingRelease
+      ? releaseBrowseId(matchingRelease.item.id)
+      : '';
     const track = matchingRelease
       ? {
           ...parsedTrack,
-          albumId: matchingRelease.item.id.replace(/^ytalbum_/, ''),
+          albumId: matchingAlbumId,
           albumName: matchingRelease.item.title,
           imageURL: matchingRelease.item.imageURL || parsedTrack.imageURL,
           releaseType: matchingRelease.item.releaseType,
+          albumAssociations: mergeAlbumAssociations(
+            parsedTrack.albumAssociations,
+            releaseAssociations.get(parsedTrack.id),
+            [{
+              id: matchingAlbumId,
+              name: matchingRelease.item.title,
+              imageURL: matchingRelease.item.imageURL,
+              releaseType: matchingRelease.item.releaseType,
+              releaseDate: matchingRelease.item.releaseDate,
+            }],
+          ),
         }
-      : parsedTrack;
+      : {
+          ...parsedTrack,
+          albumAssociations: mergeAlbumAssociations(
+            parsedTrack.albumAssociations,
+            releaseAssociations.get(parsedTrack.id),
+          ),
+        };
     const credits = artistReferences(item);
     const artistCreditIndex = credits.findIndex((artist) =>
       artist.id === browseId || normalizeArtistName(artist.name) === normalizeArtistName(name)

@@ -75,6 +75,34 @@ describe('catalogLibrary', () => {
     });
   });
 
+  it('accumulates album memberships when the same recording is seen in another release', async () => {
+    await upsertCatalogTracks([{
+      spotifyId: 'kia',
+      title: 'KIA',
+      artistName: 'Ebony',
+      albumName: 'KM2',
+      albumId: 'km2',
+      albumAssociations: [{ id: 'km2', name: 'KM2' }],
+      imageURL: 'https://images.test/km2.jpg',
+      duration_ms: 180000,
+    }]);
+    const [updated] = await upsertCatalogTracks([{
+      spotifyId: 'kia',
+      title: 'KIA',
+      artistName: 'Ebony',
+      albumName: 'KM2 Deluxe',
+      albumId: 'km2-deluxe',
+      albumAssociations: [{ id: 'km2-deluxe', name: 'KM2 Deluxe' }],
+      imageURL: 'https://images.test/km2-deluxe.jpg',
+      duration_ms: 180000,
+    }]);
+
+    expect(updated.albumAssociations).toEqual([
+      expect.objectContaining({ id: 'km2', name: 'KM2' }),
+      expect.objectContaining({ id: 'km2-deluxe', name: 'KM2 Deluxe' }),
+    ]);
+  });
+
   it('overlays a downloaded file without hiding catalog-only tracks', async () => {
     await upsertCatalogTracks([
       {

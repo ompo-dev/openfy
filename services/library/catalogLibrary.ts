@@ -6,6 +6,7 @@ import {
   type DownloadTrackInput,
 } from '../download/downloadManager';
 import { removeTrackFromLocalPlaylists } from './localPlaylistManager';
+import { albumAssociationsForTrack, mergeAlbumAssociations, type TrackAlbumRef } from '../../models/Track/TrackModel';
 
 export type CatalogSourcePlatform = 'spotify' | 'youtube';
 
@@ -17,6 +18,7 @@ export type CatalogTrackInput = {
   imageURL: string;
   duration_ms: number;
   albumId?: string;
+  albumAssociations?: TrackAlbumRef[];
   artists?: { id: string; name: string }[];
   albumArtists?: { id: string; name: string }[];
   trackNumber?: number;
@@ -86,11 +88,25 @@ const normalizeArtists = (
   return unique.size ? [...unique.values()] : undefined;
 };
 
+const normalizeAlbumAssociations = (albums?: TrackAlbumRef[]) =>
+  mergeAlbumAssociations(albums?.map((album) => ({
+    ...album,
+    id: album.id?.trim() || album.name?.trim() || '',
+    name: album.name?.trim() || album.id?.trim() || '',
+    imageURL: album.imageURL?.trim() || undefined,
+    albumArtists: normalizeArtists(album.albumArtists),
+  })));
+
 const normalizeInput = (
   input: CatalogTrackInput,
   current?: CatalogTrack
 ): CatalogTrack => {
   const now = new Date().toISOString();
+  const albumAssociations = normalizeAlbumAssociations([
+    ...(current ? albumAssociationsForTrack(current) || [] : []),
+    ...(input.albumAssociations || []),
+    ...(albumAssociationsForTrack(input) || []),
+  ]);
   return {
     spotifyId: input.spotifyId.trim(),
     title: input.title.trim() || current?.title || 'Música',
@@ -107,6 +123,7 @@ const normalizeInput = (
     ...(input.albumId?.trim() || current?.albumId
       ? { albumId: input.albumId?.trim() || current?.albumId }
       : {}),
+    ...(albumAssociations ? { albumAssociations } : {}),
     ...(normalizeArtists(input.artists) || current?.artists
       ? { artists: normalizeArtists(input.artists) || current?.artists }
       : {}),
@@ -139,6 +156,7 @@ const catalogInputFromDownload = (track: DownloadedTrack): CatalogTrackInput => 
   imageURL: track.imageURL,
   duration_ms: track.duration_ms,
   albumId: track.albumId,
+  albumAssociations: track.albumAssociations,
   artists: track.artists,
   albumArtists: track.albumArtists,
   trackNumber: track.trackNumber,
@@ -246,6 +264,10 @@ const loadLibraryTracks = async (): Promise<LibraryTrack[]> => {
         ? catalogTrack.artists
         : downloaded.artists,
       albumId: catalogTrack.albumId || downloaded.albumId,
+      albumAssociations: mergeAlbumAssociations(
+        catalogTrack.albumAssociations,
+        downloaded.albumAssociations,
+      ),
       albumArtists: catalogTrack.albumArtists?.length
         ? catalogTrack.albumArtists
         : downloaded.albumArtists,
@@ -299,6 +321,7 @@ export const toDownloadTrackInput = (
   imageURL: track.imageURL,
   duration_ms: track.duration_ms,
   albumId: track.albumId,
+  albumAssociations: track.albumAssociations,
   artists: track.artists,
   albumArtists: track.albumArtists,
   trackNumber: track.trackNumber,

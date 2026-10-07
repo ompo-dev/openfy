@@ -1,4 +1,5 @@
 import type { LibraryItemModel, TrackModel } from '@models';
+import { albumAssociationsForTrack, mergeAlbumAssociations } from '@models';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 import { log } from '../../utils/appLogger';
 import { BASE_URL, spotifyGet } from '../config';
@@ -66,6 +67,14 @@ const loadAlbumTracks = async (album: ArtistAlbum): Promise<TrackModel[]> => {
         imageURL: album.images?.[0]?.url || '',
         albumName: album.name,
         albumId: album.id,
+        albumAssociations: [{
+          id: album.id,
+          name: album.name,
+          imageURL: album.images?.[0]?.url || '',
+          albumArtists: album.artists,
+          releaseType: album.album_type === 'single' ? 'single' : album.album_type === 'compilation' ? 'compilation' : 'album',
+          releaseDate: album.release_date,
+        }],
         albumArtists: album.artists,
         durationMs: track.duration_ms,
         artists,
@@ -121,7 +130,17 @@ const loadDiscography = async (artistId: string): Promise<ArtistDiscography> => 
 
   const tracks = new Map<string, TrackModel>();
   albumTracks.flat().forEach((track) => {
-    if (track.id && !tracks.has(track.id)) tracks.set(track.id, track);
+    if (!track.id) return;
+    const primary = track.artists?.[0]?.name || track.subtitle;
+    const key = `${primary.trim().toLocaleLowerCase()}\u0000${track.title.trim().toLocaleLowerCase()}`;
+    const existing = tracks.get(key);
+    tracks.set(key, existing ? {
+      ...existing,
+      albumAssociations: mergeAlbumAssociations(
+        albumAssociationsForTrack(existing),
+        albumAssociationsForTrack(track),
+      ),
+    } : track);
   });
 
   const releases: LibraryItemModel[] = uniqueAlbums.map((album) => {

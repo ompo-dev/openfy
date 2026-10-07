@@ -86,12 +86,20 @@ export type PlayerTrack = TrackCatalogMetadata & {
 
 export type RepeatMode = 'off' | 'all' | 'one';
 
+export type PlayerArtworkFrame = { x: number; y: number; width: number; height: number };
+export type PlayerArtworkFlight = {
+  token: number;
+  uri: string;
+  source: PlayerArtworkFrame;
+};
+
 export interface PlayerStoreState {
   // Current playback
   currentTrack: PlayerTrack | null;
   playerState: PlayerState;
   isPlayerVisible: boolean;
   isFullPlayerVisible: boolean;
+  artworkFlight: PlayerArtworkFlight | null;
   isLoadingAudio: boolean;
   isLoadingLyrics: boolean;
   lyricsData: LyricsData | null;
@@ -132,6 +140,7 @@ export interface PlayerStoreState {
   setRepeatMode: (mode: RepeatMode) => void;
   setIsPlayerVisible: (visible: boolean) => void;
   setIsFullPlayerVisible: (visible: boolean) => void;
+  setArtworkFlight: (flight: PlayerArtworkFlight | null) => void;
   closePlayer: () => Promise<void>;
   refreshLyrics: () => Promise<void>;
   updateLyricsSegments: (segments: LyricSegment[]) => Promise<boolean>;
@@ -626,6 +635,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   playerState: DEFAULT_STATE,
   isPlayerVisible: false,
   isFullPlayerVisible: false,
+  artworkFlight: null,
   isLoadingAudio: false,
   isLoadingLyrics: false,
   lyricsData: null,
@@ -642,7 +652,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     set({ isPlayerVisible: visible });
   },
   setIsFullPlayerVisible: (visible: boolean) => {
-    set({ isFullPlayerVisible: visible });
+    set({ isFullPlayerVisible: visible, ...(visible ? {} : { artworkFlight: null }) });
+  },
+  setArtworkFlight: (flight: PlayerArtworkFlight | null) => {
+    set({ artworkFlight: flight });
   },
 
   playTrack: async (track: PlayerTrack, options = {}) => {

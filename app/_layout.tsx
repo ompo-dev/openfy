@@ -49,7 +49,10 @@ function PlayerOverlay() {
     <>
       <PlayerWidgetSync />
       <PlayerMediaSuggestionsSync />
-      <MiniPlayer onPress={() => setFullPlayerVisible(true)} />
+      <MiniPlayer
+        animateToFullPlayer
+        onPress={() => setFullPlayerVisible(true)}
+      />
       {fullPlayerVisible ? <FullPlayer
         visible
         onClose={() => setFullPlayerVisible(false)}

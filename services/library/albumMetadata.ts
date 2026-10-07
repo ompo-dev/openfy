@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { TrackModel } from '@models';
+import { albumAssociationsForTrack, mergeAlbumAssociations, type TrackModel } from '@models';
 import type { YouTubeMusicAlbum } from '../../api/albums/youtubeMusicAlbum';
 import { getLibraryTracks, upsertCatalogTracks, type LibraryTrack } from './catalogLibrary';
 import { getLocalAlbumId } from './localCollections';
@@ -13,7 +13,6 @@ const trackTitle = (title: string) => normalizeReleaseTitle(title.replace(/\s*\(
 const matchesTrack = (track: TrackModel, saved: LibraryTrack) =>
   track.id === saved.spotifyId || Boolean(track.youtubeVideoId && track.youtubeVideoId === saved.youtubeVideoId) || (
     trackTitle(track.title) === trackTitle(saved.title) &&
-    normalizeReleaseTitle(track.albumName || '') === normalizeReleaseTitle(saved.albumName) &&
     normalizeReleaseTitle(track.artists?.[0]?.name || track.subtitle.split(',')[0]) ===
       normalizeReleaseTitle(saved.artists?.[0]?.name || saved.artistName.split(',')[0])
   );
@@ -36,19 +35,44 @@ export const rememberAlbumMetadata = async (album: YouTubeMusicAlbum) => {
     const updates = library.flatMap((saved) => {
       const track = album.tracks.find((candidate) => matchesTrack(candidate, saved));
       if (!track) return [];
-      // The same recording can also have a separate single/deluxe release.
-      // Share its downloaded audio, but never redirect that release's album id.
-      if (normalizeReleaseTitle(saved.albumName) !== normalizeReleaseTitle(album.name) && saved.albumId !== track.albumId) return [];
-      aliases.add(getLocalAlbumId(saved));
-      if (saved.albumId === track.albumId && saved.imageURL === album.imageURL &&
-        saved.trackNumber === track.trackNumber && JSON.stringify(saved.albumArtists) === JSON.stringify(track.albumArtists)) return [];
-      return [{
-        ...saved,
-        albumId: track.albumId,
-        albumName: album.name,
-        albumArtists: track.albumArtists,
+      const albumId = track.albumId || album.id.replace(/^ytalbum_/, '');
+      const albumArtists = track.albumArtists?.length
+        ? track.albumArtists
+        : album.artists.map(({ id, name }) => ({ id, name }));
+      const association = {
+        id: albumId,
+        name: album.name,
+        imageURL: album.imageURL || track.imageURL,
+        albumArtists,
         trackNumber: track.trackNumber,
-        imageURL: album.imageURL || saved.imageURL,
+        discNumber: track.discNumber,
+        releaseType: album.releaseType,
+        releaseDate: album.releaseDate,
+      } as const;
+      const albumAssociations = mergeAlbumAssociations(
+        albumAssociationsForTrack(saved),
+        track.albumAssociations,
+        [association],
+      );
+      const samePrimaryRelease =
+        normalizeReleaseTitle(saved.albumName) === normalizeReleaseTitle(album.name) ||
+        saved.albumId === albumId;
+      if (samePrimaryRelease) aliases.add(getLocalAlbumId(saved));
+      const next = {
+        ...saved,
+        ...(samePrimaryRelease ? {
+          albumId,
+          albumName: album.name,
+          albumArtists,
+          trackNumber: track.trackNumber,
+          discNumber: track.discNumber,
+          imageURL: album.imageURL || saved.imageURL,
+        } : {}),
+        albumAssociations,
+      };
+      if (JSON.stringify(next) === JSON.stringify(saved)) return [];
+      return [{
+        ...next,
       }];
     });
     const entries = await readAlbums();

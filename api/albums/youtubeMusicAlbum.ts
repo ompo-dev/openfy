@@ -9,6 +9,7 @@ import {
 import { toYouTubeMusicTrackModel } from '../search/catalog';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 import { rememberAlbumMetadata } from '../../services/library/albumMetadata';
+import { mergeAlbumAssociations } from '@models';
 
 export type YouTubeMusicAlbum = {
   id: string;
@@ -111,6 +112,15 @@ const loadYouTubeMusicAlbum = async (
       trackNumber: index + 1,
       imageURL: imageURL || track.imageURL,
       releaseType,
+      albumAssociations: mergeAlbumAssociations(track.albumAssociations, [{
+        id: albumId,
+        name,
+        imageURL,
+        albumArtists: track.albumArtists?.length ? track.albumArtists : headerArtists,
+        trackNumber: index + 1,
+        releaseType,
+        releaseDate,
+      }]),
     }));
 
   const artists = new Map<string, { id: string; name: string; imageURL?: string }>();

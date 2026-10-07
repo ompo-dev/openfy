@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Animated,
   Alert,
+  Easing,
   FlatList,
   Linking,
   Platform,
@@ -80,6 +81,7 @@ import { MiniPlayer } from './MiniPlayer';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { useLyricsArtworkTransition } from './useLyricsArtworkTransition';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
+import type { PlayerArtworkFrame } from '../../stores/usePlayerStore';
 import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 import { GlassBackdrop, GlassBackdropScope } from '../native/GlassBackdrop';
 
@@ -184,6 +186,13 @@ const getTrackKey = (
 const getTrackArtworkUri = (
   track: { imageURL?: string | null; localImagePath?: string | null } | null
 ) => track?.imageURL || track?.localImagePath || '';
+
+const frameRelativeTo = (frame: PlayerArtworkFrame, root: PlayerArtworkFrame): PlayerArtworkFrame => ({
+  x: frame.x - root.x,
+  y: frame.y - root.y,
+  width: frame.width,
+  height: frame.height,
+});
 
 const getLocalArtworkFallback = (
   track: { imageURL?: string | null; localImagePath?: string | null } | null
@@ -323,6 +332,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     isLoadingLyrics,
     repeatMode,
     updateLyricsSegments,
+    artworkFlight,
+    setArtworkFlight,
   } = usePlayer();
 
   const [seeking, setSeeking] = React.useState(false);
@@ -359,6 +370,16 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [scrubbedLyricTimelineIndex, setScrubbedLyricTimelineIndex] = React.useState<number | null>(null);
   const [isPreviewScrubbing, setIsPreviewScrubbing] = React.useState(false);
   const [isLyricsUserScrolling, setIsLyricsUserScrolling] = React.useState(false);
+  const [playerArtworkFlight, setPlayerArtworkFlight] = React.useState<{
+    from: PlayerArtworkFrame;
+    to: PlayerArtworkFrame;
+    uri: string;
+  } | null>(null);
+  const artworkFlightProgress = React.useRef(new Animated.Value(0)).current;
+  const coverArtworkRef = React.useRef<View>(null);
+  const artworkFlightTokenRef = React.useRef<number | null>(null);
+  const artworkFlightTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closingPlayerRef = React.useRef(false);
   const previewDragOffset = React.useRef(new Animated.Value(0)).current;
   const previewScrubbingRef = React.useRef(false);
   const playerScrollGesture = React.useMemo(() => Gesture.Native(), []);
@@ -401,6 +422,109 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     visible, currentTrackKey, artworkUrl, COVER_SIZE, showLyricsFull
   );
   const transitionArtwork = artworkTransition.transition;
+
+  const runPlayerArtworkFlight = React.useCallback((
+    from: PlayerArtworkFrame,
+    to: PlayerArtworkFrame,
+    uri: string,
+    onComplete?: () => void,
+  ) => {
+    if (!uri || from.width <= 0 || from.height <= 0 || to.width <= 0 || to.height <= 0) {
+      onComplete?.();
+      return;
+    }
+    artworkFlightProgress.stopAnimation();
+    artworkFlightProgress.setValue(0);
+    setPlayerArtworkFlight({ from, to, uri });
+    Animated.timing(artworkFlightProgress, {
+      toValue: 1,
+      duration: 460,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start(({ finished }) => {
+      if (!finished) return;
+      setPlayerArtworkFlight(null);
+      onComplete?.();
+    });
+  }, [artworkFlightProgress]);
+
+  const measurePlayerArtwork = React.useCallback((callback: (target: PlayerArtworkFrame, root: PlayerArtworkFrame) => void) => {
+    const target = coverArtworkRef.current;
+    const root = artworkTransition.containerRef.current;
+    if (!target || !root) return;
+    let targetFrame: PlayerArtworkFrame | null = null;
+    let rootFrame: PlayerArtworkFrame | null = null;
+    const finish = () => {
+      if (targetFrame && rootFrame) callback(targetFrame, rootFrame);
+    };
+    target.measureInWindow((x, y, width, height) => {
+      if (width > 0 && height > 0) targetFrame = {
+        x: x + (width - COVER_SIZE) / 2,
+        y,
+        width: COVER_SIZE,
+        height: COVER_SIZE,
+      };
+      finish();
+    });
+    root.measureInWindow((x, y, width, height) => {
+      if (width > 0 && height > 0) rootFrame = { x, y, width, height };
+      finish();
+    });
+  }, [artworkTransition.containerRef]);
+
+  const startPlayerArtworkFlight = React.useCallback(() => {
+    if (!visible || !artworkFlight || artworkFlightTokenRef.current === artworkFlight.token) return;
+    measurePlayerArtwork((target, root) => {
+      if (!artworkFlight || artworkFlightTokenRef.current === artworkFlight.token) return;
+      artworkFlightTokenRef.current = artworkFlight.token;
+      runPlayerArtworkFlight(
+        frameRelativeTo(artworkFlight.source, root),
+        frameRelativeTo(target, root),
+        artworkFlight.uri,
+      );
+    });
+  }, [artworkFlight, measurePlayerArtwork, runPlayerArtworkFlight, visible]);
+
+  React.useEffect(() => {
+    if (!visible || !artworkFlight) return;
+    if (artworkFlightTimerRef.current) clearTimeout(artworkFlightTimerRef.current);
+    artworkFlightTimerRef.current = setTimeout(startPlayerArtworkFlight, 70);
+    return () => {
+      if (artworkFlightTimerRef.current) clearTimeout(artworkFlightTimerRef.current);
+      artworkFlightTimerRef.current = null;
+    };
+  }, [artworkFlight, startPlayerArtworkFlight, visible]);
+
+  const handleClose = React.useCallback(() => {
+    if (closingPlayerRef.current) return;
+    if (!artworkFlight || !artworkUrl) {
+      onClose();
+      return;
+    }
+    closingPlayerRef.current = true;
+    measurePlayerArtwork((target, root) => {
+      const finish = () => {
+        if (artworkFlightTimerRef.current) clearTimeout(artworkFlightTimerRef.current);
+        artworkFlightTimerRef.current = null;
+        setArtworkFlight?.(null);
+        closingPlayerRef.current = false;
+        onClose();
+      };
+      runPlayerArtworkFlight(
+        frameRelativeTo(target, root),
+        frameRelativeTo(artworkFlight.source, root),
+        artworkUrl,
+        finish,
+      );
+    });
+    artworkFlightTimerRef.current = setTimeout(() => {
+      if (!playerArtworkFlight) {
+        setArtworkFlight?.(null);
+        closingPlayerRef.current = false;
+        onClose();
+      }
+    }, 650);
+  }, [artworkFlight, artworkUrl, measurePlayerArtwork, onClose, playerArtworkFlight, runPlayerArtworkFlight, setArtworkFlight]);
   const queueHasMultipleTracks = queue.length > 1;
   const previousQueueIndex =
     queueIndex > 0
@@ -523,6 +647,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       const shouldResolveArtistName = !isSpotifyArtistId && (
         !artistId || artistId.startsWith('ytartist_') || artistId.startsWith('local_artist_')
       );
+
       const canonicalArtistId = isSpotifyArtistId
         ? artistId
         : shouldResolveArtistName
@@ -1506,8 +1631,11 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     <PlayerModal
       fullScreen
       visible={visible}
-      onRequestClose={onClose}
-      onShow={artworkTransition.captureFrames}
+      onRequestClose={handleClose}
+      onShow={() => {
+        artworkTransition.captureFrames();
+        startPlayerArtworkFlight();
+      }}
     >
       <GestureHandlerRootView style={styles.gestureRoot}>
         <GlassBackdropScope>
@@ -1531,7 +1659,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               accessibilityLabel={
                 isLyricsEditing ? 'Cancelar edição da letra' : 'Fechar player'
               }
-              onPress={isLyricsEditing ? cancelLyricsEditing : onClose}
+              onPress={isLyricsEditing ? cancelLyricsEditing : handleClose}
               style={styles.headerIconButton}
             >
               <Ionicons
@@ -1775,7 +1903,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               ) : null}
               {!showLyricsFull ? (
               <>
-              <View style={[styles.coverContainer, { opacity: artworkTransition.transitioning ? 0 : 1 }]}>
+              <View
+                ref={coverArtworkRef}
+                collapsable={false}
+                onLayout={startPlayerArtworkFlight}
+                style={[styles.coverContainer, { opacity: artworkTransition.transitioning || playerArtworkFlight ? 0 : 1 }]}
+              >
               <SwipeableArtwork
                 trackKey={currentTrackKey}
                 artworkUri={artworkUrl}
@@ -2047,6 +2180,58 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             </View>
           </SheetFrame>
           {artworkTransition.overlay}
+          {playerArtworkFlight ? (
+            <Animated.View
+              pointerEvents="none"
+              testID="player-mini-artwork-flight"
+              style={[
+                styles.playerArtworkFlight,
+                {
+                  left: playerArtworkFlight.from.x,
+                  top: playerArtworkFlight.from.y,
+                  width: playerArtworkFlight.from.width,
+                  height: playerArtworkFlight.from.height,
+                  borderRadius: artworkFlightProgress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [10, 24],
+                  }),
+                  transform: [
+                    {
+                      translateX: artworkFlightProgress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, (playerArtworkFlight.to.x + playerArtworkFlight.to.width / 2) - (playerArtworkFlight.from.x + playerArtworkFlight.from.width / 2)],
+                      }),
+                    },
+                    {
+                      translateY: artworkFlightProgress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, (playerArtworkFlight.to.y + playerArtworkFlight.to.height / 2) - (playerArtworkFlight.from.y + playerArtworkFlight.from.height / 2)],
+                      }),
+                    },
+                    {
+                      scaleX: artworkFlightProgress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [1, playerArtworkFlight.to.width / playerArtworkFlight.from.width],
+                      }),
+                    },
+                    {
+                      scaleY: artworkFlightProgress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [1, playerArtworkFlight.to.height / playerArtworkFlight.from.height],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <SkeletonImage
+                source={{ uri: playerArtworkFlight.uri }}
+                cachePolicy="memory-disk"
+                contentFit="cover"
+                style={StyleSheet.absoluteFill}
+              />
+            </Animated.View>
+          ) : null}
         </View>
         </GlassBackdropScope>
       </GestureHandlerRootView>
@@ -2149,6 +2334,12 @@ const styles = StyleSheet.create({
     width: COVER_VIEWPORT_WIDTH,
     height: COVER_SIZE,
     marginBottom: 18,
+  },
+  playerArtworkFlight: {
+    position: 'absolute',
+    zIndex: 80,
+    elevation: 80,
+    overflow: 'hidden',
   },
   cover: {
     width: '100%',

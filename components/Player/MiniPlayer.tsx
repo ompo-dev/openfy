@@ -10,18 +10,20 @@ import { Image } from 'expo-image';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 import * as Haptics from 'expo-haptics';
 import { usePlayer } from '@context';
+import type { PlayerArtworkFrame } from '../../stores/usePlayerStore';
 import { LoggedPressable } from '../native';
 import { MarqueeText } from '../common/MarqueeText';
 import { MiniPlayerSurface } from './MiniPlayerSurface';
 
 export type MiniPlayerProps = {
   onPress?: () => void;
+  animateToFullPlayer?: boolean;
   onConfirm?: () => void;
   style?: any;
 };
 
-export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
-  const { currentTrack, playerState, togglePlayPause, isPlayerVisible } =
+export const MiniPlayer = ({ onPress, onConfirm, animateToFullPlayer = false, style }: MiniPlayerProps) => {
+  const { currentTrack, playerState, togglePlayPause, isPlayerVisible, setArtworkFlight } =
     usePlayer();
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
   const artworkUris = [...new Set([
@@ -29,6 +31,7 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
     currentTrack?.localImagePath,
   ].filter((uri): uri is string => Boolean(uri)))];
   const [artworkIndex, setArtworkIndex] = React.useState(0);
+  const artworkRef = React.useRef<View>(null);
 
   React.useEffect(() => {
     setArtworkIndex(0);
@@ -63,6 +66,30 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
     togglePlayPause();
   };
 
+  const handleOpenPlayer = () => {
+    if (!animateToFullPlayer || !artworkUri) {
+      onPress?.();
+      return;
+    }
+    let didOpen = false;
+    const open = (frame?: PlayerArtworkFrame) => {
+      if (didOpen) return;
+      didOpen = true;
+      if (frame && frame.width > 0 && frame.height > 0) {
+        setArtworkFlight?.({
+          token: Date.now() + Math.random(),
+          uri: artworkUri,
+          source: frame,
+        });
+      }
+      onPress?.();
+    };
+    artworkRef.current?.measureInWindow((x, y, width, height) =>
+      open({ x, y, width, height })
+    );
+    setTimeout(() => open(), 80);
+  };
+
   return (
     <Animated.View
       style={[
@@ -89,13 +116,13 @@ export const MiniPlayer = ({ onPress, onConfirm, style }: MiniPlayerProps) => {
       ]}
     >
       <LoggedPressable
-        onPress={onPress}
+        onPress={handleOpenPlayer}
         style={styles.pressableWrapper}
         accessibilityLabel="Abrir Player de Música"
       >
         <MiniPlayerSurface style={styles.glassContainer} testID="mini-player-surface">
           <View testID="mini-player-content" style={styles.contentRow}>
-            <View testID="mini-player-cover" style={styles.coverWrapper}>
+            <View ref={artworkRef} collapsable={false} testID="mini-player-cover" style={styles.coverWrapper}>
               {artworkUri ? (
                 <Image
                   cachePolicy="memory-disk"

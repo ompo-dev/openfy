@@ -46,15 +46,18 @@ export const getPlayerAlbum = (id: string): Promise<PlayerAlbum> => albums.getOr
       albumId: track.albumId || id, albumName: album.name,
       imageURL: album.imageURL || track.imageURL || '', duration_ms: track.durationMs || 0,
       trackNumber: track.trackNumber || index + 1,
+      albumAssociations: track.albumAssociations,
     })),
   };
   void prefetchImages([result.imageURL, ...result.tracks.map((track) => track.imageURL)]);
   return result;
 }, 30 * 60_000);
 
-export const prefetchTrackAlbumData = (track: { albumId?: string }): void => {
-  const id = getTrackAlbumRouteId(track);
-  if (id) void getPlayerAlbum(id).catch(() => {});
+export const prefetchTrackAlbumData = (track: { albumId?: string; albumAssociations?: { id: string }[] }): void => {
+  const ids = [track.albumId || '', ...(track.albumAssociations || []).map((album) => album.id)]
+    .map((id) => getTrackAlbumRouteId({ albumId: id }))
+    .filter((id, index, values) => id && values.indexOf(id) === index);
+  ids.forEach((id) => void getPlayerAlbum(id).catch(() => {}));
 };
 
 export const _clearPlayerAlbumCacheForTests = () => albums.clear();

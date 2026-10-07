@@ -1,1 +1,2 @@
-export type { TrackModel } from './TrackModel';
+export { albumAssociationsForTrack, mergeAlbumAssociations } from './TrackModel';
+export type { TrackAlbumRef, TrackModel } from './TrackModel';

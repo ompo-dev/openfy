@@ -76,4 +76,33 @@ describe('mergeArtistProfileTracks', () => {
       'contextual',
     ]);
   });
+
+  it('merges alternate release memberships for the same recording', () => {
+    const result = mergeArtistProfileTracks({
+      artistId: 'ebony',
+      artistName: 'Ebony',
+      contextualTracks: [],
+      participationTracks: [],
+      primaryTracks: [
+        {
+          ...track('km2-copy', 'KIA', [{ id: 'ebony', name: 'Ebony' }]),
+          albumId: 'km2',
+          albumName: 'KM2',
+          albumAssociations: [{ id: 'km2', name: 'KM2' }],
+        },
+        {
+          ...track('deluxe-copy', 'KIA', [{ id: 'ebony', name: 'Ebony' }]),
+          albumId: 'km2-deluxe',
+          albumName: 'KM2 Deluxe',
+          albumAssociations: [{ id: 'km2-deluxe', name: 'KM2 Deluxe' }],
+        },
+      ],
+    });
+
+    expect(result.primaryTracks).toHaveLength(1);
+    expect(result.primaryTracks[0].albumAssociations).toEqual([
+      expect.objectContaining({ id: 'km2', name: 'KM2' }),
+      expect.objectContaining({ id: 'km2-deluxe', name: 'KM2 Deluxe' }),
+    ]);
+  });
 });

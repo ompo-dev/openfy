@@ -117,6 +117,7 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
     durationMs: track.duration_ms,
     artists: track.artists,
     albumId: track.albumId,
+    albumAssociations: track.albumAssociations,
     albumArtists: track.albumArtists,
     youtubeVideoId: track.youtubeVideoId,
     youtubeUrl: track.youtubeUrl,

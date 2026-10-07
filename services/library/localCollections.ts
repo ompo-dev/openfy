@@ -1,4 +1,5 @@
 import type { LibraryTrack } from './catalogLibrary';
+import { albumAssociationsForTrack, type TrackAlbumRef } from '../../models/Track/TrackModel';
 
 export type LocalAlbumCollection = {
   id: string;
@@ -69,27 +70,52 @@ export const getLocalAlbumId = (
   track.albumId ? `spotify:${track.albumId}` :
     `${getLocalAlbumTitle(track)}\u0000${track.albumArtists?.[0]?.name || getTrackArtists(track)[0]?.name || ''}`.toLocaleLowerCase();
 
+const getTrackAlbumAssociations = (track: LibraryTrack): TrackAlbumRef[] =>
+  albumAssociationsForTrack(track) || [{
+    id: '',
+    name: getLocalAlbumTitle(track),
+    albumArtists: track.albumArtists,
+    trackNumber: track.trackNumber,
+    discNumber: track.discNumber,
+  }];
+
+const trackForAlbum = (track: LibraryTrack, album: TrackAlbumRef): LibraryTrack => {
+  if (!album.id) return track;
+  return {
+    ...track,
+    albumId: album.id,
+    albumName: album.name || track.albumName,
+    ...(album.imageURL ? { imageURL: album.imageURL } : {}),
+    ...(album.albumArtists?.length ? { albumArtists: album.albumArtists } : {}),
+    ...(album.trackNumber ? { trackNumber: album.trackNumber } : {}),
+    ...(album.discNumber ? { discNumber: album.discNumber } : {}),
+  };
+};
+
 export const groupLocalAlbums = (
   tracks: LibraryTrack[]
 ): LocalAlbumCollection[] => {
   const albums = new Map<string, LocalAlbumCollection>();
 
   tracks.forEach((track) => {
-    const id = getLocalAlbumId(track);
-    const current = albums.get(id);
-    albums.set(
-      id,
-      current
-        ? { ...current, tracks: [...current.tracks, track] }
-        : {
-            id,
-            title: getLocalAlbumTitle(track),
-            subtitle: track.albumArtists?.map((artist) => artist.name).join(', ') ||
-              getTrackArtists(track)[0]?.name || track.artistName,
-            imageURL: track.localImagePath || track.imageURL,
-            tracks: [track],
-          }
-    );
+    getTrackAlbumAssociations(track).forEach((albumRef) => {
+      const albumTrack = trackForAlbum(track, albumRef);
+      const id = albumRef.id ? `spotify:${albumRef.id}` : getLocalAlbumId(albumTrack);
+      const current = albums.get(id);
+      albums.set(
+        id,
+        current
+          ? { ...current, tracks: [...current.tracks, albumTrack] }
+          : {
+              id,
+              title: albumTrack.albumName ? getLocalAlbumTitle(albumTrack) : albumRef.name,
+              subtitle: albumTrack.albumArtists?.map((artist) => artist.name).join(', ') ||
+                getTrackArtists(albumTrack)[0]?.name || albumTrack.artistName,
+              imageURL: albumTrack.localImagePath || albumTrack.imageURL,
+              tracks: [albumTrack],
+            }
+      );
+    });
   });
 
   return [...albums.values()].map((album) => ({

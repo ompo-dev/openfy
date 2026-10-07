@@ -1,3 +1,5 @@
+import type { TrackAlbumRef } from '../../models/Track/TrackModel';
+
 export type SpotifyArtist = { id: string; name: string };
 
 export type SpotifyTrackMetadata = {
@@ -8,6 +10,7 @@ export type SpotifyTrackMetadata = {
   albumName: string;
   albumId: string;
   albumArtists: SpotifyArtist[];
+  albumAssociations?: TrackAlbumRef[];
   imageURL: string;
   duration_ms: number;
   trackNumber?: number;
@@ -237,6 +240,12 @@ export const fetchSpotifyTrackMetadata = async (spotifyId: string): Promise<Spot
     albumName: album?.name || embeddedAlbum?.name || (description.length >= 4 ? description.slice(1, -2).join(' \u00b7 ') : ''),
     albumId,
     albumArtists: artistsFrom(album?.artists),
+    albumAssociations: albumId && (album?.name || embeddedAlbum?.name) ? [{
+      id: albumId,
+      name: album?.name || embeddedAlbum?.name || '',
+      imageURL: largestImage([...imageSources(track), ...imageSources(embeddedAlbum), ...imageSources(album)]) || metaValue(page, 'og:image'),
+      albumArtists: artistsFrom(album?.artists),
+    }] : undefined,
     imageURL: largestImage([...imageSources(track), ...imageSources(embeddedAlbum), ...imageSources(album)]) || metaValue(page, 'og:image'),
     duration_ms: durationFrom(track) || durationFrom(state) || (positiveNumber(metaValue(page, 'music:duration')) || 0) * 1000,
     ...(trackNumber ? { trackNumber } : {}),

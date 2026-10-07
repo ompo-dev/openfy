@@ -33,11 +33,13 @@ import {
 } from './downloadDiagnostics';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
 import { getAppSettings, type AudioQuality } from '../settings/appSettings';
+import type { TrackAlbumRef } from '../../models/Track/TrackModel';
 
 export type DownloadStatus = 'idle' | 'downloading' | 'completed' | 'error';
 
 export type TrackCatalogMetadata = {
   albumId?: string;
+  albumAssociations?: TrackAlbumRef[];
   artists?: { id: string; name: string }[];
   albumArtists?: { id: string; name: string }[];
   trackNumber?: number;
@@ -1446,6 +1448,7 @@ const downloadTrackInternal = async (
 
     const downloadedTrack: DownloadedTrack = {
       albumId: effectiveTrack.albumId,
+      albumAssociations: effectiveTrack.albumAssociations,
       artists: effectiveTrack.artists,
       albumArtists: effectiveTrack.albumArtists,
       trackNumber: effectiveTrack.trackNumber,

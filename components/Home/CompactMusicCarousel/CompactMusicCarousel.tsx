@@ -35,6 +35,7 @@ export interface CompactTrackItem {
   streamExpiresAt?: number;
   artists?: { id: string; name: string }[];
   albumId?: string;
+  albumAssociations?: { id: string; name: string; imageURL?: string }[];
   albumArtists?: { id: string; name: string }[];
   youtubeVideoId?: string;
   youtubeUrl?: string;
@@ -96,6 +97,7 @@ export const CompactMusicCards = ({
       streamExpiresAt: item.streamExpiresAt,
       artists: item.artists,
       albumId: item.albumId,
+      albumAssociations: item.albumAssociations,
       albumArtists: item.albumArtists,
       youtubeVideoId: item.youtubeVideoId,
       youtubeUrl: item.youtubeUrl,

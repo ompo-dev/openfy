@@ -1,4 +1,4 @@
-import type { TrackModel } from '@models';
+import { albumAssociationsForTrack, mergeAlbumAssociations, type TrackModel } from '@models';
 
 const normalize = (value: string) =>
   value
@@ -24,18 +24,34 @@ const artistMatches = (
   normalize(artist.name) === normalize(artistName);
 
 const uniqueTracks = (tracks: TrackModel[]): TrackModel[] => {
-  const providerIds = new Set<string>();
-  const canonicalNames = new Set<string>();
-  return tracks.filter((track) => {
+  const providerIds = new Map<string, number>();
+  const canonicalNames = new Map<string, number>();
+  const unique: TrackModel[] = [];
+  tracks.forEach((track) => {
     const firstArtist = trackArtists(track)[0]?.name || track.subtitle;
     const canonicalName = `${normalize(firstArtist)}:${normalize(track.title)}`;
-    if (providerIds.has(track.id) || canonicalNames.has(canonicalName)) {
-      return false;
+    const existingIndex = providerIds.get(track.id) ?? canonicalNames.get(canonicalName);
+    if (existingIndex !== undefined) {
+      const existing = unique[existingIndex];
+      unique[existingIndex] = {
+        ...existing,
+        albumAssociations: mergeAlbumAssociations(
+          albumAssociationsForTrack(existing),
+          albumAssociationsForTrack(track),
+        ),
+        imageURL: existing.imageURL || track.imageURL,
+        albumArtists: existing.albumArtists?.length ? existing.albumArtists : track.albumArtists,
+      };
+      return;
     }
-    providerIds.add(track.id);
-    canonicalNames.add(canonicalName);
-    return true;
+    const index = unique.push({
+      ...track,
+      albumAssociations: albumAssociationsForTrack(track),
+    }) - 1;
+    providerIds.set(track.id, index);
+    canonicalNames.set(canonicalName, index);
   });
+  return unique;
 };
 
 export const mergeArtistProfileTracks = ({

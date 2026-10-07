@@ -9,7 +9,7 @@ type ArtistTopTracksResponse = {
     duration_ms: number;
     explicit: boolean;
     artists: { id: string; name: string }[];
-    album: { name: string; images: { url: string }[] };
+    album: { id: string; name: string; images: { url: string }[] };
   }[];
 };
 
@@ -33,6 +33,8 @@ const loadArtistTopTracks = async (
     subtitle: track.artists.map((artist) => artist.name).join(', '),
     imageURL: track.album.images[0]?.url || '',
     albumName: track.album.name,
+    albumId: track.album.id,
+    albumAssociations: [{ id: track.album.id, name: track.album.name, imageURL: track.album.images[0]?.url || '' }],
     durationMs: track.duration_ms,
     artists: track.artists,
     explicit: track.explicit,

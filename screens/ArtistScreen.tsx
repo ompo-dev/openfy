@@ -51,7 +51,15 @@ const toTrackModel = (track: LibraryTrack): TrackModel => ({
   subtitle: track.artistName,
   imageURL: track.localImagePath || track.imageURL,
   albumName: track.albumName,
+  albumId: track.albumId,
+  albumAssociations: track.albumAssociations,
+  albumArtists: track.albumArtists,
+  trackNumber: track.trackNumber,
+  discNumber: track.discNumber,
   durationMs: track.duration_ms,
+  artists: track.artists,
+  youtubeVideoId: track.youtubeVideoId,
+  youtubeUrl: track.youtubeUrl,
   isDownloaded: track.isDownloaded,
 });
 
@@ -79,6 +87,7 @@ const toCurrentTrackModel = (
   imageURL: track.localImagePath || track.imageURL,
   albumName: track.albumName,
   albumId: track.albumId,
+  albumAssociations: track.albumAssociations,
   albumArtists: track.albumArtists,
   youtubeVideoId: track.youtubeVideoId,
   youtubeUrl: track.youtubeUrl,

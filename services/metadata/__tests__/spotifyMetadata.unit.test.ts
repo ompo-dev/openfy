@@ -57,6 +57,12 @@ describe('public Spotify metadata', () => {
       artists: ARTISTS,
       albumName: ALBUM_NAME,
       albumId: ALBUM_ID,
+      albumAssociations: [{
+        id: ALBUM_ID,
+        name: ALBUM_NAME,
+        imageURL: images[2].url,
+        albumArtists: [ARTISTS[0]],
+      }],
       albumArtists: [ARTISTS[0]],
       imageURL: images[2].url,
       duration_ms: 158250,

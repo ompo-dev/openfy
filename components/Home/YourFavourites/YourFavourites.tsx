@@ -35,6 +35,7 @@ export const YourFavourites = ({
     duration_ms: item.duration_ms,
     artists: item.artists,
     albumId: item.albumId,
+    albumAssociations: item.albumAssociations,
     albumArtists: item.albumArtists,
     youtubeVideoId: item.youtubeVideoId,
     youtubeUrl: item.youtubeUrl,

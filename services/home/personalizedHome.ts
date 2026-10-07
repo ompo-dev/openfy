@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { UserProfile } from '../recommendation/recommendationEngine';
 import type { LibraryTrack } from '../library/catalogLibrary';
 import type { LocalPlaylist } from '../library/localPlaylistManager';
+import type { TrackAlbumRef } from '../../models/Track/TrackModel';
 import {
   getBestYouTubeMusicThumbnail,
   getYouTubeMusicClient,
@@ -26,6 +27,7 @@ export type PersonalizedHomeTrack = {
   explicit?: boolean;
   artists?: { id: string; name: string }[];
   albumId?: string;
+  albumAssociations?: TrackAlbumRef[];
   albumArtists?: { id: string; name: string }[];
   trackNumber?: number;
   discNumber?: number;
@@ -166,6 +168,7 @@ export const libraryTrackToHomeTrack = (
   duration_ms: track.duration_ms,
   artists: track.artists,
   albumId: track.albumId,
+  albumAssociations: track.albumAssociations,
   albumArtists: track.albumArtists,
   trackNumber: track.trackNumber,
   discNumber: track.discNumber,

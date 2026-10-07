@@ -65,6 +65,25 @@ describe('groupLocalAlbums', () => {
       { ...tracks[1], albumId: 'release-2' },
     ] as any)).toHaveLength(2);
   });
+
+  it('shows one recording in every associated release', () => {
+    const track = {
+      ...tracks[0],
+      albumId: 'km2',
+      albumName: 'KM2',
+      albumAssociations: [
+        { id: 'km2', name: 'KM2', imageURL: 'https://image.test/km2.jpg' },
+        { id: 'km2-deluxe', name: 'KM2 Deluxe', imageURL: 'https://image.test/km2-deluxe.jpg' },
+      ],
+    };
+
+    const albums = groupLocalAlbums([track] as any);
+
+    expect(albums).toEqual([
+      expect.objectContaining({ id: 'spotify:km2', title: 'KM2', tracks: [expect.objectContaining({ spotifyId: 'first' })] }),
+      expect.objectContaining({ id: 'spotify:km2-deluxe', title: 'KM2 Deluxe', tracks: [expect.objectContaining({ spotifyId: 'first' })] }),
+    ]);
+  });
 });
 
 describe('groupLocalArtists', () => {
