@@ -374,6 +374,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [isPlayerClosing, setIsPlayerClosing] = React.useState(false);
   const [closeRequested, setCloseRequested] = React.useState(false);
   const coverArtworkRef = React.useRef<View>(null);
+  const stationaryArtworkRef = React.useRef<View>(null);
   const scrolledArtworkRef = React.useRef<View>(null);
   const artworkFlightTokenRef = React.useRef<number | null>(null);
   const artworkMeasurementTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -386,6 +387,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
   const lyricsListRef = React.useRef<FlatList>(null);
   const playerScrollRef = React.useRef<ScrollView>(null);
+  const playerScrollOffsetRef = React.useRef(0);
   const lyricScrollRetriesRef = React.useRef(0);
   const lyricScrollRetryTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldScrollLyricsOnOpenRef = React.useRef(false);
@@ -430,7 +432,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     const target = showLyricsFull
       ? artworkTransition.rowRef.current
       : isPlayerScrolled ? scrolledArtworkRef.current : coverArtworkRef.current;
-    const root = artworkTransition.containerRef.current;
+    const root = sharedArtworkPresentation
+      ? stationaryArtworkRef.current : artworkTransition.containerRef.current;
     if (!target || !root) return false;
     let targetFrame: PlayerArtworkFrame | null = null;
     let rootFrame: PlayerArtworkFrame | null = null;
@@ -462,7 +465,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       if (targetFrame && rootFrame) complete();
     });
     return true;
-  }, [artworkTransition.containerRef, artworkTransition.rowRef, isPlayerScrolled, showLyricsFull]);
+  }, [artworkTransition.containerRef, artworkTransition.rowRef, isPlayerScrolled, sharedArtworkPresentation, showLyricsFull]);
 
   const startPlayerArtworkFlight = React.useCallback(() => {
     if (!visible || !artworkFlight || measuringEntranceRef.current || artworkFlightTokenRef.current === artworkFlight.token) return true;
@@ -874,12 +877,14 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   }, [currentTrackKey, previewDragOffset]);
 
   React.useEffect(() => {
+    playerScrollOffsetRef.current = 0;
     playerScrollRef.current?.scrollTo({ y: 0, animated: false });
     setIsPlayerScrolled(false);
   }, [currentTrackKey]);
 
   React.useLayoutEffect(() => {
     if (!visible) return;
+    playerScrollOffsetRef.current = 0;
     playerScrollRef.current?.scrollTo({ y: 0, animated: false });
     setIsPlayerScrolled(false);
   }, [visible]);
@@ -1647,6 +1652,12 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     <PlayerModal
       fullScreen
       sharedArtworkTransition={sharedArtworkPresentation}
+      artworkFlightProgress={artworkTransition.flightProgress}
+      artworkOverlay={sharedArtworkPresentation ? artworkTransition.overlay : undefined}
+      artworkOverlayRef={stationaryArtworkRef}
+      closing={isPlayerClosing}
+      dismissEnabled={!artworkTransition.transitioning && !isArtworkEntrancePending}
+      scrollOffset={showLyricsFull || isLyricsEditing ? undefined : playerScrollOffsetRef}
       visible={visible}
       onRequestClose={handleClose}
       onShow={() => {
@@ -1755,6 +1766,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               nestedScrollEnabled
               keyboardShouldPersistTaps="handled"
               onScroll={(event) => {
+                playerScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
                 const canShowMiniPlayer = controlsBottomOffset !== null &&
                   event.nativeEvent.contentOffset.y >= controlsBottomOffset;
                 setIsPlayerScrolled(canShowMiniPlayer);
@@ -2198,7 +2210,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
               </LoggedPressable>
             </View>
           </SheetFrame>
-          {artworkTransition.overlay}
+          {!sharedArtworkPresentation ? artworkTransition.overlay : null}
         </View>
         </GlassBackdropScope>
       </GestureHandlerRootView>

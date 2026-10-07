@@ -1,11 +1,17 @@
 import React from 'react';
-import { Animated, KeyboardAvoidingView, Modal, PanResponder, Platform, Pressable, StyleSheet, View, type ModalProps } from 'react-native';
+import { Animated, KeyboardAvoidingView, Modal, PanResponder, Platform, Pressable, StyleSheet, View, useWindowDimensions, type ModalProps } from 'react-native';
+import Motion, { cancelAnimation, useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WithoutGlassBackdrop } from './GlassBackdrop';
 
 type PlayerModalProps = Omit<ModalProps, 'animationType' | 'presentationStyle' | 'transparent'> & {
   fullScreen?: boolean;
   sharedArtworkTransition?: boolean;
+  artworkFlightProgress?: SharedValue<number>;
+  artworkOverlay?: React.ReactNode;
+  artworkOverlayRef?: React.RefObject<View | null>;
+  closing?: boolean;
+  dismissEnabled?: boolean;
   scrollOffset?: React.RefObject<number>;
 };
 
@@ -13,36 +19,71 @@ export const shouldDismissSheet = (distance: number, velocity: number) =>
   distance > 96 || (distance > 24 && velocity > 0.65);
 
 /** Content sheets hug their contents; only the music player owns a full page sheet. */
-export function PlayerModal({ children, fullScreen = false, sharedArtworkTransition = false, scrollOffset, ...props }: PlayerModalProps) {
+export function PlayerModal({ children, fullScreen = false, sharedArtworkTransition = false,
+  artworkFlightProgress, artworkOverlay, artworkOverlayRef, closing = false, dismissEnabled = true,
+  scrollOffset, ...props }: PlayerModalProps) {
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  const reduceMotion = useReducedMotion();
+  const dragY = useSharedValue(0);
+  const dragStart = React.useRef(0);
+  const dragDismissPending = React.useRef(false);
+  const dismissalEnabledRef = React.useRef(dismissEnabled && !closing);
+  dismissalEnabledRef.current = dismissEnabled && !closing;
   const translateY = React.useRef(new Animated.Value(0)).current;
   const closeRef = React.useRef(props.onRequestClose);
   closeRef.current = props.onRequestClose;
   const offsetRef = React.useRef(scrollOffset);
   offsetRef.current = scrollOffset;
   const surfaceRef = React.useRef<View>(null);
-  const surfaceTop = React.useRef(0);
-  React.useEffect(() => { translateY.stopAnimation(); translateY.setValue(0); }, [props.visible, translateY]);
+  const surfaceTop = React.useRef(fullScreen ? insets.top + 8 : 0);
+  React.useEffect(() => {
+    translateY.stopAnimation(); translateY.setValue(0);
+    cancelAnimation(dragY); dragY.value = 0;
+    dragDismissPending.current = false;
+  }, [props.visible, translateY, dragY]);
+  const restorePosition = React.useCallback(() => {
+    if (fullScreen && sharedArtworkTransition) {
+      dragY.value = reduceMotion ? 0 : withSpring(0, { damping: 24, stiffness: 260 });
+    } else Animated.spring(translateY, { toValue: 0, useNativeDriver: Platform.OS !== 'web', damping: 24, stiffness: 260 }).start();
+  }, [dragY, fullScreen, reduceMotion, sharedArtworkTransition, translateY]);
+  const surfaceMotionStyle = useAnimatedStyle(() => {
+    const progress = closing ? (artworkFlightProgress?.value ?? 0) : 0;
+    return { transform: [{ translateY: dragY.value + (height - dragY.value) * progress }] };
+  }, [artworkFlightProgress, closing, height]);
+  const backdropMotionStyle = useAnimatedStyle(() => {
+    const progress = closing ? (artworkFlightProgress?.value ?? 0) : 0;
+    const distance = dragY.value + (height - dragY.value) * progress;
+    return { opacity: Math.max(0, 1 - distance / height) };
+  }, [artworkFlightProgress, closing, height]);
   const responder = React.useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_, gesture) => (!fullScreen || sharedArtworkTransition) &&
-      (gesture.y0 < surfaceTop.current + 104 ||
+      dismissalEnabledRef.current && !dragDismissPending.current &&
+      (gesture.y0 < surfaceTop.current + (fullScreen && sharedArtworkTransition ? dragY.value : 0) + 104 ||
         (offsetRef.current !== undefined && offsetRef.current.current <= 0)) &&
       gesture.dy > 8 && gesture.dy > Math.abs(gesture.dx) * 1.4,
+    onPanResponderGrant: () => {
+      cancelAnimation(dragY);
+      dragStart.current = dragY.value;
+    },
     onPanResponderMove: (_, gesture) => {
-      if (!fullScreen) translateY.setValue(Math.max(0, gesture.dy));
+      if (fullScreen && sharedArtworkTransition) dragY.value = Math.max(0, dragStart.current + gesture.dy);
+      else translateY.setValue(Math.max(0, gesture.dy));
     },
     onPanResponderRelease: (event, gesture) => {
       if (shouldDismissSheet(gesture.dy, gesture.vy) && closeRef.current) {
         if (sharedArtworkTransition && fullScreen) {
+          dragDismissPending.current = true;
           closeRef.current(event);
           return;
         }
         Animated.timing(translateY, { toValue: 700, duration: 180, useNativeDriver: Platform.OS !== 'web' })
           .start(({ finished }) => { if (finished) closeRef.current?.(event); });
-      } else Animated.spring(translateY, { toValue: 0, useNativeDriver: Platform.OS !== 'web', damping: 24, stiffness: 260 }).start();
+      } else restorePosition();
     },
-    onPanResponderTerminate: () => Animated.spring(translateY, { toValue: 0, useNativeDriver: Platform.OS !== 'web' }).start(),
-  }), [fullScreen, sharedArtworkTransition, translateY]);
+    onPanResponderTerminationRequest: () => !fullScreen || !sharedArtworkTransition,
+    onPanResponderTerminate: restorePosition,
+  }), [dragY, fullScreen, restorePosition, sharedArtworkTransition, translateY]);
   if (!fullScreen) {
     return (
       <Modal {...props} testID="player-modal" animationType="slide" transparent presentationStyle="overFullScreen">
@@ -62,12 +103,18 @@ export function PlayerModal({ children, fullScreen = false, sharedArtworkTransit
     return (
       <Modal {...props} testID="player-modal" animationType="none" transparent presentationStyle="overFullScreen">
         <View style={[styles.artworkLayout, { paddingTop: insets.top + 8 }]}>
-          <View pointerEvents="none" style={styles.backdrop} />
-          <View ref={surfaceRef} collapsable={false}
+          <Motion.View pointerEvents="none" testID="player-modal-backdrop" style={[styles.backdrop, backdropMotionStyle]} />
+          <Motion.View ref={surfaceRef} collapsable={false}
             onLayout={() => surfaceRef.current?.measureInWindow((_, y) => { surfaceTop.current = y; })}
             {...responder.panHandlers} testID="player-modal-surface"
-            style={[styles.surface, styles.fullSurface, styles.artworkSurface]}>
+            style={[styles.surface, styles.fullSurface, styles.artworkSurface, surfaceMotionStyle]}>
             <WithoutGlassBackdrop>{children}</WithoutGlassBackdrop>
+          </Motion.View>
+          {/* Keep the flying cover outside the moving sheet, in stationary window coordinates. */}
+          <View ref={artworkOverlayRef} collapsable={false} pointerEvents="none"
+            testID="player-modal-artwork-layer"
+            style={[StyleSheet.absoluteFill, { top: insets.top + 8 }]}>
+            {artworkOverlay}
           </View>
         </View>
       </Modal>

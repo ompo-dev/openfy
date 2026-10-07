@@ -114,6 +114,7 @@ jest.mock('react-native-reanimated', () => {
     useReducedMotion: () => false,
     useSharedValue: (value) => React.useRef({ value }).current,
     withTiming: (value) => value,
+    withSpring: (value) => value,
   };
 });
 const matchers = require('@testing-library/react-native/matchers');

@@ -190,7 +190,7 @@ export const useLyricsArtworkTransition = (
   ) : null;
 
   return { containerRef, mediaRef, rowRef, captureFrames, transition, flyBetweenFrames, transitioning: Boolean(flight),
-    lyricsStyle, toggleStyle, copyStyle, overlay };
+    flightProgress, lyricsStyle, toggleStyle, copyStyle, overlay };
 };
 
 const styles = StyleSheet.create({
