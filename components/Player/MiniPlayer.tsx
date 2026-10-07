@@ -18,11 +18,13 @@ import { MiniPlayerSurface } from './MiniPlayerSurface';
 export type MiniPlayerProps = {
   onPress?: () => void;
   animateToFullPlayer?: boolean;
+  artworkViewRef?: React.RefObject<View | null>;
+  artworkHidden?: boolean;
   onConfirm?: () => void;
   style?: any;
 };
 
-export const MiniPlayer = ({ onPress, onConfirm, animateToFullPlayer = false, style }: MiniPlayerProps) => {
+export const MiniPlayer = ({ onPress, onConfirm, animateToFullPlayer = false, artworkViewRef, artworkHidden = false, style }: MiniPlayerProps) => {
   const { currentTrack, playerState, togglePlayPause, isPlayerVisible, setArtworkFlight } =
     usePlayer();
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
@@ -32,6 +34,7 @@ export const MiniPlayer = ({ onPress, onConfirm, animateToFullPlayer = false, st
   ].filter((uri): uri is string => Boolean(uri)))];
   const [artworkIndex, setArtworkIndex] = React.useState(0);
   const artworkRef = React.useRef<View>(null);
+  const coverRef = artworkViewRef || artworkRef;
 
   React.useEffect(() => {
     setArtworkIndex(0);
@@ -84,7 +87,7 @@ export const MiniPlayer = ({ onPress, onConfirm, animateToFullPlayer = false, st
       }
       onPress?.();
     };
-    artworkRef.current?.measureInWindow((x, y, width, height) =>
+    coverRef.current?.measureInWindow((x, y, width, height) =>
       open({ x, y, width, height })
     );
     setTimeout(() => open(), 80);
@@ -122,7 +125,8 @@ export const MiniPlayer = ({ onPress, onConfirm, animateToFullPlayer = false, st
       >
         <MiniPlayerSurface style={styles.glassContainer} testID="mini-player-surface">
           <View testID="mini-player-content" style={styles.contentRow}>
-            <View ref={artworkRef} collapsable={false} testID="mini-player-cover" style={styles.coverWrapper}>
+            <View ref={coverRef} collapsable={false} testID="mini-player-cover"
+              style={[styles.coverWrapper, artworkHidden && { opacity: 0 }]}>
               {artworkUri ? (
                 <Image
                   cachePolicy="memory-disk"

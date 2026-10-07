@@ -49,6 +49,21 @@ describe('shared player modal surface', () => {
     expect(screen.getByTestId('player-modal').props.allowSwipeDismissal).toBe(true);
   });
 
+  it('lets the shared artwork flight own player presentation and dismissal without another slide', async () => {
+    const onClose = jest.fn();
+    const screen = await render(<PlayerModal visible fullScreen sharedArtworkTransition onRequestClose={onClose}>
+      <Text>Player</Text>
+    </PlayerModal>);
+    const modal = screen.getByTestId('player-modal');
+    expect(modal.props.animationType).toBe('none');
+    expect(modal.props.presentationStyle).toBe('overFullScreen');
+    expect(modal.props.transparent).toBe(true);
+    expect(modal.props.allowSwipeDismissal).not.toBe(true);
+    expect(StyleSheet.flatten(screen.getByTestId('player-modal-surface').props.style).flex).toBe(1);
+    await fireEvent(modal, 'requestClose');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('dismisses deliberate downward drags but not taps, short drags or upward scrolling', () => {
     expect(shouldDismissSheet(100, 0)).toBe(true);
     expect(shouldDismissSheet(30, 0.8)).toBe(true);

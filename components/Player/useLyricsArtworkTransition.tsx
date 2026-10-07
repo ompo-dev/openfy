@@ -11,8 +11,9 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-type Frame = { x: number; y: number; width: number; height: number };
-type Flight = { from: Frame; to: Frame; uri: string; opening: boolean; id: number };
+export type ArtworkFrame = { x: number; y: number; width: number; height: number };
+type Frame = ArtworkFrame;
+type Flight = { from: Frame; to: Frame; uri: string; fromRadius: number; toRadius: number; id: number };
 const DURATION = 460;
 const easing = Easing.bezier(0.4, 0, 0.2, 1);
 
@@ -28,6 +29,8 @@ export const useLyricsArtworkTransition = (
   const rowRef = React.useRef<View>(null);
   const frames = React.useRef<Partial<Record<'container' | 'media' | 'row', Frame>>>({});
   const flightId = React.useRef(0);
+  const flightCompletion = React.useRef<(() => void) | null>(null);
+  const flying = React.useRef(false);
   const measurementTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const lyricsVisibleRef = React.useRef(lyricsVisible);
   lyricsVisibleRef.current = lyricsVisible;
@@ -46,11 +49,48 @@ export const useLyricsArtworkTransition = (
   }, []);
 
   const finish = React.useCallback((id: number) => {
-    if (flightId.current === id) setFlight(null);
+    if (flightId.current !== id) return;
+    flying.current = false;
+    setFlight(null);
+    const complete = flightCompletion.current;
+    flightCompletion.current = null;
+    complete?.();
   }, []);
 
+  // Every artwork flight uses this same UI-thread animation and overlay.
+  const startFlight = React.useCallback((
+    from: Frame,
+    to: Frame,
+    uri: string,
+    id: number,
+    onComplete?: () => void,
+  ) => {
+    if (reduceMotion || !uri || from.width <= 0 || from.height <= 0 || to.width <= 0 || to.height <= 0) {
+      onComplete?.();
+      return;
+    }
+    flying.current = true;
+    flightCompletion.current = onComplete || null;
+    flightProgress.value = 0;
+    setFlight({ from, to, uri, fromRadius: from.width <= 36 ? 10 : 16,
+      toRadius: to.width <= 36 ? 10 : 16, id });
+    flightProgress.value = withTiming(1, { duration: DURATION, easing }, (finished) => {
+      if (finished) runOnJS(finish)(id);
+    });
+  }, [finish, flightProgress, reduceMotion]);
+
+  const flyBetweenFrames = React.useCallback((
+    from: Frame,
+    to: Frame,
+    uri: string,
+    onComplete?: () => void,
+  ) => {
+    if (flying.current) return;
+    startFlight(from, to, uri, ++flightId.current, onComplete);
+  }, [startFlight]);
+
   const transition = React.useCallback((opening: boolean, applyMode: () => void) => {
-    if (flight) return;
+    if (flying.current) return;
     const id = ++flightId.current;
     const start = (measured = frames.current) => {
       if (id !== flightId.current) return;
@@ -60,12 +100,7 @@ export const useLyricsArtworkTransition = (
           y: media.y - container.y, width: coverSize, height: coverSize };
         const small = { x: row.x - container.x + 20,
           y: row.y - container.y + (row.height - 36) / 2, width: 36, height: 36 };
-        flightProgress.value = 0;
-        setFlight({ from: opening ? large : small, to: opening ? small : large,
-          uri: artworkUri, opening, id });
-        flightProgress.value = withTiming(1, { duration: DURATION, easing }, (finished) => {
-          if (finished) runOnJS(finish)(id);
-        });
+        startFlight(opening ? large : small, opening ? small : large, artworkUri, id);
       }
       modeProgress.value = reduceMotion
         ? (opening ? 1 : 0)
@@ -99,10 +134,12 @@ export const useLyricsArtworkTransition = (
         if (--remaining === 0) complete();
       });
     });
-  }, [artworkUri, coverSize, finish, flight, flightProgress, modeProgress, reduceMotion]);
+  }, [artworkUri, coverSize, modeProgress, reduceMotion, startFlight]);
 
   const cancelFlight = React.useCallback(() => {
     flightId.current++;
+    flying.current = false;
+    flightCompletion.current = null;
     if (measurementTimer.current) clearTimeout(measurementTimer.current);
     measurementTimer.current = null;
     cancelAnimation(flightProgress);
@@ -121,7 +158,7 @@ export const useLyricsArtworkTransition = (
     if (!flight) return {};
     const p = flightProgress.value;
     const scale = (flight.from.width + (flight.to.width - flight.from.width) * p) / coverSize;
-    const radius = flight.opening ? 16 - 6 * p : 10 + 6 * p;
+    const radius = flight.fromRadius + (flight.toRadius - flight.fromRadius) * p;
     return {
       borderRadius: radius / scale,
       transform: [
@@ -144,7 +181,7 @@ export const useLyricsArtworkTransition = (
       style={[styles.flight, { width: coverSize, height: coverSize,
         left: flight.from.x + (flight.from.width - coverSize) / 2,
         top: flight.from.y + (flight.from.height - coverSize) / 2,
-        borderRadius: (flight.opening ? 16 : 10) * coverSize / flight.from.width,
+        borderRadius: flight.fromRadius * coverSize / flight.from.width,
         transform: [{ translateX: 0 }, { translateY: 0 }, { scale: flight.from.width / coverSize }],
       }, flightStyle]}>
       <Image source={{ uri: flight.uri }} cachePolicy="memory-disk" contentFit="cover"
@@ -152,7 +189,7 @@ export const useLyricsArtworkTransition = (
     </Animated.View>
   ) : null;
 
-  return { containerRef, mediaRef, rowRef, captureFrames, transition, transitioning: Boolean(flight),
+  return { containerRef, mediaRef, rowRef, captureFrames, transition, flyBetweenFrames, transitioning: Boolean(flight),
     lyricsStyle, toggleStyle, copyStyle, overlay };
 };
 

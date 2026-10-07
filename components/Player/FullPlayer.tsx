@@ -11,7 +11,6 @@ import {
   ActivityIndicator,
   Animated,
   Alert,
-  Easing,
   FlatList,
   Linking,
   Platform,
@@ -370,15 +369,16 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [scrubbedLyricTimelineIndex, setScrubbedLyricTimelineIndex] = React.useState<number | null>(null);
   const [isPreviewScrubbing, setIsPreviewScrubbing] = React.useState(false);
   const [isLyricsUserScrolling, setIsLyricsUserScrolling] = React.useState(false);
-  const [playerArtworkFlight, setPlayerArtworkFlight] = React.useState<{
-    from: PlayerArtworkFrame;
-    to: PlayerArtworkFrame;
-    uri: string;
-  } | null>(null);
-  const artworkFlightProgress = React.useRef(new Animated.Value(0)).current;
+  const [sharedArtworkPresentation] = React.useState(Boolean(artworkFlight));
+  const [isArtworkEntrancePending, setIsArtworkEntrancePending] = React.useState(Boolean(artworkFlight));
+  const [isPlayerClosing, setIsPlayerClosing] = React.useState(false);
+  const [closeRequested, setCloseRequested] = React.useState(false);
   const coverArtworkRef = React.useRef<View>(null);
+  const scrolledArtworkRef = React.useRef<View>(null);
   const artworkFlightTokenRef = React.useRef<number | null>(null);
-  const artworkFlightTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const artworkMeasurementTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelArtworkMeasurementRef = React.useRef<(() => void) | null>(null);
+  const measuringEntranceRef = React.useRef(false);
   const closingPlayerRef = React.useRef(false);
   const previewDragOffset = React.useRef(new Animated.Value(0)).current;
   const previewScrubbingRef = React.useRef(false);
@@ -423,108 +423,122 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   );
   const transitionArtwork = artworkTransition.transition;
 
-  const runPlayerArtworkFlight = React.useCallback((
-    from: PlayerArtworkFrame,
-    to: PlayerArtworkFrame,
-    uri: string,
-    onComplete?: () => void,
-  ) => {
-    if (!uri || from.width <= 0 || from.height <= 0 || to.width <= 0 || to.height <= 0) {
-      onComplete?.();
-      return;
-    }
-    artworkFlightProgress.stopAnimation();
-    artworkFlightProgress.setValue(0);
-    setPlayerArtworkFlight({ from, to, uri });
-    Animated.timing(artworkFlightProgress, {
-      toValue: 1,
-      duration: 460,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start(({ finished }) => {
-      if (!finished) return;
-      setPlayerArtworkFlight(null);
-      onComplete?.();
-    });
-  }, [artworkFlightProgress]);
-
-  const measurePlayerArtwork = React.useCallback((callback: (target: PlayerArtworkFrame, root: PlayerArtworkFrame) => void) => {
-    const target = coverArtworkRef.current;
+  const measurePlayerArtwork = React.useCallback((callback: (frames: {
+    target: PlayerArtworkFrame;
+    root: PlayerArtworkFrame;
+  } | null) => void) => {
+    const target = showLyricsFull
+      ? artworkTransition.rowRef.current
+      : isPlayerScrolled ? scrolledArtworkRef.current : coverArtworkRef.current;
     const root = artworkTransition.containerRef.current;
-    if (!target || !root) return;
+    if (!target || !root) return false;
     let targetFrame: PlayerArtworkFrame | null = null;
     let rootFrame: PlayerArtworkFrame | null = null;
-    const finish = () => {
-      if (targetFrame && rootFrame) callback(targetFrame, rootFrame);
+    let settled = false;
+    cancelArtworkMeasurementRef.current = () => { settled = true; };
+    const complete = () => {
+      if (settled) return;
+      settled = true;
+      if (artworkMeasurementTimerRef.current) clearTimeout(artworkMeasurementTimerRef.current);
+      artworkMeasurementTimerRef.current = null;
+      cancelArtworkMeasurementRef.current = null;
+      callback(targetFrame && rootFrame ? { target: targetFrame, root: rootFrame } : null);
     };
+    artworkMeasurementTimerRef.current = setTimeout(complete, 50);
     target.measureInWindow((x, y, width, height) => {
-      if (width > 0 && height > 0) targetFrame = {
-        x: x + (width - COVER_SIZE) / 2,
-        y,
-        width: COVER_SIZE,
-        height: COVER_SIZE,
-      };
-      finish();
+      if (settled) return;
+      if (width > 0 && height > 0) {
+        targetFrame = showLyricsFull
+          ? { x: x + 20, y: y + (height - 36) / 2, width: 36, height: 36 }
+          : isPlayerScrolled
+            ? { x, y, width, height }
+            : { x: x + (width - COVER_SIZE) / 2, y, width: COVER_SIZE, height: COVER_SIZE };
+      }
+      if (targetFrame && rootFrame) complete();
     });
     root.measureInWindow((x, y, width, height) => {
+      if (settled) return;
       if (width > 0 && height > 0) rootFrame = { x, y, width, height };
-      finish();
+      if (targetFrame && rootFrame) complete();
     });
-  }, [artworkTransition.containerRef]);
+    return true;
+  }, [artworkTransition.containerRef, artworkTransition.rowRef, isPlayerScrolled, showLyricsFull]);
 
   const startPlayerArtworkFlight = React.useCallback(() => {
-    if (!visible || !artworkFlight || artworkFlightTokenRef.current === artworkFlight.token) return;
-    measurePlayerArtwork((target, root) => {
-      if (!artworkFlight || artworkFlightTokenRef.current === artworkFlight.token) return;
+    if (!visible || !artworkFlight || measuringEntranceRef.current || artworkFlightTokenRef.current === artworkFlight.token) return true;
+    measuringEntranceRef.current = true;
+    const measuring = measurePlayerArtwork((frames) => {
+      measuringEntranceRef.current = false;
       artworkFlightTokenRef.current = artworkFlight.token;
-      runPlayerArtworkFlight(
-        frameRelativeTo(artworkFlight.source, root),
-        frameRelativeTo(target, root),
-        artworkFlight.uri,
-      );
+      if (frames) {
+        artworkTransition.flyBetweenFrames(
+          frameRelativeTo(artworkFlight.source, frames.root),
+          frameRelativeTo(frames.target, frames.root),
+          artworkFlight.uri,
+        );
+      }
+      setIsArtworkEntrancePending(false);
     });
-  }, [artworkFlight, measurePlayerArtwork, runPlayerArtworkFlight, visible]);
+    if (!measuring) measuringEntranceRef.current = false;
+    return measuring;
+  }, [artworkFlight, artworkTransition.flyBetweenFrames, measurePlayerArtwork, visible]);
 
   React.useEffect(() => {
     if (!visible || !artworkFlight) return;
-    if (artworkFlightTimerRef.current) clearTimeout(artworkFlightTimerRef.current);
-    artworkFlightTimerRef.current = setTimeout(startPlayerArtworkFlight, 70);
-    return () => {
-      if (artworkFlightTimerRef.current) clearTimeout(artworkFlightTimerRef.current);
-      artworkFlightTimerRef.current = null;
-    };
+    const timer = setTimeout(() => {
+      if (!startPlayerArtworkFlight()) {
+        artworkFlightTokenRef.current = artworkFlight.token;
+        setIsArtworkEntrancePending(false);
+      }
+    }, 50);
+    return () => clearTimeout(timer);
   }, [artworkFlight, startPlayerArtworkFlight, visible]);
+
+  React.useEffect(() => () => {
+    cancelArtworkMeasurementRef.current?.();
+    if (artworkMeasurementTimerRef.current) clearTimeout(artworkMeasurementTimerRef.current);
+  }, []);
+
+  const finishPlayerClose = React.useCallback(() => {
+    if (!closingPlayerRef.current) return;
+    closingPlayerRef.current = false;
+    setIsPlayerClosing(false);
+    setArtworkFlight?.(null);
+    onClose();
+  }, [onClose, setArtworkFlight]);
 
   const handleClose = React.useCallback(() => {
     if (closingPlayerRef.current) return;
+    if (artworkTransition.transitioning || isArtworkEntrancePending) {
+      setCloseRequested(true);
+      return;
+    }
     if (!artworkFlight || !artworkUrl) {
       onClose();
       return;
     }
     closingPlayerRef.current = true;
-    measurePlayerArtwork((target, root) => {
-      const finish = () => {
-        if (artworkFlightTimerRef.current) clearTimeout(artworkFlightTimerRef.current);
-        artworkFlightTimerRef.current = null;
-        setArtworkFlight?.(null);
-        closingPlayerRef.current = false;
-        onClose();
-      };
-      runPlayerArtworkFlight(
-        frameRelativeTo(target, root),
-        frameRelativeTo(artworkFlight.source, root),
+    const measuring = measurePlayerArtwork((frames) => {
+      if (!frames) { finishPlayerClose(); return; }
+      setIsPlayerClosing(true);
+      artworkTransition.flyBetweenFrames(
+        frameRelativeTo(frames.target, frames.root),
+        frameRelativeTo(artworkFlight.source, frames.root),
         artworkUrl,
-        finish,
+        finishPlayerClose,
       );
     });
-    artworkFlightTimerRef.current = setTimeout(() => {
-      if (!playerArtworkFlight) {
-        setArtworkFlight?.(null);
-        closingPlayerRef.current = false;
-        onClose();
-      }
-    }, 650);
-  }, [artworkFlight, artworkUrl, measurePlayerArtwork, onClose, playerArtworkFlight, runPlayerArtworkFlight, setArtworkFlight]);
+    if (!measuring) finishPlayerClose();
+  }, [artworkFlight, artworkTransition.flyBetweenFrames, artworkTransition.transitioning, artworkUrl, finishPlayerClose, isArtworkEntrancePending, measurePlayerArtwork, onClose]);
+
+  React.useEffect(() => {
+    if (artworkTransition.transitioning || isArtworkEntrancePending) return;
+    if (isPlayerClosing) { finishPlayerClose(); return; }
+    if (closeRequested) {
+      setCloseRequested(false);
+      handleClose();
+    }
+  }, [artworkTransition.transitioning, closeRequested, finishPlayerClose, handleClose, isArtworkEntrancePending, isPlayerClosing]);
   const queueHasMultipleTracks = queue.length > 1;
   const previousQueueIndex =
     queueIndex > 0
@@ -1054,6 +1068,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   }, [activeLineIndex, isLyricsEditing, scrollLyricsToActive, showLyricsFull]);
 
   const openLyricsView = React.useCallback(() => {
+    if (isArtworkEntrancePending || closingPlayerRef.current) return;
     Haptics.selectionAsync().catch(() => {});
     if (manualLyricsFollowTimerRef.current) {
       clearTimeout(manualLyricsFollowTimerRef.current);
@@ -1065,9 +1080,10 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     setIsLyricsUserScrolling(false);
     setHasOpenedLyrics(true);
     transitionArtwork(true, () => setShowLyricsFull(true));
-  }, [transitionArtwork]);
+  }, [isArtworkEntrancePending, transitionArtwork]);
 
   const toggleLyricsView = () => {
+    if (isArtworkEntrancePending || closingPlayerRef.current) return;
     Haptics.selectionAsync().catch(() => {});
     if (showLyricsFull) {
       shouldScrollLyricsOnOpenRef.current = false;
@@ -1630,6 +1646,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   return (
     <PlayerModal
       fullScreen
+      sharedArtworkTransition={sharedArtworkPresentation}
       visible={visible}
       onRequestClose={handleClose}
       onShow={() => {
@@ -1671,6 +1688,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             <View style={styles.headerInfo}>
               {isPlayerScrolled && !showLyricsFull ? (
                 <MiniPlayer
+                  artworkViewRef={scrolledArtworkRef}
+                  artworkHidden={artworkTransition.transitioning}
                   onPress={() => playerScrollRef.current?.scrollTo({ y: 0, animated: true })}
                   style={styles.scrolledMiniPlayer}
                 />
@@ -1907,7 +1926,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
                 ref={coverArtworkRef}
                 collapsable={false}
                 onLayout={startPlayerArtworkFlight}
-                style={[styles.coverContainer, { opacity: artworkTransition.transitioning || playerArtworkFlight ? 0 : 1 }]}
+                style={[styles.coverContainer, { opacity: artworkTransition.transitioning || isArtworkEntrancePending ? 0 : 1 }]}
               >
               <SwipeableArtwork
                 trackKey={currentTrackKey}
@@ -2180,58 +2199,6 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             </View>
           </SheetFrame>
           {artworkTransition.overlay}
-          {playerArtworkFlight ? (
-            <Animated.View
-              pointerEvents="none"
-              testID="player-mini-artwork-flight"
-              style={[
-                styles.playerArtworkFlight,
-                {
-                  left: playerArtworkFlight.from.x,
-                  top: playerArtworkFlight.from.y,
-                  width: playerArtworkFlight.from.width,
-                  height: playerArtworkFlight.from.height,
-                  borderRadius: artworkFlightProgress.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [10, 24],
-                  }),
-                  transform: [
-                    {
-                      translateX: artworkFlightProgress.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0, (playerArtworkFlight.to.x + playerArtworkFlight.to.width / 2) - (playerArtworkFlight.from.x + playerArtworkFlight.from.width / 2)],
-                      }),
-                    },
-                    {
-                      translateY: artworkFlightProgress.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0, (playerArtworkFlight.to.y + playerArtworkFlight.to.height / 2) - (playerArtworkFlight.from.y + playerArtworkFlight.from.height / 2)],
-                      }),
-                    },
-                    {
-                      scaleX: artworkFlightProgress.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [1, playerArtworkFlight.to.width / playerArtworkFlight.from.width],
-                      }),
-                    },
-                    {
-                      scaleY: artworkFlightProgress.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [1, playerArtworkFlight.to.height / playerArtworkFlight.from.height],
-                      }),
-                    },
-                  ],
-                },
-              ]}
-            >
-              <SkeletonImage
-                source={{ uri: playerArtworkFlight.uri }}
-                cachePolicy="memory-disk"
-                contentFit="cover"
-                style={StyleSheet.absoluteFill}
-              />
-            </Animated.View>
-          ) : null}
         </View>
         </GlassBackdropScope>
       </GestureHandlerRootView>
@@ -2334,12 +2301,6 @@ const styles = StyleSheet.create({
     width: COVER_VIEWPORT_WIDTH,
     height: COVER_SIZE,
     marginBottom: 18,
-  },
-  playerArtworkFlight: {
-    position: 'absolute',
-    zIndex: 80,
-    elevation: 80,
-    overflow: 'hidden',
   },
   cover: {
     width: '100%',

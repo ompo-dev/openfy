@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
-import { Animated, Platform, StyleSheet } from 'react-native';
+import { Animated, Platform, StyleSheet, View } from 'react-native';
 import { usePlayer } from '@context';
 import { MiniPlayer } from '../MiniPlayer';
 
@@ -48,6 +48,27 @@ describe('MiniPlayer', () => {
     expect(togglePlayPause).toHaveBeenCalledTimes(1);
     expect(onPress).not.toHaveBeenCalled();
     await fireEvent.press(screen.getByLabelText('Abrir Player de Música'));
+    expect(onPress).toHaveBeenCalledTimes(1);
+  });
+
+  it('captures the visible cover frame and cached image before opening the full player', async () => {
+    const onPress = jest.fn();
+    const setArtworkFlight = jest.fn();
+    jest.mocked(usePlayer).mockReturnValue({
+      currentTrack: { spotifyId: 'track', title: 'Taros', imageURL: 'cover.jpg' },
+      isPlayerVisible: true,
+      playerState: { isPlaying: false, positionMs: 0, durationMs: 180000 },
+      togglePlayPause,
+      setArtworkFlight,
+    } as any);
+    const artworkViewRef = React.createRef<View>();
+    const screen = await render(<MiniPlayer animateToFullPlayer artworkViewRef={artworkViewRef} onPress={onPress} />);
+    artworkViewRef.current!.measureInWindow = jest.fn((callback) => callback(34, 650, 36, 36));
+    await fireEvent.press(screen.getByLabelText('Abrir Player de Música'));
+    expect(setArtworkFlight).toHaveBeenCalledWith({
+      token: expect.any(Number), uri: 'cover.jpg', source: { x: 34, y: 650, width: 36, height: 36 },
+    });
+    expect(setArtworkFlight.mock.invocationCallOrder[0]).toBeLessThan(onPress.mock.invocationCallOrder[0]);
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 

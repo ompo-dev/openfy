@@ -67,6 +67,70 @@ describe('lyrics artwork transition', () => {
     expect(hook.result.current.overlay).toBeNull();
   });
 
+  it('uses the lyrics renderer, timing and curve for the mini-player flight in both directions', async () => {
+    const hook = await mount();
+    const mini = { x: 34, y: 590, width: 36, height: 36 };
+    const cover = { x: 36.5, y: 104, width: 320, height: 320 };
+    await act(() => hook.result.current.transition(true, jest.fn()));
+    const lyricsTiming = jest.mocked(Motion.withTiming).mock.calls[0][1];
+    await act(() => completions[0]());
+
+    const complete = jest.fn();
+    await act(() => hook.result.current.flyBetweenFrames(mini, cover, 'mini.jpg', complete));
+    expect(hook.result.current.overlay!.props.testID).toBe('player-artwork-transition');
+    expect(hook.result.current.overlay!.props.children.props).toMatchObject({
+      source: { uri: 'mini.jpg' }, transition: 0, cachePolicy: 'memory-disk',
+    });
+    expect(hook.result.current.overlay!.props.style[1].transform[2].scale).toBe(36 / 320);
+    expect(Motion.withTiming).toHaveBeenLastCalledWith(1, lyricsTiming, expect.any(Function));
+    let style = StyleSheet.flatten(hook.result.current.overlay!.props.style);
+    expect(style.left + 160 + style.transform[0].translateX).toBe(196.5);
+    expect(style.top + 160 + style.transform[1].translateY).toBe(264);
+    expect(style.borderRadius).toBe(16);
+    expect(complete).not.toHaveBeenCalled();
+    await act(() => completions[1]());
+    expect(complete).toHaveBeenCalledTimes(1);
+
+    await act(() => hook.result.current.flyBetweenFrames(cover, mini, 'mini.jpg', complete));
+    expect(Motion.withTiming).toHaveBeenLastCalledWith(1, lyricsTiming, expect.any(Function));
+    style = StyleSheet.flatten(hook.result.current.overlay!.props.style);
+    expect(style.left + 160 + style.transform[0].translateX).toBe(52);
+    expect(style.top + 160 + style.transform[1].translateY).toBe(608);
+    expect(style.borderRadius * style.transform[2].scale).toBe(10);
+    await act(() => completions[2]());
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(hook.result.current.overlay).toBeNull();
+  });
+
+  it('keeps small artwork corners unchanged when closing from the lyrics pill', async () => {
+    const hook = await mount();
+    await act(() => hook.result.current.flyBetweenFrames(
+      { x: 44, y: 499, width: 36, height: 36 },
+      { x: 34, y: 590, width: 36, height: 36 }, 'cover.jpg',
+    ));
+    const style = StyleSheet.flatten(hook.result.current.overlay!.props.style);
+    expect(style.transform[2].scale).toBe(36 / 320);
+    expect(style.borderRadius * style.transform[2].scale).toBe(10);
+  });
+
+  it('cancels stale external completions and respects reduced motion on dismissal', async () => {
+    const hook = await mount();
+    const mini = { x: 34, y: 590, width: 36, height: 36 };
+    const cover = { x: 36.5, y: 104, width: 320, height: 320 };
+    const complete = jest.fn();
+    await act(() => hook.result.current.flyBetweenFrames(cover, mini, 'cover.jpg', complete));
+    await hook.rerender({ trackKey: 'replacement', lyricsVisible: false });
+    await act(() => completions[0]());
+    expect(complete).not.toHaveBeenCalled();
+    jest.mocked(Motion.useReducedMotion).mockReturnValue(true);
+    await hook.rerender({ trackKey: 'replacement', lyricsVisible: false });
+    jest.mocked(Motion.withTiming).mockClear();
+    await act(() => hook.result.current.flyBetweenFrames(cover, mini, 'cover.jpg', complete));
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.overlay).toBeNull();
+    expect(Motion.withTiming).not.toHaveBeenCalled();
+  });
+
   it('does not fade a parent of the native lyrics glass button', async () => {
     const hook = await mount();
     expect(hook.result.current.toggleStyle.opacity).toBeUndefined();

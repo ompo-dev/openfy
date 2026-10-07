@@ -5,6 +5,7 @@ import { WithoutGlassBackdrop } from './GlassBackdrop';
 
 type PlayerModalProps = Omit<ModalProps, 'animationType' | 'presentationStyle' | 'transparent'> & {
   fullScreen?: boolean;
+  sharedArtworkTransition?: boolean;
   scrollOffset?: React.RefObject<number>;
 };
 
@@ -12,7 +13,7 @@ export const shouldDismissSheet = (distance: number, velocity: number) =>
   distance > 96 || (distance > 24 && velocity > 0.65);
 
 /** Content sheets hug their contents; only the music player owns a full page sheet. */
-export function PlayerModal({ children, fullScreen = false, scrollOffset, ...props }: PlayerModalProps) {
+export function PlayerModal({ children, fullScreen = false, sharedArtworkTransition = false, scrollOffset, ...props }: PlayerModalProps) {
   const insets = useSafeAreaInsets();
   const translateY = React.useRef(new Animated.Value(0)).current;
   const closeRef = React.useRef(props.onRequestClose);
@@ -23,19 +24,25 @@ export function PlayerModal({ children, fullScreen = false, scrollOffset, ...pro
   const surfaceTop = React.useRef(0);
   React.useEffect(() => { translateY.stopAnimation(); translateY.setValue(0); }, [props.visible, translateY]);
   const responder = React.useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponderCapture: (_, gesture) => !fullScreen &&
+    onMoveShouldSetPanResponderCapture: (_, gesture) => (!fullScreen || sharedArtworkTransition) &&
       (gesture.y0 < surfaceTop.current + 104 ||
         (offsetRef.current !== undefined && offsetRef.current.current <= 0)) &&
       gesture.dy > 8 && gesture.dy > Math.abs(gesture.dx) * 1.4,
-    onPanResponderMove: (_, gesture) => translateY.setValue(Math.max(0, gesture.dy)),
+    onPanResponderMove: (_, gesture) => {
+      if (!fullScreen) translateY.setValue(Math.max(0, gesture.dy));
+    },
     onPanResponderRelease: (event, gesture) => {
       if (shouldDismissSheet(gesture.dy, gesture.vy) && closeRef.current) {
+        if (sharedArtworkTransition && fullScreen) {
+          closeRef.current(event);
+          return;
+        }
         Animated.timing(translateY, { toValue: 700, duration: 180, useNativeDriver: Platform.OS !== 'web' })
           .start(({ finished }) => { if (finished) closeRef.current?.(event); });
       } else Animated.spring(translateY, { toValue: 0, useNativeDriver: Platform.OS !== 'web', damping: 24, stiffness: 260 }).start();
     },
     onPanResponderTerminate: () => Animated.spring(translateY, { toValue: 0, useNativeDriver: Platform.OS !== 'web' }).start(),
-  }), [fullScreen, translateY]);
+  }), [fullScreen, sharedArtworkTransition, translateY]);
   if (!fullScreen) {
     return (
       <Modal {...props} testID="player-modal" animationType="slide" transparent presentationStyle="overFullScreen">
@@ -48,6 +55,21 @@ export function PlayerModal({ children, fullScreen = false, scrollOffset, ...pro
             <WithoutGlassBackdrop>{children}</WithoutGlassBackdrop>
           </Animated.View>
         </KeyboardAvoidingView>
+      </Modal>
+    );
+  }
+  if (sharedArtworkTransition) {
+    return (
+      <Modal {...props} testID="player-modal" animationType="none" transparent presentationStyle="overFullScreen">
+        <View style={[styles.artworkLayout, { paddingTop: insets.top + 8 }]}>
+          <View pointerEvents="none" style={styles.backdrop} />
+          <View ref={surfaceRef} collapsable={false}
+            onLayout={() => surfaceRef.current?.measureInWindow((_, y) => { surfaceTop.current = y; })}
+            {...responder.panHandlers} testID="player-modal-surface"
+            style={[styles.surface, styles.fullSurface, styles.artworkSurface]}>
+            <WithoutGlassBackdrop>{children}</WithoutGlassBackdrop>
+          </View>
+        </View>
       </Modal>
     );
   }
@@ -66,4 +88,6 @@ const styles = StyleSheet.create({
   surface: { minHeight: 0, backgroundColor: '#101116', overflow: 'hidden', width: '100%' },
   fittedSurface: { flexShrink: 1, maxHeight: '90%', borderRadius: 28 },
   fullSurface: { flex: 1 },
+  artworkLayout: { flex: 1 },
+  artworkSurface: { borderTopLeftRadius: 28, borderTopRightRadius: 28 },
 });
