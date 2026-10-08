@@ -10,7 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 
@@ -52,6 +52,7 @@ const toPlayerTrackFromSearch = (track: TrackModel): PlayerTrack => ({
 
 export const Home = () => {
   const { top } = useSafeAreaInsets();
+  const navigation = useNavigation();
   const { home, isLoading, isRefreshing, refresh } = usePersonalizedHome();
   const { currentTrack, isPlaying, playWithQueue, togglePlayPause } = usePlayer((state) => ({
     currentTrack: state.currentTrack, isPlaying: state.playerState.isPlaying,
@@ -82,11 +83,26 @@ export const Home = () => {
     Keyboard.dismiss();
   }, []);
 
+  const resetSearch = React.useCallback(() => {
+    searchGeneration.current += 1;
+    suggestionsGeneration.current += 1;
+    setQuery('');
+    setSearchActive(false);
+    setSuggestionsOpen(false);
+    setSuggestions([]);
+    setResults({ artists: [], tracks: [] });
+    setSearchError('');
+    setSearchLoading(false);
+    dismissSearchKeyboard();
+  }, [dismissSearchKeyboard]);
+
   React.useEffect(() => {
     const unsubscribe = subscribeSearchHistory(setSearchHistory);
     void getSearchHistory();
     return unsubscribe;
   }, []);
+
+  React.useEffect(() => navigation.addListener('tabPress' as never, resetSearch), [navigation, resetSearch]);
 
   React.useEffect(() => {
     const request = ++suggestionsGeneration.current;
@@ -128,18 +144,9 @@ export const Home = () => {
 
   useFocusEffect(
     React.useCallback(() => () => {
-      searchGeneration.current += 1;
-      suggestionsGeneration.current += 1;
-      setQuery('');
-      setSearchActive(false);
-      setSuggestionsOpen(false);
-      setSuggestions([]);
-      setResults({ artists: [], tracks: [] });
-      setSearchError('');
-      setSearchLoading(false);
-      Keyboard.dismiss();
+      resetSearch();
       log.nav('discover search cleared on blur');
-    }, [])
+    }, [resetSearch])
   );
 
   React.useEffect(() => {
@@ -271,12 +278,12 @@ export const Home = () => {
         keyboardDismissMode="on-drag"
         onScrollBeginDrag={() => { dismissSearchKeyboard(); setSuggestionsOpen(false); }}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.content, { paddingTop: top + 8 }]}
+        contentContainerStyle={[styles.content, { paddingTop: top }]}
         refreshControl={
           <RefreshControl
             tintColor="#FFFFFF"
             colors={['#1DB954']}
-            progressViewOffset={top + 8}
+            progressViewOffset={top}
             refreshing={isRefreshing}
             onRefresh={refresh}
           />

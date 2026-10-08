@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { fireEvent, render } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Keyboard } from 'react-native';
 import { getCatalogSearchSuggestions, searchCatalog } from '@api';
 import { upsertCatalogTracks } from '@services';
@@ -9,6 +9,7 @@ import { Home } from '../index';
 const mockPlayQueue = jest.fn();
 const mockOpenDetail = jest.fn();
 let mockHistoryEntries: SearchHistoryEntry[] = [];
+let mockTabPressListener: (() => void) | undefined;
 
 jest.mock('@api', () => ({ searchCatalog: jest.fn(), getCatalogSearchSuggestions: jest.fn().mockResolvedValue([]) }));
 jest.mock('../../../services/search/searchHistory', () => ({
@@ -50,7 +51,15 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 jest.mock('expo-image', () => ({ Image: () => null }));
-jest.mock('expo-router', () => ({ useFocusEffect: jest.fn() }));
+jest.mock('expo-router', () => ({
+  useFocusEffect: jest.fn(),
+  useNavigation: () => ({
+    addListener: jest.fn((_event: string, listener: () => void) => {
+      mockTabPressListener = listener;
+      return jest.fn();
+    }),
+  }),
+}));
 jest.mock('@expo/vector-icons/Ionicons', () => ({
   __esModule: true,
   default: () => null,
@@ -70,6 +79,7 @@ describe('Home', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockHistoryEntries = [];
+    mockTabPressListener = undefined;
     jest.mocked(getCatalogSearchSuggestions).mockResolvedValue([]);
   });
   it('dismisses the keyboard when clearing music and artist search', async () => {
@@ -82,6 +92,21 @@ describe('Home', () => {
     expect(dismiss).toHaveBeenCalledTimes(1);
     expect(view.queryByLabelText('Limpar busca')).toBeNull();
     dismiss.mockRestore();
+  });
+
+  it('leaves search mode when the Home tab is pressed', async () => {
+    const view = await render(<Home />);
+
+    const input = view.getByLabelText('Buscar músicas e artistas');
+    await fireEvent(input, 'focus');
+    await fireEvent.changeText(input, 'aotam');
+    expect(view.getByLabelText('Cancelar busca')).toBeTruthy();
+    mockTabPressListener?.();
+
+    await waitFor(() => {
+      expect(view.getByLabelText('Buscar músicas e artistas').props.value).toBe('');
+      expect(view.queryByLabelText('Cancelar busca')).toBeNull();
+    });
   });
 
   it('uses the common music row and preserves search queue metadata without playing when saving', async () => {

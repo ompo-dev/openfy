@@ -108,6 +108,27 @@ describe('public YouTube Music catalog', () => {
     expect(search).toHaveBeenNthCalledWith(2, 'fill missing artist category', { type: 'artist' });
   });
 
+  it('shows the credited artist when a corrected typo returns only songs', async () => {
+    const search = jest.fn()
+      .mockResolvedValueOnce({
+        songs: { contents: [{
+          id: 'abcdefghijk',
+          title: 'Sinceramente',
+          artists: [{ channel_id: 'UCsotam', name: 'Sotam' }],
+        }] },
+        artists: { contents: [] },
+      })
+      .mockResolvedValueOnce({ artists: { contents: [] } });
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({
+      music: { search },
+    } as never);
+
+    await expect(searchCatalog('aotam')).resolves.toMatchObject({
+      artists: [{ id: 'ytartist_UCsotam~Sotam', name: 'Sotam' }],
+      tracks: [{ title: 'Sinceramente' }],
+    });
+  });
+
   it('normalizes YouTube Music Text objects and ignores malformed artist fields', async () => {
     const search = jest.fn().mockResolvedValue({
       songs: { contents: [{

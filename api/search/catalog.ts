@@ -546,10 +546,21 @@ const searchCatalogUncached = async (
     .map(toYouTubeMusicTrackModel)
     .filter((track): track is TrackModel => Boolean(track))
     .slice(0, limit);
-  const artists = dedupeArtistResults(artistItems
-    .map(toArtistModel)
-    .filter((artist): artist is ArtistModel => Boolean(artist))
-  ).slice(0, Math.min(limit, 8));
+  // YouTube Music sometimes corrects a typo for the song shelf but leaves the
+  // artist shelf empty (for example, "aotam" returns Sotam songs only). Keep
+  // the profile discoverable from the artist credits attached to those songs.
+  const artistsFromTrackCredits = songItems.flatMap((item) => artistReferences(item)).map((artist) => ({
+    type: 'artist' as const,
+    id: toYouTubeMusicArtistRouteId(artist.id, artist.name),
+    name: artist.name,
+    imageURL: '',
+  }));
+  const artists = dedupeArtistResults([
+    ...artistItems
+      .map(toArtistModel)
+      .filter((artist): artist is ArtistModel => Boolean(artist)),
+    ...artistsFromTrackCredits,
+  ]).slice(0, Math.min(limit, 8));
 
   const catalogResults: CatalogSearchResults = {
     artists,
