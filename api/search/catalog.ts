@@ -581,6 +581,31 @@ const normalizeQuery = (query: string) =>
   query.trim().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ').toLocaleLowerCase();
 
+const catalogSuggestionsCache = createAsyncResourceCache<string[]>({
+  name: 'catalog search suggestions', category: 'search', maxEntries: 80,
+  ttlFor: (suggestions) => suggestions.length ? 60_000 : 2_000,
+});
+
+export const getCatalogSearchSuggestions = (query: string): Promise<string[]> => {
+  const cleanQuery = query.trim();
+  if (!cleanQuery) return Promise.resolve([]);
+  return catalogSuggestionsCache.getOrLoad(normalizeQuery(cleanQuery), async () => {
+    const client = await withYouTubeMusicTimeout(getYouTubeMusicClient(), 2_000);
+    if (!client?.music.getSearchSuggestions) return [];
+    const sections = await withYouTubeMusicTimeout(client.music.getSearchSuggestions(cleanQuery), 2_000);
+    const suggestions = new Map<string, string>();
+    asArray(sections).forEach((section) => {
+      asArray(asRecord(section).contents).forEach((item) => {
+        const text = asString(asRecord(item).suggestion).replace(/\s+/g, ' ').trim();
+        if (text && text.length <= 160 && !suggestions.has(normalizeQuery(text))) {
+          suggestions.set(normalizeQuery(text), text);
+        }
+      });
+    });
+    return [...suggestions.values()].slice(0, 6);
+  }, 60_000);
+};
+
 /** Search YouTube Music's public catalog directly; no Spotify account/token is needed. */
 export const searchCatalog = (query: string, limit = 12): Promise<CatalogSearchResults> => {
   const cleanQuery = query.trim();

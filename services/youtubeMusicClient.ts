@@ -172,6 +172,7 @@ export type YouTubeMusicPlaylistPage = {
 
 export type YouTubeMusicClient = {
   music: {
+    getSearchSuggestions?: (input: string) => Promise<{ contents?: unknown[] }[]>;
     search: (
       query: string,
       filters: { type: 'all' | 'song' | 'artist' }

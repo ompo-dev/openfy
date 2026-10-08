@@ -44,6 +44,7 @@ function NavigationDiagnostics() {
 function PlayerOverlay() {
   const fullPlayerVisible = usePlayerStore((state) => state.isFullPlayerVisible);
   const setFullPlayerVisible = usePlayerStore((state) => state.setIsFullPlayerVisible);
+  const miniArtworkRef = React.useRef<View>(null);
 
   return (
     <>
@@ -51,10 +52,13 @@ function PlayerOverlay() {
       <PlayerMediaSuggestionsSync />
       <MiniPlayer
         animateToFullPlayer
+        artworkViewRef={miniArtworkRef}
+        artworkHidden={fullPlayerVisible}
         onPress={() => setFullPlayerVisible(true)}
       />
       {fullPlayerVisible ? <FullPlayer
         visible
+        miniArtworkRef={miniArtworkRef}
         onClose={() => setFullPlayerVisible(false)}
       /> : null}
     </>

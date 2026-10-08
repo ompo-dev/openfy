@@ -4,6 +4,7 @@ import {
   getYouTubeMusicArtistProfile,
   getCachedArtistSearchSeed,
   searchCatalog,
+  getCatalogSearchSuggestions,
 } from '../catalog';
 import { getYouTubeMusicClient } from '../../../services/youtubeMusicClient';
 import { getSpotifyArtistImage } from '../../../services/metadata/spotifyMetadata';
@@ -22,6 +23,17 @@ jest.mock('../../../services/metadata/spotifyMetadata', () => ({
 
 describe('public YouTube Music catalog', () => {
   beforeEach(() => jest.clearAllMocks());
+
+  it('reads and deduplicates autocomplete text from the music catalog', async () => {
+    const getSearchSuggestions = jest.fn().mockResolvedValue([{ contents: [
+      { suggestion: { text: 'Sotam sinceramente', runs: [{ text: 'Sotam ' }, { text: 'sinceramente' }] } },
+      { suggestion: 'sotam sinceramente' }, { suggestion: { text: 'Sotam cura' } }, { suggestion: {} },
+    ] }]);
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: { getSearchSuggestions } } as never);
+    await expect(getCatalogSearchSuggestions('aotam')).resolves.toEqual(['Sotam sinceramente', 'Sotam cura']);
+    await getCatalogSearchSuggestions('AOTAM');
+    expect(getSearchSuggestions).toHaveBeenCalledTimes(1);
+  });
 
   it('searches tracks and artists without requesting Spotify authentication', async () => {
     const search = jest.fn().mockResolvedValue({

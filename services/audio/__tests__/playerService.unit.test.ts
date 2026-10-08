@@ -532,6 +532,22 @@ describe('playerService fades', () => {
     expect(player.release).toHaveBeenCalledTimes(1);
   });
 
+  it('recreates a rejected native item with the same source and starts it on the first request', async () => {
+    (Platform as { OS: string }).OS = 'ios';
+    const stale = createPlayer();
+    const fresh = createPlayer();
+    stale.replace.mockImplementation(() => { throw new Error('Exception in HostFunction: <unknown>'); });
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(stale as any).mockReturnValueOnce(fresh as any);
+    expect(await loadAndPlay('file:///ay-bebe.m4a')).toBe(true);
+    const status = jest.fn();
+    expect(await loadAndPlay('file:///fantasma.m4a', status)).toBe(true);
+    expect(stale.pause).toHaveBeenCalled();
+    expect(stale.release).toHaveBeenCalledTimes(1);
+    expect(createAudioPlayer).toHaveBeenLastCalledWith('file:///fantasma.m4a', expect.any(Object));
+    expect(fresh.play).toHaveBeenCalledTimes(1);
+    expect(status).not.toHaveBeenCalledWith(expect.objectContaining({ error: expect.any(String) }));
+  });
+
   it('invalidates a repair as soon as another track is selected, before its URL is resolved', async () => {
     let finishRepair!: () => void;
     jest.mocked(prepareLocalAudioForPlayback).mockImplementationOnce(() => new Promise(resolve => {

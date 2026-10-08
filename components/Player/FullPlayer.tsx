@@ -95,6 +95,7 @@ const CHROME_OVERLAP = 52;
 type FullPlayerProps = {
   visible: boolean;
   onClose: () => void;
+  miniArtworkRef?: React.RefObject<View | null>;
 };
 
 const LyricsViewport = ({ children }: React.PropsWithChildren) => {
@@ -306,7 +307,7 @@ function PlayerGlassButton({
   );
 }
 
-export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
+export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps) => {
   const blurInactiveLyrics = useAppSettingsStore((state) => state.settings.blurInactiveLyrics);
   const insets = useSafeAreaInsets();
   const artworkProgress = useSharedValue(0);
@@ -372,6 +373,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
   const [sharedArtworkPresentation] = React.useState(Boolean(artworkFlight));
   const [isArtworkEntrancePending, setIsArtworkEntrancePending] = React.useState(Boolean(artworkFlight));
   const [isPlayerClosing, setIsPlayerClosing] = React.useState(false);
+  const [artworkDestinationY, setArtworkDestinationY] = React.useState<number>();
   const [closeRequested, setCloseRequested] = React.useState(false);
   const coverArtworkRef = React.useRef<View>(null);
   const stationaryArtworkRef = React.useRef<View>(null);
@@ -424,10 +426,13 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     visible, currentTrackKey, artworkUrl, COVER_SIZE, showLyricsFull
   );
   const transitionArtwork = artworkTransition.transition;
+  const flyPlayerArtwork = artworkTransition.flyBetweenFrames;
+  const artworkTransitioning = artworkTransition.transitioning;
 
   const measurePlayerArtwork = React.useCallback((callback: (frames: {
     target: PlayerArtworkFrame;
     root: PlayerArtworkFrame;
+    mini: PlayerArtworkFrame | null;
   } | null) => void) => {
     const target = showLyricsFull
       ? artworkTransition.rowRef.current
@@ -437,6 +442,8 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     if (!target || !root) return false;
     let targetFrame: PlayerArtworkFrame | null = null;
     let rootFrame: PlayerArtworkFrame | null = null;
+    let miniFrame: PlayerArtworkFrame | null = null;
+    let miniMeasured = !miniArtworkRef?.current;
     let settled = false;
     cancelArtworkMeasurementRef.current = () => { settled = true; };
     const complete = () => {
@@ -445,7 +452,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       if (artworkMeasurementTimerRef.current) clearTimeout(artworkMeasurementTimerRef.current);
       artworkMeasurementTimerRef.current = null;
       cancelArtworkMeasurementRef.current = null;
-      callback(targetFrame && rootFrame ? { target: targetFrame, root: rootFrame } : null);
+      callback(targetFrame && rootFrame ? { target: targetFrame, root: rootFrame, mini: miniFrame } : null);
     };
     artworkMeasurementTimerRef.current = setTimeout(complete, 50);
     target.measureInWindow((x, y, width, height) => {
@@ -457,15 +464,21 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
             ? { x, y, width, height }
             : { x: x + (width - COVER_SIZE) / 2, y, width: COVER_SIZE, height: COVER_SIZE };
       }
-      if (targetFrame && rootFrame) complete();
+      if (targetFrame && rootFrame && miniMeasured) complete();
     });
     root.measureInWindow((x, y, width, height) => {
       if (settled) return;
       if (width > 0 && height > 0) rootFrame = { x, y, width, height };
+      if (targetFrame && rootFrame && miniMeasured) complete();
+    });
+    miniArtworkRef?.current?.measureInWindow((x, y, width, height) => {
+      if (settled) return;
+      miniMeasured = true;
+      if (width > 0 && height > 0) miniFrame = { x, y, width, height };
       if (targetFrame && rootFrame) complete();
     });
     return true;
-  }, [artworkTransition.containerRef, artworkTransition.rowRef, isPlayerScrolled, sharedArtworkPresentation, showLyricsFull]);
+  }, [artworkTransition.containerRef, artworkTransition.rowRef, isPlayerScrolled, miniArtworkRef, sharedArtworkPresentation, showLyricsFull]);
 
   const startPlayerArtworkFlight = React.useCallback(() => {
     if (!visible || !artworkFlight || measuringEntranceRef.current || artworkFlightTokenRef.current === artworkFlight.token) return true;
@@ -474,7 +487,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       measuringEntranceRef.current = false;
       artworkFlightTokenRef.current = artworkFlight.token;
       if (frames) {
-        artworkTransition.flyBetweenFrames(
+        flyPlayerArtwork(
           frameRelativeTo(artworkFlight.source, frames.root),
           frameRelativeTo(frames.target, frames.root),
           artworkFlight.uri,
@@ -484,7 +497,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     });
     if (!measuring) measuringEntranceRef.current = false;
     return measuring;
-  }, [artworkFlight, artworkTransition.flyBetweenFrames, measurePlayerArtwork, visible]);
+  }, [artworkFlight, flyPlayerArtwork, measurePlayerArtwork, visible]);
 
   React.useEffect(() => {
     if (!visible || !artworkFlight) return;
@@ -512,7 +525,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
 
   const handleClose = React.useCallback(() => {
     if (closingPlayerRef.current) return;
-    if (artworkTransition.transitioning || isArtworkEntrancePending) {
+    if (artworkTransitioning || isArtworkEntrancePending) {
       setCloseRequested(true);
       return;
     }
@@ -523,16 +536,18 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
     closingPlayerRef.current = true;
     const measuring = measurePlayerArtwork((frames) => {
       if (!frames) { finishPlayerClose(); return; }
+      const destination = frameRelativeTo(frames.mini || artworkFlight.source, frames.root);
+      setArtworkDestinationY(destination.y);
       setIsPlayerClosing(true);
-      artworkTransition.flyBetweenFrames(
+      flyPlayerArtwork(
         frameRelativeTo(frames.target, frames.root),
-        frameRelativeTo(artworkFlight.source, frames.root),
+        destination,
         artworkUrl,
         finishPlayerClose,
       );
     });
     if (!measuring) finishPlayerClose();
-  }, [artworkFlight, artworkTransition.flyBetweenFrames, artworkTransition.transitioning, artworkUrl, finishPlayerClose, isArtworkEntrancePending, measurePlayerArtwork, onClose]);
+  }, [artworkFlight, artworkTransitioning, artworkUrl, finishPlayerClose, flyPlayerArtwork, isArtworkEntrancePending, measurePlayerArtwork, onClose]);
 
   React.useEffect(() => {
     if (artworkTransition.transitioning || isArtworkEntrancePending) return;
@@ -1653,6 +1668,7 @@ export const FullPlayer = ({ visible, onClose }: FullPlayerProps) => {
       fullScreen
       sharedArtworkTransition={sharedArtworkPresentation}
       artworkFlightProgress={artworkTransition.flightProgress}
+      artworkDestinationY={artworkDestinationY}
       artworkOverlay={sharedArtworkPresentation ? artworkTransition.overlay : undefined}
       artworkOverlayRef={stationaryArtworkRef}
       closing={isPlayerClosing}

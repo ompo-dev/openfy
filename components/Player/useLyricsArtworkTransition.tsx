@@ -74,10 +74,7 @@ export const useLyricsArtworkTransition = (
     flightProgress.value = 0;
     setFlight({ from, to, uri, fromRadius: from.width <= 36 ? 10 : 16,
       toRadius: to.width <= 36 ? 10 : 16, id });
-    flightProgress.value = withTiming(1, { duration: DURATION, easing }, (finished) => {
-      if (finished) runOnJS(finish)(id);
-    });
-  }, [finish, flightProgress, reduceMotion]);
+  }, [flightProgress, reduceMotion]);
 
   const flyBetweenFrames = React.useCallback((
     from: Frame,
@@ -173,6 +170,16 @@ export const useLyricsArtworkTransition = (
   const toggleStyle = useAnimatedStyle(() => ({ width: 56 * (1 - modeProgress.value),
     transform: [{ scale: Math.max(0.001, 1 - modeProgress.value) }] }));
   const copyStyle = useAnimatedStyle(() => ({ marginLeft: 54 * modeProgress.value - (lyricsVisible ? 54 : 0) }));
+
+  // Reanimated installs style mappers in passive effects. Start after those
+  // mappers (including the child sheet) so every surface sees the first frame.
+  React.useEffect(() => {
+    if (!flight || flight.id !== flightId.current) return;
+    const id = flight.id;
+    flightProgress.value = withTiming(1, { duration: DURATION, easing }, (finished) => {
+      if (finished) runOnJS(finish)(id);
+    });
+  }, [flight, finish, flightProgress]);
 
   // Match the source on the first mount, before the UI worklet attaches.
   const overlay = flight ? (

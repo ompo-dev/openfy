@@ -14,7 +14,7 @@ import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 
-import { searchCatalog } from '@api';
+import { getCatalogSearchSuggestions, searchCatalog } from '@api';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { useLibrarySelectedCategory, usePlayer, type PlayerTrack } from '@context';
 import { useDetailNavigation, usePersonalizedHome } from '@hooks';
@@ -22,11 +22,15 @@ import { rememberCachedArtistImage, upsertCatalogTracks } from '@services';
 import type { ArtistModel, TrackModel } from '@models';
 
 import { ListeningHome } from './ListeningHome';
-import { LoggedPressable } from '../native';
-import { SkeletonImage } from '../common/SkeletonImage';
+import { GlassSurface, LoggedPressable } from '../native';
+import { ArtistSearchRow } from './ArtistSearchRow';
 import { TrackRow } from '../common/TrackRow';
 import { isSameRecording } from '../../services/library/trackIdentity';
 import { log } from '../../utils/appLogger';
+import {
+  clearSearchHistory, getSearchHistory, rememberSearchSelection, removeSearchHistoryEntry,
+  searchHistoryKey, subscribeSearchHistory, type SearchHistoryEntry, type SearchSelection,
+} from '../../services/search/searchHistory';
 
 export { FriendActivityStatus } from './FriendActivityStatus';
 export { CompactMusicCarousel } from './CompactMusicCarousel';
@@ -46,8 +50,6 @@ const toPlayerTrackFromSearch = (track: TrackModel): PlayerTrack => ({
   youtubeUrl: track.youtubeUrl,
 });
 
-const artistNames = (artist: ArtistModel) => artist.genres?.slice(0, 2).join(' · ') || 'Artista';
-
 export const Home = () => {
   const { top } = useSafeAreaInsets();
   const { home, isLoading, isRefreshing, refresh } = usePersonalizedHome();
@@ -58,6 +60,13 @@ export const Home = () => {
   const { refreshLibrary } = useLibrarySelectedCategory();
   const { openDetail } = useDetailNavigation();
   const [query, setQuery] = React.useState('');
+  const [searchActive, setSearchActive] = React.useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = React.useState(false);
+  const [suggestions, setSuggestions] = React.useState<string[]>([]);
+  const [searchHistory, setSearchHistory] = React.useState<SearchHistoryEntry[]>([]);
+  const [showAllHistory, setShowAllHistory] = React.useState(false);
+  const searchInputRef = React.useRef<TextInput>(null);
+  const suggestionsGeneration = React.useRef(0);
   const [results, setResults] = React.useState<{ artists: ArtistModel[]; tracks: TrackModel[] }>({
     artists: [],
     tracks: [],
@@ -68,10 +77,63 @@ export const Home = () => {
   const [savingTrackIds, setSavingTrackIds] = React.useState<Set<string>>(new Set());
   const searchGeneration = React.useRef(0);
 
+  const dismissSearchKeyboard = React.useCallback(() => {
+    searchInputRef.current?.blur();
+    Keyboard.dismiss();
+  }, []);
+
+  React.useEffect(() => {
+    const unsubscribe = subscribeSearchHistory(setSearchHistory);
+    void getSearchHistory();
+    return unsubscribe;
+  }, []);
+
+  React.useEffect(() => {
+    const request = ++suggestionsGeneration.current;
+    setSuggestions([]);
+    if (!query.trim() || !suggestionsOpen) return;
+    const timer = setTimeout(() => {
+      void getCatalogSearchSuggestions(query).then((values) => {
+        if (request === suggestionsGeneration.current) setSuggestions(values);
+      }).catch(() => {});
+    }, 200);
+    return () => { clearTimeout(timer); suggestionsGeneration.current += 1; };
+  }, [query, suggestionsOpen]);
+
+  const rememberSelection = (selection: SearchSelection) => {
+    void rememberSearchSelection(selection).catch((error) => log.search('search history write failed', { error }));
+  };
+  const openArtist = (artist: ArtistModel) => {
+    dismissSearchKeyboard();
+    rememberSelection({ kind: 'artist', artist });
+    openDetail('artist', artist.id, 'home');
+  };
+  const playSearchTrack = (track: TrackModel, tracks: TrackModel[], sourceId: string) => {
+    dismissSearchKeyboard();
+    rememberSelection({ kind: 'track', track });
+    if (isSameRecording(currentTrack, toPlayerTrackFromSearch(track))) void togglePlayPause();
+    else void playWithQueue(tracks.map(toPlayerTrackFromSearch), tracks.findIndex((item) => item.id === track.id), sourceId);
+  };
+  const removeHistory = (entry: SearchHistoryEntry) => {
+    dismissSearchKeyboard();
+    void removeSearchHistoryEntry(searchHistoryKey(entry))
+      .catch((error) => log.search('search history removal failed', { error }));
+  };
+  const historyRemoveButton = (entry: SearchHistoryEntry) => (
+    <Pressable accessibilityRole="button" accessibilityLabel={`Remover ${entry.kind === 'artist' ? entry.artist.name : entry.track.title} dos recentes`}
+      onPress={(event) => { event.stopPropagation(); removeHistory(entry); }} style={styles.historyAction}>
+      <Ionicons name="close" size={20} color="#9B9BA0" />
+    </Pressable>
+  );
+
   useFocusEffect(
     React.useCallback(() => () => {
       searchGeneration.current += 1;
+      suggestionsGeneration.current += 1;
       setQuery('');
+      setSearchActive(false);
+      setSuggestionsOpen(false);
+      setSuggestions([]);
       setResults({ artists: [], tracks: [] });
       setSearchError('');
       setSearchLoading(false);
@@ -192,13 +254,22 @@ export const Home = () => {
     Boolean(home.playlists?.length || home.releases?.length || home.pinnedTracks?.length);
   const searching = query.trim().length > 0;
   const queryTooShort = query.trim().length === 1;
+  const localSuggestions = query.trim() ? searchHistory.map((entry) =>
+    entry.kind === 'artist' ? entry.artist.name : entry.track.title
+  ).filter((name) => name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) : [];
+  const searchSuggestions = [...new Map([...localSuggestions, ...suggestions]
+    .map((value) => [value.toLocaleLowerCase(), value])).values()].slice(0, 6);
+  const historyTracks = searchHistory.filter((entry) => entry.kind === 'track').map((entry) => entry.track);
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onTouchStart={dismissSearchKeyboard}>
       <ScrollView
+        testID="home-scroll"
         alwaysBounceVertical
         bounces
-        keyboardShouldPersistTaps="handled"
+        keyboardShouldPersistTaps="always"
+        keyboardDismissMode="on-drag"
+        onScrollBeginDrag={() => { dismissSearchKeyboard(); setSuggestionsOpen(false); }}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.content, { paddingTop: top + 8 }]}
         refreshControl={
@@ -211,13 +282,18 @@ export const Home = () => {
           />
         }
       >
+        <View style={styles.searchHeader}>
         <View style={styles.searchBox}>
           <Ionicons name="search" size={19} color="#9B9BA0" />
           <TextInput
+            ref={searchInputRef}
+            onTouchStart={(event) => event.stopPropagation()}
             accessibilityLabel="Buscar músicas e artistas"
             autoCapitalize="none"
             autoCorrect={false}
-            onChangeText={setQuery}
+            onFocus={() => { setSearchActive(true); setSuggestionsOpen(true); }}
+            onChangeText={(value) => { setQuery(value); setSuggestionsOpen(true); }}
+            onSubmitEditing={() => { dismissSearchKeyboard(); setSuggestionsOpen(false); }}
             placeholder="Músicas e artistas"
             placeholderTextColor="#8E8E93"
             returnKeyType="search"
@@ -229,7 +305,7 @@ export const Home = () => {
               accessibilityRole="button"
               accessibilityLabel="Limpar busca"
               onPress={() => {
-                Keyboard.dismiss();
+                dismissSearchKeyboard();
                 setQuery('');
                 log.ui('clear music and artist search');
               }}
@@ -239,7 +315,30 @@ export const Home = () => {
             </Pressable>
           ) : null}
         </View>
+        {searchActive ? (
+          <LoggedPressable accessibilityLabel="Cancelar busca" onPress={() => {
+            dismissSearchKeyboard(); setQuery(''); setSearchActive(false); setSuggestionsOpen(false);
+          }}>
+            <GlassSurface style={styles.cancelButton} glass="clear" isInteractive>
+              <Text style={styles.cancelText}>Cancelar</Text>
+            </GlassSurface>
+          </LoggedPressable>
+        ) : null}
+        </View>
 
+        <View testID="home-search-body">
+        {searching && suggestionsOpen && searchSuggestions.length ? (
+          <View style={styles.suggestions}>
+            {searchSuggestions.map((suggestion) => (
+              <LoggedPressable key={suggestion} accessibilityLabel={`Pesquisar ${suggestion}`} style={styles.suggestion}
+                onPress={() => { setQuery(suggestion); dismissSearchKeyboard(); setSuggestionsOpen(false); }}>
+                <Ionicons name="search" size={19} color="#9B9BA0" />
+                <Text numberOfLines={1} style={styles.suggestionText}>{suggestion}</Text>
+                <Ionicons name="arrow-forward" size={18} color="#9B9BA0" style={styles.suggestionArrow} />
+              </LoggedPressable>
+            ))}
+          </View>
+        ) : null}
         {searching ? (
           <View style={styles.searchResults}>
             {queryTooShort ? (
@@ -251,47 +350,26 @@ export const Home = () => {
               <View style={styles.resultSection}>
                 <Text style={styles.sectionTitle}>Artistas</Text>
                 {results.artists.map((artist) => (
-                  <LoggedPressable
-                    accessibilityLabel={`Abrir artista ${artist.name}`}
-                    key={artist.id}
-                    onPress={() => openDetail('artist', artist.id, 'home')}
-                    style={styles.artistResult}
-                  >
-                    {artist.imageURL ? (
-                      <SkeletonImage cachePolicy="memory-disk" priority="high" source={{ uri: artist.imageURL }} contentFit="cover" style={styles.artistImage} />
-                    ) : (
-                      <View style={[styles.artistImage, styles.imageFallback]}>
-                        <Ionicons name="person" size={22} color="#8E8E93" />
-                      </View>
-                    )}
-                    <View style={styles.resultCopy}>
-                      <Text numberOfLines={1} style={styles.resultTitle}>{artist.name}</Text>
-                      <Text numberOfLines={1} style={styles.resultSubtitle}>{artistNames(artist)}</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color="#85858A" />
-                  </LoggedPressable>
+                  <ArtistSearchRow key={artist.id} artist={artist} onPress={() => openArtist(artist)} />
                 ))}
               </View>
             ) : null}
             {results.tracks.length ? (
               <View style={styles.resultSection}>
                 <Text style={styles.sectionTitle}>Músicas</Text>
-                {results.tracks.map((track, index) => {
+                {results.tracks.map((track) => {
                   const isSaved = savedTrackIds.has(track.id) || home.tracksById.has(track.id);
                   const isSaving = savingTrackIds.has(track.id);
                   return (
                     <TrackRow key={track.id} title={track.title} subtitle={track.subtitle} imageURL={track.imageURL}
                       active={isSameRecording(currentTrack, toPlayerTrackFromSearch(track))} playing={isPlaying}
                       downloadState="idle" onDownload={() => {}}
-                      onPress={() => {
-                        if (isSameRecording(currentTrack, toPlayerTrackFromSearch(track))) void togglePlayPause();
-                        else void playWithQueue(results.tracks.map(toPlayerTrackFromSearch), index, 'home:search');
-                      }} trailingAction={
+                      onPress={() => playSearchTrack(track, results.tracks, 'home:search')} trailingAction={
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={isSaved ? 'Na Biblioteca' : `Adicionar ${track.title} à Biblioteca`}
                         disabled={isSaved || isSaving}
-                        onPress={(event) => { event.stopPropagation(); void saveTrack(track); }}
+                        onPress={(event) => { event.stopPropagation(); dismissSearchKeyboard(); void saveTrack(track); }}
                         style={styles.saveButton}
                       >
                         {isSaving ? (
@@ -313,6 +391,32 @@ export const Home = () => {
               <Text style={styles.emptyText}>Nenhum resultado encontrado.</Text>
             ) : null}
           </View>
+        ) : searchActive ? (
+          <View style={styles.resultSection}>
+            <View style={styles.historyHeader}>
+              <Text style={[styles.sectionTitle, styles.historyTitle]}>Recentes</Text>
+              {searchHistory.length > 8 ? <LoggedPressable accessibilityLabel={showAllHistory ? 'Ver menos recentes' : 'Ver todos os recentes'}
+                onPress={() => { dismissSearchKeyboard(); setShowAllHistory((value) => !value); }} style={styles.historyMore}>
+                <Text style={styles.historyMoreText}>{showAllHistory ? 'Ver menos' : 'Ver tudo'}</Text>
+              </LoggedPressable> : null}
+              {searchHistory.length ? <LoggedPressable accessibilityLabel="Limpar histórico de busca"
+                onPress={() => { dismissSearchKeyboard(); void clearSearchHistory()
+                  .catch((error) => log.search('search history clear failed', { error })); }} style={styles.historyAction}>
+                <Ionicons name="trash-outline" size={19} color="#9B9BA0" />
+              </LoggedPressable> : null}
+            </View>
+            {searchHistory.slice(0, showAllHistory ? 40 : 8).map((entry) => entry.kind === 'artist' ? (
+              <ArtistSearchRow key={searchHistoryKey(entry)} artist={entry.artist}
+                onPress={() => openArtist(entry.artist)} trailingAction={historyRemoveButton(entry)} />
+            ) : (
+              <TrackRow key={searchHistoryKey(entry)} title={entry.track.title} subtitle={entry.track.subtitle} imageURL={entry.track.imageURL}
+                active={isSameRecording(currentTrack, toPlayerTrackFromSearch(entry.track))} playing={isPlaying}
+                downloadState="idle" onDownload={() => {}}
+                onPress={() => playSearchTrack(entry.track, historyTracks, 'home:search-history')}
+                trailingAction={historyRemoveButton(entry)} />
+            ))}
+            {!searchHistory.length ? <Text style={styles.emptyText}>Nenhuma busca recente.</Text> : null}
+          </View>
         ) : (
           <>
             <ListeningHome home={home} loading={isLoading} />
@@ -321,6 +425,7 @@ export const Home = () => {
             ) : null}
           </>
         )}
+        </View>
       </ScrollView>
     </View>
   );
@@ -329,10 +434,10 @@ export const Home = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#121212', width: '100%', maxWidth: 1100, alignSelf: 'center' },
   content: { paddingBottom: BOTTOM_NAVIGATION_HEIGHT + 76 },
+  searchHeader: { marginHorizontal: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
   searchBox: {
+    flex: 1,
     height: 48,
-    marginHorizontal: 16,
-    marginBottom: 12,
     paddingHorizontal: 14,
     borderRadius: 8,
     backgroundColor: '#242428',
@@ -342,12 +447,24 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
+    minWidth: 0,
     color: '#FFFFFF',
     fontSize: 15,
     fontFamily: 'SF-Regular',
     paddingVertical: 0,
   },
   searchResults: { paddingBottom: 20 },
+  cancelButton: { height: 48, borderRadius: 24, paddingHorizontal: 14, justifyContent: 'center', alignItems: 'center' },
+  cancelText: { color: '#FFFFFF', fontFamily: 'SF-Regular', fontSize: 14 },
+  suggestions: { paddingHorizontal: 16, marginBottom: 8 },
+  suggestion: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  suggestionText: { flex: 1, minWidth: 0, fontSize: 14, fontFamily: 'SF-Regular', color: '#FFFFFF' },
+  suggestionArrow: { transform: [{ rotate: '-135deg' }] },
+  historyHeader: { paddingLeft: 18, paddingRight: 10, flexDirection: 'row', alignItems: 'center', minHeight: 44 },
+  historyTitle: { flex: 1, paddingHorizontal: 0, marginBottom: 0 },
+  historyAction: { width: 38, height: 42, justifyContent: 'center', alignItems: 'center' },
+  historyMore: { paddingHorizontal: 10, paddingVertical: 12 },
+  historyMoreText: { color: '#3EA6FF', fontFamily: 'SF-Semibold', fontSize: 13 },
   searchSpinner: { marginVertical: 18 },
   resultSection: { marginTop: 12 },
   sectionTitle: {
@@ -357,18 +474,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     marginBottom: 4,
   },
-  artistResult: {
-    minHeight: 72,
-    paddingHorizontal: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  artistImage: { width: 52, height: 52, borderRadius: 26 },
-  imageFallback: { backgroundColor: '#242428', alignItems: 'center', justifyContent: 'center' },
-  resultCopy: { flex: 1, minWidth: 0, gap: 4 },
-  resultTitle: { color: '#FFFFFF', fontSize: 15, fontFamily: 'SF-Semibold' },
-  resultSubtitle: { color: '#9B9BA0', fontSize: 12, fontFamily: 'SF-Regular' },
   saveButton: { width: 42, height: 48, alignItems: 'flex-end', justifyContent: 'center' },
   errorText: { color: '#FF8B8B', fontSize: 13, paddingHorizontal: 18, paddingVertical: 12 },
   emptyText: {

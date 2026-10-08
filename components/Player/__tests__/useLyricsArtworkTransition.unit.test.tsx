@@ -35,6 +35,8 @@ describe('lyrics artwork transition', () => {
     const update = jest.fn();
     await act(() => hook.result.current.transition(true, update));
     expect(hook.result.current.overlay!.props.style[1].transform[2].scale).toBe(1);
+    // The test worklet is static; render the next frame after the shared clock starts.
+    await hook.rerender({ trackKey: 'first', lyricsVisible: false });
     let style = StyleSheet.flatten(hook.result.current.overlay!.props.style);
     expect(style.left + 160 + style.transform[0].translateX).toBe(62);
     expect(style.top + 160 + style.transform[1].translateY).toBe(517);
@@ -48,6 +50,7 @@ describe('lyrics artwork transition', () => {
     await hook.rerender({ trackKey: 'first', lyricsVisible: true });
     await act(() => hook.result.current.transition(false, update));
     expect(hook.result.current.overlay!.props.style[1].transform[2].scale).toBe(36 / 320);
+    await hook.rerender({ trackKey: 'first', lyricsVisible: true });
     style = StyleSheet.flatten(hook.result.current.overlay!.props.style);
     expect(style.left + 160 + style.transform[0].translateX).toBe(196.5);
     expect(style.top + 160 + style.transform[1].translateY).toBe(264);
@@ -83,6 +86,7 @@ describe('lyrics artwork transition', () => {
     });
     expect(hook.result.current.overlay!.props.style[1].transform[2].scale).toBe(36 / 320);
     expect(Motion.withTiming).toHaveBeenLastCalledWith(1, lyricsTiming, expect.any(Function));
+    await hook.rerender({ trackKey: 'first', lyricsVisible: false });
     let style = StyleSheet.flatten(hook.result.current.overlay!.props.style);
     expect(style.left + 160 + style.transform[0].translateX).toBe(196.5);
     expect(style.top + 160 + style.transform[1].translateY).toBe(264);
@@ -93,6 +97,7 @@ describe('lyrics artwork transition', () => {
 
     await act(() => hook.result.current.flyBetweenFrames(cover, mini, 'mini.jpg', complete));
     expect(Motion.withTiming).toHaveBeenLastCalledWith(1, lyricsTiming, expect.any(Function));
+    await hook.rerender({ trackKey: 'first', lyricsVisible: false });
     style = StyleSheet.flatten(hook.result.current.overlay!.props.style);
     expect(style.left + 160 + style.transform[0].translateX).toBe(52);
     expect(style.top + 160 + style.transform[1].translateY).toBe(608);
@@ -144,6 +149,7 @@ describe('lyrics artwork transition', () => {
     hook.result.current.mediaRef.current = measure(24, 184, 345, 380);
     hook.result.current.rowRef.current = measure(24, 430, 345, 50);
     await act(() => hook.result.current.transition(true, jest.fn()));
+    await hook.rerender({ trackKey: 'first', lyricsVisible: false });
     const style = StyleSheet.flatten(hook.result.current.overlay!.props.style);
     expect(style.top + 160 + style.transform[1].translateY).toBe(375);
   });

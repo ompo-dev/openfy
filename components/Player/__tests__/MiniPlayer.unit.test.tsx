@@ -72,6 +72,14 @@ describe('MiniPlayer', () => {
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 
+  it('hides only the destination cover while a shared flight is presented', async () => {
+    const screen = await render(<MiniPlayer artworkHidden />);
+    expect(StyleSheet.flatten(screen.getByTestId('mini-player-cover').props.style).opacity).toBe(0);
+    expect(StyleSheet.flatten(screen.root!.props.style).opacity).toBe(1);
+    await screen.rerender(<MiniPlayer artworkHidden={false} />);
+    expect(StyleSheet.flatten(screen.getByTestId('mini-player-cover').props.style).opacity).not.toBe(0);
+  });
+
   it('uses catalog artwork first and falls back to the downloaded cover', async () => {
     jest.mocked(usePlayer).mockReturnValue({
       currentTrack: {

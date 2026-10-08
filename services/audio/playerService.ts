@@ -861,8 +861,21 @@ export const loadAndPlay = async (
       durationMs: playbackDurationMs,
       preferredForwardBufferDuration: playerOptions.preferredForwardBufferDuration,
     });
-    const player = playerInstance || createAudioPlayer(playerSource as any, playerOptions);
-    if (playerInstance) player.replace(playerSource as any);
+    let reusablePlayer = playerInstance;
+    if (reusablePlayer) {
+      try {
+        reusablePlayer.replace(playerSource as any);
+      } catch (error) {
+        // A stale native item can reject replace even for a valid local file.
+        // Recreate the engine with the same source before reporting a failure.
+        log.player('native source replacement recovered with fresh engine', {
+          trackId: diagnosticTrack?.spotifyId, error: String(error),
+        });
+        disposeCurrentPlayer();
+        reusablePlayer = null;
+      }
+    }
+    const player = reusablePlayer || createAudioPlayer(playerSource as any, playerOptions);
     playerInstance = player;
     if (Platform.OS !== 'ios') void enqueuePreloadCleanup(uri, playerSource);
     player.volume = fadeInDurationMs > 0 ? 0 : 1;

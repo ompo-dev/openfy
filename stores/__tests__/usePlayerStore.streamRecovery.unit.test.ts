@@ -482,6 +482,33 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
     jest.mocked(FileSystem.getInfoAsync).mockReset();
   });
 
+  it('retries an initial local load in place without resolving an online version', async () => {
+    const local = { ...sampleTrack, spotifyId: 'initial-local-retry', localAudioPath: 'file:///ay-bebe.m4a' };
+    jest.mocked(FileSystem.getInfoAsync).mockResolvedValue({ exists: true, size: 80000 } as any);
+    jest.mocked(loadAndPlay).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    await usePlayerStore.getState().playTrack(local);
+    expect(loadAndPlay).toHaveBeenCalledTimes(2);
+    expect(loadAndPlay).toHaveBeenLastCalledWith(local.localAudioPath, expect.any(Function), expect.any(Object), 0, local);
+    expect(resolveAudioUrl).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().history[0].spotifyId).toBe(local.spotifyId);
+    expect(usePlayerStore.getState().isLoadingAudio).toBe(false);
+    jest.mocked(FileSystem.getInfoAsync).mockReset();
+  });
+
+  it('bounds failed local retries and never substitutes another recording', async () => {
+    const local = { ...sampleTrack, spotifyId: 'initial-local-failure', localAudioPath: 'file:///broken.m4a' };
+    jest.mocked(FileSystem.getInfoAsync).mockResolvedValue({ exists: true, size: 80000 } as any);
+    jest.mocked(loadAndPlay).mockImplementation(async (_source, callback) => {
+      callback!({ isPlaying: false, isLoaded: false, isBuffering: false, positionMs: 0, durationMs: 0, error: 'decoder error' });
+      return false;
+    });
+    await usePlayerStore.getState().playTrack(local);
+    expect(loadAndPlay).toHaveBeenCalledTimes(2);
+    expect(resolveAudioUrl).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().playerState.error).toBe('decoder error');
+    jest.mocked(FileSystem.getInfoAsync).mockReset();
+  });
+
   it('keeps request ids monotonic when playback diagnostics hydrate slowly', async () => {
     const firstTrack = { ...sampleTrack, spotifyId: 'track_slow', title: 'Lenta' };
     const secondTrack = { ...sampleTrack, spotifyId: 'track_fast', title: 'Nova' };

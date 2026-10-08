@@ -6,5 +6,6 @@ export {
   getYouTubeMusicArtistProfile,
   getCachedArtistSearchSeed,
   searchCatalog,
+  getCatalogSearchSuggestions,
 } from './catalog';
 export type { CatalogSearchResults, YouTubeMusicArtistProfile } from './catalog';

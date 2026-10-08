@@ -8,6 +8,7 @@ type PlayerModalProps = Omit<ModalProps, 'animationType' | 'presentationStyle' |
   fullScreen?: boolean;
   sharedArtworkTransition?: boolean;
   artworkFlightProgress?: SharedValue<number>;
+  artworkDestinationY?: number;
   artworkOverlay?: React.ReactNode;
   artworkOverlayRef?: React.RefObject<View | null>;
   closing?: boolean;
@@ -20,7 +21,7 @@ export const shouldDismissSheet = (distance: number, velocity: number) =>
 
 /** Content sheets hug their contents; only the music player owns a full page sheet. */
 export function PlayerModal({ children, fullScreen = false, sharedArtworkTransition = false,
-  artworkFlightProgress, artworkOverlay, artworkOverlayRef, closing = false, dismissEnabled = true,
+  artworkFlightProgress, artworkDestinationY, artworkOverlay, artworkOverlayRef, closing = false, dismissEnabled = true,
   scrollOffset, ...props }: PlayerModalProps) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
@@ -49,8 +50,14 @@ export function PlayerModal({ children, fullScreen = false, sharedArtworkTransit
   }, [dragY, fullScreen, reduceMotion, sharedArtworkTransition, translateY]);
   const surfaceMotionStyle = useAnimatedStyle(() => {
     const progress = closing ? (artworkFlightProgress?.value ?? 0) : 0;
-    return { transform: [{ translateY: dragY.value + (height - dragY.value) * progress }] };
-  }, [artworkFlightProgress, closing, height]);
+    // The sheet reaches the mini cover alongside the artwork, then disappears
+    // in that same flight instead of outrunning the cover to the window bottom.
+    const destination = Math.max(dragY.value, artworkDestinationY ?? height);
+    return {
+      transform: [{ translateY: dragY.value + (destination - dragY.value) * progress }],
+      opacity: artworkDestinationY === undefined ? 1 : Math.min(1, (1 - progress) / 0.2),
+    };
+  }, [artworkDestinationY, artworkFlightProgress, closing, height]);
   const backdropMotionStyle = useAnimatedStyle(() => {
     const progress = closing ? (artworkFlightProgress?.value ?? 0) : 0;
     const distance = dragY.value + (height - dragY.value) * progress;

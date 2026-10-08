@@ -1070,6 +1070,15 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         track,
         { trackChangeAlreadyBegun: true }
       );
+      if (!success && activeStreamUri.startsWith('file:') && get().activeRequestId === requestId) {
+        log.player('retrying local playback with fresh engine', { trackId: track.spotifyId });
+        success = await loadAndPlay(streamSource, handleStatusUpdate, {
+          title: track.title,
+          artist: track.artistName,
+          albumTitle: track.albumName,
+          ...getLockScreenArtworkMetadata(track),
+        }, 0, track);
+      }
     } catch (error) {
       finishTransition({ ok: false, stage: 'native-load', error: String(error) });
       throw error;
@@ -1119,6 +1128,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     } else {
       startLyricsLoading();
       void ensurePlaybackDiagnostics(track).catch(() => {});
+      // A native file load error must not resolve a different online recording.
+      if (activeStreamUri.startsWith('file:')) return;
       const playerState = get().playerState;
       const loadError = playerState.error ?? '';
       const isRefusal = isLikelyStreamRefusal(loadError);

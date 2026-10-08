@@ -134,6 +134,26 @@ describe('shared player modal surface', () => {
       .toBeCloseTo((1 - 120 / Dimensions.get('window').height) / 2);
   });
 
+  it('keeps the descending sheet behind the cover until both reach the actual mini artwork', async () => {
+    const progress = { value: 0.5 } as Motion.SharedValue<number>;
+    const view = () => <PlayerModal visible fullScreen sharedArtworkTransition closing
+      artworkFlightProgress={progress} artworkDestinationY={600}><Text>Player</Text></PlayerModal>;
+    const screen = await render(view());
+    let style = StyleSheet.flatten(screen.getByTestId('player-modal-surface').props.style);
+    expect(style.transform).toEqual([{ translateY: 300 }]);
+    expect(style.opacity).toBe(1);
+    progress.value = 0.9;
+    await screen.rerender(view());
+    style = StyleSheet.flatten(screen.getByTestId('player-modal-surface').props.style);
+    expect(style.transform).toEqual([{ translateY: 540 }]);
+    expect(style.opacity).toBeCloseTo(0.5);
+    progress.value = 1;
+    await screen.rerender(view());
+    style = StyleSheet.flatten(screen.getByTestId('player-modal-surface').props.style);
+    expect(style.transform).toEqual([{ translateY: 600 }]);
+    expect(style.opacity).toBe(0);
+  });
+
   it('keeps header dismissal available without taking over lyric scrolling or horizontal artwork swipes', async () => {
     const create = jest.spyOn(PanResponder, 'create');
     const offset = { current: 80 };
