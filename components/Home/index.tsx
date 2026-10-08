@@ -52,7 +52,9 @@ const toPlayerTrackFromSearch = (track: TrackModel): PlayerTrack => ({
 
 export const Home = () => {
   const { top } = useSafeAreaInsets();
+  const searchTopInset = Math.min(Math.max(top, 0), 59);
   const navigation = useNavigation();
+  const tabNavigation = navigation.getParent?.();
   const { home, isLoading, isRefreshing, refresh } = usePersonalizedHome();
   const { currentTrack, isPlaying, playWithQueue, togglePlayPause } = usePlayer((state) => ({
     currentTrack: state.currentTrack, isPlaying: state.playerState.isPlaying,
@@ -102,7 +104,10 @@ export const Home = () => {
     return unsubscribe;
   }, []);
 
-  React.useEffect(() => navigation.addListener('tabPress' as never, resetSearch), [navigation, resetSearch]);
+  React.useEffect(() => {
+    if (!tabNavigation) return undefined;
+    return tabNavigation.addListener('tabPress' as never, resetSearch);
+  }, [tabNavigation, resetSearch]);
 
   React.useEffect(() => {
     const request = ++suggestionsGeneration.current;
@@ -294,12 +299,12 @@ export const Home = () => {
         contentInsetAdjustmentBehavior="never"
         onScrollBeginDrag={() => { dismissSearchKeyboard(); setSuggestionsOpen(false); }}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.content, { paddingTop: top }]}
+        contentContainerStyle={[styles.content, { paddingTop: searchTopInset }]}
         refreshControl={
           <RefreshControl
             tintColor="#FFFFFF"
             colors={['#1DB954']}
-            progressViewOffset={top}
+            progressViewOffset={searchTopInset}
             refreshing={isRefreshing}
             onRefresh={refresh}
           />

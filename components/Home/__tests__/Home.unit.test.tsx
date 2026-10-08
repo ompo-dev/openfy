@@ -58,9 +58,11 @@ jest.mock('expo-image', () => ({ Image: () => null }));
 jest.mock('expo-router', () => ({
   useFocusEffect: jest.fn(),
   useNavigation: () => ({
-    addListener: jest.fn((_event: string, listener: () => void) => {
-      mockTabPressListener = listener;
-      return jest.fn();
+    getParent: () => ({
+      addListener: jest.fn((_event: string, listener: () => void) => {
+        mockTabPressListener = listener;
+        return jest.fn();
+      }),
     }),
   }),
 }));
