@@ -2,7 +2,7 @@ import * as React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Keyboard } from 'react-native';
 import { getCatalogSearchSuggestions, searchCatalog } from '@api';
-import { upsertCatalogTracks } from '@services';
+import { getCachedArtistImage, upsertCatalogTracks } from '@services';
 import { rememberSearchSelection, removeSearchHistoryEntry, type SearchHistoryEntry } from '../../../services/search/searchHistory';
 
 import { Home } from '../index';
@@ -11,7 +11,11 @@ const mockOpenDetail = jest.fn();
 let mockHistoryEntries: SearchHistoryEntry[] = [];
 let mockTabPressListener: (() => void) | undefined;
 
-jest.mock('@api', () => ({ searchCatalog: jest.fn(), getCatalogSearchSuggestions: jest.fn().mockResolvedValue([]) }));
+jest.mock('@api', () => ({
+  searchCatalog: jest.fn(),
+  getArtistCatalogImage: jest.fn().mockResolvedValue(''),
+  getCatalogSearchSuggestions: jest.fn().mockResolvedValue([]),
+}));
 jest.mock('../../../services/search/searchHistory', () => ({
   getSearchHistory: jest.fn().mockResolvedValue([]),
   subscribeSearchHistory: (listener: (entries: SearchHistoryEntry[]) => void) => { listener(mockHistoryEntries); return () => {}; },
@@ -81,6 +85,7 @@ describe('Home', () => {
     mockHistoryEntries = [];
     mockTabPressListener = undefined;
     jest.mocked(getCatalogSearchSuggestions).mockResolvedValue([]);
+    jest.mocked(getCachedArtistImage).mockResolvedValue('');
   });
   it('dismisses the keyboard when clearing music and artist search', async () => {
     const dismiss = jest.spyOn(Keyboard, 'dismiss');
@@ -107,6 +112,24 @@ describe('Home', () => {
       expect(view.getByLabelText('Buscar músicas e artistas').props.value).toBe('');
       expect(view.queryByLabelText('Cancelar busca')).toBeNull();
     });
+  });
+
+  it('hydrates portraits for artists recovered from song credits', async () => {
+    jest.mocked(searchCatalog).mockResolvedValue({
+      artists: [{ type: 'artist', id: 'ytartist_UCsotam~Sotam', name: 'Sotam', imageURL: '' }],
+      tracks: [],
+    });
+    jest.mocked(getCachedArtistImage).mockResolvedValue('sotam.jpg');
+    const view = await render(<Home />);
+
+    await fireEvent.changeText(view.getByLabelText('Buscar músicas e artistas'), 'aotam');
+    await view.findByLabelText('Abrir artista Sotam');
+
+    await waitFor(() => expect(getCachedArtistImage).toHaveBeenCalledWith(
+      'Sotam',
+      expect.any(Function),
+      ['ytartist_UCsotam~Sotam'],
+    ));
   });
 
   it('uses the common music row and preserves search queue metadata without playing when saving', async () => {

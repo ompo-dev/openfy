@@ -14,11 +14,11 @@ import { useFocusEffect, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 
-import { getCatalogSearchSuggestions, searchCatalog } from '@api';
+import { getArtistCatalogImage, getCatalogSearchSuggestions, searchCatalog } from '@api';
 import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { useLibrarySelectedCategory, usePlayer, type PlayerTrack } from '@context';
 import { useDetailNavigation, usePersonalizedHome } from '@hooks';
-import { rememberCachedArtistImage, upsertCatalogTracks } from '@services';
+import { getCachedArtistImage, rememberCachedArtistImage, upsertCatalogTracks } from '@services';
 import type { ArtistModel, TrackModel } from '@models';
 
 import { ListeningHome } from './ListeningHome';
@@ -188,7 +188,21 @@ export const Home = () => {
             nextResults.artists.forEach((artist) => {
               if (artist.imageURL) {
                 void rememberCachedArtistImage(artist.name, artist.imageURL, [artist.id]);
+                return;
               }
+              void getCachedArtistImage(
+                artist.name,
+                () => getArtistCatalogImage(artist.id, artist.name),
+                [artist.id]
+              ).then((imageURL) => {
+                if (!imageURL || request !== searchGeneration.current) return;
+                setResults((current) => ({
+                  ...current,
+                  artists: current.artists.map((candidate) => candidate.id === artist.id
+                    ? { ...candidate, imageURL }
+                    : candidate),
+                }));
+              }).catch(() => {});
             });
             log.search('catalog query completed', {
               durationMs: Date.now() - startedAt,
@@ -276,6 +290,8 @@ export const Home = () => {
         bounces
         keyboardShouldPersistTaps="always"
         keyboardDismissMode="on-drag"
+        automaticallyAdjustContentInsets={false}
+        contentInsetAdjustmentBehavior="never"
         onScrollBeginDrag={() => { dismissSearchKeyboard(); setSuggestionsOpen(false); }}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.content, { paddingTop: top }]}
