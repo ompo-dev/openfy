@@ -24,6 +24,7 @@ describe('media suggestion iOS configuration', () => {
     const first = await config.mods.ios.appDelegate(input);
     const second = await config.mods.ios.appDelegate(first);
     expect(second.modResults.contents.match(/public func application/g)).toHaveLength(1);
+    expect(second.modResults.contents).toContain('internal import OpenfyYouTube');
     expect(second.modResults.contents).toContain('handle intent: INIntent');
     expect(second.modResults.contents).toContain('OpenfyMediaIntentHandler().handle');
     expect(second.modResults.contents).not.toContain('handlerFor');

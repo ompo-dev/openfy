@@ -23,7 +23,10 @@ module.exports = (config) => {
     if (!delegate.contents.includes('OpenfyMediaIntentHandler().handle')) {
       const marker = /(class AppDelegate\s*:\s*ExpoAppDelegate[^\{]*\{)/;
       if (!marker.test(delegate.contents)) throw new Error('Cannot register the Openfy media intent handler');
-      delegate.contents = `import Intents\nimport OpenfyYouTube\n${delegate.contents}`.replace(marker, `$1
+      // Expo's Swift 6 module provider imports this generated module with an
+      // explicit internal access level. Match it in AppDelegate or Swift emits
+      // an ambiguous implicit-access-level error during Release builds.
+      delegate.contents = `import Intents\ninternal import OpenfyYouTube\n${delegate.contents}`.replace(marker, `$1
   public func application(_ application: UIApplication, handle intent: INIntent,
     completionHandler: @escaping (INIntentResponse) -> Void) {
     guard let mediaIntent = intent as? INPlayMediaIntent else {
