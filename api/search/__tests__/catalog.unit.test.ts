@@ -2,6 +2,7 @@ import {
   getArtistCatalogImage,
   getYouTubeMusicArtistImage,
   getYouTubeMusicArtistProfile,
+  subscribeYouTubeMusicArtistProfile,
   getCachedArtistSearchSeed,
   searchCatalog,
   getCatalogSearchSuggestions,
@@ -23,6 +24,36 @@ jest.mock('../../../services/metadata/spotifyMetadata', () => ({
 
 describe('public YouTube Music catalog', () => {
   beforeEach(() => jest.clearAllMocks());
+
+  it('publishes the real header and initial songs while catalog search is still pending', async () => {
+    const id = 'ytartist_UCprogressive~Progressive';
+    let finishSearch!: (value: unknown) => void;
+    const page = {
+      header: { title: 'Progressive', description: 'Biography',
+        thumbnail: { contents: [{ url: 'https://images.example/progressive.jpg', width: 800 }] } },
+      sections: [{ contents: [{ id: 'abcdefghijk', title: 'First song', item_type: 'song',
+        artists: [{ channel_id: 'UCprogressive', name: 'Progressive' }] }] }],
+    };
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: {
+      getArtist: jest.fn().mockResolvedValue(page),
+      search: jest.fn(() => new Promise((resolve) => { finishSearch = resolve; })),
+    } } as never);
+    let notify!: () => void;
+    const initial = new Promise<void>((resolve) => { notify = resolve; });
+    const listener = jest.fn(() => notify());
+    const unsubscribe = subscribeYouTubeMusicArtistProfile(id, listener);
+    let finished = false;
+    const full = getYouTubeMusicArtistProfile(id).then((value) => { finished = true; return value; });
+    await initial;
+    expect(finished).toBe(false);
+    expect(listener.mock.calls[0]).toEqual([expect.objectContaining({
+      artist: expect.objectContaining({ name: 'Progressive', imageURL: 'https://images.example/progressive.jpg' }),
+      tracks: [expect.objectContaining({ title: 'First song' })],
+    })]);
+    finishSearch({ songs: { contents: [] } });
+    await full;
+    unsubscribe();
+  });
 
   it('reads and deduplicates autocomplete text from the music catalog', async () => {
     const getSearchSuggestions = jest.fn().mockResolvedValue([{ contents: [

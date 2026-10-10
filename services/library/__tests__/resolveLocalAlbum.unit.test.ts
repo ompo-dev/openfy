@@ -30,6 +30,18 @@ it('resolves a two-track local album to the complete public album', async () => 
   expect(withLibraryAlbumTracks).toHaveBeenCalledWith(complete);
 });
 
+it('publishes saved songs before a slow public lookup finishes', async () => {
+  let finish!: (value: unknown) => void;
+  jest.mocked(getYouTubeMusicArtistProfile).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve as never; }));
+  const preview = jest.fn();
+  const request = resolveLocalAlbum('spotify:spotify-km2', preview);
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  expect(preview).toHaveBeenCalledWith(expect.objectContaining({ partial: true, tracks: expect.any(Array) }));
+  expect(preview.mock.calls[0][0].tracks).toHaveLength(2);
+  finish({ albums: [{ id: complete.id, title: 'KM2' }], singlesAndEps: [] });
+  expect((await request).tracks).toHaveLength(11);
+});
+
 it('opens remembered membership instantly even after the old local album id has changed', async () => {
   jest.mocked(getLibraryTracks).mockResolvedValue([]);
   jest.mocked(getRememberedAlbum).mockResolvedValue(complete as never);

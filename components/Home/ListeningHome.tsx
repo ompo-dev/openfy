@@ -15,6 +15,7 @@ import { SkeletonImage } from '../common/SkeletonImage';
 import { TrackRow } from '../common/TrackRow';
 import { ProgressiveList } from '../common/ProgressiveList';
 import { getHomeRailCardSize, type HomeCardSize } from './homeCardSizing';
+import { rememberDetailPreview } from '../../services/navigation/detailPreview';
 
 export const homeTrackToPlayer = (track: PersonalizedHomeTrack) => ({ ...track, imageURL: track.localImagePath || track.imageURL });
 const releaseLabel = (release: HomeRelease) => ({ album: 'Álbum', single: 'Single', ep: 'EP', compilation: 'Coletânea', release: 'Lançamento' })[release.releaseType];
@@ -59,6 +60,26 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
   const { openDetail } = useDetailNavigation();
   React.useEffect(() => { if (!loading) publishHomePlaylists(home); }, [home, loading]);
   const [artistImages, setArtistImages] = React.useState<Record<string, string>>({});
+  React.useEffect(() => {
+    [...home.pinnedArtists, ...home.artists].forEach((artist) => {
+      rememberDetailPreview('artist', artist.artistId, {
+        title: artist.title, imageURL: artistImages[artist.artistId] || artist.imageURL,
+      });
+    });
+    (home.releases || []).forEach((release) => {
+      rememberDetailPreview('album', release.id, { title: release.title, imageURL: release.imageURL,
+        subtitle: [releaseLabel(release), release.releaseDate].filter(Boolean).join(' · '),
+        artists: [{ id: release.artistId, name: release.artistName, imageURL: release.artistImageURL }],
+      });
+    });
+    (home.playlists || []).forEach((playlist) => {
+      const tracks = playlist.trackIds.map((id) => home.tracksById.get(id)).filter((track) => track !== undefined);
+      const imageURLs = [...new Set([...tracks.map((track) => track.localImagePath || track.imageURL),
+        ...(playlist.coverImageURLs || [])].filter(Boolean))].slice(0, 4);
+      rememberDetailPreview('playlist', playlist.id, { title: playlist.title, imageURL: imageURLs[0],
+        imageURLs, trackCount: playlist.trackIds.length });
+    });
+  }, [home, artistImages]);
   const [startingRelease, setStartingRelease] = React.useState<string | null>(null);
   const recent = home.continueListening;
   const mostPlayed = home.mostPlayed || [];

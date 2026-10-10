@@ -13,6 +13,7 @@ import {
 } from '../../services/youtubeMusicClient';
 import { log } from '../../utils/appLogger';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
+import { createProgressiveResource } from '../../src/application/progressiveResource';
 import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
 
 export type CatalogSearchResults = {
@@ -29,6 +30,8 @@ export type YouTubeMusicArtistProfile = {
   albums: LibraryItemModel[];
   singlesAndEps: LibraryItemModel[];
 };
+
+const artistProfileProgress = createProgressiveResource<YouTubeMusicArtistProfile>('artist profile preview', 100);
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' ? value as Record<string, unknown> : {};
@@ -121,13 +124,16 @@ export const getYouTubeMusicArtistBiography = (artistRouteId: string) =>
 
 const loadArtistTopSongs = async (
   client: Awaited<ReturnType<typeof getYouTubeMusicClient>>,
-  artistPage: Awaited<ReturnType<NonNullable<YouTubeMusicClient['music']['getArtist']>>>
+  artistPage: Awaited<ReturnType<NonNullable<YouTubeMusicClient['music']['getArtist']>>>,
+  onPage?: (items: YouTubeMusicItem[]) => void,
 ) => {
   if (!artistPage.getAllSongs) return [] as YouTubeMusicItem[];
+  const items: YouTubeMusicItem[] = [];
   try {
     const shelf = await withYouTubeMusicTimeout(artistPage.getAllSongs(), 6_000);
     if (!shelf) return [];
-    const items = [...asArray(asRecord(shelf).contents) as YouTubeMusicItem[]];
+    items.push(...asArray(asRecord(shelf).contents) as YouTubeMusicItem[]);
+    onPage?.(items);
     const playlistId = asString(asRecord(shelf).playlist_id);
     if (!playlistId) return items;
 
@@ -141,6 +147,7 @@ const loadArtistTopSongs = async (
       if (!pageItems.length || seenPageItems.has(pageKey)) break;
       seenPageItems.add(pageKey);
       items.push(...pageItems);
+      onPage?.(pageItems);
       if (!asRecord(page).has_continuation || !page.getContinuation) break;
       const next: YouTubeMusicPlaylistPage | null = await withYouTubeMusicTimeout(page.getContinuation(), 4_000);
       if (!next) break;
@@ -149,7 +156,7 @@ const loadArtistTopSongs = async (
     return items;
   } catch (error) {
     log.artist('complete artist song shelf unavailable', { error });
-    return [];
+    return items;
   }
 };
 
@@ -740,120 +747,138 @@ const loadYouTubeMusicArtistProfile = async (
   const singlesAndEps = uniqueReleases
     .filter((release) => release.kind !== 'album')
     .map((release) => release.item);
-  const [searchedSongs, completeSongShelf] = await Promise.all([
-    initialSongSearch || searchArtistSongs(name),
-    loadArtistTopSongs(client, page),
-  ]);
+  let searchedSongs: YouTubeMusicItem[] = [];
+  let completeSongShelf: YouTubeMusicItem[] = [];
   const matchingArtistCredit = (item: YouTubeMusicItem) =>
     artistReferences(item).some((artist) =>
       artist.id === browseId || normalizeArtistName(artist.name) === normalizeArtistName(name)
     );
-  const matchingSearchedSongs = searchedSongs.filter(matchingArtistCredit);
   const pageAndCatalogSongs = new Map<string, YouTubeMusicItem>();
-  for (const item of [...profileSongItems, ...completeSongShelf, ...matchingSearchedSongs]) {
-    const data = asRecord(item);
-    const id = asString(data.id) || asString(data.video_id);
-    if (validVideoId(id) && !pageAndCatalogSongs.has(id)) {
-      pageAndCatalogSongs.set(id, item);
+  const addSongs = (items: YouTubeMusicItem[]) => {
+    for (const item of items) {
+      const data = asRecord(item);
+      const id = asString(data.id) || asString(data.video_id);
+      if (validVideoId(id) && !pageAndCatalogSongs.has(id)) {
+        pageAndCatalogSongs.set(id, item);
+      }
     }
-  }
+  };
+  addSongs(profileSongItems);
   // A profile song shelf exposes one copy of a recording, while the same
   // recording can be present in an album, a single, and a deluxe release.
   // Read the release tracklists once so the profile keeps every membership.
-  const releaseAssociations = await loadProfileReleaseAssociations(client, uniqueReleases);
-  const tracks: TrackModel[] = [];
-  const participationTracks: TrackModel[] = [];
-  const releaseByTitle = new Map(
-    uniqueReleases.map((release) => [normalizeArtistName(release.item.title), release])
-  );
-  const releaseByImage = new Map<string, YouTubeMusicReleaseModel | null>();
-  uniqueReleases.forEach((release) => {
-    const imageKey = release.item.imageURL
-      .replace(/=w\d+[^/]*$/i, '')
-      .replace(/=s\d+[^/]*$/i, '');
-    if (!imageKey) return;
-    releaseByImage.set(imageKey, releaseByImage.has(imageKey) ? null : release);
-  });
-  for (const item of pageAndCatalogSongs.values()) {
-    const parsedTrack = toYouTubeMusicTrackModel(item);
-    if (!parsedTrack) continue;
-    const imageKey = (parsedTrack.imageURL || '')
-      .replace(/=w\d+[^/]*$/i, '')
-      .replace(/=s\d+[^/]*$/i, '');
-    const matchingRelease = (parsedTrack.albumName && parsedTrack.albumName !== 'YouTube Music'
-      ? releaseByTitle.get(normalizeArtistName(parsedTrack.albumName))
-      : undefined) || (imageKey ? releaseByImage.get(imageKey) || undefined : undefined);
-    const matchingAlbumId = matchingRelease
-      ? releaseBrowseId(matchingRelease.item.id)
-      : '';
-    const track = matchingRelease
-      ? {
-          ...parsedTrack,
-          albumId: matchingAlbumId,
-          albumName: matchingRelease.item.title,
-          imageURL: matchingRelease.item.imageURL || parsedTrack.imageURL,
-          releaseType: matchingRelease.item.releaseType,
-          albumAssociations: mergeAlbumAssociations(
-            parsedTrack.albumAssociations,
-            releaseAssociations.get(parsedTrack.id),
-            [{
-              id: matchingAlbumId,
-              name: matchingRelease.item.title,
-              imageURL: matchingRelease.item.imageURL,
-              releaseType: matchingRelease.item.releaseType,
-              releaseDate: matchingRelease.item.releaseDate,
-            }],
-          ),
-        }
-      : {
-          ...parsedTrack,
-          albumAssociations: mergeAlbumAssociations(
-            parsedTrack.albumAssociations,
-            releaseAssociations.get(parsedTrack.id),
-          ),
-        };
-    const credits = artistReferences(item);
-    const artistCreditIndex = credits.findIndex((artist) =>
-      artist.id === browseId || normalizeArtistName(artist.name) === normalizeArtistName(name)
+  const collectTracks = (releaseAssociations = new Map<string, TrackAlbumRef[]>()) => {
+    const tracks: TrackModel[] = [];
+    const participationTracks: TrackModel[] = [];
+    const releaseByTitle = new Map(
+      uniqueReleases.map((release) => [normalizeArtistName(release.item.title), release])
     );
-    if (artistCreditIndex > 0) participationTracks.push(track);
-    else tracks.push(track);
-  }
-  finishSongCatalog({
-    ok: true,
-    profileTracks: profileSongItems.length + completeSongShelf.length,
-    catalogTracks: matchingSearchedSongs.length,
-    uniqueTracks: tracks.length + participationTracks.length,
-    participations: participationTracks.length,
-    releases: uniqueReleases.length,
-  });
+    const releaseByImage = new Map<string, YouTubeMusicReleaseModel | null>();
+    uniqueReleases.forEach((release) => {
+      const imageKey = release.item.imageURL
+        .replace(/=w\d+[^/]*$/i, '')
+        .replace(/=s\d+[^/]*$/i, '');
+      if (!imageKey) return;
+      releaseByImage.set(imageKey, releaseByImage.has(imageKey) ? null : release);
+    });
+    for (const item of pageAndCatalogSongs.values()) {
+      const parsedTrack = toYouTubeMusicTrackModel(item);
+      if (!parsedTrack) continue;
+      const imageKey = (parsedTrack.imageURL || '')
+        .replace(/=w\d+[^/]*$/i, '')
+        .replace(/=s\d+[^/]*$/i, '');
+      const matchingRelease = (parsedTrack.albumName && parsedTrack.albumName !== 'YouTube Music'
+        ? releaseByTitle.get(normalizeArtistName(parsedTrack.albumName))
+        : undefined) || (imageKey ? releaseByImage.get(imageKey) || undefined : undefined);
+      const matchingAlbumId = matchingRelease
+        ? releaseBrowseId(matchingRelease.item.id)
+        : '';
+      const track = matchingRelease
+        ? {
+            ...parsedTrack,
+            albumId: matchingAlbumId,
+            albumName: matchingRelease.item.title,
+            imageURL: matchingRelease.item.imageURL || parsedTrack.imageURL,
+            releaseType: matchingRelease.item.releaseType,
+            albumAssociations: mergeAlbumAssociations(
+              parsedTrack.albumAssociations,
+              releaseAssociations.get(parsedTrack.id),
+              [{
+                id: matchingAlbumId,
+                name: matchingRelease.item.title,
+                imageURL: matchingRelease.item.imageURL,
+                releaseType: matchingRelease.item.releaseType,
+                releaseDate: matchingRelease.item.releaseDate,
+              }],
+            ),
+          }
+        : {
+            ...parsedTrack,
+            albumAssociations: mergeAlbumAssociations(
+              parsedTrack.albumAssociations,
+              releaseAssociations.get(parsedTrack.id),
+            ),
+          };
+      const credits = artistReferences(item);
+      const artistCreditIndex = credits.findIndex((artist) =>
+        artist.id === browseId || normalizeArtistName(artist.name) === normalizeArtistName(name)
+      );
+      if (artistCreditIndex > 0) participationTracks.push(track);
+      else tracks.push(track);
+    }
+    return { tracks, participationTracks };
+  };
 
   const profileImageRoute = toYouTubeMusicArtistRouteId(browseId, name);
   const headerPortrait = largestImage(headerItem, 1_000);
-  const [description, profilePortrait] = await Promise.all([
-    asString(header.description) || loadChannelBiography(client, browseId).catch(() => ''),
-    headerPortrait
-      ? Promise.resolve(headerPortrait)
-      : loadYouTubeMusicArtistImage(profileImageRoute).catch(() => ''),
-  ]);
-
-  return {
-    artist: {
-      type: 'artist',
-      id: artistRouteId,
-      name,
-      imageURL: profilePortrait || (
-        !routeName || normalizeArtistName(name) === normalizeArtistName(routeName)
-          ? largestImage(headerItem, 1_000)
-          : ''
-      ),
-      ...(description ? { description } : {}),
-    },
-    tracks,
-    participationTracks,
-    albums,
-    singlesAndEps,
+  const fallbackPortrait = !routeName || normalizeArtistName(name) === normalizeArtistName(routeName) ? headerPortrait : '';
+  let snapshot: YouTubeMusicArtistProfile = {
+    artist: { type: 'artist', id: artistRouteId, name, imageURL: fallbackPortrait,
+      ...(asString(header.description) ? { description: asString(header.description) } : {}) },
+    ...collectTracks(), albums, singlesAndEps,
   };
+  const publish = () => artistProfileProgress.publish(artistRouteId, snapshot);
+  publish();
+  const metadataRequest = Promise.all([
+    Promise.resolve(asString(header.description) || loadChannelBiography(client, browseId).catch(() => '')).then((description) => {
+      if (description) {
+        snapshot = { ...snapshot, artist: { ...snapshot.artist, description } };
+        publish();
+      }
+    }),
+    (headerPortrait
+      ? Promise.resolve(headerPortrait)
+      : loadYouTubeMusicArtistImage(profileImageRoute).catch(() => '')).then((profilePortrait) => {
+        snapshot = { ...snapshot, artist: { ...snapshot.artist, imageURL: profilePortrait || fallbackPortrait } };
+        publish();
+      }),
+  ]);
+  const publishSongs = (items: YouTubeMusicItem[]) => {
+    addSongs(items);
+    snapshot = { ...snapshot, ...collectTracks() };
+    publish();
+  };
+  await Promise.all([
+    (initialSongSearch || searchArtistSongs(name)).then((items) => {
+      searchedSongs = items.filter(matchingArtistCredit);
+      publishSongs(searchedSongs);
+    }),
+    loadArtistTopSongs(client, page, publishSongs).then((items) => {
+      completeSongShelf = items;
+      publishSongs(items);
+    }),
+  ]);
+  // Keep the authoritative shelf order independent of which request finished first.
+  pageAndCatalogSongs.clear();
+  addSongs([...profileSongItems, ...completeSongShelf, ...searchedSongs]);
+  const releaseAssociations = await loadProfileReleaseAssociations(client, uniqueReleases);
+  snapshot = { ...snapshot, ...collectTracks(releaseAssociations) };
+  publish();
+  await metadataRequest;
+  finishSongCatalog({ ok: true, profileTracks: profileSongItems.length + completeSongShelf.length,
+    catalogTracks: searchedSongs.length, uniqueTracks: snapshot.tracks.length + snapshot.participationTracks.length,
+    participations: snapshot.participationTracks.length, releases: uniqueReleases.length });
+  return snapshot;
 };
 
 const ARTIST_PROFILE_CACHE_MS = 6 * 60 * 60 * 1000;
@@ -871,8 +896,20 @@ export const getYouTubeMusicArtistProfile = (
   ARTIST_PROFILE_CACHE_MS
 );
 
-export const discardPrefetchedYouTubeMusicArtistProfile = (artistRouteId: string) =>
+export const getCachedYouTubeMusicArtistProfile = (artistRouteId: string) =>
+  artistProfileCache.peek(artistRouteId) || artistProfileProgress.peek(artistRouteId);
+
+export const subscribeYouTubeMusicArtistProfile = (artistRouteId: string, listener: (profile: YouTubeMusicArtistProfile) => void) => {
+  const unsubscribe = artistProfileProgress.subscribe(artistRouteId, listener);
+  const cached = artistProfileCache.peek(artistRouteId);
+  if (cached) listener(cached);
+  return unsubscribe;
+};
+
+export const discardPrefetchedYouTubeMusicArtistProfile = (artistRouteId: string) => {
   artistProfileCache.delete(artistRouteId);
+  artistProfileProgress.delete(artistRouteId);
+};
 
 const ARTIST_IMAGE_CACHE_MS = 6 * 60 * 60 * 1000;
 const EMPTY_ARTIST_IMAGE_CACHE_MS = 30 * 1000;

@@ -34,6 +34,8 @@ const loadPlaylist = async (
 export const getPlaylist = (playlistId: string): Promise<PlaylistModel> =>
   playlistCache.getOrLoad(playlistId, () => loadPlaylist(playlistId), 15 * 60_000);
 
+export const getCachedPlaylist = (playlistId: string) => playlistCache.peek(playlistId);
+
 const loadPlaylistItems = async ({
   playlistId,
   fields = 'items.track(id,name,artists(id,name),album(name,images(url)),duration_ms,explicit)',

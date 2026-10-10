@@ -1,6 +1,16 @@
 import { createAsyncResourceCache } from '../asyncResourceCache';
 
 describe('AsyncResourceCache', () => {
+  it('reads fresh values synchronously without starting another request', async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+    const cache = createAsyncResourceCache<string>({ name: 'preview' });
+    expect(cache.peek('key')).toBeUndefined();
+    cache.set('key', 'header', 10);
+    expect(cache.peek('key')).toBe('header');
+    now.mockReturnValue(1_011);
+    expect(cache.peek('key')).toBeUndefined();
+    now.mockRestore();
+  });
   it('coalesces concurrent requests and reuses successful values', async () => {
     const cache = createAsyncResourceCache<string>({ name: 'test' });
     const load = jest.fn().mockResolvedValue('value');

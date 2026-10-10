@@ -1,5 +1,6 @@
 import * as React from 'react';
 import {
+  ActivityIndicator,
   Keyboard,
   Platform,
   RefreshControl,
@@ -32,6 +33,7 @@ import { findArtistIdByName, getArtistCatalogImage } from '@api';
 import { getCachedArtistImage } from '@services';
 import { useDetailNavigation } from '@hooks';
 import { isSameRecording } from '../../services/library/trackIdentity';
+import { rememberDetailPreview } from '../../services/navigation/detailPreview';
 
 type CollectionTrack = TrackModel & {
   localAudioPath?: string;
@@ -74,6 +76,8 @@ export type CollectionDetailProps = {
   footer?: React.ReactNode;
   onRefresh?: () => void | Promise<void>;
   refreshing?: boolean;
+  loadingTracks?: boolean;
+  loadingError?: string;
 };
 
 const toPlayerTrack = (track: CollectionTrack, collectionName: string) => ({
@@ -195,7 +199,13 @@ export const CollectionDetail = ({
   footer,
   onRefresh,
   refreshing = false,
+  loadingTracks = false,
+  loadingError = '',
 }: CollectionDetailProps) => {
+  React.useEffect(() => {
+    rememberDetailPreview(kind, collectionId, { title, imageURL, imageURLs, artists,
+      tracks: tracks.slice(0, 12), trackCount, subtitle: metadataProp });
+  }, [kind, collectionId, title, imageURL, imageURLs, artists, tracks, trackCount, metadataProp]);
   const router = useRouter();
   const { openDetail } = useDetailNavigation();
   const segments = useSegments();
@@ -886,7 +896,9 @@ export const CollectionDetail = ({
           extraSections.length || footer ? styles.listFooter : undefined
         }
         ListEmptyComponent={
-          extraSections.length ? null : (
+          loadingTracks ? <ActivityIndicator color="#1ED760" style={{ padding: 32 }} /> : loadingError ? (
+            <Text style={styles.empty}>{loadingError}</Text>
+          ) : extraSections.length ? null : (
             <Text style={styles.empty}>
               {normalizedSearchQuery
                 ? 'Nenhuma música encontrada.'

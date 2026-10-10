@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
 import {
@@ -8,6 +7,7 @@ import {
 import { useDetailNavigation } from '@hooks';
 import { CollectionDetail } from '../CollectionDetail';
 import { resolveLocalAlbum } from '../../services/library/resolveLocalAlbum';
+import { PendingCollectionDetail } from '../CollectionDetail/PendingCollectionDetail';
 
 export const LocalAlbum = ({ albumId }: { albumId: string }) => {
   const { openDetail } = useDetailNavigation();
@@ -20,7 +20,9 @@ export const LocalAlbum = ({ albumId }: { albumId: string }) => {
       let active = true;
       if (loadedId.current !== albumId) setAlbum(null);
       setError('');
-      void resolveLocalAlbum(albumId).then((nextAlbum) => {
+      void resolveLocalAlbum(albumId, (preview) => {
+        if (active) setAlbum(preview);
+      }).then((nextAlbum) => {
         if (!active) return;
         loadedId.current = albumId;
         setAlbum(nextAlbum);
@@ -32,10 +34,8 @@ export const LocalAlbum = ({ albumId }: { albumId: string }) => {
     }, [albumId])
   );
 
-  if (!album) return <View style={{ flex: 1, backgroundColor: '#101010', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-    {!error ? <ActivityIndicator color="#1ED760" /> : null}
-    <Text style={{ color: '#FFFFFF' }}>{error || 'Carregando álbum...'}</Text>
-  </View>;
+  if (!album) return <PendingCollectionDetail kind="album" collectionId={`local_album_${encodeURIComponent(albumId)}`} error={error}
+    resolveTracksForPlayback={() => resolveLocalAlbum(albumId).then((data) => data.tracks)} />;
 
   const handleArtistPress = (artistId: string, artistName: string) => {
     const targetArtistId = artistId

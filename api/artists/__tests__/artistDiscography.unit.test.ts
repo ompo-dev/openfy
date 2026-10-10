@@ -1,5 +1,5 @@
 import { spotifyGet } from '../../config';
-import { getArtistDiscography } from '../artistDiscography';
+import { getArtistDiscography, subscribeArtistDiscography } from '../artistDiscography';
 
 jest.mock('../../config', () => ({
   BASE_URL: 'https://spotify.test/v1',
@@ -9,6 +9,33 @@ jest.mock('../../config', () => ({
 describe('getArtistDiscography', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('publishes releases and the first album without waiting for a slow deluxe album', async () => {
+    const id = 'progressive-discography';
+    const albums = ['original', 'deluxe'].map((id) => ({ id, name: id, album_type: 'album',
+      release_date: '2026-01-01', images: [], artists: [{ id: 'artist', name: 'Artist' }] }));
+    const track = { id: 'original-track', name: 'Same recording', duration_ms: 1000, explicit: false,
+      artists: [{ id: 'artist', name: 'Artist' }] };
+    let finishDeluxe!: (value: unknown) => void;
+    jest.mocked(spotifyGet).mockResolvedValueOnce({ data: { items: albums, total: 2 } } as never)
+      .mockResolvedValueOnce({ data: { items: [track], total: 1 } } as never)
+      .mockImplementationOnce(() => new Promise((resolve) => { finishDeluxe = resolve as never; }));
+    let notify!: () => void;
+    const initial = new Promise<void>((resolve) => { notify = resolve; });
+    const listener = jest.fn((value) => { if (value.tracks.length) notify(); });
+    const unsubscribe = subscribeArtistDiscography(id, listener);
+    let finished = false;
+    const full = getArtistDiscography(id).then((value) => { finished = true; return value; });
+    await initial;
+    expect(finished).toBe(false);
+    expect(listener.mock.calls[0][0]).toMatchObject({ albums: expect.any(Array), tracks: [] });
+    expect(listener.mock.lastCall?.[0].tracks).toHaveLength(1);
+    finishDeluxe({ data: { items: [{ ...track, id: 'deluxe-track' }], total: 1 } });
+    const result = await full;
+    expect(result.tracks).toHaveLength(1);
+    expect(result.tracks[0].albumAssociations).toHaveLength(2);
+    unsubscribe();
   });
 
   it('loads every page of album tracks and returns Spotify credits and artwork', async () => {

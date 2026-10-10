@@ -32,6 +32,8 @@ const loadArtist = async (artistId: string): Promise<ArtistModel> => {
 export const getArtist = (artistId: string): Promise<ArtistModel> =>
   artistProfileCache.getOrLoad(artistId, () => loadArtist(artistId), 30 * 60_000);
 
+export const getCachedArtist = (artistId: string) => artistProfileCache.peek(artistId);
+
 export const discardPrefetchedArtistProfile = (artistId: string) =>
   artistProfileCache.delete(artistId);
 

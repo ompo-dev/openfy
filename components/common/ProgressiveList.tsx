@@ -68,10 +68,22 @@ export function ProgressiveList({ children, listKey = '' }: { children: React.Re
   ))}</>;
 }
 
-/** Keep the full data/queue intact; virtualization mounts cells in small, top-first batches. */
-export function ProgressiveFlatList<Item>({ listKey = '', renderItem, keyExtractor, ...props }:
+/** Stage the first viewport, then let virtualization handle the unchanged full queue. */
+export function ProgressiveFlatList<Item>({ listKey = '', data, renderItem, keyExtractor, onEndReached, ListFooterComponent, ...props }:
   FlatListProps<Item> & { listKey?: string }) {
   const reducedMotion = useReducedMotion();
+  const fullData = React.useMemo(() => Array.from(data || []), [data]);
+  const [mount, setMount] = React.useState({ scope: listKey, count: 1 });
+  const count = reducedMotion ? fullData.length : Math.min(fullData.length, mount.scope === listKey ? mount.count : 1);
+  const revealing = count < fullData.length;
+  React.useEffect(() => {
+    if (!revealing) return;
+    const timer = setTimeout(() => setMount({
+      scope: listKey, count: count < 10 ? count + 1 : fullData.length,
+    }), REVEAL_INTERVAL);
+    return () => clearTimeout(timer);
+  }, [count, fullData.length, listKey, revealing]);
+  const mountedData = React.useMemo(() => fullData.slice(0, count), [count, fullData]);
   const revealed = React.useMemo(() => ({ scope: listKey, keys: new Set<string>(), nextStart: 0 }), [listKey]);
   const renderProgressiveItem = React.useCallback<ListRenderItem<Item>>((info) => {
     const key = keyExtractor?.(info.item, info.index) ?? String(info.index);
@@ -94,6 +106,9 @@ export function ProgressiveFlatList<Item>({ listKey = '', renderItem, keyExtract
     updateCellsBatchingPeriod={REVEAL_INTERVAL}
     windowSize={5}
     {...props}
+    data={mountedData}
+    ListFooterComponent={revealing ? null : ListFooterComponent}
+    onEndReached={revealing ? undefined : onEndReached}
     keyExtractor={keyExtractor}
     renderItem={renderProgressiveItem}
   />;

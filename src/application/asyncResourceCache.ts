@@ -80,6 +80,19 @@ export class AsyncResourceCache<Value> {
     this.trim();
   }
 
+  /** Read a fresh value synchronously so a screen can use its prefetched first frame. */
+  peek(key: string): Value | undefined {
+    const cached = this.values.get(key);
+    if (!cached) return undefined;
+    if (cached.expiresAt <= Date.now()) {
+      this.values.delete(key);
+      return undefined;
+    }
+    this.values.delete(key);
+    this.values.set(key, cached);
+    return cached.value;
+  }
+
   delete(key: string) {
     this.values.delete(key);
     this.inFlight.delete(key);

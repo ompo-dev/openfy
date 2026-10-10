@@ -4,12 +4,17 @@ import type { ArtistModel } from '@models';
 import { LoggedPressable } from '../native';
 import { AppIcon } from '../native/AppIcon';
 import { SkeletonImage } from '../common/SkeletonImage';
+import { rememberDetailPreview } from '../../services/navigation/detailPreview';
 
 export const ArtistSearchRow = ({ artist, onPress, trailingAction }: {
   artist: ArtistModel;
   onPress: () => void;
   trailingAction?: React.ReactNode;
-}) => (
+}) => {
+  React.useEffect(() => {
+    rememberDetailPreview('artist', artist.id, { title: artist.name, imageURL: artist.imageURL });
+  }, [artist.id, artist.name, artist.imageURL]);
+  return (
   <LoggedPressable accessibilityLabel={`Abrir artista ${artist.name}`} onPress={onPress} style={styles.row}>
     {artist.imageURL ? (
       <SkeletonImage cachePolicy="memory-disk" priority="high" source={{ uri: artist.imageURL }}
@@ -23,7 +28,8 @@ export const ArtistSearchRow = ({ artist, onPress, trailingAction }: {
     </View>
     {trailingAction || <AppIcon name="chevron-forward" size={18} color="#85858A" />}
   </LoggedPressable>
-);
+  );
+};
 
 const styles = StyleSheet.create({
   row: { minHeight: 64, paddingVertical: 8, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 11 },

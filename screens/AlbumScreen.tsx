@@ -1,10 +1,11 @@
 import * as React from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { CollectionDetail, LocalAlbum } from '@components';
 import {
   findArtistIdByName,
   getAlbum,
+  getCachedAlbum,
+  getCachedYouTubeMusicAlbum,
   getArtist,
   getYouTubeMusicAlbum,
   isYouTubeMusicAlbumId,
@@ -15,6 +16,7 @@ import { AlbumModel, ArtistModel } from '@models';
 import { getDisplayTime } from '@utils';
 import { prefetchArtistData } from '@services';
 import { withLibraryAlbumTracks } from '../services/library/albumMetadata';
+import { PendingCollectionDetail } from '../components/CollectionDetail/PendingCollectionDetail';
 
 export type AlbumScreenPropsType = {
   albumId: string;
@@ -31,40 +33,18 @@ const getLocalAlbumId = (albumId: string): string => {
   }
 };
 
-const AlbumLoadingState = ({
-  error,
-  onRetry,
-}: {
-  error: string;
-  onRetry: () => void;
-}) => (
-  <View style={{ flex: 1, backgroundColor: '#101010', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-    <ActivityIndicator color="#1ED760" />
-    <Text style={{ color: '#FFFFFF', fontSize: 16 }}>
-      {error || 'Carregando álbum...'}
-    </Text>
-    {error ? (
-      <Pressable onPress={onRetry} accessibilityRole="button">
-        <Text style={{ color: '#1ED760', fontSize: 16, fontWeight: '700' }}>
-          Tentar novamente
-        </Text>
-      </Pressable>
-    ) : null}
-  </View>
-);
-
 export const AlbumScreen = ({ albumId }: AlbumScreenPropsType) =>
   albumId.startsWith(LOCAL_ALBUM_PREFIX) ? (
-    <LocalAlbum albumId={getLocalAlbumId(albumId)} />
+    <LocalAlbum key={albumId} albumId={getLocalAlbumId(albumId)} />
   ) : isYouTubeMusicAlbumId(albumId) ? (
-    <YouTubeMusicAlbumScreen albumId={albumId} />
+    <YouTubeMusicAlbumScreen key={albumId} albumId={albumId} />
   ) : (
-    <RemoteAlbumScreen albumId={albumId} />
+    <RemoteAlbumScreen key={albumId} albumId={albumId} />
   );
 
 const YouTubeMusicAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
   const { openDetail } = useDetailNavigation();
-  const [album, setAlbum] = React.useState<YouTubeMusicAlbum | null>(null);
+  const [album, setAlbum] = React.useState<YouTubeMusicAlbum | null>(() => getCachedYouTubeMusicAlbum(albumId) || null);
   const [error, setError] = React.useState('');
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [refreshSequence, setRefreshSequence] = React.useState(0);
@@ -77,14 +57,16 @@ const YouTubeMusicAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
     let active = true;
     setError('');
     void getYouTubeMusicAlbum(albumId)
-      .then(withLibraryAlbumTracks)
       .then((albumData) => {
-        if (active) setAlbum(albumData);
+        if (!active) return;
+        setAlbum(albumData);
         prefetchArtistData(albumData.artists);
+        void withLibraryAlbumTracks(albumData).then((enriched) => {
+          if (active) setAlbum(enriched);
+        }).catch(() => {});
       })
       .catch(() => {
         if (active) {
-          setAlbum(null);
           setError('Não foi possível carregar este álbum.');
         }
       })
@@ -96,7 +78,8 @@ const YouTubeMusicAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
     };
   }, [albumId, refreshSequence]);
 
-  if (!album) return <AlbumLoadingState error={error} onRetry={refresh} />;
+  if (!album) return <PendingCollectionDetail kind="album" collectionId={albumId} error={error} onRetry={refresh}
+    resolveTracksForPlayback={() => getYouTubeMusicAlbum(albumId).then(withLibraryAlbumTracks).then((data) => data.tracks)} />;
 
   const releaseLabel = album.releaseType === 'single'
     ? 'single'
@@ -132,7 +115,7 @@ const YouTubeMusicAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
 
 const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
   const { openDetail } = useDetailNavigation();
-  const [album, setAlbum] = React.useState<AlbumModel | null>(null);
+  const [album, setAlbum] = React.useState<AlbumModel | null>(() => getCachedAlbum(albumId) || null);
   const [artists, setArtists] = React.useState<ArtistModel[]>([]);
   const [error, setError] = React.useState('');
   const [isRefreshing, setIsRefreshing] = React.useState(false);
@@ -150,18 +133,17 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
       .then((albumData) => {
         if (!active) return;
         setAlbum(albumData);
-        setArtists([]);
-        void Promise.all(albumData.artists.map(({ id }) => getArtist(id)))
-          .then((artistData) => {
-            if (active) setArtists(artistData);
-            prefetchArtistData(artistData.map(({ id, name }) => ({ id, name })));
-          })
-          .catch(() => {});
+        albumData.artists.forEach(({ id }) => {
+          void getArtist(id).then((artistData) => {
+            if (!active) return;
+            setArtists((current) => [...current.filter((artist) => artist.id !== id), artistData]
+              .sort((a, b) => albumData.artists.findIndex((ref) => ref.id === a.id) - albumData.artists.findIndex((ref) => ref.id === b.id)));
+            prefetchArtistData([artistData]);
+          }).catch(() => {});
+        });
       })
       .catch((error) => {
         if (active) {
-          setAlbum(null);
-          setArtists([]);
           setError('Não foi possível carregar este álbum.');
         }
         console.error('Failed to get album data:', error);
@@ -184,7 +166,8 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
     [openDetail]
   );
 
-  if (!album) return <AlbumLoadingState error={error} onRetry={refresh} />;
+  if (!album) return <PendingCollectionDetail kind="album" collectionId={albumId} error={error} onRetry={refresh}
+    resolveTracksForPlayback={() => getAlbum(albumId).then((data) => data.tracks.items)} />;
 
   const metadata = [
     album.genres[0],

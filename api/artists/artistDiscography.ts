@@ -1,6 +1,7 @@
 import type { LibraryItemModel, TrackModel } from '@models';
 import { albumAssociationsForTrack, mergeAlbumAssociations } from '@models';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
+import { createProgressiveResource } from '../../src/application/progressiveResource';
 import { log } from '../../utils/appLogger';
 import { BASE_URL, spotifyGet } from '../config';
 
@@ -31,7 +32,8 @@ export type ArtistDiscography = {
 
 const ALBUM_PAGE_SIZE = 50;
 const MAX_ALBUMS = 100;
-const ALBUM_TRACK_CONCURRENCY = 5;
+const ALBUM_TRACK_CONCURRENCY = 3;
+const discographyProgress = createProgressiveResource<ArtistDiscography>('artist discography preview', 100);
 const discographyCache = createAsyncResourceCache<ArtistDiscography>({
   name: 'spotify artist discography',
   category: 'artist',
@@ -112,22 +114,34 @@ const loadDiscography = async (artistId: string): Promise<ArtistDiscography> => 
         albums.push(album);
       }
     }
+    discographyProgress.publish(artistId, buildDiscography(albums.slice(0, MAX_ALBUMS), []));
     if (data.items.length < ALBUM_PAGE_SIZE || albums.length >= MAX_ALBUMS) break;
   }
 
   const uniqueAlbums = albums.slice(0, MAX_ALBUMS);
   const albumTracks: TrackModel[][] = Array.from({ length: uniqueAlbums.length });
   let cursor = 0;
+  let publishedCount = 0;
   await Promise.all(Array.from(
     { length: Math.min(ALBUM_TRACK_CONCURRENCY, uniqueAlbums.length) },
     async () => {
       while (cursor < uniqueAlbums.length) {
         const index = cursor++;
         albumTracks[index] = await loadAlbumTracks(uniqueAlbums[index]);
+        let completedCount = publishedCount;
+        while (completedCount < albumTracks.length && albumTracks[completedCount]) completedCount++;
+        if (completedCount > publishedCount) {
+          publishedCount = completedCount;
+          discographyProgress.publish(artistId, buildDiscography(uniqueAlbums, albumTracks.slice(0, completedCount)));
+        }
       }
     }
   ));
 
+  return buildDiscography(uniqueAlbums, albumTracks);
+};
+
+const buildDiscography = (uniqueAlbums: ArtistAlbum[], albumTracks: TrackModel[][]): ArtistDiscography => {
   const tracks = new Map<string, TrackModel>();
   albumTracks.flat().forEach((track) => {
     if (!track.id) return;
@@ -184,3 +198,13 @@ export const getArtistDiscography = (artistId: string) =>
     },
     15 * 60_000
   );
+
+export const getCachedArtistDiscography = (artistId: string) =>
+  discographyCache.peek(artistId) || discographyProgress.peek(artistId);
+
+export const subscribeArtistDiscography = (artistId: string, listener: (value: ArtistDiscography) => void) => {
+  const unsubscribe = discographyProgress.subscribe(artistId, listener);
+  const cached = discographyCache.peek(artistId);
+  if (cached) listener(cached);
+  return unsubscribe;
+};

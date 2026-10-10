@@ -4,6 +4,8 @@ export {
   getYouTubeMusicArtistImage,
   getYouTubeMusicArtistBiography,
   getYouTubeMusicArtistProfile,
+  getCachedYouTubeMusicArtistProfile,
+  subscribeYouTubeMusicArtistProfile,
   getCachedArtistSearchSeed,
   searchCatalog,
   getCatalogSearchSuggestions,

@@ -1,5 +1,7 @@
 export {
   getAlbum,
+  getCachedAlbum,
+  getCachedYouTubeMusicAlbum,
   getArtistAlbums,
   getRecentlyPlayed,
   updateRecentlyPlayed,
@@ -14,6 +16,9 @@ export type { YouTubeMusicAlbum } from './albums';
 export {
   findArtistIdByName,
   getArtist,
+  getCachedArtist,
+  getCachedArtistDiscography,
+  subscribeArtistDiscography,
   getArtistDiscography,
   getArtistTopTracks,
   getUserTopArtists,
@@ -22,6 +27,7 @@ export {
 
 export {
   getPlaylist,
+  getCachedPlaylist,
   getPlaylistItems,
   getSavedPlaylists,
   checkSavedPlaylists,
@@ -40,6 +46,8 @@ export {
   getYouTubeMusicArtistImage,
   getYouTubeMusicArtistBiography,
   getYouTubeMusicArtistProfile,
+  getCachedYouTubeMusicArtistProfile,
+  subscribeYouTubeMusicArtistProfile,
   getCachedArtistSearchSeed,
   searchCatalog,
   getCatalogSearchSuggestions,

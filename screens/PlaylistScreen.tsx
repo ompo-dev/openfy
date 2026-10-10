@@ -1,16 +1,17 @@
 import * as React from 'react';
-import { View } from 'react-native';
 
 import { CollectionDetail, LocalPlaylist } from '@components';
 import { PlaylistModel, TrackModel } from '@models';
 import {
   checkSavedTracks,
   getPlaylist,
+  getCachedPlaylist,
   getPlaylistItems,
 } from '@api';
 import { formatCollectionMeta } from '@utils';
 import { TemporaryPlaylistScreen } from './TemporaryPlaylistScreen';
 import { HOME_PLAYLIST_PREFIX } from '../services/home/temporaryPlaylists';
+import { PendingCollectionDetail } from '../components/CollectionDetail/PendingCollectionDetail';
 
 export type PlaylistScreenPropsType = {
   playlistId: string;
@@ -20,14 +21,16 @@ export const PlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) =>
   playlistId.startsWith(HOME_PLAYLIST_PREFIX) ? (
     <TemporaryPlaylistScreen playlistId={playlistId} />
   ) : playlistId.startsWith('local_') ? (
-    <LocalPlaylist playlistId={playlistId} />
+    <LocalPlaylist key={playlistId} playlistId={playlistId} />
   ) : (
-    <RemotePlaylistScreen playlistId={playlistId} />
+    <RemotePlaylistScreen key={playlistId} playlistId={playlistId} />
   );
 
 const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
-  const [playlist, setPlaylist] = React.useState<PlaylistModel | null>(null);
+  const [playlist, setPlaylist] = React.useState<PlaylistModel | null>(() => getCachedPlaylist(playlistId) || null);
   const [tracks, setTracks] = React.useState<TrackModel[]>([]);
+  const [loadingTracks, setLoadingTracks] = React.useState(true);
+  const [error, setError] = React.useState('');
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [refreshSequence, setRefreshSequence] = React.useState(0);
   const offsetRef = React.useRef(0);
@@ -51,30 +54,36 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
     }
 
     const request = (async () => {
+      const limit = offsetRef.current === 0 ? 12 : 50;
+      if (generation === pageGenerationRef.current) { setLoadingTracks(true); setError(''); }
       try {
         const page = await getPlaylistItems({
           playlistId: targetPlaylist.id,
-          limit: 50,
+          limit,
           offset: offsetRef.current,
         });
-        const saved = await checkSavedTracks(page.map((track) => track.id)).catch(
-          () => []
-        );
         if (generation !== pageGenerationRef.current) return;
-        offsetRef.current += 50;
+        offsetRef.current = page.length ? offsetRef.current + limit : targetPlaylist.tracks.total;
         tracksRef.current = [
           ...tracksRef.current,
-          ...page.map((track, index) => ({
-            ...track,
-            isSaved: saved[index] ?? false,
-          })),
+          ...page,
         ];
         setTracks(tracksRef.current);
+        if (page.length) void checkSavedTracks(page.map((track) => track.id)).then((saved) => {
+          if (generation !== pageGenerationRef.current) return;
+          const savedById = new Map(page.map((track, index) => [track.id, saved[index]] as const));
+          tracksRef.current = tracksRef.current.map((track) => savedById.has(track.id)
+            ? { ...track, isSaved: savedById.get(track.id) ?? track.isSaved } : track);
+          setTracks(tracksRef.current);
+        }).catch(() => {});
       } catch (error) {
         if (generation === pageGenerationRef.current) {
-          offsetRef.current = targetPlaylist.tracks.total;
+          setError('Não foi possível carregar as músicas. Tente novamente.');
           console.error('Failed to get playlist tracks:', error);
         }
+        throw error;
+      } finally {
+        if (generation === pageGenerationRef.current) setLoadingTracks(false);
       }
     })();
 
@@ -90,8 +99,10 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
 
   const loadAllTrackPages = React.useCallback(
     async (targetPlaylist: PlaylistModel) => {
+      const generation = pageGenerationRef.current;
       while (offsetRef.current < targetPlaylist.tracks.total) {
-        await loadTrackPage(targetPlaylist);
+        if (generation !== pageGenerationRef.current) throw new Error('Playlist changed');
+        await loadTrackPage(targetPlaylist, generation);
       }
       return tracksRef.current;
     },
@@ -108,7 +119,7 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
     if (!refreshingExistingPlaylist) {
       offsetRef.current = 0;
       tracksRef.current = [];
-      setPlaylist(null);
+      setPlaylist(getCachedPlaylist(playlistId) || null);
       setTracks([]);
     }
 
@@ -123,7 +134,7 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
         await loadTrackPage(data, generation);
       })
       .catch((error) => {
-        if (active && !refreshingExistingPlaylist) setPlaylist(null);
+        if (active) { setError('Não foi possível carregar esta playlist.'); setLoadingTracks(false); }
         console.error('Failed to get playlist data:', error);
       })
       .finally(() => {
@@ -132,10 +143,12 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
 
     return () => {
       active = false;
+      if (pageGenerationRef.current === generation) pageGenerationRef.current++;
     };
   }, [loadTrackPage, playlistId, refreshSequence]);
 
-  if (!playlist) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
+  if (!playlist) return <PendingCollectionDetail kind="playlist" collectionId={playlistId} error={error} onRetry={refresh}
+    resolveTracksForPlayback={() => getPlaylist(playlistId).then(loadAllTrackPages)} />;
 
   return (
     <CollectionDetail
@@ -158,10 +171,12 @@ const RemotePlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) => {
           : 0
       }
       tracks={tracks}
+      loadingTracks={loadingTracks}
+      loadingError={error}
       disableTrackArtistLinks
       onRefresh={refresh}
       refreshing={isRefreshing}
-      onEndReached={() => void loadTrackPage(playlist)}
+      onEndReached={() => void loadTrackPage(playlist).catch(() => {})}
       resolveTracksForPlayback={() => loadAllTrackPages(playlist)}
     />
   );

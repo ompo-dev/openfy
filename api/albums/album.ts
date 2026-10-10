@@ -27,4 +27,6 @@ const loadAlbum = async (albumId: string): Promise<AlbumModel> => {
 export const getAlbum = (albumId: string): Promise<AlbumModel> =>
   albumCache.getOrLoad(albumId, () => loadAlbum(albumId), 30 * 60_000);
 
+export const getCachedAlbum = (albumId: string) => albumCache.peek(albumId);
+
 export const _clearAlbumCacheForTests = () => albumCache.clear();

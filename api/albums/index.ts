@@ -1,7 +1,8 @@
-export { getAlbum } from './album';
+export { getAlbum, getCachedAlbum } from './album';
 export { getArtistAlbums } from './artistAlbums';
 export {
   getYouTubeMusicAlbum,
+  getCachedYouTubeMusicAlbum,
   isYouTubeMusicAlbumId,
   type YouTubeMusicAlbum,
 } from './youtubeMusicAlbum';

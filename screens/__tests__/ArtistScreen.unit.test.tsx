@@ -32,6 +32,10 @@ import { ArtistScreen } from '../ArtistScreen';
 jest.mock('@api', () => ({
   findArtistIdByName: jest.fn(),
   getArtist: jest.fn(),
+  getCachedArtist: jest.fn(),
+  getCachedYouTubeMusicArtistProfile: jest.fn(),
+  subscribeYouTubeMusicArtistProfile: jest.fn(() => () => {}),
+  subscribeArtistDiscography: jest.fn(() => () => {}),
   getArtistCatalogImage: jest.fn().mockResolvedValue(''),
   getArtistDiscography: jest.fn(),
   getArtistTopTracks: jest.fn(),

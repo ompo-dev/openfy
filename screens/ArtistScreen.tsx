@@ -8,6 +8,10 @@ import {
   getArtistCatalogImage,
   getArtistDiscography,
   getArtistTopTracks,
+  getCachedArtist,
+  getCachedYouTubeMusicArtistProfile,
+  subscribeYouTubeMusicArtistProfile,
+  subscribeArtistDiscography,
   getCachedArtistSearchSeed,
   getYouTubeMusicArtistBiography,
   getYouTubeMusicAlbum,
@@ -16,7 +20,7 @@ import {
 } from '@api';
 import { CollectionDetail } from '@components';
 import { usePlayer, type PlayerTrack } from '@context';
-import { ArtistModel, LibraryItemModel, TrackModel } from '@models';
+import { ArtistModel, LibraryItemModel, TrackModel, albumAssociationsForTrack, mergeAlbumAssociations } from '@models';
 import { Shapes, Sizes } from '@config';
 import {
   getCachedArtistImage,
@@ -37,6 +41,7 @@ import {
 } from '../services/youtubeMusicClient';
 import { log } from '../utils/appLogger';
 import { mergeArtistReleases, normalizeReleaseTitle } from '../services/library/artistReleases';
+import { getDetailPreview } from '../services/navigation/detailPreview';
 
 export type ArtistScreenPropsType = {
   artistId: string;
@@ -113,7 +118,12 @@ const isRemotePrimaryArtist = (
 const uniqueTracksById = (tracks: TrackModel[]) => {
   const unique = new Map<string, TrackModel>();
   tracks.forEach((track) => {
-    if (track.id && !unique.has(track.id)) unique.set(track.id, track);
+    if (!track.id) return;
+    const previous = unique.get(track.id);
+    unique.set(track.id, previous ? {
+      ...previous, ...track,
+      albumAssociations: mergeAlbumAssociations(albumAssociationsForTrack(previous), albumAssociationsForTrack(track)),
+    } : track);
   });
   return [...unique.values()];
 };
@@ -204,7 +214,10 @@ const buildLocalArtistProfile = (
 
 export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
   const { currentTrack } = usePlayer((state) => ({ currentTrack: state.currentTrack }));
-  const [artist, setArtist] = React.useState<ArtistModel | null>(null);
+  const preview = getDetailPreview('artist', artistId);
+  const [artist, setArtist] = React.useState<ArtistModel | null>(() =>
+    getCachedArtist(artistId) || getCachedYouTubeMusicArtistProfile(artistId)?.artist ||
+    (preview ? { id: artistId, type: 'artist', name: preview.title, imageURL: preview.imageURL || '' } : null));
   const [topTracks, setTopTracks] = React.useState<TrackModel[]>([]);
   const [participationTracks, setParticipationTracks] = React.useState<TrackModel[]>([]);
   const [contextualTracks, setContextualTracks] = React.useState<TrackModel[]>(
@@ -237,12 +250,27 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
   // from the shared artist-image cache immediately.
   React.useEffect(() => {
     let active = true;
-    const releases = [...albums, ...singlesAndEps].slice(0, 12);
+    const releases = [...albums, ...singlesAndEps].slice(0, 6);
     if (!releases.length) return () => { active = false; };
 
     type ArtistRef = { id: string; name?: string };
     const warm = async () => {
-      const refs = new Map<string, ArtistRef>();
+      const seenArtists = new Set<string>();
+      const warmArtists = async (refs: ArtistRef[]) => {
+        for (const ref of refs) {
+          if (!active) return;
+          const key = ref.id || ref.name?.toLocaleLowerCase() || '';
+          if (!key || seenArtists.has(key)) continue;
+          seenArtists.add(key);
+          try {
+            const name = ref.name || (await getArtist(ref.id))?.name;
+            if (name && active) await getCachedArtistImage(name,
+              () => getArtistCatalogImage(ref.id, name), [ref.id]);
+          } catch {
+            // A missing portrait must not hold up the next release.
+          }
+        }
+      };
       let cursor = 0;
       const loadRelease = async () => {
         while (active && cursor < releases.length) {
@@ -250,15 +278,10 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           try {
             if (isYouTubeMusicAlbumId(release.id)) {
               const album = await getYouTubeMusicAlbum(release.id);
-              album.artists.forEach((ref) => {
-                const key = ref.id || ref.name.toLocaleLowerCase();
-                if (key && !refs.has(key)) refs.set(key, ref);
-              });
+              await warmArtists(album.artists);
             } else if (/^[A-Za-z0-9]{22}$/.test(release.id)) {
               const album = await getAlbum(release.id);
-              album.artists.forEach((ref) => {
-                if (ref.id && !refs.has(ref.id)) refs.set(ref.id, { id: ref.id });
-              });
+              await warmArtists(album.artists);
             }
           } catch {
             // A single unavailable release must not affect the profile.
@@ -266,38 +289,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         }
       };
       await Promise.all(
-        Array.from({ length: Math.min(3, releases.length) }, () => loadRelease())
-      );
-
-      const artistRefs = [...refs.values()];
-      cursor = 0;
-      const warmArtist = async () => {
-        while (active && cursor < artistRefs.length) {
-          const ref = artistRefs[cursor++];
-          try {
-            if (ref.name) {
-              await getCachedArtistImage(
-                ref.name,
-                () => getArtistCatalogImage(ref.id, ref.name || ''),
-                [ref.id]
-              );
-              continue;
-            }
-            const artistData = await getArtist(ref.id);
-            if (!artistData?.name) continue;
-            await getCachedArtistImage(
-              artistData.name,
-              () => Promise.resolve(artistData.imageURL || '')
-                .then((image) => image || getArtistCatalogImage(ref.id, artistData.name)),
-              [ref.id]
-            );
-          } catch {
-            // Image warming is opportunistic and never blocks navigation.
-          }
-        }
-      };
-      await Promise.all(
-        Array.from({ length: Math.min(3, artistRefs.length) }, () => warmArtist())
+        Array.from({ length: Math.min(2, releases.length) }, () => loadRelease())
       );
     };
 
@@ -309,6 +301,29 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     let active = true;
     let hasRemoteArtistProfile = false;
     let waitingForSupplement = false;
+    const subscriptions: (() => void)[] = [];
+    const cleanup = () => { active = false; subscriptions.forEach((unsubscribe) => unsubscribe()); };
+    const watchCatalog = (routeId: string, targetId = artistId) => {
+      subscriptions.push(subscribeYouTubeMusicArtistProfile(routeId, (profile) => {
+        if (!active) return;
+        setArtist((current) => ({ ...current, ...profile.artist, id: targetId,
+          imageURL: profile.artist.imageURL || current?.imageURL || '',
+        }));
+        setTopTracks((current) => uniqueTracksById([...current, ...profile.tracks]));
+        setParticipationTracks((current) => uniqueTracksById([...current, ...profile.participationTracks]));
+        setAlbums((current) => mergeArtistReleases(current, profile.albums));
+        setSinglesAndEps((current) => mergeArtistReleases(current, profile.singlesAndEps));
+      }));
+    };
+    const watchDiscography = (id: string, name = '') => {
+      subscriptions.push(subscribeArtistDiscography(id, (profile) => {
+        if (!active) return;
+        setAlbums(profile.albums);
+        setSinglesAndEps(profile.singlesAndEps);
+        setTopTracks((current) => uniqueTracksById([...current, ...profile.tracks.filter((track) => isRemotePrimaryArtist(track, id, name))]));
+        setParticipationTracks((current) => uniqueTracksById([...current, ...profile.tracks.filter((track) => !isRemotePrimaryArtist(track, id, name))]));
+      }));
+    };
     // Playback can supply a fallback name, but must not reload this route.
     const playbackArtistName = playbackArtistNameRef.current;
     setArtistError('');
@@ -318,7 +333,9 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       : null;
     if (activeArtistId.current !== artistId) {
       activeArtistId.current = artistId;
-      setArtist(null);
+      const seed = getDetailPreview('artist', artistId);
+      setArtist(getCachedArtist(artistId) || getCachedYouTubeMusicArtistProfile(artistId)?.artist ||
+        (seed ? { id: artistId, type: 'artist', name: seed.title, imageURL: seed.imageURL || '' } : null));
       setTopTracks([]);
       setParticipationTracks([]);
       setContextualTracks([]);
@@ -391,6 +408,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     ) => {
       waitingForSupplement = true;
       const catalogRouteId = toYouTubeMusicArtistRouteId(undefined, artistName);
+      watchCatalog(catalogRouteId, routeId);
       void getYouTubeMusicArtistProfile(catalogRouteId).then((catalogProfile) => {
         if (!active) return;
         waitingForSupplement = false;
@@ -441,18 +459,13 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         });
       });
     };
-    void Promise.all([libraryPromise, getUserProfile()]).then(
-      ([libraryTracks, profile]) => {
-        if (!active) return;
-        setContextualTracks([
-          ...profile.recentlyPlayedTracks.map((entry) =>
-            toHistoryTrackModel(entry.track)
-          ),
-          ...libraryTracks.map(toTrackModel),
-          ...(searchSeed?.tracks || []),
-        ]);
-      }
-    ).catch(() => {});
+    void libraryPromise.then((libraryTracks) => {
+      if (active) setContextualTracks((current) => uniqueTracksById([...current, ...libraryTracks.map(toTrackModel)]));
+    }).catch(() => {});
+    void getUserProfile().then((profile) => {
+      if (active) setContextualTracks((current) => uniqueTracksById([...current,
+        ...profile.recentlyPlayedTracks.map((entry) => toHistoryTrackModel(entry.track))]));
+    }).catch(() => {});
 
     if (localArtistName) {
       void libraryPromise.then((downloaded) => {
@@ -464,11 +477,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           setIsRefreshing(false);
           return;
         }
-        setArtist(profile.artist);
-        setTopTracks([]);
-        setParticipationTracks([]);
-        setAlbums([]);
-        setSinglesAndEps([]);
+        applyLocalArtistProfile(profile);
         setIsProfileReady(false);
         setIsRefreshing(false);
         if (profile.collection.spotifyArtistId && /^[A-Za-z0-9]{22}$/.test(profile.collection.spotifyArtistId)) {
@@ -489,15 +498,14 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           setIsRefreshing(false);
         }
       });
-      return () => {
-        active = false;
-      };
+      return cleanup;
     }
 
     if (isYouTubeArtist) {
       log.artist('profile request started', { artistId, source: 'youtube-music' });
 
       const loadYouTubeMusicProfile = (profileRouteId = artistId) => {
+      watchCatalog(profileRouteId);
       const finishProfileLoad = log.time('artist', 'youtube music profile load', {
         artistId: profileRouteId,
       });
@@ -628,7 +636,10 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
                 route: artistId,
               });
               const [artistData, topTracks] = await Promise.all([
-                getArtist(spotifyArtistId).catch(() => null),
+                getArtist(spotifyArtistId).then((data) => {
+                  if (active && data) setArtist(data);
+                  return data;
+                }).catch(() => null),
                 getArtistTopTracks(spotifyArtistId).catch(() => []),
               ]);
               if (!active) {
@@ -668,6 +679,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
                 const finishDiscography = log.time('artist', 'canonical Spotify artist discography render', {
                   artistId: spotifyArtistId,
                 });
+                watchDiscography(spotifyArtistId, profileName);
                 void getArtistDiscography(spotifyArtistId)
                   .then((discography) => {
                     if (!active) {
@@ -758,9 +770,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
           loadYouTubeMusicProfile(fallbackRoute);
         }
       })();
-      return () => {
-        active = false;
-      };
+      return cleanup;
     }
 
     const artistRequest = getArtist(artistId)
@@ -795,11 +805,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         if (!active) return null;
         const localProfile = buildLocalArtistProfile(downloaded, artistId, artistId);
         if (localProfile) {
-            setArtist(localProfile.artist);
-            setTopTracks([]);
-            setParticipationTracks([]);
-            setAlbums([]);
-            setSinglesAndEps([]);
+            applyLocalArtistProfile(localProfile);
             setIsProfileReady(false);
             supplementFromPublicCatalog(localProfile.artist.name, artistId, localProfile);
         } else {
@@ -858,6 +864,8 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
 
     const discographyRequest = new Promise<void>((resolve) => {
       setTimeout(() => {
+        if (!active) { resolve(); return; }
+        watchDiscography(artistId, earlyArtistName);
         void getArtistDiscography(artistId)
       .then(async (discography) => {
         if (!active) return;
@@ -927,9 +935,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
 
     void discographyRequest;
 
-    return () => {
-      active = false;
-    };
+    return cleanup;
   }, [artistId, isYouTubeArtist, localArtistName, refreshSequence]);
 
   const mergedTracks = React.useMemo(() => {
@@ -963,7 +969,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     topTracks,
   ]);
 
-  if (!artist || !isProfileReady) {
+  if (!artist) {
     return (
       <View
         style={{
@@ -1009,6 +1015,8 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       description=""
       metadata={metadata}
       tracks={mergedTracks.primaryTracks}
+      loadingTracks={!isProfileReady}
+      loadingError={artistError}
       disableTrackArtistLinks
       sectionTitle="Músicas em destaque"
       extraTrackSections={[

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Alert, View } from 'react-native';
+import { Alert } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import {
@@ -14,6 +14,8 @@ import { useLibrarySelectedCategory } from '@context';
 import { CollectionDetail } from '../CollectionDetail';
 import { PlaylistEditorModal } from './PlaylistEditorModal';
 import { PlaylistTrackPickerModal } from './PlaylistTrackPickerModal';
+import { PendingCollectionDetail } from '../CollectionDetail/PendingCollectionDetail';
+import { getDetailPreview } from '../../services/navigation/detailPreview';
 
 const hasArtistCredit = (track: LibraryTrack) => {
   const names = [
@@ -45,32 +47,51 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
   const [tracks, setTracks] = React.useState<LibraryTrack[]>([]);
   const [isPickerVisible, setIsPickerVisible] = React.useState(false);
   const [isEditorVisible, setIsEditorVisible] = React.useState(false);
+  const [loadingTracks, setLoadingTracks] = React.useState(true);
+  const [error, setError] = React.useState('');
+  const generationRef = React.useRef(0);
 
   const loadPlaylist = React.useCallback(async () => {
-    const [localPlaylist, downloaded] = await Promise.all([
-      getLocalPlaylist(playlistId),
-      getLibraryTracks(),
-    ]);
-    setPlaylist(localPlaylist);
-    const downloadedById = new Map(
-      downloaded.map((track) => [track.spotifyId, track])
-    );
-    setLibraryTracks(downloaded);
-    setTracks(
-      localPlaylist
-        ? localPlaylist.trackIds
-            .map((trackId) => downloadedById.get(trackId))
-            .filter(
-              (track): track is LibraryTrack =>
-                track !== undefined && hasArtistCredit(track)
-            )
-        : []
-    );
+    const generation = ++generationRef.current;
+    setLoadingTracks(true);
+    setError('');
+    try {
+      const [localPlaylist, downloaded] = await Promise.all([
+        getLocalPlaylist(playlistId).then((data) => {
+          if (generation === generationRef.current) {
+            setPlaylist(data);
+            if (!data) setError('Playlist não encontrada.');
+          }
+          return data;
+        }),
+        getLibraryTracks(),
+      ]);
+      if (generation !== generationRef.current) return;
+      const downloadedById = new Map(
+        downloaded.map((track) => [track.spotifyId, track])
+      );
+      setLibraryTracks(downloaded);
+      setTracks(
+        localPlaylist
+          ? localPlaylist.trackIds
+              .map((trackId) => downloadedById.get(trackId))
+              .filter(
+                (track): track is LibraryTrack =>
+                  track !== undefined && hasArtistCredit(track)
+              )
+          : []
+      );
+    } catch {
+      if (generation === generationRef.current) setError('Não foi possível carregar esta playlist.');
+    } finally {
+      if (generation === generationRef.current) setLoadingTracks(false);
+    }
   }, [playlistId]);
 
   useFocusEffect(
     React.useCallback(() => {
       void loadPlaylist();
+      return () => { generationRef.current++; };
     }, [loadPlaylist])
   );
 
@@ -106,7 +127,8 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
     );
   }, [playlist, refreshLibrary, router]);
 
-  if (!playlist) return <View style={{ flex: 1, backgroundColor: '#101010' }} />;
+  if (!playlist) return <PendingCollectionDetail kind="playlist" collectionId={playlistId} error={error}
+    onRetry={() => void loadPlaylist()} />;
 
   const collectionTracks = tracks.map((track) => ({
     id: track.spotifyId,
@@ -128,6 +150,7 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
   const imageURLs = [
     ...collectionTracks.map((track) => track.imageURL),
     ...(playlist.coverImageURLs || []),
+    ...(loadingTracks ? getDetailPreview('playlist', playlistId)?.imageURLs || [] : []),
   ].filter((url): url is string => Boolean(url));
   const imageURL = imageURLs[0] || '';
 
@@ -145,8 +168,10 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
         onDeletePress={confirmDelete}
         onEditPress={() => setIsEditorVisible(true)}
         disableTrackArtistLinks
-        trackCount={tracks.length}
+        trackCount={loadingTracks ? playlist.trackIds.length : tracks.length}
         tracks={collectionTracks}
+        loadingTracks={loadingTracks}
+        loadingError={error}
       />
       <PlaylistEditorModal
         onAddTracks={() => {

@@ -6,6 +6,7 @@ import { AppIcon as Foundation, AppIcon as FontAwesome } from '../native/AppIcon
 import { COLORS, Shapes, Sizes } from '@config';
 import { useDetailNavigation } from '@hooks';
 import { styling } from './styles';
+import { rememberDetailPreview } from '../../services/navigation/detailPreview';
 
 export type CardPropsType = {
   id: string;
@@ -29,6 +30,11 @@ const Card = React.memo(
   }: CardPropsType) => {
     const { openDetail } = useDetailNavigation();
     const styles = styling(size, shape);
+    React.useEffect(() => {
+      if (title && (type === 'artist' || type === 'album' || type === 'playlist')) {
+        rememberDetailPreview(type, id, { title, imageURL, subtitle });
+      }
+    }, [id, type, title, imageURL, subtitle]);
 
     const handlePress = React.useCallback(
       (typeID: string) => {

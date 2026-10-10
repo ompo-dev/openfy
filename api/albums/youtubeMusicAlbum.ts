@@ -146,7 +146,7 @@ const loadYouTubeMusicAlbum = async (
     tracks,
     artists: [...artists.values()],
   };
-  await rememberAlbumMetadata(album).catch(() => {});
+  void rememberAlbumMetadata(album).catch(() => {});
   return album;
 };
 
@@ -156,3 +156,5 @@ export const getYouTubeMusicAlbum = (routeId: string): Promise<YouTubeMusicAlbum
     () => loadYouTubeMusicAlbum(routeId),
     30 * 60_000
   );
+
+export const getCachedYouTubeMusicAlbum = (routeId: string) => youtubeAlbumCache.peek(routeId);

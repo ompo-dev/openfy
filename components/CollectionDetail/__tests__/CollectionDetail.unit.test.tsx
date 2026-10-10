@@ -146,7 +146,7 @@ describe('CollectionDetail', () => {
     }) as any);
     const screen = await renderCollection();
     expect(StyleSheet.flatten(screen.getByText(tracks[0].title).props.style).color).toBe('#1ED760');
-    expect(StyleSheet.flatten(screen.getByText(tracks[1].title).props.style).color).not.toBe('#1ED760');
+    expect(StyleSheet.flatten((await screen.findByText(tracks[1].title)).props.style).color).not.toBe('#1ED760');
     expect(playWithQueue).not.toHaveBeenCalled();
   });
 
@@ -310,7 +310,8 @@ describe('CollectionDetail', () => {
       tracks: artistTracks,
     });
 
-    expect(screen.getByTestId('collection-track-list').props.data).toHaveLength(10);
+    expect(screen.getByTestId('collection-track-list').props.data).toHaveLength(1);
+    await waitFor(() => expect(screen.getByTestId('collection-track-list').props.data).toHaveLength(10));
     expect(screen.getByText('Artist track 1')).toBeTruthy();
     expect(screen.queryByText('Artist track 16')).toBeNull();
     fireEvent.press(screen.getByLabelText('Mostrar mais músicas do artista'));

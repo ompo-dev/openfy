@@ -35,6 +35,7 @@ import { PlaylistMosaic } from '../PlaylistMosaic';
 import { TrackRow } from '../common/TrackRow';
 import { ProgressiveFlatList } from '../common/ProgressiveList';
 import { log } from '../../utils/appLogger';
+import { rememberDetailPreview } from '../../services/navigation/detailPreview';
 
 const toPlayerTrack = (track: LibraryTrack) => ({
   ...track,
@@ -88,15 +89,20 @@ export const OfflineLibrary = () => {
 
   const loadLibrary = React.useCallback(async () => {
     if (libraryLoadRef.current) return libraryLoadRef.current;
-    const request = Promise.all([getLibraryTracks(), getLocalPlaylists()])
-      .then(([downloaded, localPlaylists]) => {
-        setTracks([...downloaded].reverse());
+    const request = Promise.all([
+      getLibraryTracks().then((downloaded) => {
+        if (isMountedRef.current) setTracks([...downloaded].reverse());
+      }),
+      getLocalPlaylists().then((localPlaylists) => {
+        if (!isMountedRef.current) return;
         setPlaylists(
           [...localPlaylists].sort((a, b) =>
             b.updatedAt.localeCompare(a.updatedAt)
           )
         );
-      })
+      }),
+    ])
+      .then(() => undefined)
       .finally(() => {
         if (libraryLoadRef.current === request) libraryLoadRef.current = null;
       });
@@ -359,7 +365,11 @@ export const OfflineLibrary = () => {
       <LoggedPressable
         accessibilityRole="button"
         accessibilityLabel={`Abrir playlist ${item.title}`}
-        onPress={() => openDetail('playlist', item.id, 'library')}
+        onPress={() => {
+          rememberDetailPreview('playlist', item.id, { title: item.title, imageURL: imageURLs[0],
+            imageURLs: imageURLs.slice(0, 4), trackCount: item.trackIds.length });
+          openDetail('playlist', item.id, 'library');
+        }}
         style={styles.playlistItem}
       >
         <PlaylistMosaic imageURLs={imageURLs} size={62} />
@@ -386,17 +396,21 @@ export const OfflineLibrary = () => {
         accessibilityLabel={`${isArtist ? 'Abrir artista' : 'Abrir álbum'} ${item.title}`}
         onPress={() => {
           if (isArtist) {
+            const id = String((item as { spotifyArtistId?: string }).spotifyArtistId || '');
+            const routeId = /^[A-Za-z0-9]{22}$/.test(id) ? id : `local_artist_${encodeURIComponent(item.title)}`;
+            rememberDetailPreview('artist', routeId, { title: item.title, imageURL });
             openDetail(
               'artist',
-              (isArtist && /^[A-Za-z0-9]{22}$/.test(
-                String((item as { spotifyArtistId?: string }).spotifyArtistId || '')
-              )
-                ? String((item as { spotifyArtistId?: string }).spotifyArtistId)
-                : '') || `local_artist_${encodeURIComponent(item.title)}`,
+              routeId,
               'library'
             );
             return;
           }
+          rememberDetailPreview('album', `local_album_${encodeURIComponent(item.id)}`, {
+            title: item.title, imageURL, subtitle: item.subtitle, trackCount: item.tracks.length,
+            tracks: item.tracks.slice(0, 12).map((track) => ({ ...track, id: track.spotifyId,
+              subtitle: track.artistName, durationMs: track.duration_ms, imageURL: track.localImagePath || track.imageURL })),
+          });
           openDetail(
             'album',
             `local_album_${encodeURIComponent(item.id)}`,
