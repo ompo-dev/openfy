@@ -14,6 +14,7 @@ import { GlassSurface } from './GlassSurface';
 import { PlayerModal } from './PlayerModal';
 import { GlassBackdrop, GlassBackdropScope } from './GlassBackdrop';
 import { Image } from 'expo-image';
+import { ProgressiveFlatList } from '../common/ProgressiveList';
 
 interface SheetFrameProps {
   visible: boolean;
@@ -52,16 +53,17 @@ export function SheetFrame({
   const insets = useSafeAreaInsets();
   const scrollOffset = React.useRef(0);
   const hasDirectScroll = React.Children.toArray(children).some((child) =>
-    React.isValidElement(child) && (child.type === ScrollView || child.type === FlatList));
+    React.isValidElement(child) && (child.type === ScrollView || child.type === FlatList || child.type === ProgressiveFlatList));
   React.useEffect(() => { scrollOffset.current = scroll || hasDirectScroll ? 0 : Infinity; }, [visible, scroll, hasDirectScroll]);
   const bottomPadding = size === 'full' ? Math.max(16, insets.bottom) : 16;
   const reportScroll = (event: any) => { scrollOffset.current = event.nativeEvent.contentOffset.y; };
   // Self-scrolling lists must shrink as well as report their position for drag dismissal.
   const fittedChildren = React.Children.map(children, (child) => {
-    if (!React.isValidElement<any>(child) || (child.type !== ScrollView && child.type !== FlatList)) return child;
+    if (!React.isValidElement<any>(child) || (child.type !== ScrollView && child.type !== FlatList && child.type !== ProgressiveFlatList)) return child;
     const element = child as React.ReactElement<any>;
     return React.cloneElement(element, {
-      style: [element.props.style, { flexGrow: 0, flexShrink: 1, minHeight: 0 }],
+      style: [element.props.style, { flexGrow: contentHeight === undefined ? 0 : 1,
+        flexShrink: 1, flexBasis: 'auto', minHeight: 0 }],
       onScroll: (event: any) => { reportScroll(event); element.props.onScroll?.(event); },
       scrollEventThrottle: 16,
     });

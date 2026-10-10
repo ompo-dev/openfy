@@ -20,17 +20,21 @@ type TrackRowProps = {
   artists?: { id: string; name: string }[];
   onArtistPress?: (id: string, name: string) => void | Promise<void>;
   trailingAction?: React.ReactNode;
+  accessibilityLabel?: string;
+  disabled?: boolean;
 };
 
 export const TrackRow = React.memo(function TrackRow({
   title, subtitle, imageURL, trackNumber, active, playing, downloadState,
   onPress, onDownload, artists, onArtistPress, trailingAction,
+  accessibilityLabel, disabled = false,
 }: TrackRowProps) {
   return (
     <LoggedPressable
-      accessibilityLabel={`Tocar ${title}`}
+      accessibilityLabel={accessibilityLabel || `Tocar ${title}`}
+      disabled={disabled}
       onPress={onPress}
-      style={[styles.row, active && playing && styles.rowActive]}
+      style={[styles.row, active && playing && styles.rowActive, disabled && styles.rowDisabled]}
     >
       {trackNumber !== undefined ? (
         <Text style={styles.trackNumber}>{trackNumber}</Text>
@@ -101,6 +105,7 @@ export const TrackRow = React.memo(function TrackRow({
 const styles = StyleSheet.create({
   row: { alignItems: 'center', flexDirection: 'row', gap: 11, minHeight: 64, paddingHorizontal: 16, paddingVertical: 8 },
   rowActive: { backgroundColor: 'rgba(255,255,255,0.085)', borderRadius: 6 },
+  rowDisabled: { opacity: 0.58 },
   artwork: { borderRadius: 3, height: 42, width: 42 },
   artworkFallback: { alignItems: 'center', backgroundColor: '#292929', justifyContent: 'center' },
   trackNumber: { color: 'rgba(255,255,255,0.68)', fontFamily: 'SF-Regular', fontSize: 13, textAlign: 'center', width: 22 },

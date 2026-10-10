@@ -67,6 +67,8 @@ import {
   upsertCatalogTracks,
 } from '@services';
 import { GlassSurface, LoggedPressable, PlayerModal, SheetFrame } from '../native';
+import { ArtistSearchRow } from '../Home/ArtistSearchRow';
+import { ProgressiveList } from '../common/ProgressiveList';
 import { getPlayerAlbum, getTrackAlbumRouteId, type PlayerAlbum } from '../../services/library/playerAlbum';
 import { PlayerDetailCard } from './PlayerDetailCard';
 import { TrackPlaylistPickerModal } from '../LocalPlaylist/TrackPlaylistPickerModal';
@@ -1634,32 +1636,18 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       ) : null}
 
       <Text style={[styles.artistDetailsHeading, styles.creditsHeading]}>Créditos</Text>
+      <ProgressiveList listKey={`credits:${currentTrack?.spotifyId}`}>
       {artistLinks.map((artist, index) => (
-        <LoggedPressable
+        <ArtistSearchRow
           key={`${artist.id}-${artist.name}-${index}`}
-          accessibilityLabel={`Abrir perfil de ${artist.name}`}
+          accessibilityLabel={`Abrir crédito de ${artist.name}`}
+          artist={{ type: 'artist', id: artist.id || `local_artist_${encodeURIComponent(artist.name)}`,
+            name: artist.name, imageURL: artistImages[artist.name] || '' }}
+          subtitle={index === 0 ? 'Artista principal' : 'Participação'}
           onPress={() => void handleArtistPress(artist.id, artist.name)}
-          style={styles.creditRow}
-        >
-          {artistImages[artist.name] ? (
-            <SkeletonImage
-              source={{ uri: artistImages[artist.name] }}
-              cachePolicy="memory-disk"
-              contentFit="cover"
-              style={styles.creditAvatar}
-            />
-          ) : (
-            <View style={[styles.creditAvatar, styles.primaryArtistFallback]}>
-              <Ionicons name="person" size={17} color="#DDD" />
-            </View>
-          )}
-          <View style={styles.creditCopy}>
-            <Text numberOfLines={1} style={styles.creditName}>{artist.name}</Text>
-            <Text style={styles.creditRole}>{index === 0 ? 'Artista principal' : 'Participação'}</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.55)" />
-        </LoggedPressable>
+        />
       ))}
+      </ProgressiveList>
     </View>
   );
 
@@ -2371,11 +2359,6 @@ const styles = StyleSheet.create({
   biographyToggle: { alignSelf: 'flex-start', paddingTop: 6 },
   biographyToggleText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   creditsHeading: { marginBottom: 4, marginTop: 22 },
-  creditRow: { alignItems: 'center', borderBottomColor: 'rgba(255,255,255,0.1)', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 11, minHeight: 58, paddingHorizontal: 4 },
-  creditAvatar: { alignItems: 'center', backgroundColor: '#3A3A3A', borderRadius: 18, height: 36, justifyContent: 'center', overflow: 'hidden', width: 36 },
-  creditCopy: { flex: 1, gap: 3 },
-  creditName: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
-  creditRole: { color: 'rgba(255,255,255,0.58)', fontSize: 12 },
   lyricsMainContainer: {
     flex: 1,
     minHeight: 0,

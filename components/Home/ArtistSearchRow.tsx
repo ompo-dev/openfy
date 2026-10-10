@@ -6,16 +6,18 @@ import { AppIcon } from '../native/AppIcon';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { rememberDetailPreview } from '../../services/navigation/detailPreview';
 
-export const ArtistSearchRow = ({ artist, onPress, trailingAction }: {
+export const ArtistSearchRow = ({ artist, onPress, trailingAction, subtitle, accessibilityLabel }: {
   artist: ArtistModel;
   onPress: () => void;
   trailingAction?: React.ReactNode;
+  subtitle?: string;
+  accessibilityLabel?: string;
 }) => {
   React.useEffect(() => {
     rememberDetailPreview('artist', artist.id, { title: artist.name, imageURL: artist.imageURL });
   }, [artist.id, artist.name, artist.imageURL]);
   return (
-  <LoggedPressable accessibilityLabel={`Abrir artista ${artist.name}`} onPress={onPress} style={styles.row}>
+  <LoggedPressable accessibilityRole="button" accessibilityLabel={accessibilityLabel || `Abrir artista ${artist.name}`} onPress={onPress} style={styles.row}>
     {artist.imageURL ? (
       <SkeletonImage cachePolicy="memory-disk" priority="high" source={{ uri: artist.imageURL }}
         contentFit="cover" style={styles.image} />
@@ -24,7 +26,7 @@ export const ArtistSearchRow = ({ artist, onPress, trailingAction }: {
     )}
     <View style={styles.copy}>
       <Text numberOfLines={1} style={styles.title}>{artist.name}</Text>
-      <Text numberOfLines={1} style={styles.subtitle}>{artist.genres?.slice(0, 2).join(' · ') || 'Artista'}</Text>
+      <Text numberOfLines={1} style={styles.subtitle}>{subtitle || artist.genres?.slice(0, 2).join(' · ') || 'Artista'}</Text>
     </View>
     {trailingAction || <AppIcon name="chevron-forward" size={18} color="#85858A" />}
   </LoggedPressable>

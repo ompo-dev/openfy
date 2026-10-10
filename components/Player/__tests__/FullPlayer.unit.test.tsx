@@ -344,7 +344,7 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(screen.getByText('Sobre o artista')).toBeTruthy();
     expect(screen.getByText('Créditos')).toBeTruthy();
     expect(screen.getAllByText('Artista principal').length).toBeGreaterThan(1);
-    expect(screen.getAllByText('Participação').length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Participação')).length).toBeGreaterThan(0);
     expect(screen.queryByText('OPENFY MUSIC')).toBeNull();
     expect(screen.getByText('A song')).toBeTruthy();
   });

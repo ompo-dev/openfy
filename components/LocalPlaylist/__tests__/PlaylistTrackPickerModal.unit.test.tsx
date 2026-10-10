@@ -8,6 +8,7 @@ jest.mock('../../native', () => {
   const { Pressable: MockPressable, View: MockView } = require('react-native');
 
   return {
+    LoggedPressable: MockPressable,
     SheetFrame: ({ children }: { children: React.ReactNode }) =>
       mockReact.createElement(MockView, null, children),
   };
@@ -48,7 +49,7 @@ describe('PlaylistTrackPickerModal', () => {
     );
 
     expect(screen.getByText('Já está na playlist')).toBeTruthy();
-    await fireEvent.press(screen.getByLabelText('Selecionar Segunda música'));
+    await fireEvent.press(await screen.findByLabelText('Selecionar Segunda música'));
     await fireEvent.press(screen.getByLabelText('Adicionar 1 música'));
 
     expect(onConfirm).toHaveBeenCalledWith(['second']);

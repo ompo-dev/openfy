@@ -1,4 +1,5 @@
 import type { LibraryTrack } from './catalogLibrary';
+import { artistFollowKey, type FollowedArtist } from './followedArtists';
 import { albumAssociationsForTrack, type TrackAlbumRef } from '../../models/Track/TrackModel';
 
 export type LocalAlbumCollection = {
@@ -12,6 +13,8 @@ export type LocalAlbumCollection = {
 export type LocalArtistCollection = {
   id: string;
   spotifyArtistId?: string;
+  routeId?: string;
+  following?: boolean;
   title: string;
   subtitle: string;
   imageURL: string;
@@ -163,4 +166,36 @@ export const groupLocalArtists = (
   });
 
   return [...artists.values()];
+};
+
+/** Library membership is primary credit or an explicit follow, not a featured credit. */
+export const groupLibraryArtists = (tracks: LibraryTrack[], followed: FollowedArtist[]): LocalArtistCollection[] => {
+  const artists = new Map<string, LocalArtistCollection>();
+  const add = (artist: { id?: string; name: string }, track: LibraryTrack) => {
+    const id = artistFollowKey(artist.name);
+    if (!id) return;
+    const current = artists.get(id);
+    if (current) {
+      current.spotifyArtistId ||= artist.id || undefined;
+      if (!current.tracks.some((item) => item.spotifyId === track.spotifyId)) current.tracks.push(track);
+    } else {
+      artists.set(id, { id, title: artist.name.trim(), spotifyArtistId: artist.id || undefined,
+        subtitle: track.albumName || 'Single', imageURL: '', tracks: [track] });
+    }
+  };
+  tracks.forEach((track) => {
+    const primary = getPrimaryTrackArtist(track);
+    if (primary) add(primary, track);
+    const albumPrimaries = [track.albumArtists?.[0],
+      ...(track.albumAssociations?.map((album) => album.albumArtists?.[0]) || [])];
+    albumPrimaries.forEach((artist) => { if (artist) add(artist, track); });
+  });
+  followed.forEach((artist) => {
+    const id = artistFollowKey(artist.name);
+    const current = artists.get(id);
+    artists.set(id, { ...current, id, title: artist.name, routeId: artist.id || current?.spotifyArtistId,
+      spotifyArtistId: current?.spotifyArtistId || artist.id, following: true,
+      subtitle: 'Seguindo', imageURL: artist.imageURL, tracks: current?.tracks || [] });
+  });
+  return [...artists.values()].sort((a, b) => Number(Boolean(b.following)) - Number(Boolean(a.following)));
 };

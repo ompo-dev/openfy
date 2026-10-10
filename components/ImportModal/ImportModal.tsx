@@ -6,25 +6,28 @@
 import * as React from 'react';
 import {
   ActivityIndicator,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
-  Image,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { AppIcon as Ionicons, AppIcon as MaterialCommunityIcons } from '../native/AppIcon';
 
 import {
   getDownloadedTracks,
+  getLibraryTracks,
+  getLocalPlaylists,
   isTrackDownloaded,
   parseSpotifyLink,
   upsertCatalogTracks,
   upsertLocalPlaylist,
 } from '@services';
-import { useDownloads } from '@context';
-import { SheetFrame } from '../native';
+import { useDownloads, usePlayer } from '@context';
+import { GlassSurface, LoggedPressable, SheetFrame } from '../native';
+import { TrackRow } from '../common/TrackRow';
+import { ProgressiveFlatList } from '../common/ProgressiveList';
+import type { TrackAlbumRef } from '../../models/Track/TrackModel';
 
 import {
   fetchSpotifyCollectionMetadata,
@@ -42,6 +45,7 @@ type TrackPreview = {
   albumName: string;
   artists?: SpotifyArtist[];
   albumId?: string;
+  albumAssociations?: TrackAlbumRef[];
   albumArtists?: SpotifyArtist[];
   trackNumber?: number;
   discNumber?: number;
@@ -141,10 +145,11 @@ const fetchYouTubePlaylist = async (
       const res = await axios.get(gw, { timeout: 6000 });
       const data = res.data;
       if (data && data.videos && Array.isArray(data.videos)) {
+        const downloadedIds = new Set((await getDownloadedTracks()).map((track) => track.spotifyId));
         const list: TrackPreview[] = [];
         for (const v of data.videos) {
           const trackId = `yt_${v.videoId}`;
-          const already = await isTrackDownloaded(trackId);
+          const already = downloadedIds.has(trackId);
           list.push({
             spotifyId: trackId,
             title: v.title || 'Música',
@@ -177,6 +182,16 @@ export const ImportModal = ({
   const [isLoading, setIsLoading] = React.useState(false);
   const [tracks, setTracks] = React.useState<TrackPreview[]>([]);
   const [error, setError] = React.useState('');
+  const [savedKey, setSavedKey] = React.useState('');
+  const persistedKey = React.useRef('');
+  const importPending = React.useRef(false);
+  const resolvedImport = React.useRef<{ key: string; tracks: TrackPreview[]; playlist: ImportedPlaylist | null } | null>(null);
+  const parsedInput = parseSpotifyLink(inputText.trim());
+  const inputKey = parsedInput ? `${parsedInput.platform}:${parsedInput.type}:${parsedInput.id}` : '';
+  const added = Boolean(inputKey && savedKey === inputKey);
+  const { currentTrack, isPlaying, playWithQueue } = usePlayer((state) => ({
+    currentTrack: state.currentTrack, isPlaying: state.playerState.isPlaying, playWithQueue: state.playWithQueue,
+  }));
   const { downloads, enqueueDownloads } = useDownloads();
   const downloadsById = React.useMemo(
     () => new Map(downloads.map((download) => [download.spotifyId, download])),
@@ -185,34 +200,57 @@ export const ImportModal = ({
   const isOffline = useConnectivityStore((state) => state.status === 'offline');
 
   React.useEffect(() => {
-    if (!visible || !initialInput) return;
+    if (!visible || !initialInput || importPending.current) return;
     setInputText(initialInput);
     setError('');
-    setTracks([]);
+    const parsed = parseSpotifyLink(initialInput.trim());
+    const key = parsed ? `${parsed.platform}:${parsed.type}:${parsed.id}` : '';
+    if (resolvedImport.current?.key !== key) setTracks([]);
   }, [initialInput, visible]);
 
-  const reset = () => {
-    setInputText('');
-    setTracks([]);
-    setError('');
-    setIsLoading(false);
-  };
+  React.useEffect(() => {
+    const resolved = resolvedImport.current;
+    if (!visible || !resolved || importPending.current) return;
+    let active = true;
+    void Promise.all([getLibraryTracks(), resolved.playlist ? getLocalPlaylists() : Promise.resolve([])])
+      .then(([savedTracks, playlists]) => {
+        if (!active || importPending.current || resolvedImport.current !== resolved) return;
+        const ids = new Set(savedTracks.map((track) => track.spotifyId));
+        const stillSaved = resolved.tracks.every((track) => ids.has(track.spotifyId)) &&
+          (!resolved.playlist || playlists.some((playlist) => playlist.sourcePlatform === resolved.playlist?.sourcePlatform &&
+            playlist.sourceId === resolved.playlist.sourceId));
+        if (!stillSaved && persistedKey.current === resolved.key) {
+          persistedKey.current = '';
+          setSavedKey('');
+        }
+      }).catch(() => {});
+    return () => { active = false; };
+  }, [visible]);
 
   const handleClose = () => {
-    reset();
     onClose();
+  };
+
+  const changeInput = (text: string) => {
+    if (importPending.current) return;
+    setInputText(text);
+    setError('');
+    const parsed = parseSpotifyLink(text.trim());
+    const key = parsed ? `${parsed.platform}:${parsed.type}:${parsed.id}` : '';
+    setTracks(resolvedImport.current?.key === key ? resolvedImport.current.tracks : []);
   };
 
   const handlePasteFromClipboard = async () => {
     try {
       const text = await Clipboard.getStringAsync();
-      setInputText(text);
+      changeInput(text);
     } catch {
       setError('Não foi possível acessar a área de transferência.');
     }
   };
 
   const handleImport = async () => {
+    if (importPending.current || added || (inputKey && persistedKey.current === inputKey)) return;
     if (isOffline) {
       showOfflineActionMessage();
       return;
@@ -230,6 +268,7 @@ export const ImportModal = ({
       return;
     }
 
+    importPending.current = true;
     setIsLoading(true);
     setError('');
     setTracks([]);
@@ -238,7 +277,10 @@ export const ImportModal = ({
       let tracksToShow: TrackPreview[] = [];
       let playlistToSave: ImportedPlaylist | null = null;
 
-      if (parsed.platform === 'youtube') {
+      if (resolvedImport.current?.key === inputKey) {
+        tracksToShow = resolvedImport.current.tracks;
+        playlistToSave = resolvedImport.current.playlist;
+      } else if (parsed.platform === 'youtube') {
         if (parsed.type === 'track') {
           const ytTrack = await fetchYouTubeTrack(parsed.id);
           if (ytTrack) tracksToShow = [ytTrack];
@@ -279,6 +321,7 @@ export const ImportModal = ({
             : 'Nenhuma música encontrada. Verifique o link e tente novamente.'
         );
       } else {
+        resolvedImport.current = { key: inputKey, tracks: tracksToShow, playlist: playlistToSave };
         setTracks(tracksToShow);
         await upsertCatalogTracks(tracksToShow);
         if (playlistToSave) {
@@ -290,6 +333,8 @@ export const ImportModal = ({
               .filter(Boolean),
           });
         }
+        persistedKey.current = inputKey;
+        setSavedKey(inputKey);
         onLibraryChanged?.();
       }
     } catch (err) {
@@ -300,6 +345,7 @@ export const ImportModal = ({
       );
       console.error('[ImportModal] handleImport error:', err);
     } finally {
+      importPending.current = false;
       setIsLoading(false);
     }
   };
@@ -312,6 +358,7 @@ export const ImportModal = ({
       albumName: track.albumName,
       artists: track.artists,
       albumId: track.albumId,
+      albumAssociations: track.albumAssociations,
       albumArtists: track.albumArtists,
       trackNumber: track.trackNumber,
       discNumber: track.discNumber,
@@ -327,7 +374,7 @@ export const ImportModal = ({
 
   const handleDownloadTrack = (track: TrackPreview) => {
     const download = downloadsById.get(track.spotifyId);
-    if (track.isDownloaded || download?.status === 'completed') return;
+    if (track.isDownloaded || ['completed', 'queued', 'resolving', 'downloading'].includes(download?.status || '')) return;
     enqueueDownloads([toDownloadInput(track)]);
   };
 
@@ -336,7 +383,7 @@ export const ImportModal = ({
       tracks
         .filter((track) => {
           const download = downloadsById.get(track.spotifyId);
-          return !track.isDownloaded && download?.status !== 'completed';
+          return !track.isDownloaded && !['completed', 'queued', 'resolving', 'downloading'].includes(download?.status || '');
         })
         .map(toDownloadInput)
     );
@@ -344,276 +391,103 @@ export const ImportModal = ({
 
   const downloadableCount = tracks.filter((track) => {
     const download = downloadsById.get(track.spotifyId);
-    return !track.isDownloaded && download?.status !== 'completed';
+    return !track.isDownloaded && !['completed', 'queued', 'resolving', 'downloading'].includes(download?.status || '');
   }).length;
 
-  return (
-    <SheetFrame
-      visible={visible}
-      title="Adicionar músicas"
-      onClose={handleClose}
-    >
-      <View style={styles.inputSection}>
-        <Text style={styles.label}>Cole um link do Spotify ou YouTube:</Text>
-        <View style={styles.inputRow}>
-          <TextInput
-            style={styles.textInput}
-            value={inputText}
-            onChangeText={(t) => {
-              setInputText(t);
-              setError('');
-            }}
-            placeholder="https://open.spotify.com/track/... ou youtube.com/watch?v=..."
-            placeholderTextColor="#666"
-            multiline={false}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <Pressable
-            onPress={handlePasteFromClipboard}
-            style={styles.pasteButton}
-          >
-            <MaterialCommunityIcons
-              name="clipboard-text-outline"
-              size={20}
-              color="#1DB954"
-            />
-          </Pressable>
-        </View>
-
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-        <Pressable
-          onPress={handleImport}
-          style={[
-            styles.importButton,
-            isLoading && styles.importButtonDisabled,
-          ]}
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <ActivityIndicator color="#000" size="small" />
-          ) : (
-            <Text style={styles.importButtonText}>Adicionar à biblioteca</Text>
-          )}
-        </Pressable>
+  const inputSection = (
+    <View style={styles.inputSection}>
+      <View style={styles.inputRow}>
+        <TextInput
+          accessibilityLabel="Link da música, álbum ou playlist"
+          style={styles.textInput}
+          value={inputText}
+          onChangeText={changeInput}
+          editable={!isLoading}
+          placeholder="Link do Spotify ou YouTube"
+          placeholderTextColor="#8E8E93"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="done"
+          onSubmitEditing={() => void handleImport()}
+        />
+        <LoggedPressable accessibilityLabel="Colar link" disabled={isLoading}
+          onPress={() => void handlePasteFromClipboard()}>
+          <GlassSurface glass="regular" isInteractive style={styles.iconButton}>
+            <MaterialCommunityIcons name="clipboard-text-outline" size={21} color="#FFFFFF" />
+          </GlassSurface>
+        </LoggedPressable>
       </View>
-
-      {tracks.length > 0 ? (
-        <View style={styles.resultsSection}>
-          <View style={styles.resultsHeader}>
-            <Text style={styles.resultsCount}>
-              {tracks.length} {tracks.length === 1 ? 'música' : 'músicas'}{' '}
-              adicionada{tracks.length !== 1 ? 's' : ''}
-            </Text>
-            {downloadableCount > 0 ? (
-              <Pressable
-                onPress={handleDownloadAll}
-                style={styles.downloadAllButton}
-              >
-                <Ionicons name={isOffline ? 'cloud-offline-outline' : 'download-outline'} size={16} color="#000" />
-                <Text style={styles.downloadAllText}>Baixar Todas</Text>
-              </Pressable>
-            ) : null}
-          </View>
-
-          <View style={styles.trackList}>
-            {tracks.map((track, index) => {
-              const download = downloadsById.get(track.spotifyId);
-              const isComplete =
-                track.isDownloaded || download?.status === 'completed';
-              const isActive =
-                download?.status === 'queued' ||
-                download?.status === 'resolving' ||
-                download?.status === 'downloading';
-              return (
-                <View key={track.spotifyId + index} style={styles.trackItem}>
-                  {track.imageURL ? (
-                    <Image
-                      source={{ uri: track.imageURL }}
-                      style={styles.trackImage}
-                    />
-                  ) : (
-                    <View
-                      style={[styles.trackImage, styles.trackImageFallback]}
-                    >
-                      <Ionicons name="musical-note" size={16} color="#555" />
-                    </View>
-                  )}
-
-                  <View style={styles.trackInfo}>
-                    <Text style={styles.trackTitle} numberOfLines={1}>
-                      {track.title}
-                    </Text>
-                    <Text style={styles.trackArtist} numberOfLines={1}>
-                      {track.artistName}
-                    </Text>
-                    {download?.status === 'downloading' && (
-                      <View style={styles.progressBarContainer}>
-                        <View
-                          style={[
-                            styles.progressBar,
-                            {
-                              width: `${Math.round(download.progress * 100)}%`,
-                            },
-                          ]}
-                        />
-                      </View>
-                    )}
-                  </View>
-
-                  <Pressable
-                    onPress={() => handleDownloadTrack(track)}
-                    style={styles.downloadButton}
-                    disabled={isComplete || isActive}
-                  >
-                    {isComplete ? (
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={22}
-                        color="#1DB954"
-                      />
-                    ) : isActive ? (
-                      <ActivityIndicator size="small" color="#1DB954" />
-                    ) : download?.status === 'error' ? (
-                      <Ionicons name="alert-circle" size={22} color="#FF4444" />
-                    ) : (
-                      <Ionicons name={isOffline ? 'cloud-offline-outline' : 'download-outline'} size={22} color="#FFFFFF" />
-                    )}
-                  </Pressable>
-                </View>
-              );
-            })}
-          </View>
+      {error ? <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text> : null}
+      {!added ? (
+        <LoggedPressable accessibilityRole="button" accessibilityLabel="Adicionar à biblioteca"
+          disabled={isLoading} onPress={() => void handleImport()}>
+          <GlassSurface glass="regular" isInteractive style={[styles.importButton, isLoading && styles.disabled]}>
+            {isLoading ? <ActivityIndicator color="#FFFFFF" size="small" /> : <>
+              <Ionicons name="add" size={20} color="#1ED760" />
+              <Text style={styles.actionText}>Adicionar à biblioteca</Text>
+            </>}
+          </GlassSurface>
+        </LoggedPressable>
+      ) : null}
+      {tracks.length ? (
+        <View style={styles.resultsHeader}>
+          <Text style={styles.resultsCount}>
+            {tracks.length} {tracks.length === 1 ? 'música' : 'músicas'}{added ? ' na biblioteca' : ''}
+          </Text>
+          {downloadableCount ? (
+            <LoggedPressable accessibilityRole="button" accessibilityLabel="Baixar todas as músicas"
+              onPress={handleDownloadAll}>
+              <GlassSurface glass="regular" isInteractive style={styles.downloadAllButton}>
+                <Ionicons name="download-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.actionText}>Baixar</Text>
+              </GlassSurface>
+            </LoggedPressable>
+          ) : null}
         </View>
       ) : null}
+    </View>
+  );
+
+  return (
+    <SheetFrame visible={visible} title="Adicionar músicas" onClose={handleClose}
+      scroll={false} artworkURL={tracks[0]?.imageURL}
+      contentHeight={(added ? 128 : tracks.length ? 184 : 132) + (error ? 36 : 0) + tracks.length * 64}>
+      <ProgressiveFlatList
+        listKey={inputKey}
+        data={tracks}
+        keyExtractor={(track) => track.spotifyId}
+        ListHeaderComponent={inputSection}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        renderItem={({ item, index }) => {
+          const status = downloadsById.get(item.spotifyId)?.status;
+          return <TrackRow title={item.title} subtitle={item.artistName} imageURL={item.imageURL}
+            active={currentTrack?.spotifyId === item.spotifyId} playing={isPlaying}
+            downloadState={item.isDownloaded || status === 'completed' ? 'completed' :
+              ['queued', 'resolving', 'downloading'].includes(status || '') ? 'active' : 'idle'}
+            onDownload={() => handleDownloadTrack(item)}
+            onPress={() => void playWithQueue(
+              tracks.map((track) => ({ ...toDownloadInput(track), streamUrl: track.audioUrl })),
+              index, `import:${inputKey}`
+            )} />;
+        }}
+      />
     </SheetFrame>
   );
 };
 
 const styles = StyleSheet.create({
-  inputSection: {
-    gap: 12,
-  },
-  label: {
-    color: '#A0A0A0',
-    fontSize: 13,
-    fontFamily: 'SF-Regular',
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  textInput: {
-    flex: 1,
-    backgroundColor: '#282828',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontFamily: 'SF-Regular',
-  },
-  pasteButton: {
-    backgroundColor: '#282828',
-    borderRadius: 8,
-    padding: 12,
-  },
-  errorText: {
-    color: '#FF4444',
-    fontSize: 12,
-    fontFamily: 'SF-Regular',
-  },
-  importButton: {
-    backgroundColor: '#1DB954',
-    borderRadius: 24,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  importButtonDisabled: {
-    opacity: 0.6,
-  },
-  importButtonText: {
-    color: '#000',
-    fontSize: 15,
-    fontFamily: 'SF-Semibold',
-  },
-  resultsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: 4,
-  },
-  resultsCount: {
-    color: '#A0A0A0',
-    fontSize: 13,
-    fontFamily: 'SF-Regular',
-  },
-  downloadAllButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#1DB954',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  downloadAllText: {
-    color: '#000',
-    fontSize: 13,
-    fontFamily: 'SF-Semibold',
-  },
-  trackList: {
-    gap: 0,
-  },
-  resultsSection: {
-    gap: 8,
-  },
-  trackItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    gap: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#282828',
-  },
-  trackImage: {
-    width: 44,
-    height: 44,
-    borderRadius: 4,
-  },
-  trackImageFallback: {
-    backgroundColor: '#282828',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  trackInfo: {
-    flex: 1,
-    gap: 3,
-  },
-  trackTitle: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontFamily: 'SF-Semibold',
-  },
-  trackArtist: {
-    color: '#A0A0A0',
-    fontSize: 12,
-    fontFamily: 'SF-Regular',
-  },
-  progressBarContainer: {
-    height: 2,
-    backgroundColor: '#333',
-    borderRadius: 1,
-    marginTop: 4,
-    overflow: 'hidden',
-  },
-  progressBar: {
-    height: 2,
-    backgroundColor: '#1DB954',
-  },
-  downloadButton: {
-    padding: 8,
-  },
+  inputSection: { gap: 12, paddingBottom: 8 },
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  textInput: { flex: 1, minWidth: 0, height: 44, backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 8, paddingHorizontal: 12, color: '#FFFFFF', fontSize: 14, fontFamily: 'SF-Regular' },
+  iconButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  importButton: { minHeight: 44, borderRadius: 8, flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center' },
+  disabled: { opacity: 0.6 },
+  actionText: { color: '#FFFFFF', fontSize: 14, fontFamily: 'SF-Semibold' },
+  errorText: { color: '#FF6969', fontSize: 12, fontFamily: 'SF-Regular' },
+  resultsHeader: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  resultsCount: { flex: 1, color: 'rgba(255,255,255,0.6)', fontSize: 12, fontFamily: 'SF-Regular' },
+  downloadAllButton: { minHeight: 36, paddingHorizontal: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 7 },
 });

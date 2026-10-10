@@ -4,8 +4,19 @@ import { Dimensions, PanResponder, StyleSheet, Text } from 'react-native';
 import * as Motion from 'react-native-reanimated';
 import { SheetFrame } from '../SheetFrame';
 import { PlayerModal, shouldDismissSheet } from '../PlayerModal';
+import { ProgressiveFlatList } from '../../common/ProgressiveList';
 
 describe('shared player modal surface', () => {
+  it('fits progressive lists and forwards their scroll position to drag dismissal', async () => {
+    const screen = await render(<SheetFrame visible title="Músicas" onClose={jest.fn()} scroll={false} contentHeight={200}>
+      <ProgressiveFlatList testID="progressive-scroll" data={['Song']} keyExtractor={(item) => item}
+        renderItem={({ item }) => <Text>{item}</Text>} />
+    </SheetFrame>);
+    const list = screen.getByTestId('progressive-scroll');
+    expect(StyleSheet.flatten(list.props.style)).toMatchObject({ flexGrow: 1, flexShrink: 1, flexBasis: 'auto', minHeight: 0 });
+    expect(typeof list.props.onScroll).toBe('function');
+    await fireEvent.scroll(list, { nativeEvent: { contentOffset: { y: 120, x: 0 } } });
+  });
   afterEach(() => jest.restoreAllMocks());
   it('fits short content in a transparent sheet and closes with the supplied action', async () => {
     const onClose = jest.fn();

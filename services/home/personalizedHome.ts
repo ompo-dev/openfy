@@ -4,6 +4,7 @@ import type { UserProfile } from '../recommendation/recommendationEngine';
 import type { LibraryTrack } from '../library/catalogLibrary';
 import type { LocalPlaylist } from '../library/localPlaylistManager';
 import type { TrackAlbumRef } from '../../models/Track/TrackModel';
+import { artistFollowKey, type FollowedArtist } from '../library/followedArtists';
 import {
   getBestYouTubeMusicThumbnail,
   getYouTubeMusicClient,
@@ -45,6 +46,7 @@ export type RecommendationSeed = {
   name: string;
   score: number;
   matchArtist?: boolean;
+  followed?: boolean;
 };
 
 export type PersonalizedHomeArtist = {
@@ -219,7 +221,8 @@ const affinityForTrack = (
 export const buildRecommendationSeeds = (
   tracks: LibraryTrack[],
   playlists: LocalPlaylist[],
-  profile: UserProfile
+  profile: UserProfile,
+  followedArtists: FollowedArtist[] = []
 ): RecommendationSeed[] => {
   const playlistFrequency = new Map<string, number>();
   playlists.forEach((playlist) => {
@@ -260,14 +263,22 @@ export const buildRecommendationSeeds = (
     );
   });
 
+  followedArtists.forEach((artist) => {
+    addSeed(artist.name, 120, artist.id);
+    const current = seeds.get(normalize(artist.name));
+    if (current) seeds.set(normalize(artist.name), { ...current, id: artist.id || current.id, followed: true });
+  });
+
   return [...seeds.values()]
-    .sort((first, second) => second.score - first.score || first.name.localeCompare(second.name))
+    .sort((first, second) => Number(Boolean(second.followed)) - Number(Boolean(first.followed)) ||
+      second.score - first.score || first.name.localeCompare(second.name))
     .slice(0, 5);
 };
 
 export const buildPersonalizedHome = ({
   allowExplicitRecommendations,
   discoveries = [],
+  followedArtists = [],
   catalog,
   personalized,
   playlists,
@@ -277,6 +288,7 @@ export const buildPersonalizedHome = ({
 }: {
   allowExplicitRecommendations: boolean;
   discoveries?: PersonalizedHomeTrack[];
+  followedArtists?: FollowedArtist[];
   catalog?: HomeCatalog;
   personalized: boolean;
   playlists: LocalPlaylist[];
@@ -286,6 +298,9 @@ export const buildPersonalizedHome = ({
 }): PersonalizedHomeSnapshot => {
   const tracksById = new Map(tracks.map((track) => [track.spotifyId, track]));
   const homeTracks = tracks.map(libraryTrackToHomeTrack);
+  const followedNames = new Set(followedArtists.map((artist) => artistFollowKey(artist.name)));
+  const followAffinity = (track: PersonalizedHomeTrack) =>
+    trackArtistNames(track).some((name) => followedNames.has(artistFollowKey(name))) ? 80 : 0;
   const recentEntries = [...profile.recentlyPlayedTracks].sort(
     (first, second) => second.lastPlayedAt - first.lastPlayedAt
   );
@@ -311,7 +326,8 @@ export const buildPersonalizedHome = ({
     const current = listenedArtists.get(key);
     listenedArtists.set(key, {
       id: artistId, artistId, spotifyArtistId: artistId, title: name,
-      imageURL: '', appearances: (current?.appearances || 0) + entry.playCount,
+      imageURL: followedArtists.find((artist) => artistFollowKey(artist.name) === artistFollowKey(name))?.imageURL || '',
+      appearances: (current?.appearances || 0) + entry.playCount,
     });
   }));
   const pinnedArtists = [...listenedArtists.values()]
@@ -328,7 +344,7 @@ export const buildPersonalizedHome = ({
   const rankedLibrary = [...homeTracks].sort((first, second) => {
     const score = (track: PersonalizedHomeTrack) =>
       (personalized
-        ? affinityForTrack(track, profile.artistWeights) * 4 +
+        ? followAffinity(track) + affinityForTrack(track, profile.artistWeights) * 4 +
           (playlistFrequency.get(track.spotifyId) || 0) * 8 +
           (playCounts.get(track.spotifyId) || 0) * 2
         : 0) +
@@ -357,7 +373,7 @@ export const buildPersonalizedHome = ({
         `${normalize(track.artists?.[0]?.name || track.artistName)}:${normalize(track.title)}`
       ) &&
       (allowExplicitRecommendations || !track.explicit)
-  );
+  ).sort((a, b) => personalized ? followAffinity(b) - followAffinity(a) : 0);
   const quickPicks = diverseTracks(
     remoteDiscoveries.length ? remoteDiscoveries : libraryQuickPicks,
     12
@@ -387,7 +403,7 @@ export const buildPersonalizedHome = ({
     })
     .slice(0, 10);
   const recommendationSeeds = personalized
-    ? buildRecommendationSeeds(tracks, playlists, profile)
+    ? buildRecommendationSeeds(tracks, playlists, profile, followedArtists)
     : [];
   const knownArtistIds = new Set<string>();
   const knownArtistNames = new Set(
@@ -396,6 +412,10 @@ export const buildPersonalizedHome = ({
   groupLocalArtists(tracks).forEach((artist) => {
     if (artist.spotifyArtistId) knownArtistIds.add(artist.spotifyArtistId);
     knownArtistNames.add(normalize(artist.title));
+  });
+  followedArtists.forEach((artist) => {
+    knownArtistIds.add(artist.id);
+    knownArtistNames.add(normalize(artist.name));
   });
   const artistCandidates = new Map<string, PersonalizedHomeArtist>();
   remoteDiscoveries.forEach((track) => {

@@ -52,6 +52,17 @@ const library = [
 ];
 
 describe('personalizedHome', () => {
+  it('prioritizes explicit follows without inventing listens or keeping an unfollow bonus', () => {
+    const followedArtists = [{ id: 'ytartist_new', name: 'Novo artista', imageURL: 'portrait.jpg', followedAt: 1 }];
+    const input = { tracks: library, playlists, profile, personalized: true, allowExplicitRecommendations: true };
+    const followed = buildPersonalizedHome({ ...input, followedArtists });
+    expect(followed.seeds[0]).toMatchObject({ id: 'ytartist_new', name: 'Novo artista', followed: true });
+    expect(followed.pinnedArtists).toEqual([]);
+    expect(followed.mostPlayed).toEqual([]);
+    const unfollowed = buildPersonalizedHome(input);
+    expect(unfollowed.seeds.map((seed) => seed.name)).not.toContain('Novo artista');
+    expect(profile.totalListens).toBe(12);
+  });
   it('ranks pinned songs and artists by actual listens, while recents use playback order', () => {
     const history: UserProfile = { ...profile, recentlyPlayedTracks: library.slice(0, 3).map((item, index) => ({
       track: { id: item.spotifyId, spotifyId: item.spotifyId, title: item.title, artists: [item.artistName],

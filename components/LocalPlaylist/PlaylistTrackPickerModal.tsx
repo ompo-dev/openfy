@@ -1,17 +1,16 @@
 import * as React from 'react';
 import {
-  FlatList,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
-  View,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 
 import { type LibraryTrack } from '@services';
 import { SheetFrame } from '../native';
+import { TrackRow } from '../common/TrackRow';
+import { ProgressiveFlatList } from '../common/ProgressiveList';
 
 type PlaylistTrackPickerModalProps = {
   existingTrackIds: string[];
@@ -75,7 +74,7 @@ export const PlaylistTrackPickerModal = ({
 
   return (
     <SheetFrame visible={visible} title="Adicionar músicas" onClose={onClose} scroll={false}
-      contentHeight={42 + 46 + 40 + Math.max(1, visibleTracks.length) * 62}>
+      contentHeight={42 + 46 + 56 + Math.max(1, visibleTracks.length) * 64}>
       <TextInput
         autoCapitalize="none"
         autoCorrect={false}
@@ -85,7 +84,8 @@ export const PlaylistTrackPickerModal = ({
         style={styles.searchInput}
         value={query}
       />
-      <FlatList
+      <ProgressiveFlatList
+        listKey={query}
         data={visibleTracks}
         keyExtractor={(track) => track.spotifyId}
         keyboardShouldPersistTaps="handled"
@@ -96,42 +96,24 @@ export const PlaylistTrackPickerModal = ({
           const isExisting = existingTrackIdSet.has(item.spotifyId);
           const isSelected = selectedTrackIds.has(item.spotifyId);
           return (
-            <Pressable
+            <TrackRow
               accessibilityLabel={
                 isExisting
                   ? `${item.title} já está na playlist`
                   : `${isSelected ? 'Remover' : 'Selecionar'} ${item.title}`
               }
-              accessibilityRole="button"
               disabled={isExisting}
               onPress={() => toggleTrack(item.spotifyId)}
-              style={[styles.trackRow, isExisting && styles.trackRowDisabled]}
-            >
-              {item.localImagePath || item.imageURL ? (
-                <Image
-                  cachePolicy="memory-disk"
-                  source={{ uri: item.localImagePath || item.imageURL }}
-                  style={styles.cover}
-                />
-              ) : (
-                <View style={[styles.cover, styles.coverFallback]}>
-                  <Ionicons color="#999999" name="musical-note" size={19} />
-                </View>
-              )}
-              <View style={styles.copy}>
-                <Text numberOfLines={1} style={styles.title}>
-                  {item.title}
-                </Text>
-                <Text numberOfLines={1} style={styles.subtitle}>
-                  {isExisting ? 'Já está na playlist' : item.artistName}
-                </Text>
-              </View>
-              <Ionicons
+              title={item.title}
+              subtitle={isExisting ? 'Já está na playlist' : item.artistName}
+              imageURL={item.localImagePath || item.imageURL}
+              active={false} playing={false} downloadState="idle" onDownload={() => {}}
+              trailingAction={<Ionicons
                 color={isExisting || isSelected ? '#1ED760' : '#8B8B8B'}
                 name={isExisting || isSelected ? 'checkmark-circle' : 'ellipse-outline'}
                 size={22}
-              />
-            </Pressable>
+              />}
+            />
           );
         }}
         showsVerticalScrollIndicator={false}

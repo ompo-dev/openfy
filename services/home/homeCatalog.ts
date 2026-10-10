@@ -35,7 +35,7 @@ export const loadHomeCatalog = (
   anchors: PersonalizedHomeTrack[],
   force = false
 ): Promise<HomeCatalog> => {
-  const selected = seeds.filter((seed) => seed.matchArtist !== false).slice(0, 2);
+  const selected = seeds.filter((seed) => seed.matchArtist !== false).slice(0, seeds.some((seed) => seed.followed) ? 5 : 2);
   if (!selected.length) return Promise.resolve({ releases: [], similarTracks: [] });
   const key = JSON.stringify(selected.map((seed) => [seed.id, normalize(seed.name)]));
   return cache.getOrLoad(force ? `${key}:refresh` : key, async () => {
@@ -48,7 +48,8 @@ export const loadHomeCatalog = (
         if (!force && Date.now() - stored.fetchedAt < TTL) return previous!;
       }
     } catch {}
-    const groups = await Promise.all(selected.map(async (seed): Promise<HomeRelease[]> => {
+    const groups: HomeRelease[][] = [];
+    const loadReleases = async (seed: RecommendationSeed): Promise<HomeRelease[]> => {
       const route = seed.id?.startsWith('ytartist_')
         ? seed.id : toYouTubeMusicArtistRouteId(undefined, seed.name);
       let profile: Awaited<ReturnType<typeof getYouTubeMusicArtistProfile>> | undefined;
@@ -67,7 +68,11 @@ export const loadHomeCatalog = (
         releaseDate: item.releaseDate || item.subtitle.match(/\b(?:19|20)\d{2}\b/)?.[0] || '',
         releaseType: item.releaseType || 'release',
       }));
-    }));
+    };
+    // Explicit follows expand coverage, but do not flood playback with catalog requests.
+    for (let index = 0; index < selected.length; index += 2) {
+      groups.push(...await Promise.all(selected.slice(index, index + 2).map(loadReleases)));
+    }
     const similarTracks = await loadHomeRadio(selected[0], anchors);
     const releases = sortHomeReleases(groups.flat());
     const catalog: HomeCatalog = {

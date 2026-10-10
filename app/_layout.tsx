@@ -25,6 +25,12 @@ import { useOTAUpdates } from '@hooks';
 import { installErrorLogging, log } from '@utils';
 import { usePlayerStore } from '../stores/usePlayerStore';
 import { GlassBackdropProvider } from '../components/native/GlassBackdrop';
+import { useFollowedArtistsStore } from '../stores/useFollowedArtistsStore';
+import { prefetchArtistData } from '../services/library/artistProfilePrefetch';
+import { prefetchImage } from '../services/images/imagePrefetch';
+import { rememberDetailPreview } from '../services/navigation/detailPreview';
+import { rememberCachedArtistImage } from '../services/library/artistImageCache';
+import { useConnectivityStore } from '../stores/useConnectivityStore';
 
 import 'react-native-reanimated';
 
@@ -38,6 +44,21 @@ function NavigationDiagnostics() {
     log.nav('route changed', { pathname });
   }, [pathname]);
 
+  return null;
+}
+
+function FollowedArtistsWarmup() {
+  const artists = useFollowedArtistsStore((state) => state.artists);
+  const offline = useConnectivityStore((state) => state.status === 'offline');
+  React.useEffect(() => {
+    if (offline) return;
+    artists.slice(0, 6).forEach((artist) => {
+      rememberDetailPreview('artist', artist.id, { title: artist.name, imageURL: artist.imageURL });
+      if (artist.imageURL) void prefetchImage(artist.imageURL).catch(() => {});
+      if (artist.imageURL) void rememberCachedArtistImage(artist.name, artist.imageURL, [artist.id]);
+    });
+    prefetchArtistData(artists.slice(0, 6));
+  }, [artists, offline]);
   return null;
 }
 
@@ -99,6 +120,9 @@ export default function RootLayout() {
   React.useEffect(() => {
     log.nav('app started', { platform: Platform.OS });
     registerBackgroundDownloadTask().catch(() => {});
+    void useFollowedArtistsStore.getState().hydrate().catch((error) => {
+      log.error('load followed artists failed', { error: String(error) });
+    });
   }, []);
 
   if (!fontsLoaded) {
@@ -116,6 +140,7 @@ export default function RootLayout() {
                   <GlassBackdropProvider>
                   <View style={styles.gestureHandlerRootView}>
                     <NavigationDiagnostics />
+                    <FollowedArtistsWarmup />
                     <Stack
                       screenOptions={{
                         headerShown: false,

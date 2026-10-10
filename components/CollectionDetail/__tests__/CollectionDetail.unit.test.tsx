@@ -5,6 +5,7 @@ import { Keyboard, StyleSheet } from 'react-native';
 
 import { useDownloads, usePlayer } from '@context';
 import { CollectionDetail } from '../CollectionDetail';
+import { getFollowedArtistsSnapshot } from '../../../services/library/followedArtists';
 
 const mockReplace = jest.fn();
 const mockPush = jest.fn();
@@ -128,6 +129,17 @@ const renderCollection = (props = {}) =>
   );
 
 describe('CollectionDetail', () => {
+  it('follows and unfollows from the profile instead of sharing', async () => {
+    const screen = await renderCollection({ kind: 'artist', collectionId: 'ytartist_follow-test', title: 'Follow Test' });
+    const follow = await screen.findByLabelText('Seguir artista');
+    await waitFor(() => expect(follow.props.accessibilityState?.disabled).not.toBe(true));
+    await fireEvent.press(follow);
+    await screen.findByLabelText('Deixar de seguir artista');
+    expect(getFollowedArtistsSnapshot()).toEqual([expect.objectContaining({ name: 'Follow Test' })]);
+    expect(screen.queryByLabelText('Compartilhar')).toBeNull();
+    await fireEvent.press(screen.getByLabelText('Deixar de seguir artista'));
+    await waitFor(() => expect(getFollowedArtistsSnapshot()).toEqual([]));
+  });
   beforeEach(() => {
     jest.clearAllMocks();
     jest.mocked(useDownloads).mockReturnValue({

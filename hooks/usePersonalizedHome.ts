@@ -18,6 +18,7 @@ import type { UserProfile } from '../services/recommendation/recommendationEngin
 import { log } from '../utils/appLogger';
 import { loadHomeCatalog } from '../services/home/homeCatalog';
 import type { HomeCatalog } from '../services/home/personalizedHome';
+import { useFollowedArtistsStore } from '../stores/useFollowedArtistsStore';
 
 const MIN_REFRESH_INDICATOR_MS = 350;
 const HOME_DATA_TTL_MS = 60_000;
@@ -99,6 +100,8 @@ const cacheHomeSnapshot = (key: string, snapshot: PersonalizedHomeSnapshot) => {
 };
 
 export const usePersonalizedHome = () => {
+  const followedArtists = useFollowedArtistsStore((state) => state.artists);
+  const followRevision = useFollowedArtistsStore((state) => state.revision);
   const { libraryRevision } = useLibrarySelectedCategory();
   const { settings } = useAppSettings();
   const [home, setHome] = React.useState<PersonalizedHomeSnapshot>(
@@ -109,6 +112,7 @@ export const usePersonalizedHome = () => {
   const [refreshSequence, setRefreshSequence] = React.useState(0);
   const snapshotKey = [
     libraryRevision,
+    followRevision,
     settings.personalizedHome ? 'personalized' : 'general',
     settings.allowExplicitRecommendations ? 'explicit' : 'clean',
   ].join(':');
@@ -118,8 +122,6 @@ export const usePersonalizedHome = () => {
   const forceRefreshRef = React.useRef(false);
   const refreshStartedAt = React.useRef(0);
   const finishManualRefresh = React.useRef<((result?: unknown) => void) | null>(null);
-  const homeRef = React.useRef(home);
-  homeRef.current = home;
   const generation = React.useRef(0);
   const refresh = React.useCallback(() => {
     refreshStartedAt.current = Date.now();
@@ -184,6 +186,7 @@ export const usePersonalizedHome = () => {
             allowExplicitRecommendations: settings.allowExplicitRecommendations,
             discoveries,
             catalog,
+            followedArtists,
             personalized: settings.personalizedHome,
             playlists,
             profile,
@@ -195,7 +198,7 @@ export const usePersonalizedHome = () => {
         });
         const localSnapshot = build(
           settings.personalizedHome
-            ? cachedSnapshot?.snapshot.discoveries || homeRef.current.discoveries
+            ? cachedSnapshot?.snapshot.discoveries || []
             : []
         );
         finishLocalBuild({
@@ -277,6 +280,7 @@ export const usePersonalizedHome = () => {
       requestKey,
       snapshotKey,
       libraryRevision,
+      followedArtists,
       settings.allowExplicitRecommendations,
       settings.personalizedHome,
     ])

@@ -12,10 +12,8 @@
 import * as React from 'react';
 import {
   Dimensions,
-  FlatList,
   Image,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -30,7 +28,9 @@ import { usePlayer } from '@context';
 import { MarqueeText } from '../../common/MarqueeText';
 import { getNoteColorTheme } from '../../../utils/colorContrast';
 import { NativeIconButton } from '../../native/NativeButtons';
-import { PlayerModal, SheetFrame } from '../../native';
+import { SheetFrame } from '../../native';
+import { ProgressiveFlatList } from '../../common/ProgressiveList';
+import { TrackRow } from '../../common/TrackRow';
 import { MiniPlayer } from '../../Player/MiniPlayer';
 import { MusicSnippetEditorModal } from './MusicSnippetEditorModal';
 import { SoundWaveIcon } from './NoteBubble';
@@ -469,51 +469,12 @@ export const MyNoteModal = ({
   // SCREEN 2: Note Creator (Spacious Comfortable Height Modal Card)
   // ──────────────────────────────────────────────────────────────────────────
   return (
-    <PlayerModal visible={visible} onRequestClose={onClose}>
-      <Pressable style={S.overlay} onPress={onClose}>
-        <ScrollView
-          keyboardShouldPersistTaps="handled"
-          style={S.creatorModalContainer}
-        >
-          <Pressable
-            style={[
-              S.creatorModalCard,
-              activeBottomSection === 'colorPicker' && S.creatorModalCardExpanded,
-            ]}
-            onPress={(e) => e.stopPropagation()}
-          >
-            {/* Top Bar: SwiftUI X close icon on LEFT, SwiftUI Checkmark icon on RIGHT */}
-            <View style={S.creatorTopBar}>
-              <NativeIconButton
-                systemImage="xmark"
-                iconName="close"
-                label="Fechar"
-                size={38}
-                tint="#FFFFFF"
-                onPress={() => {
-                  try {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  } catch {}
-                  onClose();
-                }}
-              />
-
-              {noteText.length > 20 && (
-                <Text style={S.charCounter}>{NOTE_TEXT_LIMIT - noteText.length}</Text>
-              )}
-
-              {/* SwiftUI Confirm Icon Button on Top-Right */}
-              <NativeIconButton
-                systemImage="checkmark.circle.fill"
-                iconName="checkmark"
-                label="Confirmar"
-                size={38}
-                tint={canConfirm ? '#5B5BD6' : 'rgba(255,255,255,0.3)'}
-                onPress={() => {
-                  if (canConfirm) handleConfirmSave();
-                }}
-              />
-            </View>
+    <SheetFrame visible={visible} title="Nova nota" onClose={onClose}
+      headerTrailing={<NativeIconButton systemImage="checkmark" iconName="checkmark"
+        label="Confirmar" size={38} tint={canConfirm ? '#1ED760' : 'rgba(255,255,255,0.3)'}
+        onPress={() => { if (canConfirm) handleConfirmSave(); }} />}>
+          <View style={S.creatorModalCard}>
+            {noteText.length > 20 ? <Text style={S.charCounter}>{NOTE_TEXT_LIMIT - noteText.length}</Text> : null}
 
             {/* Center Area: Avatar with Compact 97px Speech Bubble */}
             <View style={S.creatorCenter}>
@@ -713,25 +674,18 @@ export const MyNoteModal = ({
                 </View>
               </View>
             )}
-          </Pressable>
-        </ScrollView>
-      </Pressable>
+          </View>
 
       {/* ────────────────────────────────────────────────────────────────── */}
       {/* MUSIC PICKER OVERLAY MODAL                                          */}
       {/* ────────────────────────────────────────────────────────────────── */}
-      <PlayerModal
+      <SheetFrame
+        title="Escolher música"
         visible={isMusicPickerVisible}
-        onRequestClose={() => setIsMusicPickerVisible(false)}
+        onClose={() => setIsMusicPickerVisible(false)}
+        scroll={false}
+        contentHeight={54 + Math.max(1, filteredTracks.length) * 64 + (previewTrack ? 90 : 0)}
       >
-        <View style={[S.musicPickerOverlay,
-          { height: 92 + Math.max(1, filteredTracks.length) * 74 + (previewTrack ? 90 : 20) }]}>
-          <View style={S.musicPickerSheet}>
-            {/* Top Handle */}
-            <View style={S.musicHandleRow}>
-              <View style={S.handle} />
-            </View>
-
             {/* Search Bar + Inline X Close Button */}
             <View style={S.musicSearchRow}>
               <View style={S.musicSearchBar}>
@@ -745,18 +699,11 @@ export const MyNoteModal = ({
                 />
               </View>
 
-              {/* X Close Button inline on the same row */}
-              <TouchableOpacity
-                style={S.musicInlineCloseBtn}
-                activeOpacity={0.7}
-                onPress={() => setIsMusicPickerVisible(false)}
-              >
-                <Ionicons name="close" size={18} color="#FFFFFF" />
-              </TouchableOpacity>
             </View>
 
             {/* Downloaded Tracks List — Triggers App's Native Global Player */}
-            <FlatList
+            <ProgressiveFlatList
+              listKey={searchQuery}
               data={filteredTracks}
               keyExtractor={(t) => t.spotifyId}
               style={S.musicList}
@@ -777,9 +724,8 @@ export const MyNoteModal = ({
                   item.imageURL ||
                   '';
                 return (
-                  <TouchableOpacity
-                    style={[S.musicRow, isSelected && S.musicRowActive]}
-                    activeOpacity={0.8}
+                  <TrackRow title={item.title} subtitle={item.artistName} imageURL={coverUri}
+                    active={isSelected} playing={isSelected} downloadState="completed" onDownload={() => {}}
                     onPress={() => {
                       try {
                         Haptics.selectionAsync();
@@ -787,6 +733,7 @@ export const MyNoteModal = ({
                       setPreviewTrack(item);
                       // Triggers app's native MiniPlayer & audio playback directly!
                       playTrack({
+                        ...item,
                         spotifyId: item.spotifyId,
                         title: item.title,
                         artistName: item.artistName,
@@ -795,28 +742,12 @@ export const MyNoteModal = ({
                         duration_ms: item.duration_ms || 200000,
                       });
                     }}
-                  >
-                    {coverUri ? (
-                      <Image source={{ uri: coverUri }} style={S.musicCover} />
-                    ) : (
-                      <View style={[S.musicCover, S.musicCoverFallback]}>
-                        <Ionicons name="musical-note" size={20} color="#8E8E93" />
-                      </View>
-                    )}
-                    <View style={S.musicInfo}>
-                      <Text style={S.musicTitle} numberOfLines={1}>
-                        {item.title}
-                      </Text>
-                      <Text style={S.musicMeta} numberOfLines={1}>
-                        {item.artistName}
-                      </Text>
-                    </View>
-                    <Ionicons
+                    trailingAction={<Ionicons
                       name={isSelected ? 'radio-button-on' : 'radio-button-off'}
                       size={18}
-                      color={isSelected ? '#5B5BD6' : 'rgba(255,255,255,0.3)'}
-                    />
-                  </TouchableOpacity>
+                      color={isSelected ? '#1ED760' : 'rgba(255,255,255,0.3)'}
+                    />}
+                  />
                 );
               }}
             />
@@ -831,9 +762,7 @@ export const MyNoteModal = ({
                 style={S.musicPickerMiniPlayer}
               />
             )}
-          </View>
-        </View>
-      </PlayerModal>
+      </SheetFrame>
 
       {/* ────────────────────────────────────────────────────────────────── */}
       {/* MUSIC 30-SECOND SNIPPET MINI-EDITOR MODAL                           */}
@@ -854,7 +783,7 @@ export const MyNoteModal = ({
           setIsSnippetEditorVisible(false);
         }}
       />
-    </PlayerModal>
+    </SheetFrame>
   );
 };
 
@@ -942,11 +871,9 @@ const S = StyleSheet.create({
     width: '100%',
   },
   creatorModalCard: {
-    paddingTop: 16,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 20,
-    paddingHorizontal: 20,
+    paddingBottom: 12,
+    paddingHorizontal: 4,
     width: '100%',
-    minHeight: 330,
   },
   creatorModalCardExpanded: {
     minHeight: 440,
@@ -1174,7 +1101,7 @@ const S = StyleSheet.create({
   musicSearchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 0,
     gap: 10,
     marginBottom: 12,
   },

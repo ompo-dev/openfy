@@ -20,7 +20,6 @@ import {
   getLibraryTracks,
   repairDownloadedTrackMetadata,
   groupLocalAlbums,
-  groupLocalArtists,
   getLocalPlaylists,
   removeCatalogTrack,
   toDownloadTrackInput,
@@ -36,6 +35,9 @@ import { TrackRow } from '../common/TrackRow';
 import { ProgressiveFlatList } from '../common/ProgressiveList';
 import { log } from '../../utils/appLogger';
 import { rememberDetailPreview } from '../../services/navigation/detailPreview';
+import { groupLibraryArtists } from '../../services/library/localCollections';
+import { useFollowedArtistsStore } from '../../stores/useFollowedArtistsStore';
+import { ArtistSearchRow } from '../Home/ArtistSearchRow';
 
 const toPlayerTrack = (track: LibraryTrack) => ({
   ...track,
@@ -50,6 +52,7 @@ const toPlayerTrack = (track: LibraryTrack) => ({
 });
 
 export const OfflineLibrary = () => {
+  const followedArtists = useFollowedArtistsStore((state) => state.artists);
   const { openDetail } = useDetailNavigation();
   const [tracks, setTracks] = React.useState<LibraryTrack[]>([]);
   const [playlists, setPlaylists] = React.useState<LocalPlaylist[]>([]);
@@ -212,7 +215,7 @@ export const OfflineLibrary = () => {
     [tracks]
   );
   const localAlbums = React.useMemo(() => groupLocalAlbums(tracks), [tracks]);
-  const localArtists = React.useMemo(() => groupLocalArtists(tracks), [tracks]);
+  const localArtists = React.useMemo(() => groupLibraryArtists(tracks, followedArtists), [tracks, followedArtists]);
   React.useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -240,7 +243,7 @@ export const OfflineLibrary = () => {
 
   React.useEffect(() => {
     const artistsToLoad = artistsForImageLoad.filter(
-      (artist) => artist.title && !requestedArtistImages.current.has(artist.id)
+      (artist) => artist.title && !artist.imageURL && !requestedArtistImages.current.has(artist.id)
     );
     if (artistsToLoad.length === 0) return;
 
@@ -389,23 +392,21 @@ export const OfflineLibrary = () => {
 
   const renderCollection = ({ item }: { item: (typeof visibleCollections)[number] }) => {
     const isArtist = libraryView === 'artists';
-    const imageURL = isArtist ? artistImageURLs[item.id] || '' : item.imageURL;
+    const imageURL = isArtist ? item.imageURL || artistImageURLs[item.id] || '' : item.imageURL;
+    if (isArtist) {
+      const artist = item as (typeof localArtists)[number];
+      const id = artist.routeId || artist.spotifyArtistId || '';
+      const routeId = /^[A-Za-z0-9]{22}$/.test(id) || id.startsWith('ytartist_') || id.startsWith('local_artist_')
+        ? id : `local_artist_${encodeURIComponent(item.title)}`;
+      return <ArtistSearchRow artist={{ type: 'artist', id: routeId, name: item.title, imageURL }}
+        subtitle={artist.following ? 'Seguindo' : `${artistTrackCounts[item.id] ?? item.tracks.length} músicas`}
+        onPress={() => openDetail('artist', routeId, 'library')} />;
+    }
     return (
       <LoggedPressable
         accessibilityRole="button"
-        accessibilityLabel={`${isArtist ? 'Abrir artista' : 'Abrir álbum'} ${item.title}`}
+        accessibilityLabel={`Abrir álbum ${item.title}`}
         onPress={() => {
-          if (isArtist) {
-            const id = String((item as { spotifyArtistId?: string }).spotifyArtistId || '');
-            const routeId = /^[A-Za-z0-9]{22}$/.test(id) ? id : `local_artist_${encodeURIComponent(item.title)}`;
-            rememberDetailPreview('artist', routeId, { title: item.title, imageURL });
-            openDetail(
-              'artist',
-              routeId,
-              'library'
-            );
-            return;
-          }
           rememberDetailPreview('album', `local_album_${encodeURIComponent(item.id)}`, {
             title: item.title, imageURL, subtitle: item.subtitle, trackCount: item.tracks.length,
             tracks: item.tracks.slice(0, 12).map((track) => ({ ...track, id: track.spotifyId,
@@ -423,19 +424,17 @@ export const OfflineLibrary = () => {
           <Image
             cachePolicy="memory-disk"
             source={{ uri: imageURL }}
-            style={[styles.collectionCover, isArtist && styles.artistCover]}
+            style={styles.collectionCover}
           />
         ) : (
-          <View style={[styles.collectionCover, styles.coverFallback, isArtist && styles.artistCover]}>
-            <Ionicons name={isArtist ? 'person' : 'disc'} size={22} color="#888" />
+          <View style={[styles.collectionCover, styles.coverFallback]}>
+            <Ionicons name="disc" size={22} color="#888" />
           </View>
         )}
         <View style={styles.playlistInfo}>
           <Text style={styles.playlistTitle} numberOfLines={1}>{item.title}</Text>
           <Text style={styles.playlistMeta} numberOfLines={1}>
-            {isArtist
-              ? `${artistTrackCounts[item.id] ?? item.tracks.length} músicas`
-              : item.subtitle}
+            {item.subtitle}
           </Text>
         </View>
         <Ionicons name="chevron-forward" size={18} color="#8B8B8B" />

@@ -1,6 +1,7 @@
 import * as React from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Keyboard,
   Platform,
   RefreshControl,
@@ -34,6 +35,9 @@ import { getCachedArtistImage } from '@services';
 import { useDetailNavigation } from '@hooks';
 import { isSameRecording } from '../../services/library/trackIdentity';
 import { rememberDetailPreview } from '../../services/navigation/detailPreview';
+import { useFollowedArtistsStore } from '../../stores/useFollowedArtistsStore';
+import { matchesFollowedArtist, setArtistFollowed } from '../../services/library/followedArtists';
+import { ArtistSearchRow } from '../Home/ArtistSearchRow';
 
 type CollectionTrack = TrackModel & {
   localAudioPath?: string;
@@ -202,6 +206,27 @@ export const CollectionDetail = ({
   loadingTracks = false,
   loadingError = '',
 }: CollectionDetailProps) => {
+  const followedArtists = useFollowedArtistsStore((state) => state.artists);
+  const followsReady = useFollowedArtistsStore((state) => state.ready);
+  const [savingFollow, setSavingFollow] = React.useState(false);
+  const followPending = React.useRef(false);
+  const following = followedArtists.some((artist) => matchesFollowedArtist(artist, { id: collectionId, name: title }));
+  const handleFollow = async () => {
+    if (followPending.current) return;
+    followPending.current = true;
+    setSavingFollow(true);
+    try {
+      await setArtistFollowed({ id: collectionId, name: title, imageURL }, !following);
+    } catch {
+      Alert.alert('Artista', 'Não foi possível salvar. Tente novamente.');
+    } finally {
+      followPending.current = false;
+      setSavingFollow(false);
+    }
+  };
+  React.useEffect(() => {
+    if (kind === 'artist') void useFollowedArtistsStore.getState().hydrate().catch(() => {});
+  }, [kind]);
   React.useEffect(() => {
     rememberDetailPreview(kind, collectionId, { title, imageURL, imageURLs, artists,
       tracks: tracks.slice(0, 12), trackCount, subtitle: metadataProp });
@@ -813,15 +838,21 @@ export const CollectionDetail = ({
                 </LoggedPressable>
                 <View style={styles.pillDivider} />
                 <LoggedPressable
-                  accessibilityLabel={onEditPress ? 'Editar playlist' : 'Compartilhar'}
-                  onPress={() => void (onEditPress ? onEditPress() : handleShare())}
-                  style={styles.pillAction}
+                  accessibilityRole="button"
+                  accessibilityLabel={kind === 'artist' ? (following ? 'Deixar de seguir artista' : 'Seguir artista') : onEditPress ? 'Editar playlist' : 'Compartilhar'}
+                  accessibilityState={{ selected: kind === 'artist' && following, busy: savingFollow }}
+                  disabled={kind === 'artist' && (savingFollow || !followsReady)}
+                  onPress={() => void (kind === 'artist' ? handleFollow() : onEditPress ? onEditPress() : handleShare())}
+                  style={[styles.pillAction, kind === 'artist' && styles.followAction]}
                 >
-                  <Ionicons
-                    name={onEditPress ? 'pencil-outline' : 'share-outline'}
+                  {savingFollow ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons
+                    name={kind === 'artist' ? (following ? 'checkmark' : 'add') : onEditPress ? 'pencil-outline' : 'share-outline'}
                     size={21}
-                    color="#FFFFFF"
-                  />
+                    color={kind === 'artist' && following ? '#1ED760' : '#FFFFFF'}
+                  />}
+                  {kind === 'artist' ? <Text style={[styles.followLabel, following && { color: '#1ED760' }]}>
+                    {following ? 'Seguindo' : 'Seguir'}
+                  </Text> : null}
                 </LoggedPressable>
                 {onDeletePress ? <>
                   <View style={styles.pillDivider} />
@@ -936,19 +967,14 @@ export const CollectionDetail = ({
               {collectionArtists.map((artist) => {
                 const uri = artist.imageURL || artistImages[artist.name] || artistImages[artist.id];
                 return (
-                  <LoggedPressable
+                  <ArtistSearchRow
                     key={`artist-modal-${artist.id}-${artist.name}`}
-                    accessibilityLabel={`Abrir artista ${artist.name}`}
+                    artist={{ type: 'artist', id: artist.id || `local_artist_${encodeURIComponent(artist.name)}`, name: artist.name, imageURL: uri || '' }}
                     onPress={() => {
                       setIsArtistListVisible(false);
                       void handleCollectionArtistPress(artist);
                     }}
-                    style={styles.artistModalRow}
-                  >
-                    {uri ? <SkeletonImage source={{ uri }} cachePolicy="memory-disk" contentFit="cover" style={styles.artistModalImage} /> : <View style={[styles.artistModalImage, styles.artistModalFallback]}><Ionicons name="person" size={20} color="#DDD" /></View>}
-                    <Text numberOfLines={1} style={styles.artistModalName}>{artist.name}</Text>
-                    <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.55)" />
-                  </LoggedPressable>
+                  />
                 );
               })}
               </ProgressiveList>
@@ -991,6 +1017,8 @@ const styles = StyleSheet.create({
   contentTopSpacer: { height: 18 },
   actionPill: { alignItems: 'center', borderRadius: 999, flexDirection: 'row', minHeight: 46, paddingHorizontal: 6 },
   pillAction: { alignItems: 'center', height: 42, justifyContent: 'center', width: 43 },
+  followAction: { width: 'auto', paddingHorizontal: 12, flexDirection: 'row', gap: 6 },
+  followLabel: { color: '#FFFFFF', fontFamily: 'SF-Semibold', fontSize: 13 },
   pillDivider: { backgroundColor: 'rgba(255,255,255,0.2)', height: 22, width: StyleSheet.hairlineWidth },
   empty: { color: 'rgba(255,255,255,0.6)', fontFamily: 'SF-Regular', padding: 32, textAlign: 'center' },
   sectionTitle: { color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 18, paddingBottom: 8, paddingHorizontal: 16 },
@@ -1000,8 +1028,4 @@ const styles = StyleSheet.create({
   showMoreTracksText: { color: '#1ED760', fontFamily: 'SF-Semibold', fontSize: 15 },
   artistModalScroll: { flexGrow: 0, flexShrink: 1, minHeight: 0 },
   artistModalLoading: { color: 'rgba(255,255,255,0.62)', fontFamily: 'SF-Regular', fontSize: 12, paddingBottom: 8 },
-  artistModalRow: { alignItems: 'center', borderBottomColor: 'rgba(255,255,255,0.1)', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 12, minHeight: 64, paddingVertical: 8 },
-  artistModalImage: { borderRadius: 24, height: 46, width: 46 },
-  artistModalFallback: { alignItems: 'center', backgroundColor: '#343434', justifyContent: 'center' },
-  artistModalName: { color: '#FFF', flex: 1, fontFamily: 'SF-Semibold', fontSize: 15 },
 });

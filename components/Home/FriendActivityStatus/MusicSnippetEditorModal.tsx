@@ -15,8 +15,6 @@
 
 import * as React from 'react';
 import {
-  Image,
-  Pressable,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -29,8 +27,7 @@ import { usePlayer } from '@context';
 import { NoteLyricBlocks } from './NoteLyricLine';
 import { MusicTimelineSelector } from './MusicTimelineSelector';
 import { MusicWaveformReel } from './MusicWaveformReel';
-import { GlassSurface, PlayerModal } from '../../native';
-import { GlassBackdrop, GlassBackdropScope } from '../../native/GlassBackdrop';
+import { GlassSurface, SheetFrame } from '../../native';
 
 interface DownloadedTrack {
   spotifyId: string;
@@ -178,52 +175,18 @@ export const MusicSnippetEditorModal: React.FC<
   };
 
   return (
-    <PlayerModal
-      visible={visible}
-      onRequestClose={onClose}
-    >
-      <GestureHandlerRootView style={[S.gestureHandlerRoot,
-        { height: 320 + Math.min(3, lyricSegments.length) * 100 }]}>
-        <Pressable style={S.overlay} onPress={onClose}>
-          <Pressable style={S.sheet} onPress={(e) => e.stopPropagation()}>
-            <GlassBackdropScope>
-            <GlassBackdrop pointerEvents="none" style={StyleSheet.absoluteFill}>
-            {imageUri ? (
-              <Image
-                source={{ uri: imageUri }}
-                style={S.backgroundCover}
-                blurRadius={22}
-                resizeMode="cover"
-              />
-            ) : null}
-            <View style={[S.backgroundScrim, { pointerEvents: 'none' }]} />
-            </GlassBackdrop>
-
+    <SheetFrame visible={visible} title={track.title} onClose={onClose}
+      artworkURL={imageUri} scroll={false} contentHeight={220 + Math.min(3, lyricSegments.length) * 100}
+      headerTrailing={<TouchableOpacity accessibilityRole="button" accessibilityLabel="Confirmar trecho" onPress={handleConfirm}>
+        <GlassSurface glass="regular" isInteractive style={S.confirmBtn}>
+          <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+        </GlassSurface>
+      </TouchableOpacity>}>
+      <GestureHandlerRootView style={S.gestureHandlerRoot}>
             <View style={S.content}>
-              <View style={S.handle} />
-
-              <View style={S.topBar}>
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar editor de trecho" onPress={onClose}>
-                  <GlassSurface glass="regular" isInteractive style={S.confirmBtn}>
-                    <Ionicons name="close" size={22} color="#FFF" />
-                  </GlassSurface>
-                </TouchableOpacity>
-                <View style={S.topTrackInfo}>
-                  <Text style={S.trackTitle} numberOfLines={1}>
-                    {track.title}
-                  </Text>
                   <Text style={S.trackArtist} numberOfLines={1}>
                     {track.artistName}
                   </Text>
-                </View>
-                <TouchableOpacity
-                  style={S.confirmBtn}
-                  activeOpacity={0.85}
-                  onPress={handleConfirm}
-                >
-                  <Ionicons name="checkmark" size={20} color="#FFFFFF" />
-                </TouchableOpacity>
-              </View>
 
               <NoteLyricBlocks
                 segments={lyricSegments}
@@ -258,16 +221,14 @@ export const MusicSnippetEditorModal: React.FC<
                 totalDurationMs={totalDurationMs}
               />
             </View>
-            </GlassBackdropScope>
-          </Pressable>
-        </Pressable>
       </GestureHandlerRootView>
-    </PlayerModal>
+    </SheetFrame>
   );
 };
 
 const S = StyleSheet.create({
   gestureHandlerRoot: {
+    flex: 1,
     flexShrink: 1,
     minHeight: 0,
   },
@@ -292,9 +253,9 @@ const S = StyleSheet.create({
   content: {
     flex: 1,
     width: '100%',
-    paddingHorizontal: 22,
+    paddingHorizontal: 0,
     paddingTop: 12,
-    paddingBottom: 42,
+    paddingBottom: 12,
     alignItems: 'center',
   },
   handle: {
@@ -316,14 +277,8 @@ const S = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: '#4E75FF',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#4E75FF',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-    elevation: 4,
   },
   topTrackInfo: {
     flex: 1,
