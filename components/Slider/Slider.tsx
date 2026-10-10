@@ -12,6 +12,7 @@ import { LibraryItemModel } from '@models';
 import { styles } from './styles';
 import { ErrorBox } from '../ErrorBox';
 import { useApplicationDimensions } from '@hooks';
+import { ProgressiveList } from '../common/ProgressiveList';
 
 export type SliderPropsType = {
   title: string;
@@ -62,9 +63,10 @@ export const Slider = ({
               size={[width - horizontalOffset * 2, size]}
             />
           ) : (
-            slides.map(({ id, type, title, subtitle, imageURL }, index) => (
+            <ProgressiveList listKey={title}>
+            {slides.map(({ id, type, title, subtitle, imageURL }, index) => (
               <Card
-                key={index}
+                key={id || index}
                 id={id}
                 type={type}
                 shape={shape}
@@ -73,7 +75,8 @@ export const Slider = ({
                 subtitle={subtitle}
                 imageURL={imageURL}
               />
-            ))
+            ))}
+            </ProgressiveList>
           )}
         </View>
       </ScrollView>

@@ -46,7 +46,7 @@ describe('ListeningHome', () => {
   it('renders listening sections and preserves playback metadata in the queue', async () => {
     const view = await render(<ListeningHome home={home} loading={false} />);
     for (const title of ['Pinados', 'Tocados recentemente', 'Playlists recentes', 'Novos lançamentos para você', 'Não sai do seu fone']) {
-      expect(view.getByText(title)).toBeTruthy();
+      expect(await view.findByText(title)).toBeTruthy();
     }
     await fireEvent.press(view.getAllByLabelText('Tocar Disco, Ebony')[0]);
     expect(mockPlay).toHaveBeenCalledWith([expect.objectContaining({ albumId: 'album', youtubeVideoId: 'abcdefghijk' })], 0, 'home:pinned');
@@ -63,9 +63,9 @@ describe('ListeningHome', () => {
   it('opens recent playlists and starts a release with its complete queue', async () => {
     jest.mocked(getPlayerAlbum).mockResolvedValue({ tracks: [song] } as never);
     const view = await render(<ListeningHome home={home} loading={false} />);
-    await fireEvent.press(view.getByLabelText('Abrir playlist Favoritas'));
+    await fireEvent.press(await view.findByLabelText('Abrir playlist Favoritas'));
     expect(mockOpen).toHaveBeenCalledWith('playlist', 'playlist', 'home');
-    await fireEvent.press(view.getByLabelText('Tocar KM2'));
+    await fireEvent.press(await view.findByLabelText('Tocar KM2'));
     expect(mockOpen).toHaveBeenCalledWith('album', 'album', 'home');
     expect(mockPlay).toHaveBeenCalledWith([song], 0, 'album:album', { continueCurrent: true });
   });
@@ -77,9 +77,9 @@ describe('ListeningHome', () => {
 
   it('opens dynamic listening collections as playlist pages, not modals', async () => {
     const view = await render(<ListeningHome home={home} loading={false} />);
-    await fireEvent.press(view.getByLabelText('Mostrar tudo: Tocados recentemente'));
+    await fireEvent.press(await view.findByLabelText('Mostrar tudo: Tocados recentemente'));
     expect(mockOpen).toHaveBeenCalledWith('playlist', 'home_mix_recent', 'home');
-    await fireEvent.press(view.getByLabelText('Mostrar tudo: Não sai do seu fone'));
+    await fireEvent.press(await view.findByLabelText('Mostrar tudo: Não sai do seu fone'));
     expect(mockOpen).toHaveBeenCalledWith('playlist', 'home_mix_most_played', 'home');
   });
 });

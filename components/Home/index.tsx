@@ -25,6 +25,7 @@ import { ListeningHome } from './ListeningHome';
 import { GlassSurface, LoggedPressable } from '../native';
 import { ArtistSearchRow } from './ArtistSearchRow';
 import { TrackRow } from '../common/TrackRow';
+import { ProgressiveList } from '../common/ProgressiveList';
 import { isSameRecording } from '../../services/library/trackIdentity';
 import { log } from '../../utils/appLogger';
 import {
@@ -52,7 +53,7 @@ const toPlayerTrackFromSearch = (track: TrackModel): PlayerTrack => ({
 
 export const Home = () => {
   const { top } = useSafeAreaInsets();
-  const searchTopInset = Math.min(Math.max(top, 0), 59);
+  const searchTopInset = top + 8;
   const navigation = useNavigation();
   const tabNavigation = navigation.getParent?.();
   const { home, isLoading, isRefreshing, refresh } = usePersonalizedHome();
@@ -190,25 +191,30 @@ export const Home = () => {
             setSearchError(nextResults.partial
               ? 'Alguns resultados não carregaram. Tente novamente para completar a busca.'
               : '');
-            nextResults.artists.forEach((artist) => {
-              if (artist.imageURL) {
-                void rememberCachedArtistImage(artist.name, artist.imageURL, [artist.id]);
-                return;
+            let artistCursor = 0;
+            const hydrateArtistImages = async () => {
+              while (request === searchGeneration.current && artistCursor < nextResults.artists.length) {
+                const artist = nextResults.artists[artistCursor++];
+                if (artist.imageURL) {
+                  void rememberCachedArtistImage(artist.name, artist.imageURL, [artist.id]);
+                  continue;
+                }
+                try {
+                  const imageURL = await getCachedArtistImage(
+                    artist.name, () => getArtistCatalogImage(artist.id, artist.name), [artist.id]
+                  );
+                  if (!imageURL || request !== searchGeneration.current) continue;
+                  setResults((current) => ({
+                    ...current,
+                    artists: current.artists.map((candidate) => candidate.id === artist.id
+                      ? { ...candidate, imageURL } : candidate),
+                  }));
+                } catch {}
               }
-              void getCachedArtistImage(
-                artist.name,
-                () => getArtistCatalogImage(artist.id, artist.name),
-                [artist.id]
-              ).then((imageURL) => {
-                if (!imageURL || request !== searchGeneration.current) return;
-                setResults((current) => ({
-                  ...current,
-                  artists: current.artists.map((candidate) => candidate.id === artist.id
-                    ? { ...candidate, imageURL }
-                    : candidate),
-                }));
-              }).catch(() => {});
-            });
+            };
+            // Resolve the first portraits first without flooding the image/profile cache.
+            void hydrateArtistImages();
+            void hydrateArtistImages();
             log.search('catalog query completed', {
               durationMs: Date.now() - startedAt,
               artists: nextResults.artists.length,
@@ -377,14 +383,17 @@ export const Home = () => {
             {results.artists.length ? (
               <View style={styles.resultSection}>
                 <Text style={styles.sectionTitle}>Artistas</Text>
+                <ProgressiveList listKey={`artists:${query.trim()}`}>
                 {results.artists.map((artist) => (
                   <ArtistSearchRow key={artist.id} artist={artist} onPress={() => openArtist(artist)} />
                 ))}
+                </ProgressiveList>
               </View>
             ) : null}
             {results.tracks.length ? (
               <View style={styles.resultSection}>
                 <Text style={styles.sectionTitle}>Músicas</Text>
+                <ProgressiveList listKey={`tracks:${query.trim()}`}>
                 {results.tracks.map((track) => {
                   const isSaved = savedTrackIds.has(track.id) || home.tracksById.has(track.id);
                   const isSaving = savingTrackIds.has(track.id);
@@ -413,6 +422,7 @@ export const Home = () => {
                     />
                   );
                 })}
+                </ProgressiveList>
               </View>
             ) : null}
             {!queryTooShort && !searchLoading && !searchError && !results.artists.length && !results.tracks.length ? (
@@ -433,6 +443,7 @@ export const Home = () => {
                 <Ionicons name="trash-outline" size={19} color="#9B9BA0" />
               </LoggedPressable> : null}
             </View>
+            <ProgressiveList listKey="search-history">
             {searchHistory.slice(0, showAllHistory ? 40 : 8).map((entry) => entry.kind === 'artist' ? (
               <ArtistSearchRow key={searchHistoryKey(entry)} artist={entry.artist}
                 onPress={() => openArtist(entry.artist)} trailingAction={historyRemoveButton(entry)} />
@@ -443,6 +454,7 @@ export const Home = () => {
                 onPress={() => playSearchTrack(entry.track, historyTracks, 'home:search-history')}
                 trailingAction={historyRemoveButton(entry)} />
             ))}
+            </ProgressiveList>
             {!searchHistory.length ? <Text style={styles.emptyText}>Nenhuma busca recente.</Text> : null}
           </View>
         ) : (

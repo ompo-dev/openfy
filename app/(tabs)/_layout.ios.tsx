@@ -12,6 +12,7 @@ export default function TabLayout() {
     <NativeTabs>
       <NativeTabs.Trigger
         name="home"
+        disableAutomaticContentInsets
         contentStyle={{ backgroundColor: '#121212' }}
       >
         <Label>Home</Label>

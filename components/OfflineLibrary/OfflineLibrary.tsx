@@ -2,7 +2,6 @@
 
 import * as React from 'react';
 import {
-  FlatList,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -34,6 +33,7 @@ import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { LoggedPressable } from '../native';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { TrackRow } from '../common/TrackRow';
+import { ProgressiveFlatList } from '../common/ProgressiveList';
 import { log } from '../../utils/appLogger';
 
 const toPlayerTrack = (track: LibraryTrack) => ({
@@ -465,7 +465,8 @@ export const OfflineLibrary = () => {
   return (
     <View style={styles.container}>
       {libraryView === 'songs' ? (
-        <FlatList
+        <ProgressiveFlatList
+          listKey={`songs:${librarySearchQuery}:${librarySort}`}
           data={visibleTracks}
           renderItem={renderTrack}
           keyExtractor={(item) => item.spotifyId}
@@ -479,7 +480,8 @@ export const OfflineLibrary = () => {
           refreshControl={refreshControl}
         />
       ) : libraryView === 'playlists' ? (
-        <FlatList
+        <ProgressiveFlatList
+          listKey={`playlists:${librarySearchQuery}:${librarySort}`}
           data={visiblePlaylists}
           renderItem={renderPlaylist}
           keyExtractor={(item) => item.id}
@@ -492,7 +494,8 @@ export const OfflineLibrary = () => {
           refreshControl={refreshControl}
         />
       ) : (
-        <FlatList
+        <ProgressiveFlatList
+          listKey={`${libraryView}:${librarySearchQuery}:${librarySort}`}
           data={visibleCollections}
           renderItem={renderCollection}
           keyExtractor={(item) => item.id}

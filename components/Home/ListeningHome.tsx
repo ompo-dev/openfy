@@ -13,6 +13,7 @@ import { GlassSurface, LoggedPressable, AppIcon } from '../native';
 import { homeRadioPlaylistId, publishHomePlaylists } from '../../services/home/temporaryPlaylists';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { TrackRow } from '../common/TrackRow';
+import { ProgressiveList } from '../common/ProgressiveList';
 import { getHomeRailCardSize, type HomeCardSize } from './homeCardSizing';
 
 export const homeTrackToPlayer = (track: PersonalizedHomeTrack) => ({ ...track, imageURL: track.localImagePath || track.imageURL });
@@ -41,7 +42,9 @@ function Section({ title, icon, onShowAll, children }: {
 }
 
 function Rail({ children }: { children: React.ReactNode }) {
-  return <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>{children}</ScrollView>;
+  return <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
+    <ProgressiveList>{children}</ProgressiveList>
+  </ScrollView>;
 }
 
 export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapshot; loading: boolean }) {
@@ -128,8 +131,8 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
     <Rail>{[0, 1, 2].map((index) => <View key={index} style={[styles.skeletonTile, { width: largeTileSize, height: largeTileSize }]} />)}</Rail>
   </View>;
 
-  return <>
-    {pinnedTracks.length || pinnedArtists.length ? <Section title="Pinados" icon={<AppIcon name="pin" size={22} color="#1ED760" />}>
+  return <ProgressiveList>
+    {pinnedTracks.length || pinnedArtists.length ? <Section key="pinned" title="Pinados" icon={<AppIcon name="pin" size={22} color="#1ED760" />}>
       <Rail>
         {trackTiles(pinnedTracks.slice(0, 2), 'home:pinned', 'compact')}
         {pinnedArtists.map((artist) => <LoggedPressable key={artist.artistId} style={[styles.tile, { width: compactTileSize }]} accessibilityLabel={`Abrir artista ${artist.title}`}
@@ -139,10 +142,10 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
         </LoggedPressable>)}
       </Rail>
     </Section> : null}
-    {recent.length ? <Section title="Tocados recentemente" icon={<AppIcon name="time" size={22} color="#1ED760" />} onShowAll={() => openDetail('playlist', 'home_mix_recent', 'home')}>
+    {recent.length ? <Section key="recent" title="Tocados recentemente" icon={<AppIcon name="time" size={22} color="#1ED760" />} onShowAll={() => openDetail('playlist', 'home_mix_recent', 'home')}>
       <Rail>{trackTiles(recent, 'home:recent', 'compact')}</Rail>
     </Section> : null}
-    {playlists.length ? <Section title="Playlists recentes" icon={<AppIcon name="musical-notes" size={22} color="#1ED760" />}>
+    {playlists.length ? <Section key="playlists" title="Playlists recentes" icon={<AppIcon name="musical-notes" size={22} color="#1ED760" />}>
       <Rail>{playlists.map((playlist) => {
         const covers = [...new Set([...playlist.trackIds.map((id) => {
           const track = home.tracksById.get(id); return track?.localImagePath || track?.imageURL || '';
@@ -153,7 +156,7 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
         </LoggedPressable>;
       })}</Rail>
     </Section> : null}
-    {releases.length ? <Section title="Novos lançamentos para você" icon={<AppIcon name="sparkles" size={22} color="#1ED760" />}>
+    {releases.length ? <Section key="releases" title="Novos lançamentos para você" icon={<AppIcon name="sparkles" size={22} color="#1ED760" />}>
       <Rail>{releases.map((release) => <LoggedPressable key={release.id} style={[styles.tile, { width: largeTileSize }]} accessibilityLabel={`Abrir ${releaseLabel(release)} ${release.title}`}
         onPressIn={() => prefetchDetail('album', release.id)} onPress={() => openDetail('album', release.id, 'home')}>
         <Artwork uri={release.imageURL} size={largeTileSize} />
@@ -162,7 +165,7 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
         <Text style={styles.releaseMeta}>{[releaseLabel(release), release.releaseDate.slice(0, 4)].filter(Boolean).join(' · ')}</Text>
       </LoggedPressable>)}</Rail>
     </Section> : null}
-    {releases[0] ? <View style={styles.spotlightSection}>
+    {releases[0] ? <View key="spotlight" style={styles.spotlightSection}>
       <LoggedPressable style={styles.artistHeading} accessibilityLabel={`Abrir artista ${releases[0].artistName}`} onPress={() => openDetail('artist', releases[0].artistId, 'home')}>
         <Artwork uri={releases[0].artistImageURL} size={46} artist />
         <View style={styles.flexCopy}><Text style={styles.subtitle}>Lançamento de</Text><Text numberOfLines={1} style={styles.artistTitle}>{releases[0].artistName}</Text></View>
@@ -185,19 +188,21 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
         </View>
       </View>
     </View> : null}
-    {mostPlayed.length ? <Section title="Não sai do seu fone" icon={<AppIcon name="headset" size={22} color="#1ED760" />} onShowAll={() => openDetail('playlist', 'home_mix_most_played', 'home')}>
+    {mostPlayed.length ? <Section key="most-played" title="Não sai do seu fone" icon={<AppIcon name="headset" size={22} color="#1ED760" />} onShowAll={() => openDetail('playlist', 'home_mix_most_played', 'home')}>
+      <ProgressiveList>
       {mostPlayed.slice(0, 5).map((track, index) => renderTrack(track, index, mostPlayed, 'home:most-played'))}
+      </ProgressiveList>
     </Section> : null}
-    {seed && similar.length ? <Section title={`Parecido com ${seed.name}`} icon={<AppIcon name="radio" size={22} color="#1ED760" />}>
+    {seed && similar.length ? <Section key="similar" title={`Parecido com ${seed.name}`} icon={<AppIcon name="radio" size={22} color="#1ED760" />}>
       <Rail>
-        <LoggedPressable style={[styles.tile, { width: largeTileSize }]} accessibilityLabel={`Abrir rádio de ${seed.name}`} onPress={() => openDetail('playlist', homeRadioPlaylistId(seed.name), 'home')}>
+        <LoggedPressable key="radio" style={[styles.tile, { width: largeTileSize }]} accessibilityLabel={`Abrir rádio de ${seed.name}`} onPress={() => openDetail('playlist', homeRadioPlaylistId(seed.name), 'home')}>
           <PlaylistMosaic imageURLs={[...new Set(similar.map((track) => track.imageURL).filter(Boolean))]} size={largeTileSize} />
           <Text style={styles.tileTitle} numberOfLines={1}>Rádio de {seed.name}</Text><Text style={styles.subtitle}>Playlist</Text>
         </LoggedPressable>
         {trackTiles(similar.slice(0, 8), 'home:similar', 'large')}
       </Rail>
     </Section> : null}
-    {discoveryArtists.length ? <Section title="Artistas para descobrir" icon={<AppIcon name="sparkles" size={22} color="#1ED760" />}>
+    {discoveryArtists.length ? <Section key="artists" title="Artistas para descobrir" icon={<AppIcon name="sparkles" size={22} color="#1ED760" />}>
       <Rail>{discoveryArtists.map((artist) => <LoggedPressable key={artist.artistId} style={[styles.tile, { width: compactTileSize }]}
         accessibilityLabel={`Abrir artista ${artist.title}`} onPressIn={() => prefetchDetail('artist', artist.artistId)}
         onPress={() => openDetail('artist', artist.artistId, 'home')}>
@@ -205,10 +210,10 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
         <Text numberOfLines={1} style={styles.compactTileTitle}>{artist.title}</Text><Text style={styles.compactSubtitle}>Artista</Text>
       </LoggedPressable>)}</Rail>
     </Section> : null}
-    {home.discoveries.length ? <Section title={home.discoveryTitle} icon={<AppIcon name="disc" size={22} color="#1ED760" />} onShowAll={() => openDetail('playlist', 'home_mix_discover', 'home')}>
+    {home.discoveries.length ? <Section key="discoveries" title={home.discoveryTitle} icon={<AppIcon name="disc" size={22} color="#1ED760" />} onShowAll={() => openDetail('playlist', 'home_mix_discover', 'home')}>
       <Rail>{trackTiles(home.discoveries, 'home:discover', 'compact')}</Rail>
     </Section> : null}
-  </>;
+  </ProgressiveList>;
 }
 
 const styles = StyleSheet.create({

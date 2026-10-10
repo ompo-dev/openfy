@@ -175,7 +175,7 @@ describe('Home', () => {
     await fireEvent.press(view.getByLabelText('Remover Sotam dos recentes'), { stopPropagation: jest.fn() });
     expect(removeSearchHistoryEntry).toHaveBeenCalledWith('artist:sotam');
     expect(mockOpenDetail).not.toHaveBeenCalled();
-    await fireEvent.press(view.getByLabelText('Tocar Cura'));
+    await fireEvent.press(await view.findByLabelText('Tocar Cura'));
     expect(mockPlayQueue).toHaveBeenCalledWith([expect.objectContaining({ youtubeVideoId: 'abcdefghijk' })], 0, 'home:search-history');
   });
 

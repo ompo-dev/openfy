@@ -1,6 +1,5 @@
 import * as React from 'react';
 import {
-  FlatList,
   Keyboard,
   Platform,
   RefreshControl,
@@ -26,6 +25,7 @@ import { GlassBackdrop, GlassBackdropScope } from '../native/GlassBackdrop';
 import { DownloadActionIcon } from '../native/DownloadActionIcon';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { TrackRow } from '../common/TrackRow';
+import { ProgressiveFlatList, ProgressiveList } from '../common/ProgressiveList';
 import { MarqueeText } from '../common/MarqueeText';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { findArtistIdByName, getArtistCatalogImage } from '@api';
@@ -604,15 +604,12 @@ export const CollectionDetail = ({
 
   return (
     <View style={styles.screen}>
-      <FlatList
+      <ProgressiveFlatList
+        listKey={`${collectionId}:${normalizedSearchQuery}:${sortAscending}`}
         testID="collection-track-list"
         data={visibleTracks}
         keyExtractor={(item) => item.id}
         renderItem={renderTrack}
-        initialNumToRender={kind === 'artist' ? ARTIST_TRACKS_PAGE_SIZE : 12}
-        maxToRenderPerBatch={10}
-        updateCellsBatchingPeriod={32}
-        windowSize={7}
         removeClippedSubviews={Platform.OS !== 'web'}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.6}
@@ -853,6 +850,7 @@ export const CollectionDetail = ({
               {extraSections.map((section) => (
                 <View key={section.id} style={styles.extraSection}>
                   <Text style={styles.sectionTitle}>{section.title}</Text>
+                  <ProgressiveList listKey={`${section.id}:${normalizedSearchQuery}:${sortAscending}`}>
                   {section.visibleTracks.map((track, index) => (
                     <React.Fragment key={track.id}>
                       {renderTrackRow(
@@ -863,6 +861,7 @@ export const CollectionDetail = ({
                       )}
                     </React.Fragment>
                   ))}
+                  </ProgressiveList>
                   {kind === 'artist' && !normalizedSearchQuery &&
                   section.visibleTracks.length < section.tracks.length ? (
                     <LoggedPressable
@@ -921,6 +920,7 @@ export const CollectionDetail = ({
               style={styles.artistModalScroll}
               testID="collection-artists-scroll-view"
             >
+              <ProgressiveList listKey={collectionId}>
               {collectionArtists.map((artist) => {
                 const uri = artist.imageURL || artistImages[artist.name] || artistImages[artist.id];
                 return (
@@ -939,6 +939,7 @@ export const CollectionDetail = ({
                   </LoggedPressable>
                 );
               })}
+              </ProgressiveList>
             </ScrollView>
       </SheetFrame>
     </View>
