@@ -112,16 +112,18 @@ Implementado nesta etapa:
   audio tap no iOS, Media3 PCM no Android e BiquadFilter no navegador.
 - Preferencias aplicadas antes da persistencia, rollback em erro e preservacao
   de ajustes rapidos em bandas diferentes. Novas faixas recebem os ajustes.
-- Patch Expo Audio regenerado e sua reversao/reaplicacao verificadas. Validacao
-  experimental no CI nao publica OTA nem cria releases de producao.
+- Patch Expo Audio regenerado e sua reversao/reaplicacao verificadas. O CI/CD
+  original completo roda na main e em codex/bitchord-integration: validacao,
+  testes, audio nativo, OTA temporario, IPA/APK, releases e artefatos. Releases
+  apontam para o commit compilado, inclusive quando ele pertence a esta branch.
 
 Executado localmente: TypeScript sem erros, 789 testes aprovados em 110 suites,
 24 testes ignorados em 24 suites do projeto, lint sem erros (43 avisos), export
 web com 19 rotas e testes do grafo Web Audio/curvas de filtro. Os testes nao
 substituem escuta em dispositivo.
 
-Pendencias de verificacao: builds completos iOS/Android e escuta real; o CI
-experimental verifica o kernel C, o audio tap e o player Swift. Provedores
+Pendencias de verificacao: resultado dos builds completos iOS/Android e escuta
+real; o CI/CD tambem verifica o kernel C, o audio tap e o player Swift. Provedores
 externos possuem adaptadores/testes de contrato, mas disponibilidade ao vivo,
 CORS e cobertura por gravacao ainda precisam de verificacao. O BrowserOS Neo
 nao estava disponivel para verificacao visual nesta sessao.

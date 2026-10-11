@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - codex/bitchord-integration
   workflow_dispatch:
     inputs:
       publish_ota:
@@ -535,6 +536,7 @@ jobs:
           gh release create "$TAG" \
             Openfy-unsigned.ipa apps.json \
             $([ -f icon.png ] && echo "icon.png") \
+            --target "${{ github.sha }}" \
             --title "Openfy ${VERSION} (build ${{ github.run_number }})" \
             --notes "Build nao-assinado (sideload via AltStore). Fonte AltStore: apps.json neste release." \
             --latest
@@ -639,6 +641,7 @@ jobs:
           TAG="v${VERSION}-android-${{ github.run_number }}"
           gh release create "$TAG" \
             Openfy-android.apk \
+            --target "${{ github.sha }}" \
             --title "Openfy ${VERSION} Android (build ${{ github.run_number }})" \
             --notes "Build Android nao-assinado." \
             --latest=false
