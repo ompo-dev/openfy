@@ -42,8 +42,8 @@ describe('selected search history', () => {
       history.rememberSearchSelection({ kind: 'track', track }),
       history.rememberSearchSelection({ kind: 'artist', artist }),
     ]);
-    expect((await history.getSearchHistory()).map(history.searchHistoryKey)).toEqual(['artist:ytartist_sotam', 'track:yt_song']);
-    await history.removeSearchHistoryEntry('artist:ytartist_sotam');
+    expect((await history.getSearchHistory()).map(history.searchHistoryKey)).toEqual(['artist:youtube:sotam', 'track:yt_song']);
+    await history.removeSearchHistoryEntry('artist:youtube:sotam');
     expect(await history.getSearchHistory()).toMatchObject([{ track }]);
     await history.clearSearchHistory();
     expect(await history.getSearchHistory()).toEqual([]);
@@ -60,5 +60,18 @@ describe('selected search history', () => {
     expect(normalized[0]).toMatchObject({ track: { id: 'song-59' } });
     expect(history.searchHistoryKey({ kind: 'artist', artist: { ...artist, id: 'same' } }))
       .not.toBe(history.searchHistoryKey({ kind: 'track', track: { ...track, id: 'same' } }));
+  });
+
+  it('keeps one history entry for channel aliases without merging homonymous channels', () => {
+    const history = loadHistory();
+    const renamed = { ...artist, id: 'ytartist_UCHguBpZUpBR52kmx9DMCTFA~RND', name: 'RND' };
+    const current = { ...artist, id: 'ytartist_UCHguBpZUpBR52kmx9DMCTFA~Sotam' };
+    const homonym = { ...artist, id: 'ytartist_UCOtherSotam~Sotam' };
+    const result = history.normalizeSearchHistory([
+      { kind: 'artist', artist: renamed, selectedAt: 1 },
+      { kind: 'artist', artist: current, selectedAt: 2 },
+      { kind: 'artist', artist: homonym, selectedAt: 3 },
+    ]);
+    expect(result.map((entry) => entry.kind === 'artist' && entry.artist)).toEqual([homonym, current]);
   });
 });

@@ -51,6 +51,28 @@ describe('followed artists', () => {
     unsubscribe();
   });
 
+  it('follows and unfollows homonymous channels independently', async () => {
+    const service = load();
+    const rapper = { ...artist, id: `ytartist_UC${'s'.repeat(22)}~Sid`, name: 'Sid' };
+    const band = { ...artist, id: `ytartist_UC${'b'.repeat(22)}~SID`, name: 'SID' };
+    await service.setArtistFollowed(rapper, true);
+    expect(service.isArtistFollowed(band)).toBe(false);
+    await service.setArtistFollowed(band, true);
+    expect(service.getFollowedArtistsSnapshot()).toHaveLength(2);
+    await service.setArtistFollowed(rapper, false);
+    expect(service.getFollowedArtistsSnapshot()).toEqual([expect.objectContaining(band)]);
+  });
+
+  it('merges a renamed profile by channel ID, not its route label', async () => {
+    const service = load();
+    const current = { ...artist, id: 'ytartist_UCHguBpZUpBR52kmx9DMCTFA~Sotam', name: 'Sotam' };
+    const alias = { ...current, id: 'ytartist_UCHguBpZUpBR52kmx9DMCTFA~RND', name: 'RND' };
+    await service.setArtistFollowed(alias, true);
+    expect(service.isArtistFollowed(current)).toBe(true);
+    await service.setArtistFollowed(current, true);
+    expect(service.getFollowedArtistsSnapshot()).toEqual([expect.objectContaining(current)]);
+  });
+
   it('does not replace stored follows with an empty list after a read failure', async () => {
     jest.mocked(storage().getItem).mockRejectedValueOnce(new Error('read'));
     await expect(load().setArtistFollowed(artist, true)).rejects.toThrow('read');

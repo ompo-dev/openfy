@@ -21,9 +21,13 @@ const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const referenceNames = (reference: unknown) => splitCanonicalArtists(
   getYouTubeMusicText(record(reference).name).replace(/\s+&\s+/g, ',')
 ).map(normalize);
+const publicArtists = new Map<string, { id: string; name: string }>();
+const publicAliases = new Map<string, { id: string; name: string }>();
 export const hasArtistIdentity = (id = '') => /^[A-Za-z0-9]{22}$/.test(id) ||
   /^UC[\w-]{22}$/.test(id) || (id.startsWith('ytartist_') && Boolean(parseYouTubeMusicArtistRoute(id).browseId));
-export const artistIdentityKey = (id = '') => {
+export const artistIdentityKey = (id = ''): string => {
+  const bridged = publicAliases.get(id);
+  if (bridged) return artistIdentityKey(bridged.id);
   if (id.startsWith('ytartist_')) {
     const browseId = parseYouTubeMusicArtistRoute(id).browseId;
     return browseId ? `youtube:${browseId}` : '';
@@ -31,27 +35,41 @@ export const artistIdentityKey = (id = '') => {
   return /^UC[\w-]{22}$/.test(id) ? `youtube:${id}` : /^[A-Za-z0-9]{22}$/.test(id) ? `spotify:${id}` : '';
 };
 
+export const rememberPublicArtistIdentity = (artist: { id: string; name: string }) => {
+  const key = artistIdentityKey(artist.id);
+  if (!key.startsWith('youtube:')) return;
+  publicArtists.set(key, artist);
+  while (publicArtists.size > 250) publicArtists.delete(publicArtists.keys().next().value!);
+};
+export const canonicalArtistReference = (artist: { id?: string; name: string }) =>
+  publicAliases.get(artist.id || '') || publicArtists.get(artistIdentityKey(artist.id)) || artist;
+
 const identities = createAsyncResourceCache<{ id: string; name: string }>({
   name: 'track artist identity', category: 'artist', maxEntries: 200,
-  ttlFor: (artist) => hasArtistIdentity(artist.id) ? 6 * 60 * 60_000 : 10_000,
+  ttlFor: (artist) => artistIdentityKey(artist.id).startsWith('youtube:') ? 6 * 60 * 60_000 : 10_000,
 });
 
-/** A real credit ID is authoritative; a name alone needs the recording's context. */
+/** Bridge Spotify credits using recording evidence, never a same-name profile guess. */
 export const resolveTrackArtist = async (
   artist: { id?: string; name: string }, track?: ArtistIdentityTrack,
 ): Promise<{ id: string; name: string }> => {
   const id = artist.id || '';
-  if (hasArtistIdentity(id)) return { id: id.startsWith('UC') ? toYouTubeMusicArtistRouteId(id, artist.name) : id, name: artist.name };
+  const known = canonicalArtistReference(artist);
+  if (known.id && (known.id !== id || known.name !== artist.name)) return { id: known.id, name: known.name };
+  if (artistIdentityKey(id).startsWith('youtube:') || (hasArtistIdentity(id) && !track?.title)) {
+    return { id: id.startsWith('UC') ? toYouTubeMusicArtistRouteId(id, artist.name) : id, name: artist.name };
+  }
   const fallback = { id: id || toYouTubeMusicArtistRouteId(undefined, artist.name), name: artist.name };
   if (!track?.title) return fallback;
   const credits = track.artists?.length ? track.artists.map((credit) => credit.name)
     : splitCanonicalArtists(track.artistName || artist.name);
-  const key = JSON.stringify([normalize(artist.name), normalize(track.title), credits.map(normalize)]);
-  return identities.getOrLoad(key, async () => {
+  const key = JSON.stringify([id, normalize(artist.name), normalize(track.title), credits.map(normalize)]);
+  const resolved = await identities.getOrLoad(key, async () => {
     const client = await withYouTubeMusicTimeout(getYouTubeMusicClient(), 3_000);
     if (!client) return fallback;
     const result = await withYouTubeMusicTimeout(client.music.search(
       `${track.title} ${credits.join(' ')}`, { type: 'song' }), 4_000);
+    let profileChecks = 0;
     for (const item of array(record(result?.songs).contents)) {
       const song = record(item);
       if (!hasCanonicalTitleMatch(getYouTubeMusicText(song.title), track.title)) continue;
@@ -67,19 +85,29 @@ export const resolveTrackArtist = async (
         if (normalize(name) === normalize(artist.name)) {
           return { id: toYouTubeMusicArtistRouteId(channel, name), name };
         }
+        if (references.some((value) => normalize(getYouTubeMusicText(record(value).name)) === normalize(artist.name))) continue;
         const names = referenceNames(reference);
-        if (names.length < 2 || names[0] !== normalize(artist.name) ||
-          !names.every((name) => credits.map(normalize).includes(name))) continue;
-        // A combined credit may link to the lead artist or to a separate duo.
-        // Verify the profile before assigning that channel to one collaborator.
+        if (names.length > 1 && (names[0] !== normalize(artist.name) ||
+          !names.every((name) => credits.map(normalize).includes(name)))) continue;
+        // Credits can retain aliases or link a duo to its lead's channel.
+        // Verify the current profile name before assigning an individual.
+        if (!client.music.getArtist || profileChecks >= 2) continue;
+        profileChecks += 1;
         const page = await withYouTubeMusicTimeout(client.music.getArtist(channel), 3_000).catch(() => null);
         if (normalize(getYouTubeMusicText(page?.header?.title)) === normalize(artist.name)) {
-          return { id: toYouTubeMusicArtistRouteId(channel, artist.name), name: artist.name };
+          const resolved = { id: toYouTubeMusicArtistRouteId(channel, artist.name), name: artist.name };
+          rememberPublicArtistIdentity(resolved);
+          return resolved;
         }
       }
     }
     return fallback;
   }, 6 * 60 * 60_000).catch(() => fallback);
+  if (/^[A-Za-z0-9]{22}$/.test(id) && artistIdentityKey(resolved.id).startsWith('youtube:')) {
+    publicAliases.set(id, resolved);
+    while (publicAliases.size > 250) publicAliases.delete(publicAliases.keys().next().value!);
+  }
+  return resolved;
 };
 
 /** Rank known identities first, without merging or hiding homonymous artists. */
@@ -87,7 +115,7 @@ export const personalizeArtistSearch = async (
   query: string, results: ArtistModel[], context: ArtistSearchContext = {},
 ): Promise<ArtistModel[]> => {
   const term = normalize(query);
-  const known = [...(context.artists || [])];
+  const known = (context.artists || []).map(canonicalArtistReference);
   const trackCandidates = (context.tracks || []).flatMap((track) =>
     (track.artists?.length ? track.artists : (track.artistName || '').split(/[,·]/)
       .map((name) => ({ id: undefined, name: name.trim() })).filter((artist) => artist.name))
@@ -101,14 +129,19 @@ export const personalizeArtistSearch = async (
     known.push(await resolveTrackArtist(artist, track));
     if (seen.size >= 3) break;
   }
-  const relevant = known.filter((artist) => hasArtistIdentity(artist.id) && normalize(artist.name).includes(term));
+  // Public search must not inject a second, authentication-only Spotify profile.
+  const relevant = known.filter((artist) => artistIdentityKey(artist.id).startsWith('youtube:') && normalize(artist.name).includes(term));
   const candidates = new Map<string, ArtistModel>(results.map((artist) => [artistIdentityKey(artist.id) || artist.id, artist]));
   relevant.forEach((artist) => {
     const id = artist.id!;
     const key = artistIdentityKey(id);
-    if (!candidates.has(key)) candidates.set(key, { type: 'artist', id, name: artist.name, imageURL: artist.imageURL || '' });
+    if (!candidates.has(key)) candidates.set(key, { type: 'artist', id, name: artist.name, imageURL: '' });
   });
   const score = (artist: ArtistModel) => (relevant.some((knownArtist) => artistIdentityKey(knownArtist.id) === artistIdentityKey(artist.id)) ? 100 : 0) +
     (normalize(artist.name) === term ? 20 : normalize(artist.name).startsWith(term) ? 10 : 0);
   return [...candidates.values()].sort((a, b) => score(b) - score(a));
+};
+
+export const _clearArtistIdentitiesForTests = () => {
+  identities.clear(); publicArtists.clear(); publicAliases.clear();
 };

@@ -1,6 +1,7 @@
 import type { LibraryTrack } from './catalogLibrary';
 import { artistFollowKey, type FollowedArtist } from './followedArtists';
 import { albumAssociationsForTrack, type TrackAlbumRef } from '../../models/Track/TrackModel';
+import { artistIdentityKey, canonicalArtistReference } from '../search/artistIdentity';
 
 export type LocalAlbumCollection = {
   id: string;
@@ -31,10 +32,16 @@ const getTrackArtists = (track: Pick<LibraryTrack, 'artistName' | 'artists'>) =>
     .filter((artist) => artist.name);
 
 const normalizeArtistIdentity = (artist: { id?: string; name: string }) =>
-  artist.name.trim().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase();
+  artistIdentityKey(canonicalArtistReference(artist).id) || artistFollowKey(artist.name);
 
 const normalizeArtistLookup = (artistIdOrName: string) =>
   artistIdOrName.trim().toLocaleLowerCase();
+const matchesArtistLookup = (artist: { id?: string; name: string }, lookup: string) => {
+  const identity = /^(?:youtube|spotify):/.test(lookup) ? lookup : artistIdentityKey(lookup);
+  const key = artistIdentityKey(canonicalArtistReference(artist).id);
+  if (identity && key) return identity === key;
+  return artist.id === lookup || artistFollowKey(artist.name) === normalizeArtistLookup(lookup);
+};
 
 export const getPrimaryTrackArtist = (
   track: Pick<LibraryTrack, 'artistName' | 'artists'>
@@ -46,25 +53,16 @@ export const isTrackPrimaryArtist = (
 ): boolean => {
   const primary = getPrimaryTrackArtist(track);
   if (!primary) return false;
-  const target = normalizeArtistLookup(artistIdOrName);
-  return (
-    normalizeArtistIdentity(primary).toLocaleLowerCase() === target ||
-    primary.name.trim().toLocaleLowerCase() === target
-  );
+  return matchesArtistLookup(primary, artistIdOrName);
 };
 
 export const isTrackParticipantArtist = (
   track: Pick<LibraryTrack, 'artistName' | 'artists'>,
   artistIdOrName: string
 ): boolean => {
-  const target = normalizeArtistLookup(artistIdOrName);
   return getTrackArtists(track)
     .slice(1)
-    .some(
-      (artist) =>
-        normalizeArtistIdentity(artist).toLocaleLowerCase() === target ||
-        artist.name.trim().toLocaleLowerCase() === target
-    );
+    .some((artist) => matchesArtistLookup(artist, artistIdOrName));
 };
 
 export const getLocalAlbumId = (
@@ -137,7 +135,7 @@ export const groupLocalArtists = (
 
   tracks.forEach((track) => {
     const seen = new Set<string>();
-    getTrackArtists(track).forEach((artist) => {
+    getTrackArtists(track).map(canonicalArtistReference).forEach((artist) => {
         const title = artist.name.trim();
         const id = normalizeArtistIdentity(artist);
         if (seen.has(id)) return;
@@ -171,8 +169,9 @@ export const groupLocalArtists = (
 /** Library membership is primary credit or an explicit follow, not a featured credit. */
 export const groupLibraryArtists = (tracks: LibraryTrack[], followed: FollowedArtist[]): LocalArtistCollection[] => {
   const artists = new Map<string, LocalArtistCollection>();
-  const add = (artist: { id?: string; name: string }, track: LibraryTrack) => {
-    const id = artistFollowKey(artist.name);
+  const add = (input: { id?: string; name: string }, track: LibraryTrack) => {
+    const artist = canonicalArtistReference(input);
+    const id = normalizeArtistIdentity(artist);
     if (!id) return;
     const current = artists.get(id);
     if (current) {
@@ -191,10 +190,14 @@ export const groupLibraryArtists = (tracks: LibraryTrack[], followed: FollowedAr
     albumPrimaries.forEach((artist) => { if (artist) add(artist, track); });
   });
   followed.forEach((artist) => {
-    const id = artistFollowKey(artist.name);
-    const current = artists.get(id);
-    artists.set(id, { ...current, id, title: artist.name, routeId: artist.id || current?.spotifyArtistId,
-      spotifyArtistId: current?.spotifyArtistId || artist.id, following: true,
+    const canonical = canonicalArtistReference(artist);
+    const id = normalizeArtistIdentity(canonical);
+    const legacyKey = artistFollowKey(artist.name);
+    const legacy = artists.get(legacyKey);
+    const current = artists.get(id) || legacy;
+    const key = artists.has(id) ? id : legacy ? legacyKey : id;
+    artists.set(key, { ...current, id, title: canonical.name, routeId: canonical.id || current?.spotifyArtistId,
+      spotifyArtistId: current?.spotifyArtistId || canonical.id, following: true,
       subtitle: 'Seguindo', imageURL: artist.imageURL, tracks: current?.tracks || [] });
   });
   return [...artists.values()].sort((a, b) => Number(Boolean(b.following)) - Number(Boolean(a.following)));

@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { artistIdentityKey, canonicalArtistReference } from '../search/artistIdentity';
 
 export type FollowedArtist = {
   id: string;
@@ -10,8 +11,12 @@ export type FollowArtistInput = Pick<FollowedArtist, 'id' | 'name' | 'imageURL'>
 
 export const artistFollowKey = (name: string) => name.normalize('NFKD')
   .replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
-export const matchesFollowedArtist = (artist: FollowArtistInput, candidate: { id?: string; name: string }) =>
-  Boolean(artist.id && artist.id === candidate.id) || artistFollowKey(artist.name) === artistFollowKey(candidate.name);
+export const matchesFollowedArtist = (artist: FollowArtistInput, candidate: { id?: string; name: string }) => {
+  const first = artistIdentityKey(canonicalArtistReference(artist).id);
+  const second = artistIdentityKey(canonicalArtistReference(candidate).id);
+  if (first && second) return first === second;
+  return Boolean(artist.id && artist.id === candidate.id) || artistFollowKey(artist.name) === artistFollowKey(candidate.name);
+};
 
 const STORAGE_KEY = 'openfy_followed_artists_v1';
 let artists: FollowedArtist[] = [];
@@ -28,7 +33,7 @@ export const normalizeFollowedArtists = (value: unknown): FollowedArtist[] => {
     typeof item.imageURL === 'string' && Number.isFinite(item.followedAt)))
     .sort((a, b) => b.followedAt - a.followedAt)
     .filter((item) => {
-      const key = artistFollowKey(item.name);
+      const key = artistIdentityKey(canonicalArtistReference(item).id) || artistFollowKey(item.name);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;

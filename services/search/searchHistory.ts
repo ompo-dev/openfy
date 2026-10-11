@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ArtistModel, TrackModel } from '@models';
+import { artistIdentityKey, canonicalArtistReference } from './artistIdentity';
 
 export type SearchSelection =
   | { kind: 'artist'; artist: ArtistModel }
@@ -15,7 +16,8 @@ let mutationQueue: Promise<unknown> = Promise.resolve();
 const listeners = new Set<(history: SearchHistoryEntry[]) => void>();
 
 export const searchHistoryKey = (entry: SearchSelection) =>
-  `${entry.kind}:${entry.kind === 'artist' ? entry.artist.id : entry.track.id}`;
+  `${entry.kind}:${entry.kind === 'artist'
+    ? artistIdentityKey(canonicalArtistReference(entry.artist).id) || entry.artist.id : entry.track.id}`;
 
 export const normalizeSearchHistory = (value: unknown): SearchHistoryEntry[] => {
   if (!Array.isArray(value)) return [];

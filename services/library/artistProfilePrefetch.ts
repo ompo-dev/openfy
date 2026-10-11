@@ -3,7 +3,7 @@ import { toYouTubeMusicArtistRouteId } from '../youtubeMusicClient';
 import { prefetchImage } from '../images/imagePrefetch';
 import { isArtistFollowed } from './followedArtists';
 import { rememberDetailPreview } from '../navigation/detailPreview';
-import { resolveTrackArtist } from '../search/artistIdentity';
+import { artistIdentityKey, resolveTrackArtist } from '../search/artistIdentity';
 
 const withPrefetchedPortrait = <T extends { imageURL?: string; artist?: { imageURL?: string } }>(request: Promise<T>): Promise<T> =>
   request.then((profile) => {
@@ -51,6 +51,7 @@ const backgroundPendingPrefetches = new Map<string, Promise<void>>();
 const backgroundQueue = new Map<string, { artist: ArtistRef; run: () => Promise<void>; cancel: () => void }>();
 const MAX_BACKGROUND_QUEUE = 24;
 let backgroundActive = 0;
+let trackPrefetchGeneration = 0;
 const pumpBackgroundQueue = () => {
   while (backgroundActive < 2 && backgroundQueue.size) {
     const [key, job] = [...backgroundQueue.entries()].sort(([, a], [, b]) =>
@@ -75,7 +76,7 @@ const getTrackArtists = ({ artistName, artists }: TrackArtistData, limit = MAX_A
   const seen = new Set<string>();
   return candidates.filter((artist) => {
     const name = artist.name.trim();
-    const key = artist.id || normalize(name);
+    const key = artistIdentityKey(artist.id) || artist.id || normalize(name);
     if (!name || seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -84,10 +85,12 @@ const getTrackArtists = ({ artistName, artists }: TrackArtistData, limit = MAX_A
 
 /** Warm only the current track's credited artists; request/result caches are bounded by their API owners. */
 export const prefetchTrackArtistData = (track: TrackArtistData): void => {
+  const generation = ++trackPrefetchGeneration;
   if (track.title) {
     void Promise.all(getTrackArtists(track, 16).map((artist) => resolveTrackArtist(artist,
-      { ...track, title: track.title! }))).then((artists) =>
-      prefetchTrackArtistData({ artistName: track.artistName, artists })).catch(() => {});
+      { ...track, title: track.title! }))).then((artists) => {
+      if (generation === trackPrefetchGeneration) prefetchTrackArtistData({ artistName: track.artistName, artists });
+    }).catch(() => {});
     return;
   }
   const artists = getTrackArtists(track);
@@ -106,7 +109,8 @@ export const prefetchTrackArtistData = (track: TrackArtistData): void => {
     const youtubeRouteId = id.startsWith('ytartist_')
       ? id
       : toYouTubeMusicArtistRouteId(id.startsWith('UC') ? id : undefined, artist.name);
-    return [spotifyId || youtubeRouteId, { spotifyId, youtubeRouteId, name: artist.name }] as const;
+    return [artistIdentityKey(spotifyId || youtubeRouteId) || youtubeRouteId,
+      { spotifyId, youtubeRouteId, name: artist.name }] as const;
   }));
   const nextKeys = new Set(nextProfiles.keys());
 
@@ -140,7 +144,7 @@ export const prefetchTrackArtistData = (track: TrackArtistData): void => {
     const youtubeRouteId = id.startsWith('ytartist_')
       ? id
       : toYouTubeMusicArtistRouteId(id.startsWith('UC') ? id : undefined, name);
-    const cacheKey = spotifyId || youtubeRouteId;
+    const cacheKey = artistIdentityKey(spotifyId || youtubeRouteId) || youtubeRouteId;
     if (pendingPrefetches.has(cacheKey)) return;
 
     const request = artistApis.then(async (apis) => {
@@ -190,7 +194,7 @@ export const prefetchArtistData = (artists: ArtistRef[]): void => {
   const candidates = artists
     .map((artist) => ({ id: artist.id?.trim() || '', name: artist.name.trim() }))
     .filter((artist) => {
-      const key = artist.id || normalize(artist.name);
+      const key = artistIdentityKey(artist.id) || artist.id || normalize(artist.name);
       if (!artist.name || seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -207,7 +211,7 @@ export const prefetchArtistData = (artists: ArtistRef[]): void => {
           artist.id.startsWith('UC') ? artist.id : undefined,
           artist.name
         );
-    const cacheKey = spotifyId || youtubeRouteId;
+    const cacheKey = artistIdentityKey(spotifyId || youtubeRouteId) || youtubeRouteId;
     if (backgroundPendingPrefetches.has(cacheKey)) return;
     if (backgroundQueue.size >= MAX_BACKGROUND_QUEUE) {
       const replaceable = [...backgroundQueue.entries()].find(([, job]) => !isArtistFollowed(job.artist));
@@ -262,6 +266,7 @@ export const prefetchArtistData = (artists: ArtistRef[]): void => {
 };
 
 export const _clearArtistProfilePrefetchForTests = () => {
+  trackPrefetchGeneration += 1;
   activeArtistKeys.clear();
   activeProfiles.clear();
   pendingPrefetches.clear();

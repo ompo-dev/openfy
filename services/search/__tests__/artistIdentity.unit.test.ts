@@ -1,5 +1,5 @@
 import { getYouTubeMusicClient, toYouTubeMusicArtistRouteId } from '../../youtubeMusicClient';
-import { personalizeArtistSearch, resolveTrackArtist } from '../artistIdentity';
+import { _clearArtistIdentitiesForTests, personalizeArtistSearch, resolveTrackArtist } from '../artistIdentity';
 import type { ArtistModel } from '@models';
 
 jest.mock('../../youtubeMusicClient', () => ({
@@ -11,7 +11,47 @@ const sid = toYouTubeMusicArtistRouteId(`UC${'s'.repeat(22)}`, 'Sid');
 const band = toYouTubeMusicArtistRouteId(`UC${'b'.repeat(22)}`, 'SID');
 
 describe('artist identities', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => { jest.clearAllMocks(); _clearArtistIdentitiesForTests(); });
+
+  it('bridges the Spotify recording credit to the same public profile as search', async () => {
+    const spotifyId = '2563ILWHSx52eOxOoi5rJW';
+    const channel = 'UC7tLuFSDy-yNoNFUOxef8QA';
+    const search = jest.fn().mockResolvedValue({ songs: { contents: [{
+      title: 'RADIOATIVO', artists: [{ name: '7 Minutoz', channel_id: channel }],
+    }] } });
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: { search } } as never);
+    const resolved = await resolveTrackArtist({ id: spotifyId, name: '7 Minutoz' }, {
+      title: 'RADIOATIVO', artists: [{ id: spotifyId, name: '7 Minutoz' }],
+    });
+    const official: ArtistModel = { type: 'artist', ...resolved, imageURL: 'official.jpg' };
+    expect(resolved.id).toBe(toYouTubeMusicArtistRouteId(channel, '7 Minutoz'));
+    expect(await personalizeArtistSearch('7 Minutoz', [official], {
+      artists: [{ id: spotifyId, name: '7 Minutoz' }],
+    })).toEqual([official]);
+    expect(await resolveTrackArtist({ id: spotifyId, name: '7 Minutoz' })).toEqual(resolved);
+    expect(search).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not inject unresolved Spotify duplicates into public artist results', async () => {
+    const official: ArtistModel = { type: 'artist', id: sid, name: 'Sid', imageURL: 'real.jpg' };
+    expect(await personalizeArtistSearch('sid', [official], {
+      artists: [{ id: '1234567890123456789012', name: 'Sid' }],
+    })).toEqual([official]);
+  });
+
+  it('confirms a renamed recording credit against the actual channel header', async () => {
+    const channel = 'UCHguBpZUpBR52kmx9DMCTFA';
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: {
+      search: jest.fn().mockResolvedValue({ songs: { contents: [{
+        title: 'Alias song', artists: [{ name: 'RND', channel_id: channel }],
+      }] } }), getArtist: jest.fn().mockResolvedValue({ header: { title: 'Sotam' } }),
+    } } as never);
+    expect(await resolveTrackArtist({ id: '1234567890123456789012', name: 'Sotam' }, {
+      title: 'Alias song', artists: [{ name: 'Sotam' }],
+    })).toEqual({ id: toYouTubeMusicArtistRouteId(channel, 'Sotam'), name: 'Sotam' });
+    expect(await resolveTrackArtist({ id: toYouTubeMusicArtistRouteId(channel, 'RND'), name: 'RND' }))
+      .toEqual({ id: toYouTubeMusicArtistRouteId(channel, 'Sotam'), name: 'Sotam' });
+  });
 
   it('preserves a real Spotify or YouTube credit instead of searching its name', async () => {
     for (const id of [sid, '1234567890123456789012']) {

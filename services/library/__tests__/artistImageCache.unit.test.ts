@@ -81,4 +81,22 @@ describe('getCachedArtistImage', () => {
     expect(firstLookup).toHaveBeenCalledTimes(1);
     expect(secondLookup).toHaveBeenCalledTimes(1);
   });
+
+  it('shares persisted artwork between renamed routes to the same channel', async () => {
+    const first = jest.fn().mockResolvedValue('https://images.test/sotam.jpg');
+    const second = jest.fn();
+    await getCachedArtistImage('Sotam', first, ['ytartist_UCHguBpZUpBR52kmx9DMCTFA~Sotam']);
+    _clearArtistImageMemoryCacheForTests();
+    expect(await getCachedArtistImage('RND', second, ['ytartist_UCHguBpZUpBR52kmx9DMCTFA~RND']))
+      .toBe('https://images.test/sotam.jpg');
+    expect(second).not.toHaveBeenCalled();
+  });
+
+  it('does not lowercase case-sensitive channel IDs in persistent cache keys', async () => {
+    await getCachedArtistImage('Artist', async () => 'https://images.test/one.jpg', ['ytartist_UCAbC~Artist']);
+    _clearArtistImageMemoryCacheForTests();
+    const load = jest.fn().mockResolvedValue('https://images.test/two.jpg');
+    expect(await getCachedArtistImage('Artist', load, ['ytartist_UCabc~Artist'])).toBe('https://images.test/two.jpg');
+    expect(load).toHaveBeenCalledTimes(1);
+  });
 });

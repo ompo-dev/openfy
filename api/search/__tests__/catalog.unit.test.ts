@@ -10,6 +10,7 @@ import {
 } from '../catalog';
 import { getYouTubeMusicClient } from '../../../services/youtubeMusicClient';
 import { getSpotifyArtistImage } from '../../../services/metadata/spotifyMetadata';
+import { _clearArtistIdentitiesForTests } from '../../../services/search/artistIdentity';
 
 jest.mock('../../../services/youtubeMusicClient', () => {
   const actual = jest.requireActual('../../../services/youtubeMusicClient');
@@ -24,7 +25,64 @@ jest.mock('../../../services/metadata/spotifyMetadata', () => ({
 }));
 
 describe('public YouTube Music catalog', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => { jest.clearAllMocks(); _clearArtistIdentitiesForTests(); });
+
+  it('deduplicates Sotam/RND by channel and keeps the actual artist shelf name and portrait', async () => {
+    const channel = 'UCHguBpZUpBR52kmx9DMCTFA';
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: {
+      search: jest.fn().mockResolvedValue({
+        songs: { contents: [{ id: 'abcdefghijk', title: 'Sotam alias recording',
+          artists: [{ name: 'RND', channel_id: channel }] }] },
+        artists: { contents: [{ id: channel, name: 'Sotam',
+          thumbnails: [{ url: 'https://images.example/sotam.jpg', width: 720 }] }] },
+      }),
+    } } as never);
+    const results = await searchCatalog('Sotam alias regression');
+    expect(results.artists).toEqual([{ type: 'artist', id: `ytartist_${channel}~Sotam`,
+      name: 'Sotam', imageURL: 'https://images.example/sotam.jpg' }]);
+    expect(results.tracks[0]).toMatchObject({ subtitle: 'Sotam',
+      artists: [{ id: `ytartist_${channel}~Sotam`, name: 'Sotam' }] });
+    expect(getCachedArtistSearchSeed(`ytartist_${channel}~RND`)?.tracks).toHaveLength(1);
+  });
+
+  it('coalesces renamed routes into one progressive profile request and one catalog', async () => {
+    const channel = 'UCprofileAlias';
+    const song = { id: 'abcdefghijk', title: 'Canonical song',
+      artists: [{ channel_id: channel, name: 'RND' }] };
+    const getArtist = jest.fn().mockResolvedValue({ header: { title: 'Sotam',
+      thumbnail: [{ url: 'https://images.example/alias-sotam.jpg', width: 720 }] }, sections: [{ contents: [song] }] });
+    const search = jest.fn().mockResolvedValue({ songs: { contents: [song] } });
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: { getArtist, search } } as never);
+    const listener = jest.fn();
+    const stop = subscribeYouTubeMusicArtistProfile(`ytartist_${channel}~Sotam`, listener);
+    const [old, current] = await Promise.all([
+      getYouTubeMusicArtistProfile(`ytartist_${channel}~RND`),
+      getYouTubeMusicArtistProfile(`ytartist_${channel}~Sotam`),
+    ]);
+    stop();
+    expect(old).toBe(current);
+    expect(current.artist).toMatchObject({ id: `ytartist_${channel}~Sotam`, name: 'Sotam' });
+    expect(current.tracks).toHaveLength(1);
+    expect(current.tracks[0].subtitle).toBe('Sotam');
+    expect(getArtist).toHaveBeenCalledTimes(1);
+    expect(search).toHaveBeenCalledWith('Sotam', { type: 'song' });
+    expect(search).not.toHaveBeenCalledWith('RND', expect.anything());
+    expect(listener).toHaveBeenCalled();
+  });
+
+  it('excludes related videos, uncredited recordings and same-name foreign artists from a profile queue', async () => {
+    const channel = 'UCstrictProfile';
+    const own = { id: 'abcdefghijk', title: 'Own song', artists: [{ channel_id: channel, name: 'Sid' }] };
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: {
+      getArtist: jest.fn().mockResolvedValue({ header: { title: 'Sid' }, sections: [{ contents: [own,
+        { id: 'lmnopqrstuv', title: 'Other Sid', artists: [{ channel_id: 'UCotherSid', name: 'Sid' }] },
+        { id: '12345678901', title: 'Uncredited video' },
+      ] }] }), search: jest.fn().mockResolvedValue({ songs: { contents: [] } }),
+    } } as never);
+    expect((await getYouTubeMusicArtistProfile(`ytartist_${channel}~Sid`)).tracks).toEqual([
+      expect.objectContaining({ title: 'Own song' }),
+    ]);
+  });
 
   it.each([
     ['84M plays', 84_000_000], ['1,2 mi reproduções', 1_200_000],
@@ -272,7 +330,7 @@ describe('public YouTube Music catalog', () => {
         id: 'abcdefghijk',
         title: 'Tarôs',
         item_type: 'song',
-        artists: [{ channel_id: 'UCartist', name: 'Pedro Qualy' }],
+        artists: [{ channel_id: 'stale', name: 'Pedro Qualy' }],
         duration: { seconds: 240 },
       }] }],
     };

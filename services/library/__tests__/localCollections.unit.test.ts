@@ -88,6 +88,24 @@ describe('groupLocalAlbums', () => {
 });
 
 describe('groupLocalArtists', () => {
+  it('keeps different Sid profiles separate in the library and merges aliases of one channel', () => {
+    const rapper = { id: 'ytartist_UCRapper~Sid', name: 'Sid' };
+    const band = { id: 'ytartist_UCBand~SID', name: 'SID' };
+    const tracks = [
+      { spotifyId: 'one', artistName: 'Sid', artists: [rapper], albumName: 'Album' },
+      { spotifyId: 'two', artistName: 'SID', artists: [band], albumName: 'Album' },
+    ];
+    const result = groupLibraryArtists(tracks as any, [{ ...rapper, imageURL: 'rapper.jpg', followedAt: 1 }]);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({ following: true, tracks: [tracks[0]] });
+    expect(result[1]).toMatchObject({ tracks: [tracks[1]] });
+    expect(groupLocalArtists(tracks as any)).toHaveLength(2);
+    const aliases = groupLocalArtists([
+      tracks[0], { ...tracks[1], artists: [{ ...rapper, id: 'ytartist_UCRapper~OldName', name: 'OldName' }] },
+    ] as any);
+    expect(aliases).toHaveLength(1);
+    expect(aliases[0].tracks).toHaveLength(2);
+  });
   it('limits library artists to primary credits and follows, preserving complete credits elsewhere', () => {
     const tracks = [{ spotifyId: 'one', artistName: 'Ebony, Rob', artists: [
       { id: 'ebony', name: 'Ebony' }, { id: 'rob', name: 'Rob' },

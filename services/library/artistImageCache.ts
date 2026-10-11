@@ -1,9 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 import { prefetchImage } from '../images/imagePrefetch';
-import { parseYouTubeMusicArtistRoute } from '../youtubeMusicClient';
+import { artistIdentityKey } from '../search/artistIdentity';
 
-const STORAGE_KEY_PREFIX = 'openfy_artist_image_verified_v5:';
+const STORAGE_KEY_PREFIX = 'openfy_artist_image_verified_v6:';
 const IMAGE_CACHE_TTL_MS = 6 * 60 * 60_000;
 const MISSING_IMAGE_CACHE_TTL_MS = 60_000;
 const imageCache = createAsyncResourceCache<string>({
@@ -23,9 +23,8 @@ const getArtistCacheId = (artistName: string) => artistName
 const isRemoteImage = (value: string) => /^https?:\/\//i.test(value);
 
 const uniqueCacheIds = (artistName: string, aliases: string[] = []) => {
-  const identities = aliases.filter((alias) => /^[A-Za-z0-9]{22}$/.test(alias) ||
-    /^UC[\w-]{22}$/.test(alias) || (alias.startsWith('ytartist_') && Boolean(parseYouTubeMusicArtistRoute(alias).browseId)));
-  return [...new Set((identities.length ? identities : [artistName, ...aliases]).map(getArtistCacheId).filter(Boolean))];
+  const identities = aliases.map(artistIdentityKey).filter(Boolean);
+  return [...new Set(identities.length ? identities : [artistName, ...aliases].map(getArtistCacheId).filter(Boolean))];
 };
 const getSpotifyArtistAlias = (aliases: string[]) =>
   aliases.find((alias) => /^[A-Za-z0-9]{22}$/.test(alias)) || '';
@@ -48,16 +47,22 @@ export const rememberCachedArtistImage = async (
     imageCache.set(`spotify:${spotifyArtistId}`, imageURL, IMAGE_CACHE_TTL_MS);
   }
   if (youtubeArtistId) {
-    imageCache.set(`youtube:${youtubeArtistId}`, imageURL, IMAGE_CACHE_TTL_MS);
+    imageCache.set(artistIdentityKey(youtubeArtistId), imageURL, IMAGE_CACHE_TTL_MS);
   }
   try {
     const entries = cacheIds.map((cacheId) => [
       `${STORAGE_KEY_PREFIX}${encodeURIComponent(cacheId)}`,
       imageURL,
     ] as [string, string]);
+    if (spotifyArtistId) {
+      entries.push([
+        `${STORAGE_KEY_PREFIX}${encodeURIComponent(`spotify:${spotifyArtistId}`)}`,
+        imageURL,
+      ]);
+    }
     if (youtubeArtistId) {
       entries.push([
-        `${STORAGE_KEY_PREFIX}${encodeURIComponent(`youtube:${youtubeArtistId}`)}`,
+        `${STORAGE_KEY_PREFIX}${encodeURIComponent(artistIdentityKey(youtubeArtistId))}`,
         imageURL,
       ]);
     }
@@ -79,12 +84,12 @@ export const getCachedArtistImage = async (
   const cacheKey = spotifyArtistId
     ? `spotify:${spotifyArtistId}`
     : youtubeArtistId
-      ? `youtube:${youtubeArtistId}`
-      : id;
+      ? artistIdentityKey(youtubeArtistId)
+      : cacheIds[0] || id;
   const storageIds = spotifyArtistId
-    ? [spotifyArtistId]
+    ? [`spotify:${spotifyArtistId}`]
     : youtubeArtistId
-      ? [`youtube:${youtubeArtistId}`, youtubeArtistId]
+      ? [artistIdentityKey(youtubeArtistId)]
       : cacheIds;
 
   const imageURL = await imageCache.getOrLoad(cacheKey, async () => {
