@@ -3,6 +3,7 @@ import { getDownloadedTracks } from '../../download/downloadManager';
 import {
   getCatalogTracks,
   getLibraryTracks,
+  toDownloadTrackInput,
   removeCatalogTrack,
   upsertCatalogTracks,
 } from '../catalogLibrary';
@@ -43,6 +44,16 @@ describe('catalogLibrary', () => {
     });
     expect(saved).not.toHaveProperty('audioUrl');
     await expect(getCatalogTracks()).resolves.toEqual([saved]);
+  });
+
+  it('keeps a verified ISRC across partial metadata enrichment and download conversion', async () => {
+    const track = { spotifyId: 'recording', title: 'Song', artistName: 'Artist', albumName: '',
+      imageURL: '', duration_ms: 3000, isrc: 'brabc2600001' };
+    await upsertCatalogTracks([track]);
+    await upsertCatalogTracks([{ ...track, isrc: 'invalid' }]);
+    const saved = (await getCatalogTracks())[0];
+    expect(saved.isrc).toBe('BRABC2600001');
+    expect(toDownloadTrackInput(saved).isrc).toBe(saved.isrc);
   });
 
   it('persists complete ordered credits with both Spotify provenance and a native channel', async () => {

@@ -1,16 +1,16 @@
 diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioModule.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioModule.kt
-index 992239b..18cea98 100644
+index 992239b..90597c6 100644
 --- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioModule.kt
 +++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioModule.kt
 @@ -202,6 +202,7 @@ class AudioModule : Module() {
    @OptIn(DelicateCoroutinesApi::class)
    override fun definition() = ModuleDefinition {
      Name("ExpoAudio")
-+    Constants("supportsChannelMode" to true)
++    Constants("supportsChannelMode" to true, "supportsEqualizer" to true)
  
      OnCreate {
        audioManager = appContext.reactContext?.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-@@ -535,6 +536,10 @@ class AudioModule : Module() {
+@@ -535,6 +536,14 @@ class AudioModule : Module() {
          player.seekTo(seekTime)
        }.runOnQueue(Queues.MAIN)
  
@@ -18,11 +18,15 @@ index 992239b..18cea98 100644
 +        player.setChannelMode(mode)
 +      }.runOnQueue(Queues.MAIN)
 +
++      AsyncFunction("setEqualizer") { player: AudioPlayer, configuration: List<Double> ->
++        player.setEqualizer(configuration)
++      }.runOnQueue(Queues.MAIN)
++
        Function("setPlaybackRate") { player: AudioPlayer, rate: Float ->
          appContext.mainQueue.launch {
            player.setPlaybackRate(rate)
 diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioPlayer.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioPlayer.kt
-index c76a9fd..622d43c 100644
+index c76a9fd..2472403 100644
 --- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioPlayer.kt
 +++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioPlayer.kt
 @@ -24,6 +24,8 @@ import java.lang.ref.WeakReference
@@ -47,7 +51,7 @@ index c76a9fd..622d43c 100644
      .setLooper(context.mainLooper)
      .setAudioAttributes(AudioAttributes.DEFAULT, false)
      .setSeekForwardIncrementMs(SEEK_JUMP_INTERVAL_MS)
-@@ -60,6 +63,11 @@ class AudioPlayer(
+@@ -60,6 +63,15 @@ class AudioPlayer(
  ) {
    var preservesPitch = true
  
@@ -56,10 +60,14 @@ index c76a9fd..622d43c 100644
 +    channelProcessor.mono = mode == "mono"
 +  }
 +
++  fun setEqualizer(configuration: List<Double>) {
++    channelProcessor.setEqualizer(configuration.toDoubleArray())
++  }
++
    // Lock screen controls
    var isActiveForLockScreen = false
    internal var metadata: Metadata? = null
-@@ -144,6 +152,14 @@ class AudioPlayer(
+@@ -144,6 +156,14 @@ class AudioPlayer(
      }
    }
  
@@ -89,46 +97,103 @@ index 86880d9..5da5950 100644
    @Field val isLiveStream: Boolean? = null
 diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/OpenfyChannelProcessor.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/OpenfyChannelProcessor.kt
 new file mode 100644
-index 0000000..c6a1ac6
+index 0000000..ea20a44
 --- /dev/null
 +++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/OpenfyChannelProcessor.kt
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,106 @@
 +package expo.modules.audio
 +
 +import android.content.Context
-+import androidx.media3.common.audio.AudioMixingUtil
++import androidx.media3.common.C
 +import androidx.media3.common.audio.AudioProcessor.AudioFormat
 +import androidx.media3.common.audio.AudioProcessor.UnhandledAudioFormatException
 +import androidx.media3.common.audio.BaseAudioProcessor
-+import androidx.media3.common.audio.ChannelMixingMatrix
 +import androidx.media3.common.util.UnstableApi
 +import androidx.media3.exoplayer.DefaultRenderersFactory
 +import androidx.media3.exoplayer.audio.AudioSink
 +import androidx.media3.exoplayer.audio.DefaultAudioSink
 +import java.nio.ByteBuffer
++import kotlin.math.*
 +
 +@UnstableApi
 +class OpenfyChannelProcessor : BaseAudioProcessor() {
 +  @Volatile var mono = false
-+  private var monoMatrix = ChannelMixingMatrix(2, 2, floatArrayOf(0.5f, 0.5f, 0.5f, 0.5f))
++  @Volatile private var configuration = doubleArrayOf(1.0, 0.0)
++  private var applied: DoubleArray? = null
++  private var coefficients = emptyArray<DoubleArray>()
++  private var history = emptyArray<Array<DoubleArray>>()
++  private var frame = DoubleArray(0)
++
++  fun setEqualizer(packet: DoubleArray) {
++    require(packet.size in 2..30 && (packet.size - 2) % 4 == 0 && packet.all { it.isFinite() })
++    require(packet[0] in 0.0..1.0 && packet[1] in -1.0..1.0)
++    for (i in 2 until packet.size step 4) {
++      require(packet[i] in 20.0..20000.0 && packet[i+1] in -12.0..12.0 &&
++        packet[i+2] in 0.1..4.0 && packet[i+3] in 0.0..2.0)
++    }
++    configuration = packet.copyOf()
++  }
 +
 +  override fun onConfigure(input: AudioFormat): AudioFormat {
-+    if (!AudioMixingUtil.canMix(input)) throw UnhandledAudioFormatException(input)
-+    val channels = input.channelCount
-+    monoMatrix = ChannelMixingMatrix(channels, channels, FloatArray(channels * channels) { 1f / channels })
++    if (input.encoding != C.ENCODING_PCM_16BIT && input.encoding != C.ENCODING_PCM_FLOAT) throw UnhandledAudioFormatException(input)
++    frame = DoubleArray(input.channelCount)
++    applied = null
 +    // Keep the processor active in stereo too: live mode changes need no seek/flush.
 +    return input
 +  }
 +
 +  override fun queueInput(input: ByteBuffer) {
++    val packet = configuration
++    if (applied !== packet) {
++      coefficients = Array((packet.size - 2) / 4) { band -> coefficients(packet, 2 + band * 4, inputAudioFormat.sampleRate.toDouble()) }
++      history = Array(inputAudioFormat.channelCount) { Array(coefficients.size) { DoubleArray(2) } }
++      applied = packet
++    }
 +    val output = replaceOutputBuffer(input.remaining())
-+    if (mono && inputAudioFormat.channelCount > 1) {
-+      AudioMixingUtil.mix(input, inputAudioFormat, output, outputAudioFormat,
-+        monoMatrix, input.remaining() / inputAudioFormat.bytesPerFrame, false, true)
-+    } else {
++    if (!mono && coefficients.isEmpty() && packet[1] == 0.0) {
 +      output.put(input)
++    } else {
++      val channels = inputAudioFormat.channelCount
++      val floating = inputAudioFormat.encoding == C.ENCODING_PCM_FLOAT
++      while (input.remaining() >= inputAudioFormat.bytesPerFrame) {
++        var sum = 0.0
++        for (channel in 0 until channels) {
++          frame[channel] = if (floating) input.float.toDouble() else input.short / 32768.0
++          sum += frame[channel]
++        }
++        for (channel in 0 until channels) {
++          var value = (if (mono) sum / channels else frame[channel]) * packet[0]
++          for (band in coefficients.indices) {
++            val c = coefficients[band]; val s = history[channel][band]
++            val next = c[0] * value + s[0]
++            s[0] = c[1] * value - c[3] * next + s[1]; s[1] = c[2] * value - c[4] * next
++            value = next
++          }
++          if (channel == 0 && packet[1] > 0) value *= 1 - packet[1]
++          if (channel == 1 && packet[1] < 0) value *= 1 + packet[1]
++          if (floating) output.putFloat(value.coerceIn(-1.0, 1.0).toFloat())
++          else output.putShort((value * 32768).toInt().coerceIn(-32768, 32767).toShort())
++        }
++      }
 +    }
 +    output.flip()
++  }
++
++  override fun onFlush() { applied = null }
++
++  // Standard RBJ coefficients, independent of catalog and playback resolution.
++  private fun coefficients(p: DoubleArray, i: Int, rate: Double): DoubleArray {
++    val a = 10.0.pow(p[i+1] / 40)
++    val omega = 2 * PI * min(p[i], rate * 0.45) / rate
++    val c = cos(omega); val s = sin(omega); val alpha = s / (2 * p[i+2]); val beta = s * sqrt(2*a)
++    val v = when (p[i+3].toInt()) {
++      1 -> doubleArrayOf(a*((a+1)-(a-1)*c+beta), 2*a*((a-1)-(a+1)*c), a*((a+1)-(a-1)*c-beta),
++        (a+1)+(a-1)*c+beta, -2*((a-1)+(a+1)*c), (a+1)+(a-1)*c-beta)
++      2 -> doubleArrayOf(a*((a+1)+(a-1)*c+beta), -2*a*((a-1)+(a+1)*c), a*((a+1)+(a-1)*c-beta),
++        (a+1)-(a-1)*c+beta, 2*((a-1)-(a+1)*c), (a+1)-(a-1)*c-beta)
++      else -> doubleArrayOf(1+alpha*a, -2*c, 1-alpha*a, 1+alpha/a, -2*c, 1-alpha/a)
++    }
++    return doubleArrayOf(v[0]/v[3], v[1]/v[3], v[2]/v[3], v[4]/v[3], v[5]/v[3])
 +  }
 +}
 +
@@ -347,30 +412,49 @@ index f3ae4ee..de63a83 100644
  export declare class AudioRecorder extends SharedObject<RecordingEvents> {
      /**
 diff --git a/node_modules/expo-audio/build/AudioPlayer.web.js b/node_modules/expo-audio/build/AudioPlayer.web.js
-index 89bc872..1046ce3 100644
+index 89bc872..01aa628 100644
 --- a/node_modules/expo-audio/build/AudioPlayer.web.js
 +++ b/node_modules/expo-audio/build/AudioPlayer.web.js
-@@ -10,10 +10,11 @@ function isIOSSafari() {
+@@ -10,10 +10,12 @@ function isIOSSafari() {
  export class AudioPlayerWeb extends globalThis.expo.SharedObject {
      constructor(source, options = {}) {
          super();
 -        const { updateInterval = 500, crossOrigin } = options;
-+        const { updateInterval = 500, crossOrigin, channelMode = 'stereo' } = options;
++        const { updateInterval = 500, crossOrigin, channelMode = 'stereo', equalizer = [1, 0] } = options;
          this.src = source;
          this.interval = Math.max(updateInterval, 1);
          this.crossOrigin = crossOrigin;
 +        this.channelMode = channelMode;
++        this.equalizer = equalizer;
          this.media = this._createMediaElement();
          activePlayers.add(this);
      }
-@@ -29,6 +30,56 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+@@ -29,6 +31,108 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
      crossOrigin;
      analyser = null;
      sourceNode = null;
 +    outputNode = null;
 +    channelMode = 'stereo';
++    equalizer = [1, 0];
++    processingNodes = [];
++    async setEqualizer(configuration) {
++        const required = configuration.length > 2 || configuration[1] !== 0;
++        if (required && !this.media.crossOrigin && this._isCrossOrigin()) {
++            throw new Error('Equalizer requires a CORS-enabled source.');
++        }
++        const previous = this.equalizer;
++        this.equalizer = configuration.slice();
++        try {
++            if (required || this.sourceNode)
++                await this.setChannelMode(this.channelMode);
++        }
++        catch (error) {
++            this.equalizer = previous;
++            throw error;
++        }
++    }
 +    async setChannelMode(mode) {
-+        if (mode === 'stereo' && !this.sourceNode) {
++        if (mode === 'stereo' && !this.sourceNode && this.equalizer.length <= 2 && this.equalizer[1] === 0) {
 +            this.channelMode = mode;
 +            return;
 +        }
@@ -407,9 +491,43 @@ index 89bc872..1046ce3 100644
 +        this.sourceNode.disconnect();
 +        this.outputNode?.disconnect();
 +        this.analyser?.disconnect();
-+        const output = this.outputNode || this.sourceNode;
++        this.processingNodes.forEach((node) => node.disconnect());
++        this.processingNodes = [];
++        let output = this.outputNode || this.sourceNode;
 +        if (this.outputNode)
 +            this.sourceNode.connect(this.outputNode);
++        if (this.equalizer.length > 2 || this.equalizer[1] !== 0) {
++            const preamp = ctx.createGain();
++            preamp.gain.value = this.equalizer[0];
++            output.connect(preamp);
++            output = preamp;
++            this.processingNodes.push(preamp);
++            for (let i = 2; i < this.equalizer.length; i += 4) {
++                const filter = ctx.createBiquadFilter();
++                filter.type = this.equalizer[i + 3] === 1 ? 'lowshelf' : this.equalizer[i + 3] === 2 ? 'highshelf' : 'peaking';
++                filter.frequency.value = Math.min(this.equalizer[i], ctx.sampleRate * 0.45);
++                filter.gain.value = this.equalizer[i + 1];
++                filter.Q.value = this.equalizer[i + 2];
++                output.connect(filter);
++                output = filter;
++                this.processingNodes.push(filter);
++            }
++            const stereo = ctx.createGain();
++            stereo.channelCount = 2;
++            stereo.channelCountMode = 'explicit';
++            const split = ctx.createChannelSplitter(2), merge = ctx.createChannelMerger(2);
++            const left = ctx.createGain(), right = ctx.createGain();
++            left.gain.value = 1 - Math.max(0, this.equalizer[1]);
++            right.gain.value = 1 + Math.min(0, this.equalizer[1]);
++            output.connect(stereo);
++            stereo.connect(split);
++            split.connect(left, 0);
++            split.connect(right, 1);
++            left.connect(merge, 0, 0);
++            right.connect(merge, 0, 1);
++            output = merge;
++            this.processingNodes.push(stereo, split, left, right, merge);
++        }
 +        if (this.analyser) {
 +            output.connect(this.analyser);
 +            this.analyser.connect(ctx.destination);
@@ -420,7 +538,15 @@ index 89bc872..1046ce3 100644
      samplingFrameId = null;
      samplingEnabled = false;
      samplingBuffer = null;
-@@ -134,9 +185,7 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+@@ -102,6 +206,7 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+         this.isPlaying = false;
+         this.loaded = false;
+         this.media = this._createMediaElement();
++        activePlayers.add(this);
+         if (wasSampling) {
+             this.setAudioSamplingEnabled(true);
+         }
+@@ -134,9 +239,7 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
              }
              this.analyser = ctx.createAnalyser();
              this.analyser.fftSize = 2048;
@@ -431,7 +557,7 @@ index 89bc872..1046ce3 100644
              this.samplingBuffer = new Float32Array(this.analyser.frequencyBinCount);
              this.samplingEnabled = true;
              if (this.isPlaying) {
-@@ -151,9 +200,7 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+@@ -151,9 +254,7 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
                  this.analyser = null;
              }
              if (this.sourceNode) {
@@ -442,16 +568,18 @@ index 89bc872..1046ce3 100644
              }
              this.samplingBuffer = null;
              this.samplingEnabled = false;
-@@ -199,6 +246,8 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+@@ -199,6 +300,10 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
              this.sourceNode.disconnect();
              this.sourceNode = null;
          }
 +        this.outputNode?.disconnect();
 +        this.outputNode = null;
++        this.processingNodes.forEach((node) => node.disconnect());
++        this.processingNodes = [];
          this.samplingEnabled = false;
          this.media.pause();
          // Clear event handlers to prevent memory leaks
-@@ -231,6 +280,8 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+@@ -231,6 +336,8 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
          mediaSessionController.clear(this);
      }
      _isCrossOrigin() {
@@ -460,14 +588,14 @@ index 89bc872..1046ce3 100644
          try {
              return new URL(this.media.src).origin !== window.location.origin;
          }
-@@ -241,10 +292,15 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
+@@ -241,10 +348,15 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
      _createMediaElement() {
          const newSource = getSourceUri(this.src);
          const cachedUri = newSource && preloadCache.has(newSource) ? preloadCache.get(newSource).blobUrl : newSource;
 -        const media = new Audio(cachedUri);
 -        if (this.crossOrigin !== undefined) {
 +        const media = new Audio();
-+        if (this.channelMode === 'mono') {
++        if (this.channelMode === 'mono' || this.equalizer.length > 2 || this.equalizer[1] !== 0) {
 +            media.crossOrigin = 'anonymous';
 +        }
 +        else if (this.crossOrigin !== undefined) {
@@ -478,25 +606,28 @@ index 89bc872..1046ce3 100644
          let lastEmitTime = 0;
          const intervalSec = this.interval / 1000;
          // Throttled status updates based on interval
-@@ -314,4 +370,3 @@ export class AudioPlayerWeb extends globalThis.expo.SharedObject {
-         return media;
-     }
- }
--//# sourceMappingURL=AudioPlayer.web.js.map
+diff --git a/node_modules/expo-audio/build/AudioPlayer.web.js.map b/node_modules/expo-audio/build/AudioPlayer.web.js.map
+index 7017f27..1dd43a8 100644
+--- a/node_modules/expo-audio/build/AudioPlayer.web.js.map
++++ b/node_modules/expo-audio/build/AudioPlayer.web.js.map
+@@ -1 +1 @@
+-{"version":3,"file":"AudioPlayer.web.js","sourceRoot":"","sources":["../src/AudioPlayer.web.ts"],"names":[],"mappings":"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","sourcesContent":["import type {\n  AudioMetadata,\n  AudioPlayerOptions,\n  AudioSource,\n  AudioStatus,\n  PitchCorrectionQuality,\n} from './Audio.types';\nimport type { AudioLockScreenOptions } from './AudioConstants';\nimport { AUDIO_SAMPLE_UPDATE, PLAYBACK_STATUS_UPDATE } from './AudioEventKeys';\nimport type { AudioPlayer, AudioEvents } from './AudioModule.types';\nimport { isAudioActive } from './AudioModule.web';\nimport {\n  getAudioContext,\n  getSourceUri,\n  getStatusFromMedia,\n  nextId,\n  preloadCache,\n  safeDuration,\n} from './AudioUtils.web';\nimport { mediaSessionController } from './MediaSessionController.web';\n\nexport const activePlayers = new Set<AudioPlayerWeb>();\n\nlet hasWarnedIOSVolume = false;\nfunction isIOSSafari(): boolean {\n  return /iPad|iPhone|iPod/.test(navigator.userAgent);\n}\n\nexport class AudioPlayerWeb\n  extends globalThis.expo.SharedObject<AudioEvents>\n  implements AudioPlayer\n{\n  constructor(source: AudioSource, options: AudioPlayerOptions = {}) {\n    super();\n    const { updateInterval = 500, crossOrigin } = options;\n    this.src = source;\n    this.interval = Math.max(updateInterval, 1);\n    this.crossOrigin = crossOrigin;\n    this.media = this._createMediaElement();\n    activePlayers.add(this);\n  }\n\n  id: string = nextId();\n  isAudioSamplingSupported = false;\n  isBuffering = false;\n  shouldCorrectPitch = false;\n\n  private src: AudioSource = null;\n  private media: HTMLAudioElement;\n  private interval = 500;\n  private isPlaying = false;\n  private loaded = false;\n  private crossOrigin?: 'anonymous' | 'use-credentials';\n  private analyser: AnalyserNode | null = null;\n  private sourceNode: MediaElementAudioSourceNode | null = null;\n  private samplingFrameId: number | null = null;\n  private samplingEnabled = false;\n  private samplingBuffer: Float32Array<ArrayBuffer> | null = null;\n\n  get playing(): boolean {\n    return this.isPlaying;\n  }\n\n  get muted(): boolean {\n    return this.media.muted;\n  }\n\n  set muted(value: boolean) {\n    this.media.muted = value;\n  }\n\n  get loop(): boolean {\n    return this.media.loop;\n  }\n\n  set loop(value: boolean) {\n    this.media.loop = value;\n  }\n\n  get duration(): number {\n    return safeDuration(this.media.duration);\n  }\n\n  get currentTime(): number {\n    return this.media.currentTime;\n  }\n\n  get paused(): boolean {\n    return this.media.paused;\n  }\n\n  get isLoaded(): boolean {\n    return this.loaded;\n  }\n\n  get playbackRate(): number {\n    return this.media.playbackRate;\n  }\n\n  set playbackRate(value: number) {\n    this.media.playbackRate = value;\n  }\n\n  get volume(): number {\n    return this.media.volume;\n  }\n\n  set volume(value: number) {\n    if (!hasWarnedIOSVolume && isIOSSafari()) {\n      hasWarnedIOSVolume = true;\n      console.warn(\n        'expo-audio: Programmatic volume control is not supported in browsers on iOS. ' +\n          'Apple requires volume to be controlled exclusively by the device physical buttons.'\n      );\n    }\n    this.media.volume = value;\n  }\n\n  get currentStatus(): AudioStatus {\n    return getStatusFromMedia(this.media, this.id);\n  }\n\n  play(): void {\n    if (!isAudioActive) {\n      return;\n    }\n    this.media.play();\n    this.isPlaying = true;\n    this.startSampling();\n  }\n\n  pause(): void {\n    this.media.pause();\n    this.isPlaying = false;\n    this.stopSampling();\n  }\n\n  replace(source: AudioSource): void {\n    const wasPlaying = this.isPlaying;\n    const wasSampling = this.samplingEnabled;\n    const mediaSessionState = mediaSessionController.getActiveState(this);\n\n    // we need to remove the current media element and create a new one\n    this.remove();\n\n    this.src = source;\n    this.isPlaying = false;\n    this.loaded = false;\n    this.media = this._createMediaElement();\n\n    if (wasSampling) {\n      this.setAudioSamplingEnabled(true);\n    }\n\n    if (mediaSessionState) {\n      mediaSessionController.setActivePlayer(\n        this,\n        mediaSessionState.metadata ?? undefined,\n        mediaSessionState.options ?? undefined\n      );\n    }\n\n    // Resume playback if it was playing before\n    if (wasPlaying) {\n      this.play();\n    }\n  }\n\n  async seekTo(\n    seconds: number,\n    toleranceMillisBefore?: number,\n    toleranceMillisAfter?: number\n  ): Promise<void> {\n    this.media.currentTime = seconds;\n  }\n\n  setAudioSamplingEnabled(enabled: boolean): void {\n    if (enabled) {\n      if (!this.media.crossOrigin && this._isCrossOrigin()) {\n        this.isAudioSamplingSupported = false;\n        return;\n      }\n\n      if (this.analyser) {\n        return;\n      }\n\n      const ctx = getAudioContext();\n      if (ctx.state === 'suspended') {\n        ctx.resume();\n      }\n\n      if (!this.sourceNode) {\n        this.sourceNode = ctx.createMediaElementSource(this.media);\n      }\n\n      this.analyser = ctx.createAnalyser();\n      this.analyser.fftSize = 2048;\n\n      this.sourceNode.disconnect();\n      this.sourceNode.connect(this.analyser);\n      this.analyser.connect(ctx.destination);\n\n      this.samplingBuffer = new Float32Array(this.analyser.frequencyBinCount);\n      this.samplingEnabled = true;\n\n      if (this.isPlaying) {\n        this.startSampling();\n      }\n      this.isAudioSamplingSupported = true;\n    } else {\n      this.stopSampling();\n\n      if (this.analyser) {\n        this.analyser.disconnect();\n        this.analyser = null;\n      }\n\n      if (this.sourceNode) {\n        const ctx = getAudioContext();\n        this.sourceNode.disconnect();\n        this.sourceNode.connect(ctx.destination);\n      }\n\n      this.samplingBuffer = null;\n      this.samplingEnabled = false;\n    }\n  }\n\n  private startSampling(): void {\n    if (!this.samplingEnabled || !this.analyser || !this.samplingBuffer) {\n      return;\n    }\n    const sampleLoop = () => {\n      if (!this.analyser || !this.samplingBuffer) {\n        return;\n      }\n      this.analyser.getFloatTimeDomainData(this.samplingBuffer);\n      this.emit(AUDIO_SAMPLE_UPDATE, {\n        channels: [{ frames: Array.from(this.samplingBuffer) }],\n        timestamp: this.media.currentTime,\n      });\n      this.samplingFrameId = requestAnimationFrame(sampleLoop);\n    };\n    this.samplingFrameId = requestAnimationFrame(sampleLoop);\n  }\n\n  private stopSampling(): void {\n    if (this.samplingFrameId != null) {\n      cancelAnimationFrame(this.samplingFrameId);\n      this.samplingFrameId = null;\n    }\n  }\n\n  setPlaybackRate(second: number, pitchCorrectionQuality?: PitchCorrectionQuality): void {\n    this.media.playbackRate = second;\n    this.shouldCorrectPitch = pitchCorrectionQuality === 'high';\n    this.media.preservesPitch = this.shouldCorrectPitch;\n    mediaSessionController.updatePositionState(this);\n  }\n\n  remove(): void {\n    mediaSessionController.clear(this);\n    this.stopSampling();\n\n    if (this.analyser) {\n      this.analyser.disconnect();\n      this.analyser = null;\n    }\n\n    if (this.sourceNode) {\n      this.sourceNode.disconnect();\n      this.sourceNode = null;\n    }\n\n    this.samplingEnabled = false;\n    this.media.pause();\n    // Clear event handlers to prevent memory leaks\n    this.media.ontimeupdate = null;\n    this.media.onplay = null;\n    this.media.onpause = null;\n    this.media.onseeked = null;\n    this.media.onended = null;\n    this.media.onloadeddata = null;\n    this.media.onerror = null;\n    this.media.removeAttribute('src');\n    this.media.load();\n    activePlayers.delete(this);\n  }\n\n  release(): void {\n    this.remove();\n  }\n\n  setActiveForLockScreen(\n    active: boolean,\n    metadata?: AudioMetadata,\n    options?: AudioLockScreenOptions\n  ): void {\n    if (active) {\n      mediaSessionController.setActivePlayer(this, metadata, options);\n    } else {\n      mediaSessionController.clear(this);\n    }\n  }\n\n  updateLockScreenMetadata(metadata: AudioMetadata): void {\n    mediaSessionController.updateMetadata(this, metadata);\n  }\n\n  clearLockScreenControls(): void {\n    mediaSessionController.clear(this);\n  }\n\n  _isCrossOrigin(): boolean {\n    try {\n      return new URL(this.media.src).origin !== window.location.origin;\n    } catch {\n      return false;\n    }\n  }\n\n  _createMediaElement(): HTMLAudioElement {\n    const newSource = getSourceUri(this.src);\n    const cachedUri =\n      newSource && preloadCache.has(newSource) ? preloadCache.get(newSource)!.blobUrl : newSource;\n    const media = new Audio(cachedUri);\n    if (this.crossOrigin !== undefined) {\n      media.crossOrigin = this.crossOrigin;\n    }\n\n    let lastEmitTime = 0;\n    const intervalSec = this.interval / 1000;\n\n    // Throttled status updates based on interval\n    media.ontimeupdate = () => {\n      const now = media.currentTime;\n      // Handle backwards time (loop/seek)\n      if (now < lastEmitTime) {\n        lastEmitTime = now;\n      }\n      if (now - lastEmitTime >= intervalSec) {\n        lastEmitTime = now;\n        this.emit(PLAYBACK_STATUS_UPDATE, getStatusFromMedia(media, this.id));\n        mediaSessionController.updatePositionState(this);\n      }\n    };\n\n    media.onplay = () => {\n      this.isPlaying = true;\n      lastEmitTime = media.currentTime;\n      this.emit(PLAYBACK_STATUS_UPDATE, {\n        ...getStatusFromMedia(media, this.id),\n        playing: this.isPlaying,\n      });\n      mediaSessionController.updatePlaybackState(this);\n      mediaSessionController.updatePositionState(this);\n    };\n\n    media.onpause = () => {\n      this.isPlaying = false;\n      lastEmitTime = media.currentTime;\n      this.emit(PLAYBACK_STATUS_UPDATE, {\n        ...getStatusFromMedia(media, this.id),\n        playing: this.isPlaying,\n      });\n      mediaSessionController.updatePlaybackState(this);\n      mediaSessionController.updatePositionState(this);\n    };\n\n    media.onseeked = () => {\n      lastEmitTime = media.currentTime;\n      this.emit(PLAYBACK_STATUS_UPDATE, getStatusFromMedia(media, this.id));\n      mediaSessionController.updatePositionState(this);\n    };\n\n    media.onended = () => {\n      lastEmitTime = 0;\n      mediaSessionController.updatePlaybackState(this);\n    };\n\n    media.onloadeddata = () => {\n      this.loaded = true;\n      lastEmitTime = media.currentTime;\n      this.emit(PLAYBACK_STATUS_UPDATE, {\n        ...getStatusFromMedia(media, this.id),\n        isLoaded: this.loaded,\n      });\n      mediaSessionController.updatePositionState(this);\n    };\n\n    media.onerror = () => {\n      this.loaded = false;\n      this.isPlaying = false;\n      const errorMessage = media.error\n        ? `Playback error (code ${media.error.code})`\n        : 'Unknown playback error';\n      this.emit(PLAYBACK_STATUS_UPDATE, {\n        ...getStatusFromMedia(media, this.id),\n        isLoaded: false,\n        playing: false,\n        error: errorMessage,\n      });\n    };\n\n    return media;\n  }\n}\n"]}
+\ No newline at end of file
++{"version":3,"file":"AudioPlayer.web.js","sourceRoot":"","sources":["AudioPlayer.web.ts"],"names":[],"mappings":"AAQA,OAAO,EAAE,mBAAmB,EAAE,sBAAsB,EAAE,MAAM,kBAAkB,CAAC;AAE/E,OAAO,EAAE,aAAa,EAAE,MAAM,mBAAmB,CAAC;AAClD,OAAO,EACL,eAAe,EACf,YAAY,EACZ,kBAAkB,EAClB,MAAM,EACN,YAAY,EACZ,YAAY,GACb,MAAM,kBAAkB,CAAC;AAC1B,OAAO,EAAE,sBAAsB,EAAE,MAAM,8BAA8B,CAAC;AAEtE,MAAM,CAAC,MAAM,aAAa,GAAG,IAAI,GAAG,EAAkB,CAAC;AAEvD,IAAI,kBAAkB,GAAG,KAAK,CAAC;AAC/B,SAAS,WAAW;IAClB,OAAO,kBAAkB,CAAC,IAAI,CAAC,SAAS,CAAC,SAAS,CAAC,CAAC;AACtD,CAAC;AAED,MAAM,OAAO,cACX,SAAQ,UAAU,CAAC,IAAI,CAAC,YAAyB;IAGjD,YAAY,MAAmB,EAAE,UAA8B,EAAE;QAC/D,KAAK,EAAE,CAAC;QACR,MAAM,EAAE,cAAc,GAAG,GAAG,EAAE,WAAW,EAAE,WAAW,GAAG,QAAQ,EAAE,SAAS,GAAG,CAAC,CAAC,EAAE,CAAC,CAAC,EAAE,GAAG,OAAyF,CAAC;QACpL,IAAI,CAAC,GAAG,GAAG,MAAM,CAAC;QAClB,IAAI,CAAC,QAAQ,GAAG,IAAI,CAAC,GAAG,CAAC,cAAc,EAAE,CAAC,CAAC,CAAC;QAC5C,IAAI,CAAC,WAAW,GAAG,WAAW,CAAC;QAC/B,IAAI,CAAC,WAAW,GAAG,WAAW,CAAC;QAC/B,IAAI,CAAC,SAAS,GAAG,SAAS,CAAC;QAC3B,IAAI,CAAC,KAAK,GAAG,IAAI,CAAC,mBAAmB,EAAE,CAAC;QACxC,aAAa,CAAC,GAAG,CAAC,IAAI,CAAC,CAAC;IAC1B,CAAC;IAED,EAAE,GAAW,MAAM,EAAE,CAAC;IACtB,wBAAwB,GAAG,KAAK,CAAC;IACjC,WAAW,GAAG,KAAK,CAAC;IACpB,kBAAkB,GAAG,KAAK,CAAC;IAEnB,GAAG,GAAgB,IAAI,CAAC;IACxB,KAAK,CAAmB;IACxB,QAAQ,GAAG,GAAG,CAAC;IACf,SAAS,GAAG,KAAK,CAAC;IAClB,MAAM,GAAG,KAAK,CAAC;IACf,WAAW,CAAmC;IAC9C,QAAQ,GAAwB,IAAI,CAAC;IACrC,UAAU,GAAuC,IAAI,CAAC;IACtD,UAAU,GAAoB,IAAI,CAAC;IACnC,WAAW,GAAsB,QAAQ,CAAC;IAC1C,SAAS,GAAa,CAAC,CAAC,EAAE,CAAC,CAAC,CAAC;IAC7B,eAAe,GAAgB,EAAE,CAAC;IAE1C,KAAK,CAAC,YAAY,CAAC,aAAuB;QACxC,MAAM,QAAQ,GAAG,aAAa,CAAC,MAAM,GAAG,CAAC,IAAI,aAAa,CAAC,CAAC,CAAC,KAAK,CAAC,CAAC;QACpE,IAAI,QAAQ,IAAI,CAAC,IAAI,CAAC,KAAK,CAAC,WAAW,IAAI,IAAI,CAAC,cAAc,EAAE,EAAE,CAAC;YACjE,MAAM,IAAI,KAAK,CAAC,2CAA2C,CAAC,CAAC;QAC/D,CAAC;QACD,MAAM,QAAQ,GAAG,IAAI,CAAC,SAAS,CAAC;QAChC,IAAI,CAAC,SAAS,GAAG,aAAa,CAAC,KAAK,EAAE,CAAC;QACvC,IAAI,CAAC;YACH,IAAI,QAAQ,IAAI,IAAI,CAAC,UAAU;gBAAE,MAAM,IAAI,CAAC,cAAc,CAAC,IAAI,CAAC,WAAW,CAAC,CAAC;QAC/E,CAAC;QAAC,OAAO,KAAK,EAAE,CAAC;YAAC,IAAI,CAAC,SAAS,GAAG,QAAQ,CAAC;YAAC,MAAM,KAAK,CAAC;QAAC,CAAC;IAC7D,CAAC;IAED,KAAK,CAAC,cAAc,CAAC,IAAuB;QAC1C,IAAI,IAAI,KAAK,QAAQ,IAAI,CAAC,IAAI,CAAC,UAAU,IAAI,IAAI,CAAC,SAAS,CAAC,MAAM,IAAI,CAAC,IAAI,IAAI,CAAC,SAAS,CAAC,CAAC,CAAC,KAAK,CAAC,EAAE,CAAC;YACnG,IAAI,CAAC,WAAW,GAAG,IAAI,CAAC;YACxB,OAAO;QACT,CAAC;QACD,IAAI,IAAI,KAAK,MAAM,IAAI,CAAC,IAAI,CAAC,KAAK,CAAC,WAAW,IAAI,IAAI,CAAC,cAAc,EAAE,EAAE,CAAC;YACxE,MAAM,IAAI,KAAK,CAAC,6EAA6E,CAAC,CAAC;QACjG,CAAC;QACD,MAAM,GAAG,GAAG,eAAe,EAAE,CAAC;QAC9B,IAAI,GAAG,CAAC,KAAK,KAAK,WAAW,EAAE,CAAC;YAC9B,IAAI,KAAgD,CAAC;YACrD,IAAI,CAAC;gBACH,MAAM,OAAO,CAAC,IAAI,CAAC,CAAC,GAAG,CAAC,MAAM,EAAE,EAAE,IAAI,OAAO,CAAQ,CAAC,CAAC,EAAE,MAAM,EAAE,EAAE;wBACjE,KAAK,GAAG,UAAU,CAAC,GAAG,EAAE,CAAC,MAAM,CAAC,IAAI,KAAK,CAAC,oDAAoD,CAAC,CAAC,EAAE,IAAI,CAAC,CAAC;oBAC1G,CAAC,CAAC,CAAC,CAAC,CAAC;YACP,CAAC;oBAAS,CAAC;gBAAC,YAAY,CAAC,KAAK,CAAC,CAAC;YAAC,CAAC;QACpC,CAAC;QACD,IAAI,GAAG,CAAC,KAAK,KAAK,SAAS;YAAE,MAAM,IAAI,KAAK,CAAC,yDAAyD,CAAC,CAAC;QACxG,IAAI,CAAC,IAAI,CAAC,UAAU;YAAE,IAAI,CAAC,UAAU,GAAG,GAAG,CAAC,wBAAwB,CAAC,IAAI,CAAC,KAAK,CAAC,CAAC;QACjF,IAAI,CAAC,IAAI,CAAC,UAAU;YAAE,IAAI,CAAC,UAAU,GAAG,GAAG,CAAC,UAAU,EAAE,CAAC;QACzD,IAAI,CAAC,WAAW,GAAG,IAAI,CAAC;QACxB,IAAI,CAAC,UAAU,CAAC,YAAY,GAAG,IAAI,KAAK,MAAM,CAAC,CAAC,CAAC,CAAC,CAAC,CAAC,CAAC,CAAC,CAAC;QACvD,IAAI,CAAC,UAAU,CAAC,gBAAgB,GAAG,IAAI,KAAK,MAAM,CAAC,CAAC,CAAC,UAAU,CAAC,CAAC,CAAC,KAAK,CAAC;QACxE,IAAI,CAAC,kBAAkB,EAAE,CAAC;IAC5B,CAAC;IAEO,kBAAkB;QACxB,IAAI,CAAC,IAAI,CAAC,UAAU;YAAE,OAAO;QAC7B,MAAM,GAAG,GAAG,eAAe,EAAE,CAAC;QAC9B,IAAI,CAAC,UAAU,CAAC,UAAU,EAAE,CAAC;QAC7B,IAAI,CAAC,UAAU,EAAE,UAAU,EAAE,CAAC;QAC9B,IAAI,CAAC,QAAQ,EAAE,UAAU,EAAE,CAAC;QAC5B,IAAI,CAAC,eAAe,CAAC,OAAO,CAAC,CAAC,IAAI,EAAE,EAAE,CAAC,IAAI,CAAC,UAAU,EAAE,CAAC,CAAC;QAC1D,IAAI,CAAC,eAAe,GAAG,EAAE,CAAC;QAC1B,IAAI,MAAM,GAAc,IAAI,CAAC,UAAU,IAAI,IAAI,CAAC,UAAU,CAAC;QAC3D,IAAI,IAAI,CAAC,UAAU;YAAE,IAAI,CAAC,UAAU,CAAC,OAAO,CAAC,IAAI,CAAC,UAAU,CAAC,CAAC;QAC9D,IAAI,IAAI,CAAC,SAAS,CAAC,MAAM,GAAG,CAAC,IAAI,IAAI,CAAC,SAAS,CAAC,CAAC,CAAC,KAAK,CAAC,EAAE,CAAC;YACzD,MAAM,MAAM,GAAG,GAAG,CAAC,UAAU,EAAE,CAAC;YAChC,MAAM,CAAC,IAAI,CAAC,KAAK,GAAG,IAAI,CAAC,SAAS,CAAC,CAAC,CAAC,CAAC;YACtC,MAAM,CAAC,OAAO,CAAC,MAAM,CAAC,CAAC;YAAC,MAAM,GAAG,MAAM,CAAC;YACxC,IAAI,CAAC,eAAe,CAAC,IAAI,CAAC,MAAM,CAAC,CAAC;YAClC,KAAK,IAAI,CAAC,GAAG,CAAC,EAAE,CAAC,GAAG,IAAI,CAAC,SAAS,CAAC,MAAM,EAAE,CAAC,IAAI,CAAC,EAAE,CAAC;gBAClD,MAAM,MAAM,GAAG,GAAG,CAAC,kBAAkB,EAAE,CAAC;gBACxC,MAAM,CAAC,IAAI,GAAG,IAAI,CAAC,SAAS,CAAC,CAAC,GAAC,CAAC,CAAC,KAAK,CAAC,CAAC,CAAC,CAAC,UAAU,CAAC,CAAC,CAAC,IAAI,CAAC,SAAS,CAAC,CAAC,GAAC,CAAC,CAAC,KAAK,CAAC,CAAC,CAAC,CAAC,WAAW,CAAC,CAAC,CAAC,SAAS,CAAC;gBAC3G,MAAM,CAAC,SAAS,CAAC,KAAK,GAAG,IAAI,CAAC,GAAG,CAAC,IAAI,CAAC,SAAS,CAAC,CAAC,CAAC,EAAE,GAAG,CAAC,UAAU,GAAG,IAAI,CAAC,CAAC;gBAC5E,MAAM,CAAC,IAAI,CAAC,KAAK,GAAG,IAAI,CAAC,SAAS,CAAC,CAAC,GAAC,CAAC,CAAC,CAAC;gBAAC,MAAM,CAAC,CAAC,CAAC,KAAK,GAAG,IAAI,CAAC,SAAS,CAAC,CAAC,GAAC,CAAC,CAAC,CAAC;gBAC9E,MAAM,CAAC,OAAO,CAAC,MAAM,CAAC,CAAC;gBAAC,MAAM,GAAG,MAAM,CAAC;gBAAC,IAAI,CAAC,eAAe,CAAC,IAAI,CAAC,MAAM,CAAC,CAAC;YAC7E,CAAC;YACD,MAAM,MAAM,GAAG,GAAG,CAAC,UAAU,EAAE,CAAC;YAAC,MAAM,CAAC,YAAY,GAAG,CAAC,CAAC;YAAC,MAAM,CAAC,gBAAgB,GAAG,UAAU,CAAC;YAC/F,MAAM,KAAK,GAAG,GAAG,CAAC,qBAAqB,CAAC,CAAC,CAAC,EAAE,KAAK,GAAG,GAAG,CAAC,mBAAmB,CAAC,CAAC,CAAC,CAAC;YAC/E,MAAM,IAAI,GAAG,GAAG,CAAC,UAAU,EAAE,EAAE,KAAK,GAAG,GAAG,CAAC,UAAU,EAAE,CAAC;YACxD,IAAI,CAAC,IAAI,CAAC,KAAK,GAAG,CAAC,GAAG,IAAI,CAAC,GAAG,CAAC,CAAC,EAAE,IAAI,CAAC,SAAS,CAAC,CAAC,CAAC,CAAC,CAAC;YACrD,KAAK,CAAC,IAAI,CAAC,KAAK,GAAG,CAAC,GAAG,IAAI,CAAC,GAAG,CAAC,CAAC,EAAE,IAAI,CAAC,SAAS,CAAC,CAAC,CAAC,CAAC,CAAC;YACtD,MAAM,CAAC,OAAO,CAAC,MAAM,CAAC,CAAC;YAAC,MAAM,CAAC,OAAO,CAAC,KAAK,CAAC,CAAC;YAAC,KAAK,CAAC,OAAO,CAAC,IAAI,EAAE,CAAC,CAAC,CAAC;YAAC,KAAK,CAAC,OAAO,CAAC,KAAK,EAAE,CAAC,CAAC,CAAC;YAC/F,IAAI,CAAC,OAAO,CAAC,KAAK,EAAE,CAAC,EAAE,CAAC,CAAC,CAAC;YAAC,KAAK,CAAC,OAAO,CAAC,KAAK,EAAE,CAAC,EAAE,CAAC,CAAC,CAAC;YAAC,MAAM,GAAG,KAAK,CAAC;YACtE,IAAI,CAAC,eAAe,CAAC,IAAI,CAAC,MAAM,EAAE,KAAK,EAAE,IAAI,EAAE,KAAK,EAAE,KAAK,CAAC,CAAC;QAC/D,CAAC;QACD,IAAI,IAAI,CAAC,QAAQ,EAAE,CAAC;YAClB,MAAM,CAAC,OAAO,CAAC,IAAI,CAAC,QAAQ,CAAC,CAAC;YAC9B,IAAI,CAAC,QAAQ,CAAC,OAAO,CAAC,GAAG,CAAC,WAAW,CAAC,CAAC;QACzC,CAAC;;YAAM,MAAM,CAAC,OAAO,CAAC,GAAG,CAAC,WAAW,CAAC,CAAC;IACzC,CAAC;IACO,eAAe,GAAkB,IAAI,CAAC;IACtC,eAAe,GAAG,KAAK,CAAC;IACxB,cAAc,GAAqC,IAAI,CAAC;IAEhE,IAAI,OAAO;QACT,OAAO,IAAI,CAAC,SAAS,CAAC;IACxB,CAAC;IAED,IAAI,KAAK;QACP,OAAO,IAAI,CAAC,KAAK,CAAC,KAAK,CAAC;IAC1B,CAAC;IAED,IAAI,KAAK,CAAC,KAAc;QACtB,IAAI,CAAC,KAAK,CAAC,KAAK,GAAG,KAAK,CAAC;IAC3B,CAAC;IAED,IAAI,IAAI;QACN,OAAO,IAAI,CAAC,KAAK,CAAC,IAAI,CAAC;IACzB,CAAC;IAED,IAAI,IAAI,CAAC,KAAc;QACrB,IAAI,CAAC,KAAK,CAAC,IAAI,GAAG,KAAK,CAAC;IAC1B,CAAC;IAED,IAAI,QAAQ;QACV,OAAO,YAAY,CAAC,IAAI,CAAC,KAAK,CAAC,QAAQ,CAAC,CAAC;IAC3C,CAAC;IAED,IAAI,WAAW;QACb,OAAO,IAAI,CAAC,KAAK,CAAC,WAAW,CAAC;IAChC,CAAC;IAED,IAAI,MAAM;QACR,OAAO,IAAI,CAAC,KAAK,CAAC,MAAM,CAAC;IAC3B,CAAC;IAED,IAAI,QAAQ;QACV,OAAO,IAAI,CAAC,MAAM,CAAC;IACrB,CAAC;IAED,IAAI,YAAY;QACd,OAAO,IAAI,CAAC,KAAK,CAAC,YAAY,CAAC;IACjC,CAAC;IAED,IAAI,YAAY,CAAC,KAAa;QAC5B,IAAI,CAAC,KAAK,CAAC,YAAY,GAAG,KAAK,CAAC;IAClC,CAAC;IAED,IAAI,MAAM;QACR,OAAO,IAAI,CAAC,KAAK,CAAC,MAAM,CAAC;IAC3B,CAAC;IAED,IAAI,MAAM,CAAC,KAAa;QACtB,IAAI,CAAC,kBAAkB,IAAI,WAAW,EAAE,EAAE,CAAC;YACzC,kBAAkB,GAAG,IAAI,CAAC;YAC1B,OAAO,CAAC,IAAI,CACV,+EAA+E;gBAC7E,oFAAoF,CACvF,CAAC;QACJ,CAAC;QACD,IAAI,CAAC,KAAK,CAAC,MAAM,GAAG,KAAK,CAAC;IAC5B,CAAC;IAED,IAAI,aAAa;QACf,OAAO,kBAAkB,CAAC,IAAI,CAAC,KAAK,EAAE,IAAI,CAAC,EAAE,CAAC,CAAC;IACjD,CAAC;IAED,IAAI;QACF,IAAI,CAAC,aAAa,EAAE,CAAC;YACnB,OAAO;QACT,CAAC;QACD,IAAI,CAAC,KAAK,CAAC,IAAI,EAAE,CAAC;QAClB,IAAI,CAAC,SAAS,GAAG,IAAI,CAAC;QACtB,IAAI,CAAC,aAAa,EAAE,CAAC;IACvB,CAAC;IAED,KAAK;QACH,IAAI,CAAC,KAAK,CAAC,KAAK,EAAE,CAAC;QACnB,IAAI,CAAC,SAAS,GAAG,KAAK,CAAC;QACvB,IAAI,CAAC,YAAY,EAAE,CAAC;IACtB,CAAC;IAED,OAAO,CAAC,MAAmB;QACzB,MAAM,UAAU,GAAG,IAAI,CAAC,SAAS,CAAC;QAClC,MAAM,WAAW,GAAG,IAAI,CAAC,eAAe,CAAC;QACzC,MAAM,iBAAiB,GAAG,sBAAsB,CAAC,cAAc,CAAC,IAAI,CAAC,CAAC;QAEtE,mEAAmE;QACnE,IAAI,CAAC,MAAM,EAAE,CAAC;QAEd,IAAI,CAAC,GAAG,GAAG,MAAM,CAAC;QAClB,IAAI,CAAC,SAAS,GAAG,KAAK,CAAC;QACvB,IAAI,CAAC,MAAM,GAAG,KAAK,CAAC;QACpB,IAAI,CAAC,KAAK,GAAG,IAAI,CAAC,mBAAmB,EAAE,CAAC;QAExC,aAAa,CAAC,GAAG,CAAC,IAAI,CAAC,CAAC;QACxB,IAAI,WAAW,EAAE,CAAC;YAChB,IAAI,CAAC,uBAAuB,CAAC,IAAI,CAAC,CAAC;QACrC,CAAC;QAED,IAAI,iBAAiB,EAAE,CAAC;YACtB,sBAAsB,CAAC,eAAe,CACpC,IAAI,EACJ,iBAAiB,CAAC,QAAQ,IAAI,SAAS,EACvC,iBAAiB,CAAC,OAAO,IAAI,SAAS,CACvC,CAAC;QACJ,CAAC;QAED,2CAA2C;QAC3C,IAAI,UAAU,EAAE,CAAC;YACf,IAAI,CAAC,IAAI,EAAE,CAAC;QACd,CAAC;IACH,CAAC;IAED,KAAK,CAAC,MAAM,CACV,OAAe,EACf,qBAA8B,EAC9B,oBAA6B;QAE7B,IAAI,CAAC,KAAK,CAAC,WAAW,GAAG,OAAO,CAAC;IACnC,CAAC;IAED,uBAAuB,CAAC,OAAgB;QACtC,IAAI,OAAO,EAAE,CAAC;YACZ,IAAI,CAAC,IAAI,CAAC,KAAK,CAAC,WAAW,IAAI,IAAI,CAAC,cAAc,EAAE,EAAE,CAAC;gBACrD,IAAI,CAAC,wBAAwB,GAAG,KAAK,CAAC;gBACtC,OAAO;YACT,CAAC;YAED,IAAI,IAAI,CAAC,QAAQ,EAAE,CAAC;gBAClB,OAAO;YACT,CAAC;YAED,MAAM,GAAG,GAAG,eAAe,EAAE,CAAC;YAC9B,IAAI,GAAG,CAAC,KAAK,KAAK,WAAW,EAAE,CAAC;gBAC9B,GAAG,CAAC,MAAM,EAAE,CAAC;YACf,CAAC;YAED,IAAI,CAAC,IAAI,CAAC,UAAU,EAAE,CAAC;gBACrB,IAAI,CAAC,UAAU,GAAG,GAAG,CAAC,wBAAwB,CAAC,IAAI,CAAC,KAAK,CAAC,CAAC;YAC7D,CAAC;YAED,IAAI,CAAC,QAAQ,GAAG,GAAG,CAAC,cAAc,EAAE,CAAC;YACrC,IAAI,CAAC,QAAQ,CAAC,OAAO,GAAG,IAAI,CAAC;YAE7B,IAAI,CAAC,kBAAkB,EAAE,CAAC;YAE1B,IAAI,CAAC,cAAc,GAAG,IAAI,YAAY,CAAC,IAAI,CAAC,QAAQ,CAAC,iBAAiB,CAAC,CAAC;YACxE,IAAI,CAAC,eAAe,GAAG,IAAI,CAAC;YAE5B,IAAI,IAAI,CAAC,SAAS,EAAE,CAAC;gBACnB,IAAI,CAAC,aAAa,EAAE,CAAC;YACvB,CAAC;YACD,IAAI,CAAC,wBAAwB,GAAG,IAAI,CAAC;QACvC,CAAC;aAAM,CAAC;YACN,IAAI,CAAC,YAAY,EAAE,CAAC;YAEpB,IAAI,IAAI,CAAC,QAAQ,EAAE,CAAC;gBAClB,IAAI,CAAC,QAAQ,CAAC,UAAU,EAAE,CAAC;gBAC3B,IAAI,CAAC,QAAQ,GAAG,IAAI,CAAC;YACvB,CAAC;YAED,IAAI,IAAI,CAAC,UAAU,EAAE,CAAC;gBACpB,IAAI,CAAC,kBAAkB,EAAE,CAAC;YAC5B,CAAC;YAED,IAAI,CAAC,cAAc,GAAG,IAAI,CAAC;YAC3B,IAAI,CAAC,eAAe,GAAG,KAAK,CAAC;QAC/B,CAAC;IACH,CAAC;IAEO,aAAa;QACnB,IAAI,CAAC,IAAI,CAAC,eAAe,IAAI,CAAC,IAAI,CAAC,QAAQ,IAAI,CAAC,IAAI,CAAC,cAAc,EAAE,CAAC;YACpE,OAAO;QACT,CAAC;QACD,MAAM,UAAU,GAAG,GAAG,EAAE;YACtB,IAAI,CAAC,IAAI,CAAC,QAAQ,IAAI,CAAC,IAAI,CAAC,cAAc,EAAE,CAAC;gBAC3C,OAAO;YACT,CAAC;YACD,IAAI,CAAC,QAAQ,CAAC,sBAAsB,CAAC,IAAI,CAAC,cAAc,CAAC,CAAC;YAC1D,IAAI,CAAC,IAAI,CAAC,mBAAmB,EAAE;gBAC7B,QAAQ,EAAE,CAAC,EAAE,MAAM,EAAE,KAAK,CAAC,IAAI,CAAC,IAAI,CAAC,cAAc,CAAC,EAAE,CAAC;gBACvD,SAAS,EAAE,IAAI,CAAC,KAAK,CAAC,WAAW;aAClC,CAAC,CAAC;YACH,IAAI,CAAC,eAAe,GAAG,qBAAqB,CAAC,UAAU,CAAC,CAAC;QAC3D,CAAC,CAAC;QACF,IAAI,CAAC,eAAe,GAAG,qBAAqB,CAAC,UAAU,CAAC,CAAC;IAC3D,CAAC;IAEO,YAAY;QAClB,IAAI,IAAI,CAAC,eAAe,IAAI,IAAI,EAAE,CAAC;YACjC,oBAAoB,CAAC,IAAI,CAAC,eAAe,CAAC,CAAC;YAC3C,IAAI,CAAC,eAAe,GAAG,IAAI,CAAC;QAC9B,CAAC;IACH,CAAC;IAED,eAAe,CAAC,MAAc,EAAE,sBAA+C;QAC7E,IAAI,CAAC,KAAK,CAAC,YAAY,GAAG,MAAM,CAAC;QACjC,IAAI,CAAC,kBAAkB,GAAG,sBAAsB,KAAK,MAAM,CAAC;QAC5D,IAAI,CAAC,KAAK,CAAC,cAAc,GAAG,IAAI,CAAC,kBAAkB,CAAC;QACpD,sBAAsB,CAAC,mBAAmB,CAAC,IAAI,CAAC,CAAC;IACnD,CAAC;IAED,MAAM;QACJ,sBAAsB,CAAC,KAAK,CAAC,IAAI,CAAC,CAAC;QACnC,IAAI,CAAC,YAAY,EAAE,CAAC;QAEpB,IAAI,IAAI,CAAC,QAAQ,EAAE,CAAC;YAClB,IAAI,CAAC,QAAQ,CAAC,UAAU,EAAE,CAAC;YAC3B,IAAI,CAAC,QAAQ,GAAG,IAAI,CAAC;QACvB,CAAC;QAED,IAAI,IAAI,CAAC,UAAU,EAAE,CAAC;YACpB,IAAI,CAAC,UAAU,CAAC,UAAU,EAAE,CAAC;YAC7B,IAAI,CAAC,UAAU,GAAG,IAAI,CAAC;QACzB,CAAC;QACD,IAAI,CAAC,UAAU,EAAE,UAAU,EAAE,CAAC;QAC9B,IAAI,CAAC,UAAU,GAAG,IAAI,CAAC;QACvB,IAAI,CAAC,eAAe,CAAC,OAAO,CAAC,CAAC,IAAI,EAAE,EAAE,CAAC,IAAI,CAAC,UAAU,EAAE,CAAC,CAAC;QAC1D,IAAI,CAAC,eAAe,GAAG,EAAE,CAAC;QAE1B,IAAI,CAAC,eAAe,GAAG,KAAK,CAAC;QAC7B,IAAI,CAAC,KAAK,CAAC,KAAK,EAAE,CAAC;QACnB,+CAA+C;QAC/C,IAAI,CAAC,KAAK,CAAC,YAAY,GAAG,IAAI,CAAC;QAC/B,IAAI,CAAC,KAAK,CAAC,MAAM,GAAG,IAAI,CAAC;QACzB,IAAI,CAAC,KAAK,CAAC,OAAO,GAAG,IAAI,CAAC;QAC1B,IAAI,CAAC,KAAK,CAAC,QAAQ,GAAG,IAAI,CAAC;QAC3B,IAAI,CAAC,KAAK,CAAC,OAAO,GAAG,IAAI,CAAC;QAC1B,IAAI,CAAC,KAAK,CAAC,YAAY,GAAG,IAAI,CAAC;QAC/B,IAAI,CAAC,KAAK,CAAC,OAAO,GAAG,IAAI,CAAC;QAC1B,IAAI,CAAC,KAAK,CAAC,eAAe,CAAC,KAAK,CAAC,CAAC;QAClC,IAAI,CAAC,KAAK,CAAC,IAAI,EAAE,CAAC;QAClB,aAAa,CAAC,MAAM,CAAC,IAAI,CAAC,CAAC;IAC7B,CAAC;IAED,OAAO;QACL,IAAI,CAAC,MAAM,EAAE,CAAC;IAChB,CAAC;IAED,sBAAsB,CACpB,MAAe,EACf,QAAwB,EACxB,OAAgC;QAEhC,IAAI,MAAM,EAAE,CAAC;YACX,sBAAsB,CAAC,eAAe,CAAC,IAAI,EAAE,QAAQ,EAAE,OAAO,CAAC,CAAC;QAClE,CAAC;aAAM,CAAC;YACN,sBAAsB,CAAC,KAAK,CAAC,IAAI,CAAC,CAAC;QACrC,CAAC;IACH,CAAC;IAED,wBAAwB,CAAC,QAAuB;QAC9C,sBAAsB,CAAC,cAAc,CAAC,IAAI,EAAE,QAAQ,CAAC,CAAC;IACxD,CAAC;IAED,uBAAuB;QACrB,sBAAsB,CAAC,KAAK,CAAC,IAAI,CAAC,CAAC;IACrC,CAAC;IAED,cAAc;QACZ,IAAI,IAAI,CAAC,KAAK,CAAC,GAAG,CAAC,UAAU,CAAC,OAAO,CAAC;YAAE,OAAO,KAAK,CAAC;QACrD,IAAI,CAAC;YACH,OAAO,IAAI,GAAG,CAAC,IAAI,CAAC,KAAK,CAAC,GAAG,CAAC,CAAC,MAAM,KAAK,MAAM,CAAC,QAAQ,CAAC,MAAM,CAAC;QACnE,CAAC;QAAC,MAAM,CAAC;YACP,OAAO,KAAK,CAAC;QACf,CAAC;IACH,CAAC;IAED,mBAAmB;QACjB,MAAM,SAAS,GAAG,YAAY,CAAC,IAAI,CAAC,GAAG,CAAC,CAAC;QACzC,MAAM,SAAS,GACb,SAAS,IAAI,YAAY,CAAC,GAAG,CAAC,SAAS,CAAC,CAAC,CAAC,CAAC,YAAY,CAAC,GAAG,CAAC,SAAS,CAAE,CAAC,OAAO,CAAC,CAAC,CAAC,SAAS,CAAC;QAC9F,MAAM,KAAK,GAAG,IAAI,KAAK,EAAE,CAAC;QAC1B,IAAI,IAAI,CAAC,WAAW,KAAK,MAAM,IAAI,IAAI,CAAC,SAAS,CAAC,MAAM,GAAG,CAAC,IAAI,IAAI,CAAC,SAAS,CAAC,CAAC,CAAC,KAAK,CAAC,EAAE,CAAC;YACxF,KAAK,CAAC,WAAW,GAAG,WAAW,CAAC;QAClC,CAAC;aAAM,IAAI,IAAI,CAAC,WAAW,KAAK,SAAS,EAAE,CAAC;YAC1C,KAAK,CAAC,WAAW,GAAG,IAAI,CAAC,WAAW,CAAC;QACvC,CAAC;QACD,IAAI,SAAS;YAAE,KAAK,CAAC,GAAG,GAAG,SAAS,CAAC;QAErC,IAAI,YAAY,GAAG,CAAC,CAAC;QACrB,MAAM,WAAW,GAAG,IAAI,CAAC,QAAQ,GAAG,IAAI,CAAC;QAEzC,6CAA6C;QAC7C,KAAK,CAAC,YAAY,GAAG,GAAG,EAAE;YACxB,MAAM,GAAG,GAAG,KAAK,CAAC,WAAW,CAAC;YAC9B,oCAAoC;YACpC,IAAI,GAAG,GAAG,YAAY,EAAE,CAAC;gBACvB,YAAY,GAAG,GAAG,CAAC;YACrB,CAAC;YACD,IAAI,GAAG,GAAG,YAAY,IAAI,WAAW,EAAE,CAAC;gBACtC,YAAY,GAAG,GAAG,CAAC;gBACnB,IAAI,CAAC,IAAI,CAAC,sBAAsB,EAAE,kBAAkB,CAAC,KAAK,EAAE,IAAI,CAAC,EAAE,CAAC,CAAC,CAAC;gBACtE,sBAAsB,CAAC,mBAAmB,CAAC,IAAI,CAAC,CAAC;YACnD,CAAC;QACH,CAAC,CAAC;QAEF,KAAK,CAAC,MAAM,GAAG,GAAG,EAAE;YAClB,IAAI,CAAC,SAAS,GAAG,IAAI,CAAC;YACtB,YAAY,GAAG,KAAK,CAAC,WAAW,CAAC;YACjC,IAAI,CAAC,IAAI,CAAC,sBAAsB,EAAE;gBAChC,GAAG,kBAAkB,CAAC,KAAK,EAAE,IAAI,CAAC,EAAE,CAAC;gBACrC,OAAO,EAAE,IAAI,CAAC,SAAS;aACxB,CAAC,CAAC;YACH,sBAAsB,CAAC,mBAAmB,CAAC,IAAI,CAAC,CAAC;YACjD,sBAAsB,CAAC,mBAAmB,CAAC,IAAI,CAAC,CAAC;QACnD,CAAC,CAAC;QAEF,KAAK,CAAC,OAAO,GAAG,GAAG,EAAE;YACnB,IAAI,CAAC,SAAS,GAAG,KAAK,CAAC;YACvB,YAAY,GAAG,KAAK,CAAC,WAAW,CAAC;YACjC,IAAI,CAAC,IAAI,CAAC,sBAAsB,EAAE;gBAChC,GAAG,kBAAkB,CAAC,KAAK,EAAE,IAAI,CAAC,EAAE,CAAC;gBACrC,OAAO,EAAE,IAAI,CAAC,SAAS;aACxB,CAAC,CAAC;YACH,sBAAsB,CAAC,mBAAmB,CAAC,IAAI,CAAC,CAAC;YACjD,sBAAsB,CAAC,mBAAmB,CAAC,IAAI,CAAC,CAAC;QACnD,CAAC,CAAC;QAEF,KAAK,CAAC,QAAQ,GAAG,GAAG,EAAE;YACpB,YAAY,GAAG,KAAK,CAAC,WAAW,CAAC;YACjC,IAAI,CAAC,IAAI,CAAC,sBAAsB,EAAE,kBAAkB,CAAC,KAAK,EAAE,IAAI,CAAC,EAAE,CAAC,CAAC,CAAC;YACtE,sBAAsB,CAAC,mBAAmB,CAAC,IAAI,CAAC,CAAC;QACnD,CAAC,CAAC;QAEF,KAAK,CAAC,OAAO,GAAG,GAAG,EAAE;YACnB,YAAY,GAAG,CAAC,CAAC;YACjB,sBAAsB,CAAC,mBAAmB,CAAC,IAAI,CAAC,CAAC;QACnD,CAAC,CAAC;QAEF,KAAK,CAAC,YAAY,GAAG,GAAG,EAAE;YACxB,IAAI,CAAC,MAAM,GAAG,IAAI,CAAC;YACnB,YAAY,GAAG,KAAK,CAAC,WAAW,CAAC;YACjC,IAAI,CAAC,IAAI,CAAC,sBAAsB,EAAE;gBAChC,GAAG,kBAAkB,CAAC,KAAK,EAAE,IAAI,CAAC,EAAE,CAAC;gBACrC,QAAQ,EAAE,IAAI,CAAC,MAAM;aACtB,CAAC,CAAC;YACH,sBAAsB,CAAC,mBAAmB,CAAC,IAAI,CAAC,CAAC;QACnD,CAAC,CAAC;QAEF,KAAK,CAAC,OAAO,GAAG,GAAG,EAAE;YACnB,IAAI,CAAC,MAAM,GAAG,KAAK,CAAC;YACpB,IAAI,CAAC,SAAS,GAAG,KAAK,CAAC;YACvB,MAAM,YAAY,GAAG,KAAK,CAAC,KAAK;gBAC9B,CAAC,CAAC,wBAAwB,KAAK,CAAC,KAAK,CAAC,IAAI,GAAG;gBAC7C,CAAC,CAAC,wBAAwB,CAAC;YAC7B,IAAI,CAAC,IAAI,CAAC,sBAAsB,EAAE;gBAChC,GAAG,kBAAkB,CAAC,KAAK,EAAE,IAAI,CAAC,EAAE,CAAC;gBACrC,QAAQ,EAAE,KAAK;gBACf,OAAO,EAAE,KAAK;gBACd,KAAK,EAAE,YAAY;aACpB,CAAC,CAAC;QACL,CAAC,CAAC;QAEF,OAAO,KAAK,CAAC;IACf,CAAC;CACF"}
 \ No newline at end of file
 diff --git a/node_modules/expo-audio/ios/AudioModule.swift b/node_modules/expo-audio/ios/AudioModule.swift
-index d265606..4cde9f4 100644
+index d265606..27fafc6 100644
 --- a/node_modules/expo-audio/ios/AudioModule.swift
 +++ b/node_modules/expo-audio/ios/AudioModule.swift
 @@ -17,6 +17,7 @@ public class AudioModule: Module {
  
    public func definition() -> ModuleDefinition {
      Name("ExpoAudio")
-+    Constants(["supportsChannelMode": true])
++    Constants(["supportsChannelMode": true, "supportsEqualizer": true])
  
      OnCreate {
        #if os(iOS)
-@@ -231,6 +232,10 @@ public class AudioModule: Module {
+@@ -231,6 +232,16 @@ public class AudioModule: Module {
          }
        }
  
@@ -504,11 +635,17 @@ index d265606..4cde9f4 100644
 +        try await player.setChannelMode(mode)
 +      }
 +
++      AsyncFunction("setEqualizer") { (player: AudioPlayer, configuration: [Double]) in
++        guard configuration.count >= 2, configuration.count <= 30, (configuration.count - 2) % 4 == 0,
++          configuration.allSatisfy({ $0.isFinite }) else { throw NSError(domain: "OpenfyAudio", code: 3) }
++        try await player.setEqualizer(configuration)
++      }
++
        Function("replace") { (player, source: AudioSource) in
          if let uri = source.uri?.absoluteString, let cachedPlayer = self.registry.removePreloadedPlayer(forKey: uri) {
            let cachedItem = cachedPlayer.currentItem
 diff --git a/node_modules/expo-audio/ios/AudioPlayer.swift b/node_modules/expo-audio/ios/AudioPlayer.swift
-index 0742943..4d9c047 100644
+index 0742943..b93b9ef 100644
 --- a/node_modules/expo-audio/ios/AudioPlayer.swift
 +++ b/node_modules/expo-audio/ios/AudioPlayer.swift
 @@ -1,9 +1,14 @@
@@ -526,28 +663,38 @@ index 0742943..4d9c047 100644
  }
  
  public class AudioPlayer: SharedRef<AVPlayer>, Playable {
-@@ -23,6 +28,30 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -23,6 +28,40 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
      ref.rate == 0.0
    }
    var samplingEnabled = false
 +  private var mono = false
++  private var equalizer: [Double] = [1, 0]
++  private var needsProcessing: Bool { mono || equalizer.count > 2 || equalizer[1] != 0 }
++
++  @MainActor
++  func setEqualizer(_ configuration: [Double]) async throws {
++    equalizer = configuration
++    audioProcessor?.setEqualizer(configuration.map { NSNumber(value: $0) })
++    try await setChannelMode(mono ? "mono" : "stereo")
++  }
 +
 +  @MainActor
 +  func setChannelMode(_ mode: String) async throws {
 +    guard mode == "mono" || mode == "stereo" else { throw NSError(domain: "OpenfyAudio", code: 1) }
 +    mono = mode == "mono"
 +    audioProcessor?.mono = mono
-+    if !mono {
++    if !needsProcessing {
 +      if !samplingEnabled { uninstallTap() }
 +      return
 +    }
 +    guard let item = ref.currentItem else { return }
 +    let tracks = try await item.asset.loadTracks(withMediaType: .audio)
-+    guard ref.currentItem === item, mono, let track = tracks.first else { return }
++    guard ref.currentItem === item, needsProcessing, let track = tracks.first else { return }
 +    if audioProcessor?.isTapInstalled != true {
 +      audioProcessor?.invalidate()
 +      audioProcessor = AudioTapProcessor(player: ref)
-+      audioProcessor?.mono = true
++      audioProcessor?.mono = mono
++      audioProcessor?.setEqualizer(equalizer.map { NSNumber(value: $0) })
 +      guard audioProcessor?.installTap(track: track) == true else {
 +        throw NSError(domain: "OpenfyAudio", code: 2, userInfo: [NSLocalizedDescriptionKey: "Mono processing unavailable for this source"])
 +      }
@@ -557,7 +704,7 @@ index 0742943..4d9c047 100644
    var keepAudioSessionActive = false
  
    var isLooping = false {
-@@ -47,6 +76,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -47,6 +86,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
    private var timeToken: Any?
    private var cancellables = Set<AnyCancellable>()
    private var endObserver: NSObjectProtocol?
@@ -565,16 +712,16 @@ index 0742943..4d9c047 100644
  
    private var audioProcessor: AudioTapProcessor?
    private var tapInstalled = false
-@@ -125,7 +155,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -125,7 +165,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
          shouldInstallAudioTap = true
        }
      } else {
 -      uninstallTap()
-+      if !mono { uninstallTap() }
++      if !needsProcessing { uninstallTap() }
        shouldInstallAudioTap = false
      }
    }
-@@ -164,6 +194,14 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -164,6 +204,14 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
      }
    }
  
@@ -589,7 +736,7 @@ index 0742943..4d9c047 100644
    func updateStatus(with dict: [String: Any]) {
      var arguments = currentStatus()
      arguments.merge(dict) { _, new in
-@@ -210,7 +248,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -210,7 +258,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
            if self.isLooping {
              self.enqueueNextLoopItem()
            }
@@ -598,7 +745,7 @@ index 0742943..4d9c047 100644
              installTap()
              shouldInstallAudioTap = false
            }
-@@ -232,7 +270,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -232,7 +280,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
            self.enqueueNextLoopItem()
            self.addPlaybackEndNotification()
          }
@@ -607,7 +754,7 @@ index 0742943..4d9c047 100644
            self.uninstallTap()
            self.installTap()
          }
-@@ -246,7 +284,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -246,7 +294,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
      removeQueuedLoopItems()
      ref.pause()
  
@@ -616,7 +763,7 @@ index 0742943..4d9c047 100644
        uninstallTap()
      }
      replacePlayerItem(with: item)
-@@ -267,7 +305,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -267,7 +315,7 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
      removeQueuedLoopItems()
      ref.pause()
  
@@ -625,7 +772,7 @@ index 0742943..4d9c047 100644
        uninstallTap()
      }
      let item = AudioUtils.createAVPlayerItem(from: source)
-@@ -320,9 +358,9 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -320,9 +368,9 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
  
    private func teardownPlayer() {
      removeQueuedLoopItems()
@@ -638,7 +785,7 @@ index 0742943..4d9c047 100644
      if let timeToken {
        ref.removeTimeObserver(timeToken)
        self.timeToken = nil
-@@ -358,20 +396,15 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -358,20 +406,16 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
        return
      }
  
@@ -654,6 +801,7 @@ index 0742943..4d9c047 100644
 +      audioProcessor?.invalidate()
 +      audioProcessor = AudioTapProcessor(player: ref)
 +      audioProcessor?.mono = mono
++      audioProcessor?.setEqualizer(equalizer.map { NSNumber(value: $0) })
 +      tapInstalled = audioProcessor?.installTap() ?? false
      }
 -
@@ -666,7 +814,7 @@ index 0742943..4d9c047 100644
        audioProcessor?.sampleBufferCallback = { [weak self] buffer, frameCount, timestamp in
          guard let self = self,
            let audioBuffer = buffer?.pointee,
-@@ -479,11 +512,20 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
+@@ -479,11 +523,20 @@ public class AudioPlayer: SharedRef<AVPlayer>, Playable {
      let updateInterval = interval / 1000
      let interval = CMTime(seconds: updateInterval, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
  
@@ -702,14 +850,15 @@ index 33db27c..8154e4c 100644
    @Field var showSeekBackward: Bool = false
    @Field var isLiveStream: Bool? = false
 diff --git a/node_modules/expo-audio/ios/AudioTapProcessor.h b/node_modules/expo-audio/ios/AudioTapProcessor.h
-index ddd4f23..78c9b39 100644
+index ddd4f23..68df2d3 100644
 --- a/node_modules/expo-audio/ios/AudioTapProcessor.h
 +++ b/node_modules/expo-audio/ios/AudioTapProcessor.h
-@@ -8,9 +8,11 @@ typedef void (^SampleBufferCallback)(AudioBuffer *audioBuffer, long frameCount,
+@@ -8,9 +8,12 @@ typedef void (^SampleBufferCallback)(AudioBuffer *audioBuffer, long frameCount,
  @property (nonatomic, copy, nullable) SampleBufferCallback sampleBufferCallback;
  @property (nonatomic, strong, readonly) AVPlayer *player;
  @property (nonatomic, readonly) BOOL isTapInstalled;
 +@property (atomic) BOOL mono;
++- (void)setEqualizer:(NSArray<NSNumber *> *)configuration;
  
  - (instancetype)initWithPlayer:(AVPlayer *)player;
  - (BOOL)installTap;
@@ -718,10 +867,83 @@ index ddd4f23..78c9b39 100644
  - (void)invalidate;
  
 diff --git a/node_modules/expo-audio/ios/AudioTapProcessor.m b/node_modules/expo-audio/ios/AudioTapProcessor.m
-index 6f8fb16..204c41a 100644
+index 6f8fb16..1b00e5b 100644
 --- a/node_modules/expo-audio/ios/AudioTapProcessor.m
 +++ b/node_modules/expo-audio/ios/AudioTapProcessor.m
-@@ -41,6 +41,11 @@ typedef struct AVAudioTapProcessorContext {
+@@ -3,6 +3,7 @@
+ #import "AudioTapProcessor.h"
+ #import <AudioToolbox/AudioToolbox.h>
+ #import <os/lock.h>
++#import "OpenfyEqualizer.h"
+ 
+ NS_ASSUME_NONNULL_BEGIN
+ 
+@@ -11,6 +12,9 @@ typedef struct AVAudioTapProcessorContext {
+   Boolean supportedTapProcessingFormat;
+   void *self;
+   Boolean isValid;
++  double sampleRate;
++  unsigned revision;
++  OpenfyEqualizer equalizer;
+ } AVAudioTapProcessorContext;
+ 
+ 
+@@ -19,6 +23,10 @@ typedef struct AVAudioTapProcessorContext {
+   MTAudioProcessingTapRef _audioProcessingTap;
+   BOOL _isTapInstalled;
+   BOOL _isInvalidated;
++  os_unfair_lock _equalizerLock;
++  double _equalizerPacket[OPENFY_EQ_PACKET];
++  int _equalizerLength;
++  unsigned _equalizerRevision;
+ }
+ 
+ - (instancetype)initWithPlayer:(AVPlayer *)player {
+@@ -29,10 +37,43 @@ typedef struct AVAudioTapProcessorContext {
+     _isTapInstalled = NO;
+     _isInvalidated = NO;
+     _audioProcessingTap = NULL;
++    _equalizerLock = OS_UNFAIR_LOCK_INIT;
++    _equalizerPacket[0] = 1;
++    _equalizerLength = 2;
++    _equalizerRevision = 1;
+   }
+   return self;
+ }
+ 
++- (void)setEqualizer:(NSArray<NSNumber *> *)configuration {
++  if (configuration.count < 2 || configuration.count > OPENFY_EQ_PACKET || (configuration.count - 2) % 4) return;
++  double packet[OPENFY_EQ_PACKET] = {0};
++  for (NSUInteger i = 0; i < configuration.count; i++) {
++    packet[i] = configuration[i].doubleValue;
++    if (!isfinite(packet[i])) return;
++  }
++  if (packet[0] < 0 || packet[0] > 1 || fabs(packet[1]) > 1) return;
++  for (NSUInteger i = 2; i < configuration.count; i += 4) {
++    if (packet[i] < 20 || packet[i] > 20000 || fabs(packet[i+1]) > 12 ||
++        packet[i+2] < 0.1 || packet[i+2] > 4 || packet[i+3] < 0 || packet[i+3] > 2) return;
++  }
++  os_unfair_lock_lock(&_equalizerLock);
++  memcpy(_equalizerPacket, packet, sizeof(packet));
++  _equalizerLength = (int)configuration.count;
++  _equalizerRevision++;
++  os_unfair_lock_unlock(&_equalizerLock);
++}
++
++- (void)configureEqualizerContext:(AVAudioTapProcessorContext *)context {
++  // Never wait on a UI-thread lock in the audio callback; retry next block.
++  if (!os_unfair_lock_trylock(&_equalizerLock)) return;
++  if (context->revision != _equalizerRevision && context->sampleRate > 0) {
++    OpenfyEQConfigure(&context->equalizer, _equalizerPacket, _equalizerLength, context->sampleRate);
++    context->revision = _equalizerRevision;
++  }
++  os_unfair_lock_unlock(&_equalizerLock);
++}
++
+ - (BOOL)isTapInstalled {
+   os_unfair_lock_lock(&_lock);
+   BOOL installed = _isTapInstalled;
+@@ -41,6 +82,11 @@ typedef struct AVAudioTapProcessorContext {
  }
  
  - (BOOL)installTap {
@@ -733,7 +955,7 @@ index 6f8fb16..204c41a 100644
    os_unfair_lock_lock(&_lock);
    
    if (_isInvalidated || _isTapInstalled) {
-@@ -53,7 +58,6 @@ typedef struct AVAudioTapProcessorContext {
+@@ -53,7 +99,6 @@ typedef struct AVAudioTapProcessorContext {
      return NO;
    }
    
@@ -741,7 +963,7 @@ index 6f8fb16..204c41a 100644
    if (!track) {
      os_unfair_lock_unlock(&_lock);
      return NO;
-@@ -110,6 +114,7 @@ typedef struct AVAudioTapProcessorContext {
+@@ -110,6 +155,7 @@ typedef struct AVAudioTapProcessorContext {
        }
      }
      
@@ -749,7 +971,7 @@ index 6f8fb16..204c41a 100644
      _audioProcessingTap = NULL;
    }
    
-@@ -133,6 +138,7 @@ typedef struct AVAudioTapProcessorContext {
+@@ -133,6 +179,7 @@ typedef struct AVAudioTapProcessorContext {
          context->self = NULL;
        }
      }
@@ -757,7 +979,7 @@ index 6f8fb16..204c41a 100644
      _audioProcessingTap = NULL;
    }
    
-@@ -168,7 +174,11 @@ void tapFinalize(MTAudioProcessingTapRef tap) {
+@@ -168,7 +215,11 @@ void tapFinalize(MTAudioProcessingTapRef tap) {
  
  void tapPrepare(MTAudioProcessingTapRef tap, CMItemCount maxFrames, const AudioStreamBasicDescription *processingFormat) {
    AVAudioTapProcessorContext *context = (AVAudioTapProcessorContext *)MTAudioProcessingTapGetStorage(tap);
@@ -770,7 +992,7 @@ index 6f8fb16..204c41a 100644
    
    if (processingFormat->mFormatID != kAudioFormatLinearPCM) {
      NSLog(@"Audio Format ID for audioProcessingTap: LinearPCM");
-@@ -178,9 +188,7 @@ void tapPrepare(MTAudioProcessingTapRef tap, CMItemCount maxFrames, const AudioS
+@@ -178,9 +229,10 @@ void tapPrepare(MTAudioProcessingTapRef tap, CMItemCount maxFrames, const AudioS
      NSLog(@"Audio Format ID for audioProcessingTap: Float only");
    }
    
@@ -778,13 +1000,17 @@ index 6f8fb16..204c41a 100644
 -    context->isNonInterleaved = true;
 -  }
 +  context->isNonInterleaved = (processingFormat->mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0;
++  context->sampleRate = processingFormat->mSampleRate;
++  context->revision = 0;
++  context->equalizer.preamp = 1;
  }
  
  void tapProcess(MTAudioProcessingTapRef tap, CMItemCount numberFrames, MTAudioProcessingTapFlags flags, AudioBufferList *bufferListInOut, CMItemCount *numberFramesOut, MTAudioProcessingTapFlags *flagsOut) {
-@@ -201,6 +209,26 @@ void tapProcess(MTAudioProcessingTapRef tap, CMItemCount numberFrames, MTAudioPr
+@@ -201,6 +253,40 @@ void tapProcess(MTAudioProcessingTapRef tap, CMItemCount numberFrames, MTAudioPr
      return;
    }
  
++
 +  // Mix before output, without allocating sample arrays or emitting JS events.
 +  if (processor.mono && context->supportedTapProcessingFormat && bufferListInOut) {
 +    if (bufferListInOut->mNumberBuffers == 0) return;
@@ -805,6 +1031,19 @@ index 6f8fb16..204c41a 100644
 +    }
 +  }
 +  
++  if (context->supportedTapProcessingFormat && bufferListInOut && bufferListInOut->mNumberBuffers > 0) {
++    [processor configureEqualizerContext:context];
++    UInt32 channels = context->isNonInterleaved ? bufferListInOut->mNumberBuffers : bufferListInOut->mBuffers[0].mNumberChannels;
++    if (channels <= OPENFY_EQ_CHANNELS && (context->equalizer.count || context->equalizer.balance != 0)) {
++      for (CMItemCount frame = 0; frame < *numberFramesOut; frame++) {
++        for (UInt32 channel = 0; channel < channels; channel++) {
++          float *samples = bufferListInOut->mBuffers[context->isNonInterleaved ? channel : 0].mData;
++          CMItemCount index = context->isNonInterleaved ? frame : frame * channels + channel;
++          samples[index] = OpenfyEQSample(&context->equalizer, samples[index], channel);
++        }
++      }
++    }
++  }
    SampleBufferCallback callback = processor.sampleBufferCallback;
    if (callback && bufferListInOut && bufferListInOut->mNumberBuffers > 0) {
      double timestamp = 0.0; 
@@ -1081,6 +1320,69 @@ index e977f57..b85295c 100644
 +    removeRemoteCommandTargets()
    }
  }
+diff --git a/node_modules/expo-audio/ios/OpenfyEqualizer.h b/node_modules/expo-audio/ios/OpenfyEqualizer.h
+new file mode 100644
+index 0000000..3bdc8f3
+--- /dev/null
++++ b/node_modules/expo-audio/ios/OpenfyEqualizer.h
+@@ -0,0 +1,57 @@
++#ifndef OPENFY_EQUALIZER_H
++#define OPENFY_EQUALIZER_H
++#include <math.h>
++#include <string.h>
++
++#define OPENFY_EQ_BANDS 7
++#define OPENFY_EQ_CHANNELS 8
++#define OPENFY_EQ_PACKET (2 + OPENFY_EQ_BANDS * 4)
++
++typedef struct {
++  double coefficients[OPENFY_EQ_BANDS][5];
++  double state[OPENFY_EQ_CHANNELS][OPENFY_EQ_BANDS][2];
++  int count;
++  double preamp;
++  double balance;
++} OpenfyEqualizer;
++
++// RBJ peak/shelf equations: https://www.w3.org/TR/audio-eq-cookbook/.
++static inline void OpenfyEQConfigure(OpenfyEqualizer *eq, const double *packet, int length, double rate) {
++  memset(eq, 0, sizeof(*eq));
++  eq->preamp = packet[0];
++  eq->balance = packet[1];
++  eq->count = (length - 2) / 4;
++  for (int band = 0; band < eq->count; band++) {
++    const double *p = packet + 2 + band * 4;
++    double a = pow(10, p[1] / 40);
++    double omega = 6.283185307179586 * fmin(p[0], rate * 0.45) / rate;
++    double c = cos(omega), s = sin(omega), alpha = s / (2 * p[2]), beta = s * sqrt(2 * a);
++    double b0, b1, b2, a0, a1, a2;
++    if ((int)p[3] == 1) {
++      b0 = a * ((a+1)-(a-1)*c+beta); b1 = 2*a*((a-1)-(a+1)*c); b2 = a*((a+1)-(a-1)*c-beta);
++      a0 = (a+1)+(a-1)*c+beta; a1 = -2*((a-1)+(a+1)*c); a2 = (a+1)+(a-1)*c-beta;
++    } else if ((int)p[3] == 2) {
++      b0 = a*((a+1)+(a-1)*c+beta); b1 = -2*a*((a-1)+(a+1)*c); b2 = a*((a+1)+(a-1)*c-beta);
++      a0 = (a+1)-(a-1)*c+beta; a1 = 2*((a-1)-(a+1)*c); a2 = (a+1)-(a-1)*c-beta;
++    } else {
++      b0 = 1+alpha*a; b1 = -2*c; b2 = 1-alpha*a;
++      a0 = 1+alpha/a; a1 = -2*c; a2 = 1-alpha/a;
++    }
++    double *v = eq->coefficients[band];
++    v[0] = b0/a0; v[1] = b1/a0; v[2] = b2/a0; v[3] = a1/a0; v[4] = a2/a0;
++  }
++}
++
++static inline float OpenfyEQSample(OpenfyEqualizer *eq, float sample, int channel) {
++  double value = sample * eq->preamp;
++  for (int band = 0; band < eq->count; band++) {
++    double *c = eq->coefficients[band], *s = eq->state[channel][band];
++    double output = c[0]*value+s[0];
++    s[0] = c[1]*value-c[3]*output+s[1]; s[1] = c[2]*value-c[4]*output;
++    value = output;
++  }
++  if (channel == 0 && eq->balance > 0) value *= 1-eq->balance;
++  if (channel == 1 && eq->balance < 0) value *= 1+eq->balance;
++  return (float)fmax(-1, fmin(1, value));
++}
++#endif
 diff --git a/node_modules/expo-audio/src/AudioConstants.ts b/node_modules/expo-audio/src/AudioConstants.ts
 index dcc0452..5c50f47 100644
 --- a/node_modules/expo-audio/src/AudioConstants.ts
@@ -1116,31 +1418,46 @@ index 7e75371..aef5e92 100644
  
  export declare class AudioRecorder extends SharedObject<RecordingEvents> {
 diff --git a/node_modules/expo-audio/src/AudioPlayer.web.ts b/node_modules/expo-audio/src/AudioPlayer.web.ts
-index 61db2df..1502fd1 100644
+index 61db2df..0ac6eb9 100644
 --- a/node_modules/expo-audio/src/AudioPlayer.web.ts
 +++ b/node_modules/expo-audio/src/AudioPlayer.web.ts
-@@ -32,10 +32,11 @@ export class AudioPlayerWeb
+@@ -32,10 +32,12 @@ export class AudioPlayerWeb
  {
    constructor(source: AudioSource, options: AudioPlayerOptions = {}) {
      super();
 -    const { updateInterval = 500, crossOrigin } = options;
-+    const { updateInterval = 500, crossOrigin, channelMode = 'stereo' } = options as AudioPlayerOptions & { channelMode?: 'stereo' | 'mono' };
++    const { updateInterval = 500, crossOrigin, channelMode = 'stereo', equalizer = [1, 0] } = options as AudioPlayerOptions & { channelMode?: 'stereo' | 'mono'; equalizer?: number[] };
      this.src = source;
      this.interval = Math.max(updateInterval, 1);
      this.crossOrigin = crossOrigin;
 +    this.channelMode = channelMode;
++    this.equalizer = equalizer;
      this.media = this._createMediaElement();
      activePlayers.add(this);
    }
-@@ -53,6 +54,48 @@ export class AudioPlayerWeb
+@@ -53,6 +55,85 @@ export class AudioPlayerWeb
    private crossOrigin?: 'anonymous' | 'use-credentials';
    private analyser: AnalyserNode | null = null;
    private sourceNode: MediaElementAudioSourceNode | null = null;
 +  private outputNode: GainNode | null = null;
 +  private channelMode: 'stereo' | 'mono' = 'stereo';
++  private equalizer: number[] = [1, 0];
++  private processingNodes: AudioNode[] = [];
++
++  async setEqualizer(configuration: number[]): Promise<void> {
++    const required = configuration.length > 2 || configuration[1] !== 0;
++    if (required && !this.media.crossOrigin && this._isCrossOrigin()) {
++      throw new Error('Equalizer requires a CORS-enabled source.');
++    }
++    const previous = this.equalizer;
++    this.equalizer = configuration.slice();
++    try {
++      if (required || this.sourceNode) await this.setChannelMode(this.channelMode);
++    } catch (error) { this.equalizer = previous; throw error; }
++  }
 +
 +  async setChannelMode(mode: 'stereo' | 'mono'): Promise<void> {
-+    if (mode === 'stereo' && !this.sourceNode) {
++    if (mode === 'stereo' && !this.sourceNode && this.equalizer.length <= 2 && this.equalizer[1] === 0) {
 +      this.channelMode = mode;
 +      return;
 +    }
@@ -1171,8 +1488,31 @@ index 61db2df..1502fd1 100644
 +    this.sourceNode.disconnect();
 +    this.outputNode?.disconnect();
 +    this.analyser?.disconnect();
-+    const output = this.outputNode || this.sourceNode;
++    this.processingNodes.forEach((node) => node.disconnect());
++    this.processingNodes = [];
++    let output: AudioNode = this.outputNode || this.sourceNode;
 +    if (this.outputNode) this.sourceNode.connect(this.outputNode);
++    if (this.equalizer.length > 2 || this.equalizer[1] !== 0) {
++      const preamp = ctx.createGain();
++      preamp.gain.value = this.equalizer[0];
++      output.connect(preamp); output = preamp;
++      this.processingNodes.push(preamp);
++      for (let i = 2; i < this.equalizer.length; i += 4) {
++        const filter = ctx.createBiquadFilter();
++        filter.type = this.equalizer[i+3] === 1 ? 'lowshelf' : this.equalizer[i+3] === 2 ? 'highshelf' : 'peaking';
++        filter.frequency.value = Math.min(this.equalizer[i], ctx.sampleRate * 0.45);
++        filter.gain.value = this.equalizer[i+1]; filter.Q.value = this.equalizer[i+2];
++        output.connect(filter); output = filter; this.processingNodes.push(filter);
++      }
++      const stereo = ctx.createGain(); stereo.channelCount = 2; stereo.channelCountMode = 'explicit';
++      const split = ctx.createChannelSplitter(2), merge = ctx.createChannelMerger(2);
++      const left = ctx.createGain(), right = ctx.createGain();
++      left.gain.value = 1 - Math.max(0, this.equalizer[1]);
++      right.gain.value = 1 + Math.min(0, this.equalizer[1]);
++      output.connect(stereo); stereo.connect(split); split.connect(left, 0); split.connect(right, 1);
++      left.connect(merge, 0, 0); right.connect(merge, 0, 1); output = merge;
++      this.processingNodes.push(stereo, split, left, right, merge);
++    }
 +    if (this.analyser) {
 +      output.connect(this.analyser);
 +      this.analyser.connect(ctx.destination);
@@ -1181,7 +1521,15 @@ index 61db2df..1502fd1 100644
    private samplingFrameId: number | null = null;
    private samplingEnabled = false;
    private samplingBuffer: Float32Array<ArrayBuffer> | null = null;
-@@ -197,9 +240,7 @@ export class AudioPlayerWeb
+@@ -148,6 +229,7 @@ export class AudioPlayerWeb
+     this.loaded = false;
+     this.media = this._createMediaElement();
+ 
++    activePlayers.add(this);
+     if (wasSampling) {
+       this.setAudioSamplingEnabled(true);
+     }
+@@ -197,9 +279,7 @@ export class AudioPlayerWeb
        this.analyser = ctx.createAnalyser();
        this.analyser.fftSize = 2048;
  
@@ -1192,7 +1540,7 @@ index 61db2df..1502fd1 100644
  
        this.samplingBuffer = new Float32Array(this.analyser.frequencyBinCount);
        this.samplingEnabled = true;
-@@ -217,9 +258,7 @@ export class AudioPlayerWeb
+@@ -217,9 +297,7 @@ export class AudioPlayerWeb
        }
  
        if (this.sourceNode) {
@@ -1203,16 +1551,18 @@ index 61db2df..1502fd1 100644
        }
  
        this.samplingBuffer = null;
-@@ -272,6 +311,8 @@ export class AudioPlayerWeb
+@@ -272,6 +350,10 @@ export class AudioPlayerWeb
        this.sourceNode.disconnect();
        this.sourceNode = null;
      }
 +    this.outputNode?.disconnect();
 +    this.outputNode = null;
++    this.processingNodes.forEach((node) => node.disconnect());
++    this.processingNodes = [];
  
      this.samplingEnabled = false;
      this.media.pause();
-@@ -313,6 +354,7 @@ export class AudioPlayerWeb
+@@ -313,6 +395,7 @@ export class AudioPlayerWeb
    }
  
    _isCrossOrigin(): boolean {
@@ -1220,14 +1570,14 @@ index 61db2df..1502fd1 100644
      try {
        return new URL(this.media.src).origin !== window.location.origin;
      } catch {
-@@ -324,10 +366,13 @@ export class AudioPlayerWeb
+@@ -324,10 +407,13 @@ export class AudioPlayerWeb
      const newSource = getSourceUri(this.src);
      const cachedUri =
        newSource && preloadCache.has(newSource) ? preloadCache.get(newSource)!.blobUrl : newSource;
 -    const media = new Audio(cachedUri);
 -    if (this.crossOrigin !== undefined) {
 +    const media = new Audio();
-+    if (this.channelMode === 'mono') {
++    if (this.channelMode === 'mono' || this.equalizer.length > 2 || this.equalizer[1] !== 0) {
 +      media.crossOrigin = 'anonymous';
 +    } else if (this.crossOrigin !== undefined) {
        media.crossOrigin = this.crossOrigin;

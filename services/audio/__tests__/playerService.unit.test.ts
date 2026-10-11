@@ -45,7 +45,9 @@ import {
   unload,
   toAudioSource,
   setAudioChannelMode,
+  applyAudioPreferences,
 } from '../playerService';
+import { equalizerPacket } from '../equalizer';
 
 const createPlayer = () => ({
   currentStatus: {
@@ -63,6 +65,8 @@ const createPlayer = () => ({
   release: jest.fn(),
   replace: jest.fn(),
   setChannelMode: jest.fn().mockResolvedValue(undefined),
+  setEqualizer: jest.fn().mockResolvedValue(undefined),
+  setPlaybackRate: jest.fn(),
   clearLockScreenControls: jest.fn(),
 });
 
@@ -427,8 +431,41 @@ describe('playerService fades', () => {
           'User-Agent': expect.any(String),
         }),
       }),
-      { updateInterval: 100, channelMode: 'stereo' }
+      { updateInterval: 100, channelMode: 'stereo', equalizer: [1, 0] }
     );
+  });
+
+  it('restores EQ, balance and pitch-corrected speed on a new track and applies live changes', async () => {
+    const preferences = { ...appSettings.DEFAULT_APP_SETTINGS, equalizerEnabled: true,
+      equalizerBands: [6, 0, 0, 0, 0, 0, 0], audioBalance: 0.25, playbackSpeed: 1.25 };
+    const settings = jest.spyOn(appSettings, 'getCachedAppSettings').mockReturnValue(preferences);
+    const player = createPlayer();
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+    try {
+      await expect(loadAndPlay('file:///processing.m4a')).resolves.toBe(true);
+      expect(player.setEqualizer).toHaveBeenLastCalledWith(equalizerPacket(preferences));
+      expect(player.setPlaybackRate).toHaveBeenLastCalledWith(1.25, 'high');
+      expect((player as any).shouldCorrectPitch).toBe(true);
+      await applyAudioPreferences({ ...preferences, playbackSpeed: 1.5 });
+      expect(player.setPlaybackRate).toHaveBeenLastCalledWith(1.5, 'high');
+    } finally { settings.mockRestore(); }
+  });
+
+  it('does not start an old request after delayed EQ finishes on a reused player', async () => {
+    let finish!: () => void;
+    let entered!: () => void;
+    const processing = new Promise<void>((resolve) => { entered = resolve; });
+    const stale = createPlayer(), fresh = createPlayer();
+    stale.setEqualizer.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; entered(); }));
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(stale as any).mockReturnValueOnce(fresh as any);
+    const pending = loadAndPlay('file:///old-processing.m4a');
+    await processing;
+    await expect(loadAndPlay('file:///new-processing.m4a')).resolves.toBe(true);
+    expect(stale.play).toHaveBeenCalledTimes(1);
+    finish();
+    await expect(pending).resolves.toBe(false);
+    expect(stale.play).toHaveBeenCalledTimes(1);
+    expect(fresh.play).not.toHaveBeenCalled();
   });
 
   it('keeps a bounded diagnostic snapshot for playback lifecycle evidence', async () => {

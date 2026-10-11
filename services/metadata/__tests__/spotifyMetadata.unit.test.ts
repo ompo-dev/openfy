@@ -98,6 +98,11 @@ describe('public Spotify metadata', () => {
     await expect(subject.fetchSpotifyTrackMetadata(TRACK_ID)).resolves.toMatchObject({ title: TITLE, artists: ARTISTS, albumName: ALBUM_NAME, imageURL: images[2].url, duration_ms: 158250 });
   });
 
+  it('preserves a supplied recording ISRC without guessing it from names or album identity', async () => {
+    pages.set(`embed/track/${TRACK_ID}`, embed({ ...trackEntity, external_ids: { isrc: 'brabc2600001' } }));
+    await expect(subject.fetchSpotifyTrackMetadata(TRACK_ID)).resolves.toMatchObject({ isrc: 'BRABC2600001' });
+  });
+
   it('returns the known embed fields when the other pages fail, without a fabricated album', async () => {
     pages.delete(`track/${TRACK_ID}`);
     const metadata = await subject.fetchSpotifyTrackMetadata(TRACK_ID);

@@ -24,7 +24,7 @@ export const resolveTrackCredits = async (
     const restored = await spotifyCredits.getOrLoad(id, () => fetchSpotifyTrackCredits(id), 6 * 60 * 60_000).catch(() => []);
     if (restored.length) {
       // An authenticated import can include more participants than the public page.
-      const imported = credits.filter((credit) => /^[A-Za-z0-9]{22}$/.test(credit.spotifyId || credit.id));
+      const imported = credits.filter((credit) => credit.name.trim());
       const known = new Set(restored.map((credit) => normalize(credit.name)));
       credits = [...restored, ...imported.filter((credit) => !known.has(normalize(credit.name)))];
       verified = true;

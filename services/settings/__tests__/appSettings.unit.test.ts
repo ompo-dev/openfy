@@ -95,4 +95,14 @@ describe('appSettings', () => {
       automaticUpdates: false,
     });
   });
+
+  it('sanitizes processing ranges and migrates provider order without duplicate sources', () => {
+    const settings = normalizeAppSettings({ equalizerBands: [99, -99, NaN, '3'],
+      playbackSpeed: 8, equalizerToneX: -20, audioBalance: Infinity, lyricsOffsetMs: -50000,
+      lyricsSourceOrder: ['lrclib', 'lrclib', 'unknown'], lyricsDisabledSources: ['youtube', 'youtube', 'unknown'] });
+    expect(settings).toMatchObject({ equalizerBands: [12, -12, 0, 0, 0, 0, 0], playbackSpeed: 2,
+      equalizerToneX: -5, audioBalance: 0, lyricsOffsetMs: -10000, lyricsDisabledSources: ['youtube'] });
+    expect(settings.lyricsSourceOrder[0]).toBe('lrclib');
+    expect(new Set(settings.lyricsSourceOrder).size).toBe(DEFAULT_APP_SETTINGS.lyricsSourceOrder.length);
+  });
 });

@@ -6,11 +6,12 @@ import {
   resetAppSettings,
   subscribeAppSettings,
   updateAppSettings,
+  normalizeAppSettings,
   type AppSettings,
 } from '../services/settings/appSettings';
 import { executeCommand } from '../src/application/commandBus';
 import { log, logConfig } from '../utils/appLogger';
-import { setAudioChannelMode } from '../services/audio/playerService';
+import { applyAudioPreferences } from '../services/audio/playerService';
 
 type AppSettingsState = {
   settings: AppSettings;
@@ -18,13 +19,16 @@ type AppSettingsState = {
   hydrate: () => Promise<void>;
   setSetting: <Key extends keyof AppSettings>(
     key: Key,
-    value: AppSettings[Key]
+    value: AppSettings[Key] | ((current: AppSettings[Key]) => AppSettings[Key])
   ) => Promise<void>;
   resetSettings: () => Promise<void>;
 };
 
 let hydration: Promise<void> | null = null;
 let unsubscribeSettings: (() => void) | null = null;
+let mutations: Promise<unknown> = Promise.resolve();
+const AUDIO_KEYS = new Set<keyof AppSettings>(['audioChannelMode', 'playbackSpeed', 'equalizerEnabled',
+  'equalizerMode', 'equalizerBands', 'equalizerToneX', 'equalizerToneY', 'equalizerFocused', 'audioBalance']);
 
 export const useAppSettingsStore = create<AppSettingsState>((set, get) => ({
   settings: DEFAULT_APP_SETTINGS,
@@ -58,19 +62,24 @@ export const useAppSettingsStore = create<AppSettingsState>((set, get) => ({
     await executeCommand({
       name: 'settings.update',
       category: 'ui',
-      idempotencyKey: `${key}:${String(value)}`,
+      idempotencyKey: typeof value === 'function' ? undefined : `${key}:${String(value)}`,
       successTtlMs: 0,
       execute: async () => {
-        const previousMode = get().settings.audioChannelMode;
-        let settings: AppSettings;
-        try {
-          if (key === 'audioChannelMode') await setAudioChannelMode(value as AppSettings['audioChannelMode']);
-          settings = await updateAppSettings({ [key]: value });
-        } catch (error) {
-          if (key === 'audioChannelMode') await setAudioChannelMode(previousMode).catch(() => {});
-          throw error;
-        }
-        set({ settings, isReady: true });
+        const mutation = mutations.then(async () => {
+          const previous = await getAppSettings();
+          const updated = typeof value === 'function' ? value(previous[key]) : value;
+          const next = normalizeAppSettings({ ...previous, [key]: updated });
+          try {
+            if (AUDIO_KEYS.has(key)) await applyAudioPreferences(next);
+            const settings = await updateAppSettings({ [key]: updated });
+            set({ settings, isReady: true });
+          } catch (error) {
+            if (AUDIO_KEYS.has(key)) await applyAudioPreferences(previous).catch(() => {});
+            throw error;
+          }
+        });
+        mutations = mutation.catch(() => {});
+        await mutation;
       },
     });
   },
@@ -80,8 +89,16 @@ export const useAppSettingsStore = create<AppSettingsState>((set, get) => ({
       category: 'ui',
       successTtlMs: 0,
       execute: async () => {
-        const settings = await resetAppSettings();
-        set({ settings, isReady: true });
+        const mutation = mutations.then(async () => {
+          const previous = await getAppSettings();
+          try {
+            await applyAudioPreferences(DEFAULT_APP_SETTINGS);
+            const settings = await resetAppSettings();
+            set({ settings, isReady: true });
+          } catch (error) { await applyAudioPreferences(previous).catch(() => {}); throw error; }
+        });
+        mutations = mutation.catch(() => {});
+        await mutation;
       },
     });
   },

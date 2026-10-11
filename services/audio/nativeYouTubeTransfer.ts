@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { getAppSettings, getCachedAppSettings, type AudioChannelMode, type AudioQuality } from '../settings/appSettings';
+import { equalizerPacket } from './equalizer';
 
 export type NativeYouTubeTransferResult = {
   uri?: string;
@@ -40,6 +41,10 @@ type NativeSubscription = { remove(): void };
 
 type OpenfyYouTubeNativeModule = {
   supportsAudioPreferences?: boolean;
+  supportsEqualizer?: boolean;
+  supportsPlaybackRate?: boolean;
+  setNativeEqualizerAsync?(configuration: number[]): Promise<void>;
+  setNativePlaybackRateAsync?(rate: number): Promise<void>;
   setNativeChannelModeAsync?(mode: AudioChannelMode): Promise<void>;
   preloadNativeYouTubeWithQualityAsync?(videoId: string, quality: AudioQuality): Promise<unknown>;
   resolveAndDownloadWithQualityAsync?(videoId: string, destination: string, chunkBytes: number, quality: AudioQuality): Promise<unknown>;
@@ -127,6 +132,23 @@ export const hasNativeYouTubePlayback = (): boolean =>
 export const hasNativeYouTubeAudioPreferences = (): boolean =>
   getNativeModule()?.supportsAudioPreferences === true;
 
+export const hasNativeYouTubeEqualizer = () => getNativeModule()?.supportsEqualizer === true;
+export const hasNativeYouTubePlaybackRate = () => getNativeModule()?.supportsPlaybackRate === true;
+export const setNativeYouTubeEqualizer = async (configuration: number[]) => {
+  if (!getNativeModule()?.setNativeEqualizerAsync) {
+    if (configuration.length > 2 || configuration[1] !== 0) throw new Error('Instale o novo build para usar equalizador e balanceamento.');
+    return;
+  }
+  await getNativeModule()!.setNativeEqualizerAsync!(configuration);
+};
+export const setNativeYouTubePlaybackRate = async (rate: number) => {
+  if (!getNativeModule()?.setNativePlaybackRateAsync) {
+    if (rate !== 1) throw new Error('Instale o novo build para alterar a velocidade.');
+    return;
+  }
+  await getNativeModule()!.setNativePlaybackRateAsync!(rate);
+};
+
 export const setNativeYouTubeChannelMode = async (mode: AudioChannelMode): Promise<void> => {
   const module = getNativeModule();
   if (!module?.setNativeChannelModeAsync) {
@@ -173,6 +195,8 @@ export const playYouTubeVideoNatively = async (
   const nativeModule = getNativeModule();
   if (!nativeModule?.playNativeYouTubeAsync) return false;
   const settings = await getAppSettings();
+  await setNativeYouTubeEqualizer(equalizerPacket(settings));
+  await setNativeYouTubePlaybackRate(settings.playbackSpeed);
   if (nativeModule.playNativeYouTubeWithMetadataAsync) {
     await nativeModule.playNativeYouTubeWithMetadataAsync(
       videoId,

@@ -1,8 +1,9 @@
-import type { TrackAlbumRef } from '../../models/Track/TrackModel';
+import { normalizeTrackIsrc, type TrackAlbumRef } from '../../models/Track/TrackModel';
 
 export type SpotifyArtist = { id: string; name: string };
 
 export type SpotifyTrackMetadata = {
+  isrc?: string;
   spotifyId: string;
   title: string;
   artistName: string;
@@ -21,6 +22,8 @@ type ImageSource = { url?: string; width?: number; maxWidth?: number };
 type ArtistSource = { id?: string; uri?: string; name?: string; profile?: { name?: string } };
 type ArtistList = ArtistSource[] | { items?: ArtistSource[] };
 type Entity = {
+  external_ids?: { isrc?: string };
+  isrc?: string;
   id?: string;
   uri?: string;
   name?: string;
@@ -246,7 +249,9 @@ export const fetchSpotifyTrackMetadata = async (spotifyId: string): Promise<Spot
   const position = trackPosition(albumPage, id);
   const trackNumber = positiveNumber(state?.trackNumber) || positiveNumber(track?.trackNumber) || positiveNumber(metaValue(page, 'music:album:track')) || position.trackNumber;
   const discNumber = positiveNumber(state?.discNumber) || positiveNumber(track?.discNumber) || positiveNumber(metaValue(page, 'music:album:disc')) || position.discNumber;
+  const isrc = normalizeTrackIsrc(state?.external_ids?.isrc || state?.isrc || track?.external_ids?.isrc || track?.isrc);
   return {
+    ...(isrc ? { isrc } : {}),
     spotifyId: id,
     title,
     artistName: artists.map((artist) => artist.name).join(', ') || metaValue(page, 'music:musician_description') || description[0] || '',

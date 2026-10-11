@@ -41,6 +41,8 @@ import {
   sanitizeLogData,
 } from '../../utils/appLogger';
 import { formatStorageSize, StorageManagerModal } from './StorageManagerModal';
+import { AudioSettingsSheet } from './AudioSettingsSheet';
+import { LyricsSettingsSheet } from './LyricsSettingsSheet';
 
 type LibrarySummary = {
   downloads: number;
@@ -131,6 +133,8 @@ export const Settings = () => {
   const [summary, setSummary] = React.useState(EMPTY_SUMMARY);
   const [storage, setStorage] = React.useState(EMPTY_STORAGE);
   const [storageVisible, setStorageVisible] = React.useState(false);
+  const [audioVisible, setAudioVisible] = React.useState(false);
+  const [lyricsVisible, setLyricsVisible] = React.useState(false);
   const [updateStatus, setUpdateStatus] = React.useState('');
   const [checkingUpdate, setCheckingUpdate] = React.useState(false);
   const developerVisible = settings.developerTools;
@@ -348,6 +352,9 @@ export const Settings = () => {
         </Section>
 
         <Section title="REPRODUÇÃO">
+          <ActionRow icon="options" label="Audio e equalizador" detail={settings.equalizerEnabled ? 'Ativo' : `${settings.playbackSpeed}x`}
+            onPress={() => setAudioVisible(true)} />
+          <View style={styles.separator} />
           <View style={styles.audioBlock}>
             <Text style={styles.settingLabel}>Saída de áudio</Text>
             <View accessibilityRole="radiogroup" style={styles.segmentedControl}>
@@ -384,6 +391,8 @@ export const Settings = () => {
         </Section>
 
         <Section title="APARÊNCIA">
+          <ActionRow icon="chatbubble-ellipses-outline" label="Letras e provedores" onPress={() => setLyricsVisible(true)} />
+          <View style={styles.separator} />
           <SettingRow icon="eye" label="Blur nas letras inativas"
             description="Mantém em foco a frase que está tocando."
             value={settings.blurInactiveLyrics} onValueChange={change('blurInactiveLyrics')} />
@@ -574,6 +583,8 @@ export const Settings = () => {
           }));
         }}
       />
+      <AudioSettingsSheet visible={audioVisible} onClose={() => setAudioVisible(false)} />
+      <LyricsSettingsSheet visible={lyricsVisible} onClose={() => setLyricsVisible(false)} />
     </View>
   );
 };

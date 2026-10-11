@@ -6,11 +6,12 @@ import {
   type DownloadTrackInput,
 } from '../download/downloadManager';
 import { removeTrackFromLocalPlaylists } from './localPlaylistManager';
-import { albumAssociationsForTrack, mergeAlbumAssociations, type TrackAlbumRef } from '../../models/Track/TrackModel';
+import { albumAssociationsForTrack, mergeAlbumAssociations, normalizeTrackIsrc, type TrackAlbumRef } from '../../models/Track/TrackModel';
 
 export type CatalogSourcePlatform = 'spotify' | 'youtube';
 
 export type CatalogTrackInput = {
+  isrc?: string;
   artistCreditsVersion?: number;
   spotifyId: string;
   title: string;
@@ -109,6 +110,7 @@ const normalizeInput = (
     ...(albumAssociationsForTrack(input) || []),
   ]);
   return {
+    isrc: normalizeTrackIsrc(input.isrc) || normalizeTrackIsrc(current?.isrc),
     artistCreditsVersion: input.artistCreditsVersion || current?.artistCreditsVersion,
     spotifyId: input.spotifyId.trim(),
     title: input.title.trim() || current?.title || 'Música',
@@ -151,6 +153,7 @@ const normalizeInput = (
 };
 
 const catalogInputFromDownload = (track: DownloadedTrack): CatalogTrackInput => ({
+  isrc: track.isrc,
   artistCreditsVersion: track.artistCreditsVersion,
   spotifyId: track.spotifyId,
   title: track.title,
@@ -322,6 +325,7 @@ export const getLibraryTracks = (): Promise<LibraryTrack[]> => {
 export const toDownloadTrackInput = (
   track: CatalogTrackInput
 ): DownloadTrackInput => ({
+  isrc: track.isrc,
   artistCreditsVersion: track.artistCreditsVersion,
   spotifyId: track.spotifyId,
   title: track.title,

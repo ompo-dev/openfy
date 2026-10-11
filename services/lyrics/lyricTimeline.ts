@@ -1,5 +1,20 @@
 import type { LyricSegment } from './lyricsService';
 
+export const getLyricWordRuns = (text: string, words: LyricSegment['words'], positionMs: number) => {
+  const runs: { text: string; highlighted: boolean }[] = [];
+  let cursor = 0;
+  words?.forEach((word) => {
+    const value = word.text.trim();
+    const start = text.indexOf(value, cursor);
+    if (!value || start < cursor) return;
+    if (start > cursor) runs.push({ text: text.slice(cursor, start), highlighted: true });
+    runs.push({ text: value, highlighted: positionMs >= word.startTimeMs });
+    cursor = start + value.length;
+  });
+  if (runs.length && cursor < text.length) runs.push({ text: text.slice(cursor), highlighted: true });
+  return runs;
+};
+
 export type LyricTimelineBlock =
   | ({ kind: 'lyric' } & LyricSegment)
   | {

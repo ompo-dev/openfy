@@ -292,7 +292,14 @@ jobs:
             scripts/check-youtube-playback-duration.swift -o "$RUNNER_TEMP/check-youtube-playback-duration"
           "$RUNNER_TEMP/check-youtube-playback-duration"
 
-      - name: Compilar processamento de canais de audio
+      - name: Conferir resposta PCM do equalizador
+        run: |
+          xcrun clang -std=c11 -Wall -Wextra -Werror \
+            -I node_modules/expo-audio/ios scripts/check-audio-equalizer.c \
+            -o "$RUNNER_TEMP/check-audio-equalizer"
+          "$RUNNER_TEMP/check-audio-equalizer"
+
+      - name: Compilar processamento de canais e equalizador de audio
         run: |
           xcrun clang -c -fobjc-arc -fmodules \
             -target arm64-apple-ios16.4 \

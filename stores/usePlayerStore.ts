@@ -46,10 +46,9 @@ import {
 import {
   fetchLyrics,
   LyricsData,
-  LyricSegment,
-  saveLyricsOffline,
 } from '../services/lyrics/lyricsService';
-import { normalizeLyricSegments } from '../services/lyrics/lyricTimeline';
+import { getCachedTrackLyricsProvider, getTrackLyricsProvider, lyricsPolicyKey, setTrackLyricsProvider } from '../services/lyrics/lyricsRepository';
+import type { LyricsProviderId, LyricsProviderSelection, LyricsProviderStatus } from '../services/lyrics/lyricsSources';
 import type {
   TrackCatalogMetadata,
   DownloadedTrack,
@@ -105,6 +104,8 @@ export interface PlayerStoreState {
   isLoadingAudio: boolean;
   isLoadingLyrics: boolean;
   lyricsData: LyricsData | null;
+  lyricsProvider: LyricsProviderSelection;
+  lyricsProviderAttempts: Partial<Record<LyricsProviderId, LyricsProviderStatus>>;
 
   // Queue & Navigation
   queue: PlayerTrack[];
@@ -145,18 +146,19 @@ export interface PlayerStoreState {
   setArtworkFlight: (flight: PlayerArtworkFlight | null) => void;
   closePlayer: () => Promise<void>;
   replaceQueueTrack: (previous: PlayerTrack, replacement: PlayerTrack) => void;
-  refreshLyrics: () => Promise<void>;
-  updateLyricsSegments: (segments: LyricSegment[]) => Promise<boolean>;
+  refreshLyrics: (force?: boolean) => Promise<void>;
+  selectLyricsProvider: (provider: LyricsProviderSelection) => Promise<void>;
 }
 
 // In-Memory Fast Caches
 const lyricsCache = new Map<string, LyricsData>();
 const pendingLyricsLoads = new Map<string, Promise<LyricsData | null>>();
+let lyricsLoadGeneration = 0;
+let activeLyricsController: AbortController | null = null;
 
 // Existing entries were created by native fallback providers. Start new caches
 // on canonical backend so iPhone cannot reuse a different song or expired URL.
-const LYRICS_CACHE_VERSION = 'v9';
-const STORAGE_LYRICS_PREFIX = `openfy_lyrics_cache_${LYRICS_CACHE_VERSION}_`;
+const LYRICS_CACHE_VERSION = 'v10-providers';
 const AUDIO_SOURCE_TTL_MS = 10 * 60_000;
 const MAX_RECENT_AUDIO_SOURCES = 24;
 const MIN_PRELOADED_SOURCE_LIFETIME_MS = 5_000;
@@ -266,7 +268,8 @@ const getLockScreenArtworkMetadata = (track: PlayerTrack) => ({
 });
 
 const getLyricsCacheKey = (track: PlayerTrack) =>
-  `${getCacheKey(track)}:${LYRICS_CACHE_VERSION}`;
+  `${getCacheKey(track)}:${LYRICS_CACHE_VERSION}:${JSON.stringify([track.title, track.artistName,
+    track.duration_ms, track.albumName, track.isrc, track.youtubeVideoId || track.videoId])}:${getCachedTrackLyricsProvider(track.spotifyId)}:${lyricsPolicyKey()}`;
 
 export const getExistingLocalAudioPath = async (
   path?: string
@@ -364,7 +367,6 @@ const cacheAudioSource = (track: PlayerTrack, source: AudioSourceInput, quality:
 };
 
 const loadLyricsForTrack = (track: PlayerTrack): Promise<LyricsData | null> => {
-  const cacheKey = getCacheKey(track);
   const lyricsCacheKey = getLyricsCacheKey(track);
   const cached = lyricsCache.get(lyricsCacheKey);
   if (cached) return Promise.resolve(cached);
@@ -373,33 +375,17 @@ const loadLyricsForTrack = (track: PlayerTrack): Promise<LyricsData | null> => {
 
   const loading = (async () => {
     try {
-      const stored = await AsyncStorage.getItem(`${STORAGE_LYRICS_PREFIX}${cacheKey}`);
-      const edited = lyricsCache.get(lyricsCacheKey);
-      if (edited?.source === 'user') return edited;
-      if (stored) {
-        const lyrics = JSON.parse(stored) as LyricsData;
-        lyricsCache.set(lyricsCacheKey, lyrics);
-        return lyrics;
-      }
-    } catch {}
-
-    if (useConnectivityStore.getState().status === 'offline') return null;
-
-    try {
       const lyrics = await fetchLyrics(
         track.title,
         track.artistName,
         track.duration_ms ? track.duration_ms / 1000 : undefined,
-        track.albumName
+        track.albumName, track.releaseDate,
+        { trackId: track.spotifyId, isrc: track.isrc, videoId: track.youtubeVideoId || track.videoId ||
+          (track.spotifyId.startsWith('yt_') ? track.spotifyId.slice(3) : undefined),
+          offline: useConnectivityStore.getState().status === 'offline' }
       );
-      const edited = lyricsCache.get(lyricsCacheKey);
-      if (edited?.source === 'user') return edited;
-      if (lyrics) {
+      if (lyrics && !lyricsCache.has(lyricsCacheKey) && getLyricsCacheKey(track) === lyricsCacheKey) {
         lyricsCache.set(lyricsCacheKey, lyrics);
-        void AsyncStorage.setItem(
-          `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
-          JSON.stringify(lyrics)
-        ).catch(() => {});
       }
       return lyrics;
     } catch {
@@ -413,6 +399,7 @@ const loadLyricsForTrack = (track: PlayerTrack): Promise<LyricsData | null> => {
 };
 
 const warmTrackLyrics = (track: PlayerTrack, direction: string) => {
+  if (!getCachedAppSettings().lyricsEnabled) return;
   if (useConnectivityStore.getState().status === 'offline') return;
   if (lyricsCache.has(getLyricsCacheKey(track))) return;
   const finishWarmup = log.time('player', 'queue lyrics warmup', {
@@ -648,7 +635,8 @@ const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
           .split(/\s*(?:,|&| feat\.?)\s*/i)
           .filter(Boolean)
           .map((name) => ({ name })));
-    warmTrackLyrics(track, direction);
+    // Multi-provider lyrics should not compete with four neighboring streams.
+    if (direction === 'next') warmTrackLyrics(track, direction);
     warmTrackAudio(
       track,
       () => isAppActiveForPreload() && quality === getCachedAppSettings().streamingQuality &&
@@ -668,6 +656,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   isLoadingAudio: false,
   isLoadingLyrics: false,
   lyricsData: null,
+  lyricsProvider: 'auto',
+  lyricsProviderAttempts: {},
   queue: [],
   queueOriginalOrder: [],
   queueIndex: 0,
@@ -688,6 +678,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   },
 
   playTrack: async (track: PlayerTrack, options = {}) => {
+    lyricsLoadGeneration += 1;
+    activeLyricsController?.abort();
     const { showPlayer = true, setQueue = true } = options;
     let offlinePlaybackBlocked = false;
     if (isTrackUnavailable(track)) {
@@ -698,9 +690,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         isFullPlayerVisible: true, isLoadingAudio: false, isLoadingLyrics: true,
         lyricsData: null, playerState: { ...DEFAULT_STATE, durationMs: track.duration_ms,
           error: 'Áudio indisponível. Edite o link do YouTube para corrigir esta faixa.' } });
-      void loadLyricsForTrack(track).then((lyrics) => {
-        if (get().activeRequestId === requestId) set({ lyricsData: lyrics, isLoadingLyrics: false });
-      });
+      void get().refreshLyrics();
       await unload();
       return;
     }
@@ -748,6 +738,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       isLoadingAudio: true,
       isLoadingLyrics: !cachedLyrics,
       lyricsData: cachedLyrics,
+      lyricsProvider: getCachedTrackLyricsProvider(track.spotifyId),
+      lyricsProviderAttempts: {},
       playerState: {
         ...DEFAULT_STATE,
         isBuffering: true,
@@ -850,12 +842,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     })();
 
     const startLyricsLoading = () => {
-      if (cachedLyrics) return;
-      void loadLyricsForTrack(track).then((lyrics) => {
-        if (get().activeRequestId === requestId && get().lyricsData?.source !== 'user') {
-          set({ lyricsData: lyrics, isLoadingLyrics: false });
-        }
-      });
+      void get().refreshLyrics();
     };
 
     startLyricsLoading();
@@ -1511,6 +1498,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   },
 
   closePlayer: async () => {
+    lyricsLoadGeneration += 1;
+    activeLyricsController?.abort();
     await unload();
     set({
       currentTrack: null,
@@ -1522,85 +1511,51 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     });
   },
 
-  refreshLyrics: async () => {
+  refreshLyrics: async (force = false) => {
     const { currentTrack, activeRequestId } = get();
     if (!currentTrack) return;
-    set({ isLoadingLyrics: true });
-
-    const lyrics = await fetchLyrics(
-      currentTrack.title,
-      currentTrack.artistName,
-      currentTrack.duration_ms ? currentTrack.duration_ms / 1000 : undefined,
-      currentTrack.albumName
-    );
-
-    if (get().activeRequestId === activeRequestId) {
-      if (get().lyricsData?.source === 'user') {
-        set({ isLoadingLyrics: false });
-        return;
-      }
-      const cacheKey = getCacheKey(currentTrack);
-      if (lyrics) {
-        lyricsCache.set(getLyricsCacheKey(currentTrack), lyrics);
-        AsyncStorage.setItem(
-          `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
-          JSON.stringify(lyrics)
-        ).catch(() => {});
-      }
-      set({
-        lyricsData: lyrics,
-        isLoadingLyrics: false,
-      });
+    const generation = ++lyricsLoadGeneration;
+    activeLyricsController?.abort();
+    const controller = new AbortController();
+    activeLyricsController = controller;
+    const current = () => get().activeRequestId === activeRequestId && generation === lyricsLoadGeneration;
+    set({ isLoadingLyrics: true, lyricsProviderAttempts: {} });
+    try {
+      const provider = await getTrackLyricsProvider(currentTrack.spotifyId);
+      if (!current()) return;
+      set({ lyricsProvider: provider });
+      const lyrics = await fetchLyrics(currentTrack.title, currentTrack.artistName,
+        currentTrack.duration_ms / 1000, currentTrack.albumName, currentTrack.releaseDate,
+        { trackId: currentTrack.spotifyId, isrc: currentTrack.isrc, provider, force,
+          videoId: currentTrack.youtubeVideoId || currentTrack.videoId ||
+            (currentTrack.spotifyId.startsWith('yt_') ? currentTrack.spotifyId.slice(3) : undefined),
+          offline: useConnectivityStore.getState().status === 'offline', signal: controller.signal,
+          onAttempt: (source, status) => {
+            if (current()) set({ lyricsProviderAttempts: { ...get().lyricsProviderAttempts, [source]: status } });
+          } });
+      if (!current()) return;
+      if (lyrics) lyricsCache.set(getLyricsCacheKey(currentTrack), lyrics);
+      set({ lyricsData: lyrics, isLoadingLyrics: false });
+    } catch (error) {
+      if (current()) set({ isLoadingLyrics: false });
+      log.error('lyrics provider lookup failed', error);
     }
   },
 
-  updateLyricsSegments: async (segments: LyricSegment[]) => {
-    const { currentTrack, lyricsData, activeRequestId } = get();
-    if (!currentTrack || !segments.length || segments.some((segment) =>
-      !segment.text.trim() || !Number.isFinite(segment.startTimeMs) ||
-      !Number.isFinite(segment.endTimeMs) || segment.startTimeMs < 0 ||
-      segment.endTimeMs <= segment.startTimeMs
-    )) return false;
-
-    const normalizedSegments = normalizeLyricSegments(segments);
-    const updatedLyrics: LyricsData = {
-      ...lyricsData,
-      trackName: currentTrack.title,
-      artistName: currentTrack.artistName,
-      plainLyrics: normalizedSegments.map((segment) => segment.text).join('\n'),
-      syncedLyrics: undefined,
-      source: 'user',
-      isSynced: true,
-      segments: normalizedSegments,
-    };
-    const cacheKey = getCacheKey(currentTrack);
-    lyricsCache.set(getLyricsCacheKey(currentTrack), updatedLyrics);
-    set({ lyricsData: updatedLyrics, isLoadingLyrics: false });
-
+  selectLyricsProvider: async (provider) => {
+    const { currentTrack, activeRequestId } = get();
+    if (!currentTrack) return;
+    const generation = ++lyricsLoadGeneration;
+    activeLyricsController?.abort();
+    set({ lyricsProvider: provider, lyricsData: null, lyricsProviderAttempts: {}, isLoadingLyrics: true });
     try {
-      await AsyncStorage.setItem(
-        `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
-        JSON.stringify(updatedLyrics)
-      );
-      const offlineCopy = await saveLyricsOffline(
-        currentTrack.spotifyId,
-        updatedLyrics
-      );
-      if (!offlineCopy) {
-        console.warn('[PlayerStore] Could not save offline lyric copy.');
-      }
-      return true;
+      await setTrackLyricsProvider(currentTrack.spotifyId, provider);
+      if (get().activeRequestId === activeRequestId && generation === lyricsLoadGeneration) await get().refreshLyrics();
     } catch (error) {
-      console.warn('[PlayerStore] Could not save edited lyrics:', error);
-      if (get().activeRequestId === activeRequestId && get().lyricsData === updatedLyrics) {
-        set({ lyricsData });
+      if (get().activeRequestId === activeRequestId && generation === lyricsLoadGeneration) {
+        set({ lyricsProvider: getCachedTrackLyricsProvider(currentTrack.spotifyId), isLoadingLyrics: false });
       }
-      const lyricsCacheKey = getLyricsCacheKey(currentTrack);
-      if (lyricsCache.get(lyricsCacheKey) === updatedLyrics) {
-        if (lyricsData) lyricsCache.set(lyricsCacheKey, lyricsData);
-        else lyricsCache.delete(lyricsCacheKey);
-      }
-      return false;
+      throw error;
     }
   },
 }));
@@ -1612,7 +1567,14 @@ setRemotePlaybackHandlers({
 
 let previousStreamingQuality = getCachedAppSettings().streamingQuality;
 let previousPreloading = getCachedAppSettings().preloadNextTrack;
+let previousLyricsPolicy = lyricsPolicyKey();
 subscribeAppSettings((settings) => {
+  const policy = lyricsPolicyKey();
+  if (policy !== previousLyricsPolicy) {
+    previousLyricsPolicy = policy;
+    lyricsCache.clear();
+    void usePlayerStore.getState().refreshLyrics();
+  }
   const changed = settings.streamingQuality !== previousStreamingQuality ||
     settings.preloadNextTrack !== previousPreloading;
   previousStreamingQuality = settings.streamingQuality;

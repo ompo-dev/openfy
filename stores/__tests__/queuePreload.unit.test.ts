@@ -483,12 +483,12 @@ describe('queue preload window', () => {
       expect(neighbors).toHaveLength(shuffle ? 2 : 4);
       neighbors.forEach((neighbor) => {
         expect(preloadNativeYouTubeAudio).toHaveBeenCalledWith(neighbor.youtubeVideoId, 'high');
-        expect(fetchLyrics).toHaveBeenCalledWith(
-          neighbor.title,
-          neighbor.artistName,
-          neighbor.duration_ms / 1000,
-          neighbor.albumName
-        );
+      });
+      const next = queue[queueIndex + 1];
+      expect(fetchLyrics).toHaveBeenCalledWith(next.title, next.artistName, next.duration_ms / 1000,
+        next.albumName, next.releaseDate, expect.objectContaining({ trackId: next.spotifyId, videoId: next.youtubeVideoId }));
+      neighbors.filter((neighbor) => neighbor !== next).forEach((neighbor) => {
+        expect(jest.mocked(fetchLyrics).mock.calls.some(([title]) => title === neighbor.title)).toBe(false);
       });
       randomSpy.mockRestore();
       Platform.OS = 'web';

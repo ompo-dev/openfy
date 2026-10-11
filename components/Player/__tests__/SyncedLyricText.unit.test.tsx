@@ -7,6 +7,16 @@ jest.mock('@expo/ui/swift-ui', () => {
   return { Host: View, Text };
 });
 
+it('highlights supplied word starts in the native renderer without changing text spacing', async () => {
+  const words = [{ text: 'Hello ', startTimeMs: 1000, endTimeMs: 2000 },
+    { text: 'world', startTimeMs: 2000, endTimeMs: 3000 }];
+  const screen = await render(<SyncedLyricText active blurred={false} words={words} positionMs={1500}>Hello world</SyncedLyricText>);
+  expect(screen.getByText('Hello').props.modifiers).toEqual([expect.objectContaining({ $type: 'foregroundStyle', color: '#FFFFFF' })]);
+  expect(screen.getByText('world').props.modifiers).toEqual([expect.objectContaining({ $type: 'foregroundStyle', color: 'rgba(255,255,255,0.48)' })]);
+  await screen.rerender(<SyncedLyricText active blurred={false} words={words} positionMs={2000}>Hello world</SyncedLyricText>);
+  expect(screen.getByText('world').props.modifiers).toEqual([expect.objectContaining({ $type: 'foregroundStyle', color: '#FFFFFF' })]);
+});
+
 it('uses native SwiftUI blur without changing lyric size or alignment', async () => {
   const screen = await render(<SyncedLyricText active={false} blurred>Next lyric</SyncedLyricText>);
   const modifiers = () => screen.getByText('Next lyric').props.modifiers;

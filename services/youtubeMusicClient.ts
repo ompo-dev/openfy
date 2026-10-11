@@ -176,6 +176,7 @@ export type YouTubeMusicPlaylistPage = {
 
 export type YouTubeMusicClient = {
   music: {
+    getLyrics?: (videoId: string) => Promise<{ description?: unknown } | undefined>;
     getSearchSuggestions?: (input: string) => Promise<{ contents?: unknown[] }[]>;
     search: (
       query: string,

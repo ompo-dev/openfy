@@ -17,7 +17,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
 import { log } from '../../utils/appLogger';
 import { requireNativeModule } from 'expo-modules-core';
-import { getAppSettings, getCachedAppSettings, subscribeAppSettings, type AudioChannelMode } from '../settings/appSettings';
+import { getAppSettings, getCachedAppSettings, subscribeAppSettings, type AudioChannelMode, type AppSettings } from '../settings/appSettings';
+import { equalizerPacket, needsEqualizerProcessing } from './equalizer';
 import { getDirectYouTubeMediaHeaders } from './directYouTubeResolver';
 import { prepareLocalAudioForPlayback } from './localAudioRepair';
 import { unlockBrowserAudioOutput } from './browserAudioOutput';
@@ -37,6 +38,10 @@ import {
   hasNativeYouTubePlayback,
   hasNativeYouTubeAudioPreferences,
   setNativeYouTubeChannelMode,
+  hasNativeYouTubeEqualizer,
+  hasNativeYouTubePlaybackRate,
+  setNativeYouTubeEqualizer,
+  setNativeYouTubePlaybackRate,
 } from './nativeYouTubeTransfer';
 
 export type AudioSourceInput =
@@ -177,19 +182,54 @@ let volumeRamp: {
 const diagnostics: AudioDiagnosticEvent[] = [];
 const MAX_DIAGNOSTICS = 30;
 
-type ChannelPlayer = AudioPlayer & { setChannelMode?: (mode: AudioChannelMode) => Promise<void> };
+type ChannelPlayer = AudioPlayer & { setChannelMode?: (mode: AudioChannelMode) => Promise<void>;
+  setEqualizer?: (configuration: number[]) => Promise<void> };
 let appliedChannelMode: AudioChannelMode = 'stereo';
+let appliedEqualizer: number[] = [1, 0];
+let appliedPlaybackSpeed = 1;
 let outputError: string | null = null;
 
 export const getAudioCapabilities = () => {
   let channels = Platform.OS === 'web';
+  let equalizer = Platform.OS === 'web';
   if (!channels) {
     try {
-      channels = requireNativeModule<{ supportsChannelMode?: boolean }>('ExpoAudio').supportsChannelMode === true;
+      const module = requireNativeModule<{ supportsChannelMode?: boolean; supportsEqualizer?: boolean }>('ExpoAudio');
+      channels = module.supportsChannelMode === true;
+      equalizer = module.supportsEqualizer === true;
     } catch { /* Older development binaries keep stereo playback. */ }
   }
   const nativePreferences = !hasNativeYouTubePlayback() || hasNativeYouTubeAudioPreferences();
-  return { channels: channels && nativePreferences, quality: nativePreferences };
+  return { channels: channels && nativePreferences, quality: nativePreferences,
+    equalizer: equalizer && (!hasNativeYouTubePlayback() || hasNativeYouTubeEqualizer()),
+    speed: !hasNativeYouTubePlayback() || hasNativeYouTubePlaybackRate() };
+};
+
+const applyPlayerEqualizer = async (player: AudioPlayer, packet: number[]) => {
+  if ((player as ChannelPlayer).setEqualizer) await (player as ChannelPlayer).setEqualizer!(packet);
+  else if (needsEqualizerProcessing(packet)) throw new Error('Instale o novo build para usar o equalizador.');
+};
+
+export const applyAudioPreferences = async (settings: AppSettings) => {
+  const packet = equalizerPacket(settings);
+  const capabilities = getAudioCapabilities();
+  if (needsEqualizerProcessing(packet) && !capabilities.equalizer) throw new Error('O equalizador requer o novo build nativo.');
+  if (settings.playbackSpeed !== 1 && !capabilities.speed) throw new Error('A velocidade requer o novo build nativo.');
+  unlockBrowserAudioOutput();
+  try {
+    await setAudioChannelMode(settings.audioChannelMode);
+    if (nativeYouTubeActive) {
+      await setNativeYouTubeEqualizer(packet);
+      await setNativeYouTubePlaybackRate(settings.playbackSpeed);
+    } else if (playerInstance) {
+      await applyPlayerEqualizer(playerInstance, packet);
+      playerInstance.shouldCorrectPitch = true;
+      playerInstance.setPlaybackRate(settings.playbackSpeed, 'high');
+    }
+    appliedEqualizer = packet; appliedPlaybackSpeed = settings.playbackSpeed;
+    outputError = null;
+    recordAudioDiagnostic('audio-processing-changed');
+  } catch (error) { outputError = String(error); throw error; }
 };
 
 const applyPlayerChannels = async (player: AudioPlayer, mode: AudioChannelMode) => {
@@ -219,22 +259,26 @@ export const setAudioChannelMode = async (mode: AudioChannelMode): Promise<void>
 export const getAudioOutputDiagnostics = () => ({
   engine: nativeYouTubeActive ? 'AVPlayer / YouTube nativo' : playerInstance ? Platform.OS === 'web' ? 'HTML Audio / Web Audio' : 'Expo Audio' : 'Inativo',
   channelMode: appliedChannelMode,
+  equalizer: appliedEqualizer,
+  playbackSpeed: appliedPlaybackSpeed,
   sourceKind: currentSourceKind,
   sourceHost: currentSourceHost,
   error: outputError,
   capabilities: getAudioCapabilities(),
 });
 
-let observedChannelMode = getCachedAppSettings().audioChannelMode;
+let observedProcessing = '';
 subscribeAppSettings((settings) => {
-  if (settings.audioChannelMode === observedChannelMode) return;
-  observedChannelMode = settings.audioChannelMode;
-  void setAudioChannelMode(settings.audioChannelMode).catch((error) => log.error('audio output preference failed', error));
+  const signature = JSON.stringify([settings.audioChannelMode, settings.playbackSpeed, equalizerPacket(settings)]);
+  if (signature === observedProcessing) return;
+  observedProcessing = signature;
+  if (!outputError && signature === JSON.stringify([appliedChannelMode, appliedPlaybackSpeed, appliedEqualizer])) return;
+  void applyAudioPreferences(settings).catch((error) => log.error('audio output preference failed', error));
 });
 
-const getPlayerOptions = (): AudioPlayerOptions & { channelMode?: AudioChannelMode } =>
+const getPlayerOptions = (): AudioPlayerOptions & { channelMode?: AudioChannelMode; equalizer?: number[] } =>
   Platform.OS === 'web'
-    ? { updateInterval: 100, channelMode: getCachedAppSettings().audioChannelMode }
+    ? { updateInterval: 100, channelMode: getCachedAppSettings().audioChannelMode, equalizer: equalizerPacket(getCachedAppSettings()) }
     : {
         updateInterval: 500,
         keepAudioSessionActive: true,
@@ -739,6 +783,8 @@ const loadAndPlayNativeYouTube = async (
     }
 
     appliedChannelMode = hasNativeYouTubeAudioPreferences() ? getCachedAppSettings().audioChannelMode : 'stereo';
+    appliedEqualizer = equalizerPacket(getCachedAppSettings());
+    appliedPlaybackSpeed = getCachedAppSettings().playbackSpeed;
 
     nativeYouTubeStatusTimer = setInterval(() => {
       void publishStatus();
@@ -959,6 +1005,13 @@ export const loadAndPlay = async (
     }
 
     await applyPlayerChannels(player, getCachedAppSettings().audioChannelMode);
+    const packet = equalizerPacket(getCachedAppSettings());
+    await applyPlayerEqualizer(player, packet);
+    if (generation !== loadGeneration || playerInstance !== player) return false;
+    const speed = getCachedAppSettings().playbackSpeed;
+    player.shouldCorrectPitch = true;
+    player.setPlaybackRate(speed, 'high');
+    appliedEqualizer = packet; appliedPlaybackSpeed = speed;
     if (generation !== loadGeneration || playerInstance !== player) return false;
     player.play();
     recordAudioDiagnostic('play-called');

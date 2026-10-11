@@ -109,7 +109,7 @@ public final class OpenfyYouTubeModule: Module {
 
   public func definition() -> ModuleDefinition {
     Name("OpenfyYouTube")
-    Constants(["supportsAudioPreferences": true])
+    Constants(["supportsAudioPreferences": true, "supportsEqualizer": true, "supportsPlaybackRate": true])
     Events(
       "onNativePlaybackEnded",
       "onNativeRemoteNext",
@@ -187,6 +187,14 @@ public final class OpenfyYouTubeModule: Module {
 
     AsyncFunction("setNativeChannelModeAsync") { (mode: String) in
       try await self.nativePlayer.setChannelMode(mode)
+    }
+
+    AsyncFunction("setNativeEqualizerAsync") { (configuration: [Double]) in
+      try await self.nativePlayer.setEqualizer(configuration)
+    }
+
+    AsyncFunction("setNativePlaybackRateAsync") { (rate: Double) in
+      await self.nativePlayer.setPlaybackRate(rate)
     }
 
     AsyncFunction("resolveAndDownloadWithQualityAsync") {

@@ -45,20 +45,39 @@ public final class OpenfyNativeYouTubePlayer {
   private var didJustFinish = false
   private var channelProcessor: AudioTapProcessor?
   private var mono = false
+  private var equalizer: [Double] = [1, 0]
+  private var playbackRate: Float = 1
+  private var needsProcessing: Bool { mono || equalizer.count > 2 || equalizer[1] != 0 }
+
+  public func setEqualizer(_ configuration: [Double]) async throws {
+    guard configuration.count >= 2, configuration.count <= 30, (configuration.count - 2) % 4 == 0,
+      configuration.allSatisfy({ $0.isFinite }) else { throw StreamTransportError.audioTrackUnavailable }
+    equalizer = configuration
+    channelProcessor?.setEqualizer(configuration.map { NSNumber(value: $0) })
+    try await setChannelMode(mono ? "mono" : "stereo")
+  }
+
+  public func setPlaybackRate(_ rate: Double) {
+    playbackRate = Float(max(0.5, min(2, rate)))
+    player?.currentItem?.audioTimePitchAlgorithm = .spectral
+    if player?.rate != 0 { player?.rate = playbackRate }
+    updateNowPlayingInfo()
+  }
 
   public func setChannelMode(_ mode: String) async throws {
     mono = mode == "mono"
     channelProcessor?.mono = mono
-    guard mono, let player, let item = player.currentItem else { return }
+    guard needsProcessing, let player, let item = player.currentItem else { return }
     let tracks = try await item.asset.loadTracks(withMediaType: .audio)
-    guard self.player === player, player.currentItem === item, mono else { return }
+    guard self.player === player, player.currentItem === item, needsProcessing else { return }
     guard let track = tracks.first else { throw StreamTransportError.audioTrackUnavailable }
     if channelProcessor?.isTapInstalled != true {
       channelProcessor?.invalidate()
       guard let processor = AudioTapProcessor(player: player) else {
         throw StreamTransportError.audioTrackUnavailable
       }
-      processor.mono = true
+      processor.mono = mono
+      processor.setEqualizer(equalizer.map { NSNumber(value: $0) })
       guard processor.installTap(track: track) else { throw StreamTransportError.audioTrackUnavailable }
       channelProcessor = processor
     }
@@ -109,6 +128,7 @@ public final class OpenfyNativeYouTubePlayer {
     asset.resourceLoader.setDelegate(loader, queue: loader.queue)
 
     let item = AVPlayerItem(asset: asset)
+    item.audioTimePitchAlgorithm = .spectral
     item.preferredForwardBufferDuration = 2
     let player = AVPlayer(playerItem: item)
     // AVFoundation cannot predict delivery through a custom resource loader.
@@ -164,7 +184,7 @@ public final class OpenfyNativeYouTubePlayer {
     )
     try await setChannelMode(mono ? "mono" : "stereo")
     guard self.player === player else { return }
-    player.playImmediately(atRate: 1)
+    player.playImmediately(atRate: playbackRate)
   }
 
   public func pause() {
@@ -174,7 +194,7 @@ public final class OpenfyNativeYouTubePlayer {
 
   public func resume() {
     didJustFinish = false
-    player?.playImmediately(atRate: 1)
+    player?.playImmediately(atRate: playbackRate)
     updateNowPlayingInfo()
   }
 
@@ -304,7 +324,7 @@ public final class OpenfyNativeYouTubePlayer {
       MPNowPlayingInfoPropertyElapsedPlaybackTime:
         position.isFinite ? max(0, position) : 0,
       MPNowPlayingInfoPropertyPlaybackRate:
-        player.timeControlStatus == .playing ? 1.0 : 0.0,
+        player.timeControlStatus == .playing ? Double(playbackRate) : 0.0,
     ]
     if let albumTitle = metadata.albumTitle, !albumTitle.isEmpty {
       info[MPMediaItemPropertyAlbumTitle] = albumTitle

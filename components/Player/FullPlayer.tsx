@@ -42,26 +42,17 @@ import {
 import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
 import { useDetailNavigation } from '@hooks';
 import {
-  createEstimatedLyricSegments,
   deleteDownloadedTrack,
   getCatalogMapping,
-  getLyricGapRange,
   getLyricTimelineBlocks,
   isTrackDownloaded,
   LyricGapTarget,
   LyricSegment,
   LyricTimelineBlock,
-  moveLyricGap,
-  moveLyricSegment,
-  normalizeLyricSegments,
   parseSpotifyLink,
   setCatalogMapping,
   resolveSpotifyTrackVideoId,
   getCachedArtistImage,
-  resizeLyricGapEnd,
-  resizeLyricGapStart,
-  resizeLyricSegmentEnd,
-  resizeLyricSegmentStart,
   toDownloadTrackInput,
   upsertCatalogTracks,
 } from '@services';
@@ -73,7 +64,7 @@ import { getPlaybackOrigin } from '../../services/navigation/playbackOrigin';
 import { getPlayerAlbum, getTrackAlbumRouteId, type PlayerAlbum } from '../../services/library/playerAlbum';
 import { PlayerDetailCard } from './PlayerDetailCard';
 import { TrackPlaylistPickerModal } from '../LocalPlaylist/TrackPlaylistPickerModal';
-import { LyricSyncEditor } from './LyricSyncEditor';
+import { LyricsProviderSheet } from './LyricsProviderSheet';
 import { SyncedLyricText } from './SyncedLyricText';
 import { MarqueeText } from '../common/MarqueeText';
 import { useLyricScrubGesture } from '../common/useLyricScrubGesture';
@@ -206,9 +197,6 @@ const getLocalArtworkFallback = (
   ? { uri: track.localImagePath }
   : undefined;
 
-type LyricEditorTarget =
-  { kind: 'lyric'; index: number } | { kind: 'gap'; target: LyricGapTarget };
-
 const getGapTarget = (
   timeline: LyricTimelineBlock[],
   gapIndex: number
@@ -315,6 +303,7 @@ function PlayerGlassButton({
 
 export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps) => {
   const blurInactiveLyrics = useAppSettingsStore((state) => state.settings.blurInactiveLyrics);
+  const lyricsOffsetMs = useAppSettingsStore((state) => state.settings.lyricsOffsetMs);
   const insets = useSafeAreaInsets();
   const artworkProgress = useSharedValue(0);
   const isOffline = useConnectivityStore((state) => state.status === 'offline');
@@ -338,7 +327,6 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     lyricsData,
     isLoadingLyrics,
     repeatMode,
-    updateLyricsSegments,
     artworkFlight,
     setArtworkFlight,
     replaceQueueTrack,
@@ -351,12 +339,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   const afterCloseRef = React.useRef<(() => void) | null>(null);
   const playbackOrigin = getPlaybackOrigin(queueSourceId);
   const [hasOpenedLyrics, setHasOpenedLyrics] = React.useState(false);
-  const [isLyricsEditing, setIsLyricsEditing] = React.useState(false);
-  const [draftLyricSegments, setDraftLyricSegments] = React.useState<
-    LyricSegment[]
-  >([]);
-  const [selectedLyricTarget, setSelectedLyricTarget] =
-    React.useState<LyricEditorTarget>({ kind: 'lyric', index: 0 });
+  const [isProviderVisible, setIsProviderVisible] = React.useState(false);
 
   // YouTube action sheet and custom link edit state
   const [isActionModalVisible, setIsActionModalVisible] = React.useState(false);
@@ -413,8 +396,6 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   const lyricsListDraggingRef = React.useRef(false);
   const currentTrackRef = React.useRef(currentTrack);
   const youtubeLinkRef = React.useRef({ trackKey: '', url: '' });
-  const draftLyricSegmentsRef = React.useRef<LyricSegment[]>([]);
-  const resumeAfterLyricEditRef = React.useRef(false);
   const currentTrackKey = getTrackKey(currentTrack);
   const currentDownloadJob = React.useMemo(
     () => downloads.find((job) => job.spotifyId === currentTrack?.spotifyId),
@@ -872,8 +853,8 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       ? playerState.durationMs
       : currentTrack?.duration_ms || 0;
   const displayedLyricSegments = React.useMemo(
-    () => isLyricsEditing ? draftLyricSegments : lyricsData?.segments || [],
-    [draftLyricSegments, isLyricsEditing, lyricsData?.segments]
+    () => lyricsData?.segments || [],
+    [lyricsData?.segments]
   );
   const lyricTimelineDurationMs = Math.max(
     lyricDurationMs,
@@ -894,14 +875,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   lyricTimelineRef.current = lyricTimeline;
   scrubbedLyricTimelineIndexRef.current = scrubbedLyricTimelineIndex;
   React.useEffect(() => {
-    draftLyricSegmentsRef.current = draftLyricSegments;
-  }, [draftLyricSegments]);
-
-  React.useEffect(() => {
-    setIsLyricsEditing(false);
-    setDraftLyricSegments([]);
-    draftLyricSegmentsRef.current = [];
-    setSelectedLyricTarget({ kind: 'lyric', index: 0 });
+    setIsProviderVisible(false);
     setScrubbedLyricTimelineIndex(null);
     previewScrubbingRef.current = false;
     setIsPreviewScrubbing(false);
@@ -932,7 +906,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   // the previous lyric as their active line.
   const activeLineIndex = React.useMemo(() => {
     if (lyricTimeline.length === 0) return -1;
-    const currentMs = playerState.positionMs;
+    const currentMs = playerState.positionMs - lyricsOffsetMs;
     const activeIndex = lyricTimeline.findIndex(
       (block) => currentMs >= block.startTimeMs && currentMs < block.endTimeMs
     );
@@ -940,14 +914,14 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
 
     const lastIndex = lyricTimeline.length - 1;
     return currentMs >= lyricTimeline[lastIndex].startTimeMs ? lastIndex : 0;
-  }, [lyricTimeline, playerState.positionMs]);
+  }, [lyricTimeline, playerState.positionMs, lyricsOffsetMs]);
 
   const lyricTimelineIndices = React.useMemo(
     () => lyricTimeline.flatMap((block, index) => block.kind === 'lyric' ? [index] : []),
     [lyricTimeline]
   );
   const activePreviewPosition = React.useMemo(() => {
-    const currentMs = playerState.positionMs;
+    const currentMs = playerState.positionMs - lyricsOffsetMs;
     const activePosition = lyricTimelineIndices.findIndex((index) => {
       const line = lyricTimeline[index];
       return currentMs >= line.startTimeMs && currentMs < line.endTimeMs;
@@ -957,7 +931,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       (index) => lyricTimeline[index].endTimeMs > currentMs
     );
     return upcomingPosition >= 0 ? upcomingPosition : Math.max(0, lyricTimelineIndices.length - 1);
-  }, [lyricTimeline, lyricTimelineIndices, playerState.positionMs]);
+  }, [lyricTimeline, lyricTimelineIndices, playerState.positionMs, lyricsOffsetMs]);
   previewLineIndicesRef.current = lyricTimelineIndices;
   activePreviewPositionRef.current = activePreviewPosition;
 
@@ -968,7 +942,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
         : lyricTimelineIndices.indexOf(scrubbedLyricTimelineIndex);
       const firstLyric = lyricTimeline[lyricTimelineIndices[0]];
       const beforeFirstLyric = manualIndex < 0 &&
-        playerState.positionMs < firstLyric.startTimeMs;
+        playerState.positionMs - lyricsOffsetMs < firstLyric.startTimeMs;
       const startPosition = manualIndex >= 0
         ? manualIndex
         : beforeFirstLyric ? 0 : activePreviewPosition;
@@ -1003,6 +977,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     lyricTimeline,
     lyricTimelineIndices,
     lyricsData?.plainLyrics,
+    lyricsOffsetMs,
     playerState.positionMs,
     scrubbedLyricTimelineIndex,
   ]);
@@ -1013,19 +988,6 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     setPreviewCurrentLineCount(0);
   }, [currentTrackKey, previewCurrentText, previewNextText]);
 
-  React.useEffect(() => {
-    if (!isLyricsEditing || !playerState.isPlaying || activeLineIndex < 0) {
-      return;
-    }
-    const activeBlock = lyricTimeline[activeLineIndex];
-    if (!activeBlock) return;
-    setSelectedLyricTarget(
-      activeBlock.kind === 'lyric'
-        ? { kind: 'lyric', index: activeBlock.index }
-        : { kind: 'gap', target: getGapTarget(lyricTimeline, activeLineIndex) }
-    );
-  }, [activeLineIndex, isLyricsEditing, lyricTimeline, playerState.isPlaying]);
-
   const scrollLyricsToActive = React.useCallback(
     (animated: boolean) => {
       if (
@@ -1033,7 +995,6 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
         Date.now() < manualLyricsFollowUntilRef.current ||
         activeLineIndex < 0 ||
         !lyricsListRef.current ||
-        isLyricsEditing ||
         activeLineIndex >= lyricTimeline.length
       ) {
         return;
@@ -1045,7 +1006,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
         viewPosition: 0.35,
       });
     },
-    [activeLineIndex, isLyricsEditing, lyricTimeline.length, showLyricsFull]
+    [activeLineIndex, lyricTimeline.length, showLyricsFull]
   );
 
   const scrollLyricsToActiveRef = React.useRef(scrollLyricsToActive);
@@ -1097,7 +1058,6 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     if (lyricScrollRetryTimerRef.current) clearTimeout(lyricScrollRetryTimerRef.current);
     if (
       !showLyricsFull ||
-      isLyricsEditing ||
       activeLineIndex < 0
     ) {
       return;
@@ -1109,7 +1069,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       shouldScrollLyricsOnOpenRef.current = false;
     });
     return () => cancelAnimationFrame(frame);
-  }, [activeLineIndex, isLyricsEditing, scrollLyricsToActive, showLyricsFull]);
+  }, [activeLineIndex, scrollLyricsToActive, showLyricsFull]);
 
   const openLyricsView = React.useCallback(() => {
     if (isArtworkEntrancePending || closingPlayerRef.current) return;
@@ -1175,7 +1135,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
         lastPreviewSeekTimelineIndexRef.current = timelineIndex;
         setScrubbedLyricTimelineIndex(timelineIndex);
         Haptics.selectionAsync().catch(() => {});
-        void seekToPositionRef.current(line.startTimeMs);
+        void seekToPositionRef.current(line.startTimeMs + lyricsOffsetMs);
     },
     onEnd: () => {
       if (!previewScrubbingRef.current) return;
@@ -1331,10 +1291,6 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     playerState.durationMs > 0
       ? playerState.durationMs
       : currentTrack.duration_ms || 0;
-  const editorDurationMs = Math.max(
-    totalDurationMs,
-    getLastSegmentEndMs(draftLyricSegments)
-  );
 
   const progress =
     !seeking && totalDurationMs > 0
@@ -1387,207 +1343,14 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     );
   };
 
-  const beginLyricsEditing = () => {
-    const plainLyrics = lyricsData?.plainLyrics?.trim() || '';
-    // Persisted plain/empty provider responses may not contain a segment list.
-    const syncedSegments = Array.isArray(lyricsData?.segments)
-      ? normalizeLyricSegments(lyricsData.segments)
-      : [];
-    const draftDurationMs = totalDurationMs || Math.max(3000, plainLyrics.split('\n').filter(Boolean).length * 3000);
-    const nextDraft = syncedSegments.length
-      ? syncedSegments
-      : createEstimatedLyricSegments(plainLyrics, draftDurationMs);
-    if (!nextDraft.length) {
-      nextDraft.push({ index: 0, startTimeMs: 0, endTimeMs: Math.min(5000, draftDurationMs), text: plainLyrics });
-    }
-    const editTimeline = getLyricTimelineBlocks(nextDraft, totalDurationMs);
-    const activeTimelineIndex = editTimeline.findIndex(
-      (block) =>
-        playerState.positionMs >= block.startTimeMs &&
-        playerState.positionMs < block.endTimeMs
-    );
-    const activeBlock = editTimeline[activeTimelineIndex];
-    const followingSegmentIndex = nextDraft.findIndex(
-      (segment) => segment.startTimeMs >= playerState.positionMs
-    );
-    if (playerState.isPlaying) void togglePlayPause();
-    draftLyricSegmentsRef.current = nextDraft;
-    setDraftLyricSegments(nextDraft);
-    setSelectedLyricTarget(
-      activeBlock?.kind === 'gap' && syncedSegments.length > 0
-        ? {
-            kind: 'gap',
-            target: getGapTarget(editTimeline, activeTimelineIndex),
-          }
-        : {
-            kind: 'lyric',
-            index:
-              activeBlock?.kind === 'lyric'
-                ? activeBlock.index
-                : followingSegmentIndex >= 0
-                  ? followingSegmentIndex
-                  : nextDraft.length - 1,
-          }
-    );
-    setIsLyricsEditing(true);
-    Haptics.selectionAsync().catch(() => {});
-  };
-
-  const cancelLyricsEditing = () => {
-    setIsLyricsEditing(false);
-    setDraftLyricSegments([]);
-    draftLyricSegmentsRef.current = [];
-    Haptics.selectionAsync().catch(() => {});
-  };
-
-  const confirmLyricsEditing = async () => {
-    const nextSegments = draftLyricSegmentsRef.current;
-    if (!nextSegments.length) return cancelLyricsEditing();
-    if (nextSegments.some((segment) => !segment.text.trim())) {
-      Alert.alert('Letra incompleta', 'Preencha o texto dos trechos antes de salvar.');
-      return;
-    }
-
-    const wasSaved = await updateLyricsSegments(nextSegments);
-    if (!wasSaved) {
-      Alert.alert(
-        'Não foi possível salvar',
-        'A sincronização não foi alterada. Tente novamente.'
-      );
-      return;
-    }
-    setIsLyricsEditing(false);
-    setDraftLyricSegments([]);
-    draftLyricSegmentsRef.current = [];
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-      () => {}
-    );
-  };
-
-  const updateDraftSegments = (
-    update: (segments: LyricSegment[]) => LyricSegment[]
-  ) => {
-    const next = update(draftLyricSegmentsRef.current);
-    draftLyricSegmentsRef.current = next;
-    setDraftLyricSegments(next);
-    return next;
-  };
-
-  const applyImportedSegments = (segments: LyricSegment[]) => {
-    draftLyricSegmentsRef.current = segments;
-    setDraftLyricSegments(segments);
-    const selectedIndex = selectedLyricTarget.kind === 'lyric'
-      ? Math.min(selectedLyricTarget.index, Math.max(0, segments.length - 1))
-      : Math.max(0, segments.findIndex((segment) =>
-        playerState.positionMs >= segment.startTimeMs && playerState.positionMs < segment.endTimeMs
-      ));
-    setSelectedLyricTarget({ kind: 'lyric', index: selectedIndex });
-    Haptics.selectionAsync().catch(() => {});
-  };
-
-  const updateDraftLyricText = (index: number, text: string) => {
-    updateDraftSegments((segments) => segments.map((segment) =>
-      segment.index === index ? { ...segment, text } : segment
-    ));
-  };
-
-  const getEditorRange = (segments: LyricSegment[]) =>
-    selectedLyricTarget.kind === 'lyric'
-      ? segments[selectedLyricTarget.index] || null
-      : {
-          index: -1,
-          text: '♪ ♪ ♪',
-          ...getLyricGapRange(
-            segments,
-            selectedLyricTarget.target,
-            Math.max(totalDurationMs, getLastSegmentEndMs(segments))
-          ),
-        };
-  const selectedEditorRange = getEditorRange(draftLyricSegments);
-
-  const moveSelectedEditorRange = (deltaMs: number) => {
-    const previous = getEditorRange(draftLyricSegmentsRef.current);
-    const next = updateDraftSegments((segments) =>
-      selectedLyricTarget.kind === 'lyric'
-        ? moveLyricSegment(segments, selectedLyricTarget.index, deltaMs)
-        : moveLyricGap(segments, selectedLyricTarget.target, deltaMs)
-    );
-    const nextRange = getEditorRange(next);
-    return previous && nextRange
-      ? nextRange.startTimeMs - previous.startTimeMs
-      : 0;
-  };
-
-  const resizeSelectedEditorRangeStart = (deltaMs: number) => {
-    const previous = getEditorRange(draftLyricSegmentsRef.current);
-    const next = updateDraftSegments((segments) =>
-      selectedLyricTarget.kind === 'lyric'
-        ? resizeLyricSegmentStart(segments, selectedLyricTarget.index, deltaMs)
-        : resizeLyricGapStart(
-            segments,
-            selectedLyricTarget.target,
-            deltaMs,
-            editorDurationMs
-          )
-    );
-    const nextRange = getEditorRange(next);
-    return previous && nextRange
-      ? nextRange.startTimeMs - previous.startTimeMs
-      : 0;
-  };
-
-  const resizeSelectedEditorRangeEnd = (deltaMs: number) => {
-    const previous = getEditorRange(draftLyricSegmentsRef.current);
-    const next = updateDraftSegments((segments) =>
-      selectedLyricTarget.kind === 'lyric'
-        ? resizeLyricSegmentEnd(segments, selectedLyricTarget.index, deltaMs)
-        : resizeLyricGapEnd(segments, selectedLyricTarget.target, deltaMs)
-    );
-    const nextRange = getEditorRange(next);
-    return previous && nextRange ? nextRange.endTimeMs - previous.endTimeMs : 0;
-  };
-
-  const handleEditorScrubStart = () => {
-    resumeAfterLyricEditRef.current = playerState.isPlaying;
-    if (resumeAfterLyricEditRef.current) void togglePlayPause();
-  };
-
-  const handleEditorScrubEnd = (positionMs?: number) => {
-    const selected = getEditorRange(draftLyricSegmentsRef.current);
-    if (selected) void seekToPosition(positionMs ?? selected.startTimeMs);
-    if (resumeAfterLyricEditRef.current) void togglePlayPause();
-    resumeAfterLyricEditRef.current = false;
-  };
-
-  const handleEditorTogglePlayPause = async () => {
-    if (playerState.isPlaying) {
-      await togglePlayPause('lyrics-editor');
-      return;
-    }
-    const selected = getEditorRange(draftLyricSegmentsRef.current);
-    if (
-      selected &&
-      (playerState.positionMs < selected.startTimeMs ||
-        playerState.positionMs >= selected.endTimeMs)
-    ) {
-      await seekToPosition(selected.startTimeMs);
-    }
-    await togglePlayPause('lyrics-editor');
-  };
-
-  const handleLyricPress = async (segment: LyricSegment, index: number) => {
+  const handleLyricPress = async (segment: LyricSegment) => {
     pauseLyricsAutoFollow();
-    if (isLyricsEditing) setSelectedLyricTarget({ kind: 'lyric', index });
-    await seekToPosition(segment.startTimeMs);
+    await seekToPosition(segment.startTimeMs + lyricsOffsetMs);
   };
 
-  const handleGapPress = async (
-    target: LyricGapTarget,
-    startTimeMs: number
-  ) => {
+  const handleGapPress = async (_target: LyricGapTarget, startTimeMs: number) => {
     pauseLyricsAutoFollow();
-    if (isLyricsEditing) setSelectedLyricTarget({ kind: 'gap', target });
-    await seekToPosition(startTimeMs);
+    await seekToPosition(startTimeMs + lyricsOffsetMs);
   };
 
   const renderArtistDetails = () => (
@@ -1670,7 +1433,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       artworkOverlayRef={stationaryArtworkRef}
       closing={isPlayerClosing}
       dismissEnabled={!artworkTransition.transitioning && !isArtworkEntrancePending}
-      scrollOffset={showLyricsFull || isLyricsEditing ? undefined : playerScrollOffsetRef}
+      scrollOffset={showLyricsFull ? undefined : playerScrollOffsetRef}
       visible={visible}
       onRequestClose={handleClose}
       onShow={() => {
@@ -1698,14 +1461,12 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
           <View testID="player-header" style={styles.header}>
             {showLyricsFull ? <PlayerChromeFade edge="header" /> : null}
             <PlayerGlassButton
-              accessibilityLabel={
-                isLyricsEditing ? 'Cancelar edição da letra' : 'Fechar player'
-              }
-              onPress={isLyricsEditing ? cancelLyricsEditing : handleClose}
+              accessibilityLabel="Fechar player"
+              onPress={handleClose}
               style={styles.headerIconButton}
             >
               <Ionicons
-                name={isLyricsEditing ? 'close' : 'chevron-down'}
+                name="chevron-down"
                 size={26}
                 color="#FFFFFF"
               />
@@ -1726,39 +1487,33 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
             </View>
             <PlayerGlassButton
               accessibilityLabel={
-                isLyricsEditing
-                  ? 'Confirmar sincronização da letra'
-                  : showLyricsFull
-                    ? 'Editar sincronização da letra'
+                showLyricsFull
+                    ? 'Selecionar provedor da letra'
                     : playbackOrigin?.kind === 'album' ? 'Abrir álbum de origem'
                       : playbackOrigin?.kind === 'playlist' ? 'Abrir playlist de origem'
                         : playbackOrigin?.kind === 'artist' ? 'Abrir artista de origem' : 'Abrir fila de reprodução'
               }
               onPress={
-                isLyricsEditing
-                  ? () => void confirmLyricsEditing()
-                  : showLyricsFull
-                    ? beginLyricsEditing
+                showLyricsFull
+                    ? () => setIsProviderVisible(true)
                     : openPlaybackOrigin
               }
               style={styles.headerIconButton}
               tintColor={
-                isLyricsEditing || showLyricsFull
+                showLyricsFull
                   ? 'rgba(255,255,255,0.28)'
                   : undefined
               }
             >
               <Ionicons
                 name={
-                  isLyricsEditing
-                    ? 'checkmark'
-                    : showLyricsFull
-                      ? 'pencil-outline'
+                  showLyricsFull
+                      ? 'options-outline'
                       : playbackOrigin?.kind === 'album' ? 'disc' : 'list'
                 }
                 size={22}
                 color={
-                  isLyricsEditing || showLyricsFull
+                  showLyricsFull
                     ? '#FFFFFF'
                     : 'rgba(255,255,255,0.7)'
                 }
@@ -1774,9 +1529,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
               contentContainerStyle={[
                 styles.playerScrollContent,
                 { paddingTop: showLyricsFull ? CHROME_OVERLAP : undefined,
-                  paddingBottom: isLyricsEditing
-                  ? Math.max(16, insets.bottom + 8)
-                  : Math.max(24, insets.bottom + 20) },
+                  paddingBottom: Math.max(24, insets.bottom + 20) },
               ]}
               contentInsetAdjustmentBehavior="never"
               nestedScrollEnabled
@@ -1809,7 +1562,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   removeClippedSubviews={false}
                   ref={lyricsListRef}
                   data={lyricTimeline}
-                  extraData={`${activeLineIndex}:${isLyricsEditing}:${isLyricsUserScrolling}:${JSON.stringify(selectedLyricTarget)}`}
+                  extraData={`${activeLineIndex}:${isLyricsUserScrolling}:${playerState.positionMs}:${lyricsOffsetMs}`}
                   keyExtractor={(item) =>
                     item.kind === 'gap'
                       ? item.id
@@ -1835,7 +1588,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                     pauseLyricsAutoFollow();
                   }}
                   onScrollToIndexFailed={({ index, averageItemLength }) => {
-                    if (!showLyricsFull || isLyricsEditing || index !== activeLineIndex ||
+                    if (!showLyricsFull || index !== activeLineIndex ||
                       Date.now() < manualLyricsFollowUntilRef.current || lyricScrollRetriesRef.current >= 8) return;
                     lyricScrollRetriesRef.current += 1;
                     lyricsListRef.current?.scrollToOffset({
@@ -1861,7 +1614,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                         accessibilityLabel={item.text}
                         onPress={() => {
                           if (item.kind === 'lyric') {
-                            void handleLyricPress(item, item.index);
+                            void handleLyricPress(item);
                           } else {
                             void handleGapPress(
                               gapTarget || getGapTarget(lyricTimeline, index),
@@ -1871,29 +1624,12 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                         }}
                         style={[
                           styles.lyricLineButton,
-                          isLyricsEditing && styles.lyricEditorLine,
                         ]}
                       >
-                        {isLyricsEditing ? (
-                          <Text style={styles.lyricTiming}>
-                            {formatTime(item.startTimeMs)}
-                            {'\n'}
-                            {formatTime(item.endTimeMs)}
-                          </Text>
-                        ) : null}
-                        {isLyricsEditing && item.kind === 'lyric' &&
-                          selectedLyricTarget.kind === 'lyric' && selectedLyricTarget.index === item.index ? (
-                          <TextInput
-                            accessibilityLabel={`Texto do trecho ${item.index + 1}`}
-                            multiline
-                            placeholder="Texto da letra"
-                            placeholderTextColor="rgba(255,255,255,0.4)"
-                            onChangeText={(text) => updateDraftLyricText(item.index, text)}
-                            style={[styles.lyricText, styles.lyricEditorText, styles.lyricTextActive, { paddingVertical: 0 }]}
-                            value={item.text}
-                          />
-                        ) : !isLyricsEditing && item.kind === 'lyric' ? (
-                          <SyncedLyricText active={isActive} blurred={blurInactiveLyrics && !isActive && !isLyricsUserScrolling}>
+                        {item.kind === 'lyric' ? (
+                          <SyncedLyricText active={isActive} words={item.words}
+                            positionMs={isActive ? playerState.positionMs - lyricsOffsetMs : 0}
+                            blurred={blurInactiveLyrics && !isActive && !isLyricsUserScrolling}>
                             {item.text}
                           </SyncedLyricText>
                         ) : <Text
@@ -1904,7 +1640,6 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                               : isActive
                                 ? styles.lyricTextActive
                                 : styles.lyricTextUnblurred,
-                            isLyricsEditing && styles.lyricEditorText,
                           ]}
                         >
                           {item.text}
@@ -2050,29 +1785,11 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
               testID="player-controls-block"
               style={styles.playerControlsBlock}
               onLayout={(event) => {
-                if (isLyricsEditing) return;
                 const { y, height } = event.nativeEvent.layout;
                 setControlsBottomOffset(y + height);
               }}
             >
             {showLyricsFull ? <PlayerChromeFade edge="controls" /> : null}
-            {isLyricsEditing ? (
-                <LyricSyncEditor
-                  currentPositionMs={playerState.positionMs}
-                  selectedRange={selectedEditorRange}
-                  totalDurationMs={editorDurationMs}
-                  onMove={moveSelectedEditorRange}
-                  onResizeStart={resizeSelectedEditorRangeStart}
-                  onResizeEnd={resizeSelectedEditorRangeEnd}
-                  onScrubStart={handleEditorScrubStart}
-                  onScrubEnd={handleEditorScrubEnd}
-                  isPlaying={playerState.isPlaying}
-                  onTogglePlayPause={() => void handleEditorTogglePlayPause()}
-                  waveformSeed={currentTrack.title}
-                  segments={draftLyricSegments}
-                  onApplySegments={applyImportedSegments}
-                />
-            ) : (
               <>
                 <View ref={artworkTransition.rowRef} collapsable={false}
                   onLayout={artworkTransition.captureFrames} style={styles.actionPillRow}>
@@ -2121,9 +1838,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   </View>
                 </View>
               </>
-            )}
 
-            {!isLyricsEditing ? (
               <View
                 testID="player-controls-row"
                 style={styles.controlsRow}
@@ -2149,11 +1864,10 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   <MaterialCommunityIcons name="playlist-plus" size={24} color="rgba(255,255,255,0.82)" />
                 </PlayerGlassButton>
               </View>
-            ) : null}
 
             </View>
 
-            {!isLyricsEditing ? renderArtistDetails() : null}
+            {renderArtistDetails()}
             </ScrollView>
             </GestureDetector>
 
@@ -2184,6 +1898,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
             track={currentTrackInput!}
             visible={isPlaylistPickerVisible}
           />
+          <LyricsProviderSheet visible={isProviderVisible} onClose={() => setIsProviderVisible(false)} />
 
           <SheetFrame
             visible={isActionModalVisible}
@@ -2416,25 +2131,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     width: '100%',
   },
-  lyricEditorLine: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 68,
-    paddingVertical: 12,
-    position: 'relative',
-    width: '100%',
-  },
   lyricText: {
     fontSize: 22,
     fontWeight: '600',
     letterSpacing: 0,
     textAlign: 'left',
-    width: '100%',
-  },
-  lyricEditorText: {
-    fontSize: 19,
-    lineHeight: 25,
-    paddingHorizontal: 52,
     width: '100%',
   },
   lyricTextActive: {
@@ -2449,17 +2150,6 @@ const styles = StyleSheet.create({
     letterSpacing: 6,
     textAlign: 'left',
     width: '100%',
-  },
-  lyricTiming: {
-    color: 'rgba(255,255,255,0.58)',
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
-    fontWeight: '600',
-    lineHeight: 15,
-    left: 0,
-    position: 'absolute',
-    textAlign: 'left',
-    width: 52,
   },
   plainLyricRow: {
     paddingVertical: 8,
