@@ -1,9 +1,10 @@
 import * as React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
-import { AppState, Platform } from 'react-native';
+import { Alert, AppState, Platform } from 'react-native';
 import * as Updates from 'expo-updates';
 import { checkForOTAUpdateNow } from '../useOTAUpdates';
 import { prepareTemporaryOTAUpdate } from '../../services/updates/temporaryOTA';
+import { getAppSettings } from '@services';
 
 const mockListeners = new Set<(state: string) => void>();
 const mockRemove = jest.fn();
@@ -27,6 +28,7 @@ jest.mock('expo-updates', () => ({
 jest.mock('../../services/updates/temporaryOTA', () => ({
   prepareTemporaryOTAUpdate: jest.fn(),
 }));
+jest.mock('@services', () => ({ getAppSettings: jest.fn() }));
 
 const flushPromises = () => act(async () => {});
 const enabledOptions = (getNow: () => number) => ({
@@ -58,6 +60,9 @@ describe('useOTAUpdates', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.useFakeTimers();
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    jest.mocked(getAppSettings).mockResolvedValue({ automaticUpdates: true } as any);
     mockListeners.clear();
     mockRemove.mockClear();
     now = 1_000;
@@ -94,6 +99,8 @@ describe('useOTAUpdates', () => {
   });
 
   afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
     (global as typeof globalThis & { __DEV__?: boolean }).__DEV__ =
       originalDev;
     Object.defineProperty(Platform, 'OS', {
@@ -112,9 +119,10 @@ describe('useOTAUpdates', () => {
 
     expect(Updates.checkForUpdateAsync).not.toHaveBeenCalled();
     expect(Updates.fetchUpdateAsync).not.toHaveBeenCalled();
+    expect(prepareTemporaryOTAUpdate).not.toHaveBeenCalled();
   });
 
-  it('checks and fetches on warm resume after one hour without reloading', async () => {
+  it('does not check or download on warm resume even after one hour', async () => {
     act(() => {
       renderOTAUpdates(() => now);
     });
@@ -124,12 +132,13 @@ describe('useOTAUpdates', () => {
     await setAppState('active');
     await flushPromises();
 
-    expect(Updates.checkForUpdateAsync).toHaveBeenCalledTimes(1);
-    expect(Updates.fetchUpdateAsync).toHaveBeenCalledTimes(1);
+    expect(Updates.checkForUpdateAsync).not.toHaveBeenCalled();
+    expect(Updates.fetchUpdateAsync).not.toHaveBeenCalled();
+    expect(prepareTemporaryOTAUpdate).not.toHaveBeenCalled();
     expect(Updates.reloadAsync).not.toHaveBeenCalled();
   });
 
-  it('rate-limits warm resume checks for one hour', async () => {
+  it('waits for the CI notice listener instead of querying on every foreground event', async () => {
     act(() => {
       renderOTAUpdates(() => now);
     });
@@ -140,67 +149,52 @@ describe('useOTAUpdates', () => {
     await flushPromises();
 
     expect(Updates.checkForUpdateAsync).not.toHaveBeenCalled();
+    expect(prepareTemporaryOTAUpdate).not.toHaveBeenCalled();
+    await act(async () => { jest.advanceTimersByTime(60_000); });
+    expect(prepareTemporaryOTAUpdate).toHaveBeenCalledTimes(1);
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+    expect(Updates.checkForUpdateAsync).not.toHaveBeenCalled();
   });
 
-  it('deduplicates in-flight checks', async () => {
-    let resolveCheck: (
-      value: Awaited<ReturnType<typeof Updates.checkForUpdateAsync>>
-    ) => void = () => {};
-    jest.mocked(Updates.checkForUpdateAsync).mockReturnValue(
-      new Promise((resolve) => {
-        resolveCheck = resolve;
-      })
-    );
+  it('deduplicates in-flight CI notices and never downloads them before a restart', async () => {
+    let resolvePointer!: (value: Awaited<ReturnType<typeof prepareTemporaryOTAUpdate>>) => void;
+    jest.mocked(prepareTemporaryOTAUpdate).mockReturnValue(new Promise((resolve) => { resolvePointer = resolve; }));
 
     act(() => {
       renderOTAUpdates(() => now);
     });
 
-    await setAppState('background');
-    now += 60 * 60 * 1000;
-    await setAppState('active');
-    now += 60 * 60 * 1000;
-    await setAppState('background');
-    await setAppState('active');
-
-    expect(Updates.checkForUpdateAsync).toHaveBeenCalledTimes(1);
+    await act(async () => { jest.advanceTimersByTime(60_000); });
+    await act(async () => { jest.advanceTimersByTime(60_000); });
+    expect(prepareTemporaryOTAUpdate).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      resolveCheck({ isAvailable: true } as Awaited<
-        ReturnType<typeof Updates.checkForUpdateAsync>
-      >);
+      resolvePointer({ status: 'restart-required', runId: 1, expiresAt: '2026-10-01T20:00:00.000Z' });
     });
     await flushPromises();
 
-    expect(Updates.fetchUpdateAsync).toHaveBeenCalledTimes(1);
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+    expect(Updates.checkForUpdateAsync).not.toHaveBeenCalled();
+    expect(Updates.fetchUpdateAsync).not.toHaveBeenCalled();
   });
 
-  it('does not fetch if the app backgrounds while checking', async () => {
-    let resolveCheck: (
-      value: Awaited<ReturnType<typeof Updates.checkForUpdateAsync>>
-    ) => void = () => {};
-    jest.mocked(Updates.checkForUpdateAsync).mockReturnValue(
-      new Promise((resolve) => {
-        resolveCheck = resolve;
-      })
-    );
+  it('does not display a late notice or fetch after entering the background', async () => {
+    let resolvePointer!: (value: Awaited<ReturnType<typeof prepareTemporaryOTAUpdate>>) => void;
+    jest.mocked(prepareTemporaryOTAUpdate).mockReturnValue(new Promise((resolve) => { resolvePointer = resolve; }));
 
     act(() => {
       renderOTAUpdates(() => now);
     });
 
-    await setAppState('background');
-    now += 60 * 60 * 1000;
-    await setAppState('active');
+    await act(async () => { jest.advanceTimersByTime(60_000); });
     await setAppState('background');
     await act(async () => {
-      resolveCheck({ isAvailable: true } as Awaited<
-        ReturnType<typeof Updates.checkForUpdateAsync>
-      >);
+      resolvePointer({ status: 'restart-required', runId: 1, expiresAt: '2026-10-01T20:00:00.000Z' });
     });
     await flushPromises();
 
     expect(Updates.fetchUpdateAsync).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
   });
 
   it('removes the AppState listener on unmount', () => {

@@ -10,8 +10,10 @@ Expo Updates protocol from its GitHub runner, and exposes that runner through a
 temporary Cloudflare Quick Tunnel. GitHub publishes the tunnel URL, runtime, and
 expiry in the `ota-window` release asset `openfy-ota-pointer.json`. The server
 stays available for 10 minutes after that pointer is published; CI then marks the
-pointer inactive and stops both processes. The pointer is polled by the app while
-it is open, and is also checked when the app launches or returns to the foreground.
+pointer inactive and stops both processes. The pointer is polled once per minute
+while the app is open. Launching or returning to the foreground does not query
+the pointer or trigger an Expo update check. This existing transport is polling,
+not a push notification service.
 
 Startup verifies the local server and then the public tunnel against the same
 runtime and update ID. The CI tunnel uses HTTP/2 over IPv4 and retries startup up
@@ -30,8 +32,15 @@ The native URL override is experimental in `expo-updates`. The first installatio
 after this change must use the new IPA once; earlier installed builds cannot gain
 the native override support through JavaScript alone. When CI publishes an active
 window, the app prepares its temporary URL and asks to be fully closed and opened
-again. On that next launch, the installed bundle opens first, then checks the
-temporary server from JavaScript. The update screen shows checking, downloading
+again. The app persists the validated CI notice locally, including its run,
+runtime, update ID, endpoint, and expiry. On that next launch, the installed
+bundle reads only this local notice. With no pending notice it opens normally
+without a network update check. With a pending notice it checks the already
+prepared temporary server, without re-fetching the pointer. The notice is cleared
+once its expected update ID is the running bundle, so later launches do not check
+again until another CI notice is discovered. A failed or deferred download keeps
+the notice for retry, while the CI window remains available.
+The update screen shows checking, downloading
 (with native download progress when available), and applying before reloading
 the matching bundle. Users can retry a failure or continue using the installed
 version; dismissing the screen never triggers a late automatic restart. A

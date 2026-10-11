@@ -7,6 +7,7 @@ export const TEMPORARY_OTA_POINTER_URL =
   'https://github.com/ompo-dev/openfy/releases/download/ota-window/openfy-ota-pointer.json';
 
 const CONFIGURED_UPDATE_URL_KEY = 'openfy_temporary_ota_url_v1';
+const PENDING_UPDATE_KEY = 'openfy_pending_temporary_ota_v1';
 let configuredDuringThisProcess: string | null = null;
 
 type TemporaryOTAPointer = {
@@ -30,6 +31,7 @@ type PrepareTemporaryOTAOptions = {
   fetcher?: typeof fetch;
   now?: () => number;
   pointerUrl?: string;
+  pendingOnly?: boolean;
 };
 
 const isTemporaryUpdateUrl = (value: unknown): value is string => {
@@ -67,6 +69,32 @@ const parsePointer = (value: unknown): TemporaryOTAPointer | null => {
   return pointer as TemporaryOTAPointer;
 };
 
+const clearPendingUpdate = async (runId: number) => {
+  const raw = await AsyncStorage.getItem(PENDING_UPDATE_KEY);
+  let pointer: TemporaryOTAPointer | null;
+  try { pointer = raw ? parsePointer(JSON.parse(raw)) : null; } catch { return; }
+  if (pointer?.runId === runId) {
+    await AsyncStorage.removeItem(PENDING_UPDATE_KEY);
+  }
+};
+
+/** Opening the app reads only this local CI notice, never the release endpoint. */
+export async function getPendingTemporaryOTAUpdate(): Promise<TemporaryOTAPointer | null> {
+  const raw = await AsyncStorage.getItem(PENDING_UPDATE_KEY);
+  if (!raw) return null;
+  let pointer: TemporaryOTAPointer | null;
+  try { pointer = parsePointer(JSON.parse(raw)); } catch { pointer = null; }
+  if (!pointer) {
+    await AsyncStorage.removeItem(PENDING_UPDATE_KEY);
+    return null;
+  }
+  if (pointer.updateId && pointer.updateId.toLowerCase() === Updates.updateId?.toLowerCase()) {
+    await clearPendingUpdate(pointer.runId);
+    return null;
+  }
+  return pointer;
+}
+
 export async function prepareTemporaryOTAUpdate(
   source: 'automatic' | 'manual',
   options: PrepareTemporaryOTAOptions = {}
@@ -75,23 +103,27 @@ export async function prepareTemporaryOTAUpdate(
   const now = options.now ?? Date.now;
   const pointerUrl = options.pointerUrl ?? TEMPORARY_OTA_POINTER_URL;
   const startedAt = now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8_000);
   let pointer: TemporaryOTAPointer | null;
-  try {
-    const response = await fetcher(`${pointerUrl}?_=${startedAt}`, {
-      headers: { 'cache-control': 'no-cache' },
-      signal: controller.signal,
-    });
-    if (response.status === 404 || response.status === 410) {
-      return { status: 'inactive' };
+  if (options.pendingOnly) {
+    pointer = await getPendingTemporaryOTAUpdate();
+  } else {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8_000);
+    try {
+      const response = await fetcher(`${pointerUrl}?_=${startedAt}`, {
+        headers: { 'cache-control': 'no-cache' },
+        signal: controller.signal,
+      });
+      if (response.status === 404 || response.status === 410) {
+        return { status: 'inactive' };
+      }
+      if (!response.ok) {
+        throw new Error(`OTA pointer request failed with HTTP ${response.status}.`);
+      }
+      pointer = parsePointer(await response.json());
+    } finally {
+      clearTimeout(timeout);
     }
-    if (!response.ok) {
-      throw new Error(`OTA pointer request failed with HTTP ${response.status}.`);
-    }
-    pointer = parsePointer(await response.json());
-  } finally {
-    clearTimeout(timeout);
   }
   const expiresAt = pointer ? Date.parse(pointer.expiresAt) : 0;
   if (
@@ -114,6 +146,7 @@ export async function prepareTemporaryOTAUpdate(
     return { status: 'incompatible', reason: 'runtime-version-mismatch' };
   }
   if (pointer.updateId && pointer.updateId.toLowerCase() === Updates.updateId?.toLowerCase()) {
+    await clearPendingUpdate(pointer.runId);
     log.updates('temporary update is already installed', {
       source,
       runId: pointer.runId,
@@ -124,6 +157,10 @@ export async function prepareTemporaryOTAUpdate(
     return { status: 'already-installed', runId: pointer.runId, expiresAt: pointer.expiresAt };
   }
 
+  const pending = JSON.stringify(pointer);
+  if (await AsyncStorage.getItem(PENDING_UPDATE_KEY) !== pending) {
+    await AsyncStorage.setItem(PENDING_UPDATE_KEY, pending);
+  }
   const storedUrl = await AsyncStorage.getItem(CONFIGURED_UPDATE_URL_KEY);
   if (storedUrl === pointer.updateUrl && configuredDuringThisProcess !== pointer.updateUrl) {
     log.updates('temporary update endpoint already configured', {

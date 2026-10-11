@@ -6,12 +6,9 @@ import { getAppSettings } from '@services';
 import { log } from '../utils/appLogger';
 import { prepareTemporaryOTAUpdate } from '../services/updates/temporaryOTA';
 
-const MIN_UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
-
 type UpdateCheckerOptions = {
   enabled?: boolean;
   canUseUpdates?: () => boolean;
-  getNow?: () => number;
 };
 
 export type OTAUpdateProgressHandlers = {
@@ -59,7 +56,8 @@ const updateContext = () => ({
 export const checkForOTAUpdateNow = async (
   source: 'manual' | 'automatic' = 'manual',
   canContinue: () => boolean = () => true,
-  progress: OTAUpdateProgressHandlers = {}
+  progress: OTAUpdateProgressHandlers = {},
+  options: { pendingOnly?: boolean } = {}
 ): Promise<OTAUpdateCheckResult> => {
   if (!canUseUpdates()) {
     log.updates('check unavailable in this runtime', {
@@ -75,7 +73,7 @@ export const checkForOTAUpdateNow = async (
   log.updates('check started', { source, ...updateContext() });
 
   try {
-    const temporaryUpdate = await prepareTemporaryOTAUpdate(source);
+    const temporaryUpdate = await prepareTemporaryOTAUpdate(source, options);
     if (temporaryUpdate.status === 'inactive') {
       return { status: 'window-inactive' };
     }
@@ -164,18 +162,15 @@ export const checkForOTAUpdateNow = async (
 };
 
 export function useOTAUpdates(options: UpdateCheckerOptions = {}) {
-  const [isDownloading, setIsDownloading] = React.useState(false);
   const [lastResult, setLastResult] = React.useState<OTAUpdateCheckResult | null>(null);
   const canCheckForUpdates = options.canUseUpdates ?? canUseUpdates;
-  const getNow = options.getNow ?? Date.now;
-  const lastCheckAtRef = React.useRef(getNow());
-  const inFlightRef = React.useRef<Promise<void> | null>(null);
   const pointerCheckRef = React.useRef<Promise<void> | null>(null);
   const promptedRunIdRef = React.useRef<number | null>(null);
   const activeRef = React.useRef(AppState.currentState === 'active');
 
   React.useEffect(() => {
     if (options.enabled === false || !canCheckForUpdates()) return;
+    activeRef.current = AppState.currentState === 'active';
 
     const discoverTemporaryUpdate = () => {
       if (!activeRef.current || pointerCheckRef.current) return;
@@ -184,11 +179,13 @@ export function useOTAUpdates(options: UpdateCheckerOptions = {}) {
           const settings = await getAppSettings();
           if (!settings.automaticUpdates || !activeRef.current) return;
           const result = await prepareTemporaryOTAUpdate('automatic');
+          if (!activeRef.current) return;
           if (
-            result.status === 'restart-required' &&
+            (result.status === 'restart-required' || result.status === 'ready') &&
             promptedRunIdRef.current !== result.runId
           ) {
             promptedRunIdRef.current = result.runId;
+            setLastResult({ status: 'restart-required', expiresAt: result.expiresAt });
             Alert.alert(
               'Atualização do Openfy pronta',
               'Feche o app completamente e abra novamente enquanto a janela do CI estiver ativa.'
@@ -203,58 +200,22 @@ export function useOTAUpdates(options: UpdateCheckerOptions = {}) {
       pointerCheckRef.current = check;
     };
 
-    discoverTemporaryUpdate();
+    // Listen for new CI notices while the app is open, not on launch/resume.
     const pointerInterval = setInterval(discoverTemporaryUpdate, 60_000);
-
-    const runUpdateCheck = () => {
-      const now = getNow();
-      if (now - lastCheckAtRef.current < MIN_UPDATE_CHECK_INTERVAL_MS) return;
-      if (inFlightRef.current) return;
-
-      lastCheckAtRef.current = now;
-      const check = (async () => {
-        try {
-          const settings = await getAppSettings();
-          if (!settings.automaticUpdates || !activeRef.current) return;
-          if (AppState.currentState !== 'active') return;
-          const result = await checkForOTAUpdateNow(
-            'automatic',
-            () => activeRef.current && AppState.currentState === 'active',
-            {
-              onDownloading: () => setIsDownloading(true),
-              onDownloadFinished: () => setIsDownloading(false),
-            }
-          );
-          setLastResult(result);
-          log.updates('automatic check finished', { status: result.status });
-        } catch (error) {
-          log.error('automatic update check failed', error);
-        }
-      })().finally(() => {
-        if (inFlightRef.current === check) {
-          inFlightRef.current = null;
-        }
-      });
-
-      inFlightRef.current = check;
-    };
 
     const subscription = AppState.addEventListener(
       'change',
       (nextState: AppStateStatus) => {
         activeRef.current = nextState === 'active';
-        if (nextState === 'active') {
-          discoverTemporaryUpdate();
-          runUpdateCheck();
-        }
       }
     );
 
     return () => {
       clearInterval(pointerInterval);
+      activeRef.current = false;
       subscription.remove();
     };
-  }, [canCheckForUpdates, getNow, options.enabled]);
+  }, [canCheckForUpdates, options.enabled]);
 
-  return { isDownloading, lastResult };
+  return { isDownloading: false, lastResult };
 }

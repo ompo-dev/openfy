@@ -4,6 +4,7 @@ import * as Updates from 'expo-updates';
 import { getAppSettings } from '@services';
 import { checkForOTAUpdateNow, type OTAUpdateCheckResult } from '../useOTAUpdates';
 import { useOTAStartupUpdate } from '../useOTAStartupUpdate';
+import { getPendingTemporaryOTAUpdate } from '../../services/updates/temporaryOTA';
 
 jest.mock('expo-constants', () => ({ __esModule: true, default: { appOwnership: 'standalone' } }));
 jest.mock('expo-updates', () => ({
@@ -11,6 +12,7 @@ jest.mock('expo-updates', () => ({
 }));
 jest.mock('@services', () => ({ getAppSettings: jest.fn() }));
 jest.mock('../useOTAUpdates', () => ({ checkForOTAUpdateNow: jest.fn() }));
+jest.mock('../../services/updates/temporaryOTA', () => ({ getPendingTemporaryOTAUpdate: jest.fn() }));
 
 const nativeState = () => ({ isStartupProcedureRunning: false, isChecking: false,
   isDownloading: false, isUpdatePending: false, downloadProgress: undefined });
@@ -31,6 +33,7 @@ describe('startup OTA screen', () => {
     jest.mocked(getAppSettings).mockResolvedValue({ automaticUpdates: true } as any);
     jest.mocked(checkForOTAUpdateNow).mockResolvedValue({ status: 'window-inactive' });
     jest.mocked(Updates.reloadAsync).mockResolvedValue(undefined);
+    jest.mocked(getPendingTemporaryOTAUpdate).mockResolvedValue({ runId: 123 } as any);
   });
   afterEach(() => {
     (globalThis as any).__DEV__ = originalDev;
@@ -39,14 +42,32 @@ describe('startup OTA screen', () => {
     jest.restoreAllMocks();
   });
 
-  it('waits for the interface and skips inactive CI windows without restarting', async () => {
+  it('opens immediately without a network check when there is no saved CI notice', async () => {
+    jest.mocked(getPendingTemporaryOTAUpdate).mockResolvedValue(null);
     const screen = await renderHook((ready) => useOTAStartupUpdate(ready), { initialProps: false });
     expect(checkForOTAUpdateNow).not.toHaveBeenCalled();
     await screen.rerender(true);
-    expect(checkForOTAUpdateNow).toHaveBeenCalledTimes(1);
+    expect(checkForOTAUpdateNow).not.toHaveBeenCalled();
     expect(screen.result.current.phase).toBe('idle');
     expect(screen.result.current.settled).toBe(true);
     expect(Updates.reloadAsync).not.toHaveBeenCalled();
+  });
+
+  it('uses only the saved CI notice when startup has a pending update', async () => {
+    const screen = await renderHook(() => useOTAStartupUpdate(true));
+    expect(checkForOTAUpdateNow).toHaveBeenCalledWith('automatic', expect.any(Function),
+      expect.objectContaining({ onDownloading: expect.any(Function) }), { pendingOnly: true });
+    expect(screen.result.current.settled).toBe(true);
+  });
+
+  it('applies an already downloaded update without rediscovering it', async () => {
+    jest.mocked(getPendingTemporaryOTAUpdate).mockResolvedValue(null);
+    setNative({ isUpdatePending: true });
+    const screen = await renderHook(() => useOTAStartupUpdate(true));
+    expect(screen.result.current.phase).toBe('applying');
+    expect(checkForOTAUpdateNow).not.toHaveBeenCalled();
+    await act(() => jest.advanceTimersByTimeAsync(150));
+    expect(Updates.reloadAsync).toHaveBeenCalledTimes(1);
   });
 
   it('shows real progress and paints the applying state before restarting', async () => {

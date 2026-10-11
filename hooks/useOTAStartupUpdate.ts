@@ -5,6 +5,7 @@ import * as Updates from 'expo-updates';
 import { getAppSettings } from '@services';
 import { checkForOTAUpdateNow } from './useOTAUpdates';
 import { log } from '../utils/appLogger';
+import { getPendingTemporaryOTAUpdate } from '../services/updates/temporaryOTA';
 
 export type AppUpdatePhase = 'idle' | 'checking' | 'downloading' | 'applying' | 'error';
 
@@ -17,7 +18,7 @@ export function useOTAStartupUpdate(ready: boolean) {
     native.isStartupProcedureRunning || native.isDownloading || native.isUpdatePending
   ));
   const [phase, setPhase] = React.useState<AppUpdatePhase>(
-    controlledStartup || startupNativeRef.current ? 'checking' : 'idle'
+    startupNativeRef.current ? 'checking' : 'idle'
   );
   const [settled, setSettled] = React.useState(!controlledStartup && !startupNativeRef.current);
   const [attempt, setAttempt] = React.useState(0);
@@ -77,12 +78,23 @@ export function useOTAStartupUpdate(ready: boolean) {
           setSettled(true);
           return;
         }
+        const pending = await getPendingTemporaryOTAUpdate();
+        if (!canContinue()) return;
+        if (native.isUpdatePending) {
+          await applyUpdate(generation);
+          return;
+        }
+        if (!pending) {
+          setPhase('idle');
+          setSettled(true);
+          return;
+        }
         setPhase('checking');
         const result = await checkForOTAUpdateNow('automatic', canContinue, {
           onDownloading: () => {
             if (canContinue()) setPhase('downloading');
           },
-        });
+        }, { pendingOnly: true });
         if (!mountedRef.current || generation !== generationRef.current) return;
         if (result.status === 'downloaded') {
           await applyUpdate(generation);
@@ -100,7 +112,7 @@ export function useOTAStartupUpdate(ready: boolean) {
       if (inFlightRef.current === run) inFlightRef.current = null;
     });
     inFlightRef.current = run;
-  }, [ready, appActive, controlledStartup, settled, attempt, applyUpdate]);
+  }, [ready, appActive, controlledStartup, settled, attempt, applyUpdate, native.isUpdatePending]);
 
   // Older installed binaries still use native ON_LOAD. Observe that download
   // without issuing a competing check, until the next native build is installed.

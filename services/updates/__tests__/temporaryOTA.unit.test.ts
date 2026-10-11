@@ -1,13 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Updates from 'expo-updates';
 import { Platform } from 'react-native';
-import { prepareTemporaryOTAUpdate } from '../temporaryOTA';
+import { getPendingTemporaryOTAUpdate, prepareTemporaryOTAUpdate } from '../temporaryOTA';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
   default: {
     getItem: jest.fn(),
     setItem: jest.fn(),
+    removeItem: jest.fn(),
   },
 }));
 
@@ -21,11 +22,19 @@ jest.mock('expo-updates', () => ({
 
 describe('prepareTemporaryOTAUpdate', () => {
   const now = Date.parse('2026-10-01T12:00:00.000Z');
+  const storage = new Map<string, string>();
+  const pendingPointer = {
+    active: true, updateUrl: 'https://pending-ci.trycloudflare.com/api/manifest',
+    runtimeVersion: '1.0.2', updateId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', runId: 150,
+    expiresAt: '2026-10-01T12:10:00.000Z',
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.mocked(AsyncStorage.getItem).mockResolvedValue(null);
-    jest.mocked(AsyncStorage.setItem).mockResolvedValue(undefined);
+    storage.clear();
+    jest.mocked(AsyncStorage.getItem).mockImplementation(async (key) => storage.get(key) ?? null);
+    jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => { storage.set(key, value); });
+    jest.mocked(AsyncStorage.removeItem).mockImplementation(async (key) => { storage.delete(key); });
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
   });
 
@@ -62,6 +71,7 @@ describe('prepareTemporaryOTAUpdate', () => {
       'openfy_temporary_ota_url_v1',
       updateUrl
     );
+    expect(JSON.parse(storage.get('openfy_pending_temporary_ota_v1')!)).toMatchObject({ runId: 123, updateUrl });
   });
 
   it('rejects a tunnel for a different runtime and does not change native settings', async () => {
@@ -110,7 +120,43 @@ describe('prepareTemporaryOTAUpdate', () => {
       expiresAt: '2026-10-01T12:10:05.000Z',
     });
     expect(Updates.setUpdateURLAndRequestHeadersOverride).not.toHaveBeenCalled();
-    expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('does not contact the CI endpoint when there is no locally saved update', async () => {
+    const fetcher = jest.fn();
+    await expect(prepareTemporaryOTAUpdate('automatic', {
+      pendingOnly: true, fetcher, now: () => now,
+    })).resolves.toEqual({ status: 'inactive' });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('reuses the saved CI notice across launches without re-fetching the pointer', async () => {
+    storage.set('openfy_pending_temporary_ota_v1', JSON.stringify(pendingPointer));
+    storage.set('openfy_temporary_ota_url_v1', pendingPointer.updateUrl);
+    const fetcher = jest.fn();
+    await expect(prepareTemporaryOTAUpdate('automatic', {
+      pendingOnly: true, fetcher, now: () => now,
+    })).resolves.toMatchObject({ status: 'ready', runId: 150 });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await getPendingTemporaryOTAUpdate()).toEqual(pendingPointer);
+  });
+
+  it('clears the notice after the expected bundle is running and performs no further network check', async () => {
+    storage.set('openfy_pending_temporary_ota_v1', JSON.stringify({
+      ...pendingPointer, updateId: Updates.updateId,
+    }));
+    expect(await getPendingTemporaryOTAUpdate()).toBeNull();
+    expect(storage.has('openfy_pending_temporary_ota_v1')).toBe(false);
+    const fetcher = jest.fn();
+    await prepareTemporaryOTAUpdate('automatic', { pendingOnly: true, fetcher, now: () => now });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('ignores a corrupt local notice without blocking startup', async () => {
+    storage.set('openfy_pending_temporary_ota_v1', '{broken');
+    expect(await getPendingTemporaryOTAUpdate()).toBeNull();
+    expect(storage.has('openfy_pending_temporary_ota_v1')).toBe(false);
   });
 
   it('ignores expired and non-HTTPS pointers', async () => {
