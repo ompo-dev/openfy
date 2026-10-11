@@ -15,6 +15,7 @@ export type AppSettings = {
   blurInactiveLyrics: boolean;
   captureLogs: boolean;
   verboseLogs: boolean;
+  developerTools: boolean;
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -29,6 +30,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   blurInactiveLyrics: true,
   captureLogs: true,
   verboseLogs: false,
+  developerTools: true,
 };
 
 const STORAGE_KEY = 'openfy_app_settings_v1';

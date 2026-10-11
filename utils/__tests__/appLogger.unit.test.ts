@@ -23,15 +23,16 @@ describe('app logger', () => {
     clearLogBuffer();
   });
 
-  it('keeps the newest entries first and bounds the in-memory buffer', () => {
-    for (let index = 0; index < 505; index += 1) {
+  it('keeps the newest entries first without discarding earlier events after 500 entries', () => {
+    for (let index = 0; index < 1_505; index += 1) {
       log.player(`event-${index}`);
     }
 
     const entries = getLogBuffer();
-    expect(entries).toHaveLength(500);
-    expect(entries[0].event).toBe('event-504');
-    expect(entries[499].event).toBe('event-5');
+    expect(entries).toHaveLength(1_505);
+    expect(entries[0].event).toBe('event-1504');
+    expect(entries[1_504].event).toBe('event-0');
+    expect(formatLogBuffer()).toContain('event-0');
   });
 
   it('redacts secrets and URL query values before storing details', () => {

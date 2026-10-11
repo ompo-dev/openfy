@@ -133,7 +133,7 @@ export const Settings = () => {
   const [storageVisible, setStorageVisible] = React.useState(false);
   const [updateStatus, setUpdateStatus] = React.useState('');
   const [checkingUpdate, setCheckingUpdate] = React.useState(false);
-  const [developerVisible, setDeveloperVisible] = React.useState(false);
+  const developerVisible = settings.developerTools;
   const [qualityPicker, setQualityPicker] = React.useState<'streamingQuality' | 'downloadQuality' | null>(null);
   const [diagnosticsText, setDiagnosticsText] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState('');
@@ -457,10 +457,10 @@ export const Settings = () => {
         <Section title="DIAGNÓSTICOS">
           <SettingRow icon="code-slash" label="Ferramentas de desenvolvimento"
             description="Logs, tempos de carregamento e estado do motor de áudio."
-            value={developerVisible} onValueChange={setDeveloperVisible} />
+            value={developerVisible} onValueChange={change('developerTools')} />
           {developerVisible ? <>
           <SettingRow
-            description="Guarda até 500 eventos nesta sessão, apenas neste aparelho."
+            description="Guarda todos os eventos desta sessão, apenas neste aparelho."
             icon="document-text"
             label="Capturar logs"
             onValueChange={change('captureLogs')}

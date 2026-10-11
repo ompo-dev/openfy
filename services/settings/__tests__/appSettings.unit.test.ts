@@ -74,6 +74,14 @@ describe('appSettings', () => {
     unsubscribe();
   });
 
+  it('keeps developer tools enabled by default and persists an explicit change', async () => {
+    expect((await getAppSettings()).developerTools).toBe(true);
+    await updateAppSettings({ developerTools: false });
+    expect((await getAppSettings()).developerTools).toBe(false);
+    const stored = JSON.parse((await AsyncStorage.getItem('openfy_app_settings_v1'))!);
+    expect(normalizeAppSettings(stored).developerTools).toBe(false);
+  });
+
   it('preserves rapid changes to different preferences', async () => {
     await Promise.all([
       updateAppSettings({ personalizedHome: false }),

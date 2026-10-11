@@ -20,7 +20,6 @@ export type LogEntry = {
   meta?: string;
 };
 
-const LOG_CAPACITY = 500;
 const META_LIMIT = 1_000;
 const isDevelopment =
   typeof __DEV__ !== 'undefined' &&
@@ -128,7 +127,6 @@ const emit = (category: LogCategory, event: string, meta?: unknown) => {
     }
   }
   if (!logConfig.capture) return;
-  if (ring.length >= LOG_CAPACITY) ring.shift();
   ring.push({ ts: stamp(), category, event, ...(text ? { meta: text } : {}) });
 };
 
