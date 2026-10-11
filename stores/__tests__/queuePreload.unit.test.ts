@@ -31,6 +31,7 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   removeItem: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('@services', () => ({
+  ...jest.requireActual('../../services/audio/playbackDuration'),
   DEFAULT_STATE: {
     isPlaying: false,
     isBuffering: false,
@@ -78,6 +79,7 @@ jest.mock('../../services/library/artistProfilePrefetch', () => ({
   prefetchTrackArtistData: jest.fn(),
 }));
 jest.mock('../../services/library/playerAlbum', () => ({ prefetchTrackAlbumData: jest.fn() }));
+jest.mock('../../services/search/trackCredits', () => ({ resolveTrackCredits: jest.fn().mockResolvedValue({ artists: [] }) }));
 
 const realPlayTrack = usePlayerStore.getState().playTrack;
 let queueTestRun = 0;
@@ -148,7 +150,10 @@ describe('queue preload window', () => {
       track.spotifyId = `queue-test-${queueTestRun}-${index}`;
     });
     (getDownloadedTrack as jest.Mock).mockResolvedValue(null);
-    (loadAndPlay as jest.Mock).mockResolvedValue(true);
+    jest.mocked(loadAndPlay).mockImplementation(async (_source, onStatusUpdate) => {
+      onStatusUpdate?.({ ...DEFAULT_STATE, isPlaying: true, isLoaded: true });
+      return true;
+    });
     (resolveAudioUrl as jest.Mock).mockImplementation((title: string) =>
       Promise.resolve({ url: `https://media.test/${title}.m4a`, format: 'm4a' })
     );
@@ -643,6 +648,8 @@ describe('queue preload window', () => {
 
     finishLoad(true);
     await transition;
+    expect(prefetchTrackArtistData).not.toHaveBeenCalled();
+    jest.mocked(loadAndPlay).mock.calls[0][1]?.({ ...DEFAULT_STATE, isPlaying: true, isLoaded: true });
     expect(prefetchTrackArtistData).toHaveBeenCalledWith(usePlayerStore.getState().currentTrack);
     expect(usePlayerStore.getState().queueSourceId).toBe('artist:target');
   });

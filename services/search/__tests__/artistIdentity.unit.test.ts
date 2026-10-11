@@ -153,4 +153,23 @@ describe('YouTube channel identities', () => {
       artists: [{ id: '1234567890123456789012', name: 'Sid' }],
     })).toEqual([official]);
   });
+
+  it('links a trusted Spotify participant using a matching recording with an explicit channel credit', async () => {
+    const credit = { id: '1234567890123456789012', name: 'Guest' };
+    search.mockResolvedValue({ songs: { contents: [{ id: 'lmnopqrstuv', title: 'Dueto',
+      duration: { seconds: 180 }, artists: [{ name: 'Guest', channel_id: other }] }] } });
+    expect(await resolveTrackArtist(credit, { title: 'Dueto', durationMs: 180_000,
+      youtubeVideoId: videoId, artists: [credit] }))
+      .toEqual({ id: toYouTubeMusicArtistRouteId(other, 'Guest'), name: 'Guest' });
+    expect(search).toHaveBeenCalledWith('Guest Dueto', { type: 'song' });
+  });
+
+  it('does not use a homonymous artist result or a different recording as a credit channel', async () => {
+    const credit = { id: '1234567890123456789012', name: 'Guest' };
+    search.mockResolvedValue({ songs: { contents: [{ id: 'lmnopqrstuv', title: 'Other song',
+      duration: { seconds: 180 }, artists: [{ name: 'Guest', channel_id: other }] }] },
+      artists: { contents: [{ id: other, name: 'Guest' }] } });
+    expect(await resolveTrackArtist(credit, { title: 'Dueto', durationMs: 180_000,
+      youtubeVideoId: videoId, artists: [credit] })).toEqual({ id: '', name: 'Guest' });
+  });
 });

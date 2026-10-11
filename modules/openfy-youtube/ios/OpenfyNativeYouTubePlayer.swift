@@ -91,7 +91,7 @@ public final class OpenfyNativeYouTubePlayer {
     try audioSession.setActive(true)
 
     // 2. Build virtual openfy-stream URL to route AVAsset requests into our ResourceLoader delegate
-    guard let virtualURL = URL(string: "openfy-stream://media/\(descriptor.videoId)") else {
+    guard let virtualURL = URL(string: "openfy-stream://media/\(descriptor.videoId).m4a") else {
       throw StreamTransportError.invalidVirtualURL
     }
 
@@ -109,9 +109,11 @@ public final class OpenfyNativeYouTubePlayer {
     asset.resourceLoader.setDelegate(loader, queue: loader.queue)
 
     let item = AVPlayerItem(asset: asset)
-    item.preferredForwardBufferDuration = 5
+    item.preferredForwardBufferDuration = 2
     let player = AVPlayer(playerItem: item)
-    player.automaticallyWaitsToMinimizeStalling = true
+    // AVFoundation cannot predict delivery through a custom resource loader.
+    // Automatic stall minimization can wait for the entire progressive file.
+    player.automaticallyWaitsToMinimizeStalling = false
     self.player = player
 
     playbackEndObserver = NotificationCenter.default.addObserver(
@@ -162,7 +164,7 @@ public final class OpenfyNativeYouTubePlayer {
     )
     try await setChannelMode(mono ? "mono" : "stereo")
     guard self.player === player else { return }
-    player.play()
+    player.playImmediately(atRate: 1)
   }
 
   public func pause() {
@@ -172,7 +174,7 @@ public final class OpenfyNativeYouTubePlayer {
 
   public func resume() {
     didJustFinish = false
-    player?.play()
+    player?.playImmediately(atRate: 1)
     updateNowPlayingInfo()
   }
 

@@ -45,6 +45,15 @@ describe('catalogLibrary', () => {
     await expect(getCatalogTracks()).resolves.toEqual([saved]);
   });
 
+  it('persists complete ordered credits with both Spotify provenance and a native channel', async () => {
+    const artists = [{ id: 'primary', name: 'Primary' },
+      { id: 'ytartist_UCchannel~Guest', name: 'Guest', spotifyId: 'c'.repeat(22) }];
+    await upsertCatalogTracks([{ spotifyId: 'verified-credits', title: 'Dueto',
+      artistName: 'Primary, Guest', albumName: '', imageURL: '', duration_ms: 180000,
+      artists, artistCreditsVersion: 2 }]);
+    expect((await getCatalogTracks())[0]).toMatchObject({ artists, artistCreditsVersion: 2 });
+  });
+
   it('preserves added order and enriches an existing catalog item', async () => {
     const [first] = await upsertCatalogTracks([
       {

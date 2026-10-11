@@ -277,7 +277,7 @@ describe('resolveSpotifyTrackVideoId', () => {
       const pending = resolveSpotifyTrackVideoId('lost_connection', 'Indecisao', ['Sotam'], 159000);
       await jest.runAllTimersAsync();
       expect(await pending).toMatchObject({ status: 'resolved', videoId: '_MyOuFWnPPY' });
-      expect(search.mock.calls[0]).toEqual(search.mock.calls[1]);
+      expect(search.mock.calls.filter(([query]) => query === 'Sotam Indecisao')).toHaveLength(2);
     } finally { jest.useRealTimers(); }
   });
 
@@ -318,5 +318,35 @@ describe('resolveSpotifyTrackVideoId', () => {
     }] }), getChannel: jest.fn().mockRejectedValue(new Error('unavailable')) });
     expect(await resolveSpotifyTrackVideoId('taros-offline-channel', 'Taros', ['Pedro Qualy', 'Sotam'], 269785))
       .toMatchObject({ status: 'resolved', videoId: 'LIXckjwbPdY' });
+  });
+
+  it('coalesces playback and neighbor resolution while running searches concurrently', async () => {
+    const finish: ((value: object) => void)[] = [];
+    const search = jest.fn(() => new Promise((resolve) => finish.push(resolve)));
+    mockCreate.mockResolvedValue({ search });
+    const pending = [resolveSpotifyTrackVideoId('shared', 'Long track', ['Primary', 'Guest'], 1_080_000),
+      resolveSpotifyTrackVideoId('shared', 'Long track', ['Primary', 'Guest'], 1_080_000)];
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(search).toHaveBeenCalledTimes(3);
+    finish.forEach((resolve) => resolve({ videos: [{ video_id: 'abcdefghijk',
+      title: { toString: () => 'Long track' }, author: { name: 'Primary', is_verified_artist: true },
+      duration: { seconds: 1080 } }] }));
+    expect(await Promise.all(pending)).toEqual([expect.objectContaining({ videoId: 'abcdefghijk' }),
+      expect.objectContaining({ videoId: 'abcdefghijk' })]);
+  });
+
+  it('does not wait for a stalled subscriber lookup before selecting the stream', async () => {
+    jest.useFakeTimers();
+    try {
+      mockCreate.mockResolvedValue({ search: jest.fn().mockResolvedValue({ videos: [{
+        video_id: 'abcdefghijk', title: { toString: () => 'Long track' },
+        author: { name: 'Primary', is_verified_artist: true, id: 'UC' + 'a'.repeat(22) },
+        duration: { seconds: 1080 },
+      }] }), getChannel: jest.fn(() => new Promise(() => {})) });
+      const pending = resolveSpotifyTrackVideoId('slow-channel', 'Long track', ['Primary'], 1_080_000);
+      await jest.advanceTimersByTimeAsync(600);
+      expect(await pending).toMatchObject({ status: 'resolved', videoId: 'abcdefghijk' });
+      await jest.runAllTimersAsync();
+    } finally { jest.useRealTimers(); }
   });
 });

@@ -12,6 +12,7 @@ import {
   type YouTubeMusicPlaylistPage,
 } from '../../services/youtubeMusicClient';
 import { log } from '../../utils/appLogger';
+import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 import { createProgressiveResource } from '../../src/application/progressiveResource';
 import { artistIdentityKey, canonicalArtistReference, personalizeArtistSearch,
@@ -924,6 +925,9 @@ export const getArtistCatalogImage = async (
   artistId: string,
   artistName: string
 ): Promise<string> => {
+  if (artistIdentityKey(artistId).startsWith('spotify:')) {
+    return await getSpotifyArtistImage(artistId).catch(() => null) || '';
+  }
   const canonical = canonicalArtistReference({ id: artistId, name: artistName });
   artistId = canonical.id || artistId;
   artistName = canonical.name;

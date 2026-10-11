@@ -18,6 +18,7 @@ const getArtistApis = () => {
 type ArtistRef = { id?: string; name: string };
 const activeArtistKeys = new Set<string>();
 const pending = new Set<string>();
+const warmed = new Map<string, number>();
 const jobs = new Map<string, ArtistRef>();
 let running = 0;
 let trackPrefetchGeneration = 0;
@@ -33,7 +34,7 @@ const pump = () => {
       const id = artist.id!;
       await Promise.allSettled([
         getCachedArtistImage(artist.name, () => apis.getArtistCatalogImage(id, artist.name), [id]),
-        apis.getYouTubeMusicArtistProfile(id).then(async (profile) => {
+        ...(isArtistFollowed(artist) || activeArtistKeys.values().next().value === key ? [apis.getYouTubeMusicArtistProfile(id).then(async (profile) => {
           if (profile.artist.imageURL) void prefetchImage(profile.artist.imageURL);
           rememberDetailPreview('artist', profile.artist.id, {
             title: profile.artist.name, imageURL: profile.artist.imageURL,
@@ -44,8 +45,10 @@ const pump = () => {
             await prefetchImage(album.imageURL).catch(() => {});
             await apis.getYouTubeMusicAlbum(album.id).catch(() => {});
           }
-        }),
+        })] : []),
       ]);
+      warmed.set(key, Date.now() + 5 * 60_000);
+      while (warmed.size > 100) warmed.delete(warmed.keys().next().value!);
     }).catch(() => {}).finally(() => {
       pending.delete(key);
       running -= 1;
@@ -58,7 +61,7 @@ const pump = () => {
 export const prefetchArtistData = (artists: ArtistRef[]): void => {
   artists.map(canonicalArtistReference).slice(0, 16).forEach((artist) => {
     const key = artistIdentityKey(artist.id);
-    if (!key.startsWith('youtube:') || pending.has(key)) return;
+    if (!key.startsWith('youtube:') || pending.has(key) || (warmed.get(key) || 0) > Date.now()) return;
     if (jobs.size >= 24) {
       const replaceable = [...jobs.entries()].find(([id, ref]) =>
         !activeArtistKeys.has(id) && !isArtistFollowed(ref));
@@ -89,4 +92,5 @@ export const _clearArtistProfilePrefetchForTests = () => {
   activeArtistKeys.clear();
   jobs.clear();
   pending.clear();
+  warmed.clear();
 };

@@ -66,8 +66,8 @@ import {
 import { prefetchTrackAlbumData } from '../services/library/playerAlbum';
 import { isSameRecording } from '../services/library/trackIdentity';
 import { hydrateTrackAvailability, isTrackUnavailable, markTrackUnavailable, clearTrackUnavailable } from './useTrackAvailabilityStore';
-import { getCatalogMapping } from '../services/audio/catalogMappingCache';
-import { resolveTrackArtists } from '../services/search/artistIdentity';
+import { getCatalogMapping, isCurrentCatalogMapping } from '../services/audio/catalogMappingCache';
+import { resolveTrackCredits } from '../services/search/trackCredits';
 
 export type PlayerTrack = TrackCatalogMetadata & {
   spotifyId: string;
@@ -211,7 +211,7 @@ const resolveNativeYouTubeSource = async (
   ) return null;
 
   const manualMapping = await getCatalogMapping(track.spotifyId);
-  if (manualMapping?.source === 'user_direct') return toNativeYouTubePlaybackUri(manualMapping.videoId);
+  if (manualMapping && isCurrentCatalogMapping(manualMapping)) return toNativeYouTubePlaybackUri(manualMapping.videoId);
 
   const exactVideoId = track.youtubeVideoId ||
     track.spotifyId.match(/^yt_([A-Za-z0-9_-]{11})$/)?.[1];
@@ -603,6 +603,7 @@ const warmTrackAudio = (
 
 const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
   if (!getCachedAppSettings().preloadNextTrack) return;
+  if (usePlayerStore.getState().playerState.isBuffering) return;
   if (Platform.OS !== 'web' && !isAppActiveForPreload()) return;
   const currentTrack = queue[queueIndex];
   const neighbors = [
@@ -718,6 +719,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     // 1. ATOMIC GENERATION LOCK 🔒: Increments request counter to cancel any stale in-flight fetches
     const requestId = get().activeRequestId + 1;
+    const requestedAt = Date.now();
     const finishTransition = log.time('player', 'track transition', {
       requestId,
       trackId: track.spotifyId,
@@ -762,11 +764,13 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         : {}),
     });
     // 2. CONCURRENT AUDIO STREAM RESOLUTION & PERSISTENT CACHE
+    let playbackQuality = getCachedAppSettings().streamingQuality;
     const resolveAudioPromise = (async (): Promise<AudioSourceInput | null> => {
       await hydrateTrackAvailability();
       if (isTrackUnavailable(track)) return null;
       await getAppSettings();
       const quality = getCachedAppSettings().streamingQuality;
+      playbackQuality = quality;
       const hasFreshTrackStream = Boolean(
         track.streamUrl &&
         (Platform.OS === 'web' ||
@@ -913,6 +917,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     let handledTrackFinish = false;
     let durationLimitReached = false;
     let lastPlaybackPositionMs = 0;
+    let didStartPlayback = false;
 
     console.log(`[PlayerStore #${requestId}] Playing stream:`, activeStreamUri);
     if (get().activeRequestId !== requestId) return;
@@ -995,6 +1000,15 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           durationMs: currentDuration,
         },
       });
+
+      if (state.isPlaying && !didStartPlayback) {
+        didStartPlayback = true;
+        log.player('audio playback started', { trackId: track.spotifyId,
+          durationMs: Date.now() - requestedAt, mediaDurationMs: currentDuration });
+        warmQueueNeighbors(get().queue, get().queueIndex);
+        prefetchTrackArtistData(track);
+        prefetchTrackAlbumData(track);
+      }
 
       // Reset consecutive recovery counter once stream has played stably past resume position
       if (
@@ -1170,16 +1184,15 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     if (success) {
       clearTrackUnavailable(track);
-      prefetchTrackArtistData(track);
-      void resolveTrackArtists(track).then((artists) => {
+      void resolveTrackCredits(track).then(({ artists, artistCreditsVersion }) => {
         if (!artists.length || get().activeRequestId !== requestId) return;
         const current = get().currentTrack;
         if (!current) return;
-        const enriched = { ...current, artists, artistName: artists.map((artist) => artist.name).join(', ') };
+        const enriched = { ...current, artists, artistCreditsVersion, artistName: artists.map((artist) => artist.name).join(', ') };
+        cacheAudioSource(enriched, streamSource, playbackQuality);
         set({ currentTrack: enriched });
         get().replaceQueueTrack(current, enriched);
       }).catch(() => {});
-      prefetchTrackAlbumData(track);
       void ensurePlaybackDiagnostics(track).catch(() => {});
       recordInteraction(track, 'play').catch(() => {});
       warmQueueNeighbors(get().queue, get().queueIndex);

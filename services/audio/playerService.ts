@@ -732,7 +732,8 @@ const loadAndPlayNativeYouTube = async (
       artworkUrl: lockScreenMetadata?.artworkUrl,
       durationMs: diagnosticTrack?.duration_ms,
     });
-    if (!started || generation !== loadGeneration) {
+    if (generation !== loadGeneration) return false;
+    if (!started) {
       await stopNativeYouTubeEngine();
       return false;
     }

@@ -2,6 +2,7 @@ import type { ArtistModel } from '@models';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 import { getCatalogMapping, isCurrentCatalogMapping } from '../audio/catalogMappingCache';
 import { parseSpotifyLink } from '../spotify/linkParser';
+import { hasCanonicalTitleMatch } from '../canonical/canonicalMatcher';
 import { getYouTubeMusicClient, getYouTubeMusicText, parseYouTubeMusicArtistRoute,
   toYouTubeMusicArtistRouteId, withYouTubeMusicTimeout } from '../youtubeMusicClient';
 
@@ -13,6 +14,8 @@ export type ArtistIdentityTrack = {
   youtubeUrl?: string;
   videoId?: string;
   artistName?: string;
+  durationMs?: number;
+  duration_ms?: number;
   artists?: { id?: string; name: string }[];
 };
 export type ArtistSearchContext = {
@@ -70,6 +73,10 @@ const recordingArtists = createAsyncResourceCache<ArtistReference[]>({
   name: 'recording channel credits', category: 'artist', maxEntries: 200,
   ttlFor: (artists) => artists.length ? 6 * 60 * 60_000 : 10_000,
 });
+const participantChannels = createAsyncResourceCache<ArtistReference>({
+  name: 'credited participant channel', category: 'artist', maxEntries: 200,
+  ttlFor: (artist) => artist.id ? 6 * 60 * 60_000 : 60_000,
+});
 
 /** Read the selected video's own artist links, not autoplay neighbors or a similar recording. */
 export const resolveTrackArtists = async (track: ArtistIdentityTrack): Promise<ArtistReference[]> => {
@@ -110,7 +117,7 @@ export const resolveTrackArtists = async (track: ArtistIdentityTrack): Promise<A
   }, 6 * 60 * 60_000).catch(() => sameRecording ? native : []);
 };
 
-/** Legacy credits navigate only when the actual recording links that artist's channel. */
+/** Verify a participant against a linked recording, never a same-name profile alone. */
 export const resolveTrackArtist = async (
   artist: { id?: string; name: string }, track?: ArtistIdentityTrack,
 ): Promise<ArtistReference> => {
@@ -120,7 +127,33 @@ export const resolveTrackArtist = async (
   const linked = artists.find((credit) => artistIdentityKey(credit.id) === artistIdentityKey(artist.id));
   if (linked) return linked;
   const matches = artists.filter((credit) => normalize(credit.name) === normalize(artist.name));
-  return matches.length === 1 ? matches[0] : { id: '', name: artist.name };
+  if (matches.length === 1) return matches[0];
+  const fallback = { id: '', name: artist.name };
+  const trusted = track?.artists?.some((credit) => credit.id === artist.id && credit.name === artist.name);
+  if (!trusted || !/^[A-Za-z0-9]{22}$/.test(artist.id || '') || !track?.title) return fallback;
+  const videoId = await getArtistRecordingVideoId(track);
+  const durationMs = track.duration_ms || track.durationMs || 0;
+  const key = JSON.stringify([artist.id, videoId, track.title, durationMs]);
+  return participantChannels.getOrLoad(key, async () => {
+    const client = await withYouTubeMusicTimeout(getYouTubeMusicClient(), 3_000);
+    if (!client) return fallback;
+    const result = await withYouTubeMusicTimeout(client.music.search(`${artist.name} ${track.title}`, { type: 'song' }), 4_000);
+    const linked = (result?.songs?.contents || []).flatMap((song) => {
+      const exact = (song.video_id || song.id) === videoId;
+      const sameRecording = hasCanonicalTitleMatch(getYouTubeMusicText(song.title), track.title!) &&
+        durationMs > 0 && Boolean(song.duration?.seconds) &&
+        Math.abs(song.duration!.seconds! * 1000 - durationMs) < 15_000;
+      if (!exact && !sameRecording) return [];
+      return (song.artists || []).flatMap((credit) => {
+        const channel = credit.channel_id || credit.id || '';
+        const name = getYouTubeMusicText(credit.name);
+        return normalize(name) === normalize(artist.name) && /^UC[\w-]{22}$/.test(channel)
+          ? [{ id: toYouTubeMusicArtistRouteId(channel, name), name }] : [];
+      });
+    });
+    const unique = uniqueChannels(linked);
+    return unique.length === 1 ? unique[0] : fallback;
+  }, 6 * 60 * 60_000).catch(() => fallback);
 };
 
 /** Rank linked channels first while preserving other same-name YouTube profiles. */
@@ -145,5 +178,5 @@ export const personalizeArtistSearch = async (
 };
 
 export const _clearArtistIdentitiesForTests = () => {
-  recordingArtists.clear(); publicArtists.clear();
+  recordingArtists.clear(); participantChannels.clear(); publicArtists.clear();
 };

@@ -170,6 +170,25 @@ const artistsFrom = (source?: ArtistList): SpotifyArtist[] => {
   return Array.from(result.values());
 };
 
+const trackCreditsFrom = (embed: Page | null, page: Page | null): SpotifyArtist[] => {
+  const state = page?.entity;
+  const sources = [
+    artistsFrom([...artistItems(state?.firstArtist), ...artistItems(state?.otherArtists)]),
+    artistsFrom(state?.artists), artistsFrom(embed?.entity?.artists),
+  ];
+  // Public/embed responses can contain different subsets of the same credits.
+  const ordered = [...sources].sort((a, b) => b.length - a.length)[0] || [];
+  return [...new Map([...ordered, ...sources.flat()].map((artist) => [artist.id, artist])).values()];
+};
+
+/** Complete ordered credits, without waiting for album/discography requests. */
+export const fetchSpotifyTrackCredits = async (spotifyId: string): Promise<SpotifyArtist[]> => {
+  const id = spotifyIdFrom(spotifyId, 'track');
+  if (!id) return [];
+  const [embed, page] = await Promise.all([requestPage('track', id, true), requestPage('track', id)]);
+  return trackCreditsFrom(embed, page);
+};
+
 const imageSources = (entity?: Entity | null): ImageSource[] => [
   ...(entity?.visualIdentity?.image ?? []),
   ...(entity?.coverArt?.sources ?? []),
@@ -221,13 +240,8 @@ export const fetchSpotifyTrackMetadata = async (spotifyId: string): Promise<Spot
     ? await requestPage('album', albumId, true) : null;
   const album = albumPage?.entity || albumEmbed?.entity || embeddedAlbum;
   const albumTrack = albumTracks(embeddedAlbum).find((item) => spotifyIdFrom(item.uri || item.id, 'track') === id);
-  const artistCandidates = [
-    artistsFrom(track?.artists),
-    artistsFrom(state?.artists),
-    artistsFrom(albumTrack?.artists),
-    artistsFrom([...artistItems(state?.firstArtist), ...artistItems(state?.otherArtists)]),
-  ];
-  const artists = artistCandidates.find((items) => items.length > 0) ?? [];
+  const publicCredits = trackCreditsFrom(embed, page);
+  const artists = publicCredits.length ? publicCredits : artistsFrom(albumTrack?.artists);
   const description = metaValue(page, 'og:description').split(/\s+\u00b7\s+/);
   const position = trackPosition(albumPage, id);
   const trackNumber = positiveNumber(state?.trackNumber) || positiveNumber(track?.trackNumber) || positiveNumber(metaValue(page, 'music:album:track')) || position.trackNumber;

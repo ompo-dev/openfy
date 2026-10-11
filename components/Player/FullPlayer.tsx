@@ -616,16 +616,20 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   const albumRouteId = getTrackAlbumRouteId(currentTrack);
 
   React.useEffect(() => {
-    let active = true;
     setPlayerAlbum(null);
     setIsStartingAlbum(false);
+  }, [albumRouteId]);
+
+  React.useEffect(() => {
+    if (!visible || playerState.isBuffering) return;
+    let active = true;
     if (albumRouteId) {
       void getPlayerAlbum(albumRouteId).then((album) => {
         if (active) setPlayerAlbum(album);
       }).catch(() => {});
     }
     return () => { active = false; };
-  }, [albumRouteId]);
+  }, [albumRouteId, visible, playerState.isBuffering]);
 
   const handleListenAlbum = async () => {
     if (!albumRouteId || isStartingAlbum) return;
@@ -647,54 +651,65 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   };
 
   React.useEffect(() => {
-    let active = true;
     setPrimaryArtistImage('');
     setArtistImages({});
-    if (!primaryArtist) return;
+  }, [currentTrackKey, artistLinks]);
+
+  React.useEffect(() => {
+    if (!visible || playerState.isBuffering || !primaryArtist) return;
+    let active = true;
     const key = primaryArtist.name;
     void (async () => {
       const resolved = await resolveTrackArtist(primaryArtist, currentTrack || undefined);
-      if (!resolved.id) return;
+      const imageArtistId = resolved.id || primaryArtist.id;
+      if (!imageArtistId) return;
       const imageURL = await getCachedArtistImage(key, () =>
-        getArtistCatalogImage(resolved.id, resolved.name), [resolved.id]);
+        getArtistCatalogImage(imageArtistId, primaryArtist.name), [imageArtistId]);
       if (active) setPrimaryArtistImage(imageURL);
     })().catch(() => {});
     return () => { active = false; };
-  }, [currentTrack, currentTrackKey, primaryArtist, primaryArtist?.id, primaryArtist?.name]);
+  }, [currentTrack, currentTrackKey, primaryArtist, primaryArtist?.id, primaryArtist?.name, visible, playerState.isBuffering]);
 
   const primaryArtistId = primaryArtist?.id || '';
   const primaryArtistName = primaryArtist?.name || '';
 
   React.useEffect(() => {
-    let active = true;
     setPrimaryArtistBiography('');
     setIsBiographyExpanded(false);
-    if (!visible || !primaryArtistName) return;
+  }, [currentTrackKey, primaryArtistId, primaryArtistName]);
+
+  React.useEffect(() => {
+    if (!visible || playerState.isBuffering || !primaryArtistName) return;
+    let active = true;
     const routeId = primaryArtistId;
     void resolveTrackArtist({ id: routeId, name: primaryArtistName }, currentTrack || undefined)
       .then((artist) => getYouTubeMusicArtistBiography(artist.id)).then((description) => {
       if (active) setPrimaryArtistBiography(description);
     }).catch(() => {});
     return () => { active = false; };
-  }, [currentTrack, currentTrackKey, primaryArtistId, primaryArtistName, visible]);
+  }, [currentTrack, currentTrackKey, primaryArtistId, primaryArtistName, visible, playerState.isBuffering]);
 
   React.useEffect(() => {
+    if (!visible || playerState.isBuffering) return;
     let active = true;
     const loadImages = async () => {
-      await Promise.all(artistLinks.map(async (artist) => {
-        const key = artist.id || artist.name;
-        const resolved = await resolveTrackArtist(artist, currentTrack || undefined);
-        if (!resolved.id) return;
-        const imageURL = await getCachedArtistImage(key, () =>
-          getArtistCatalogImage(resolved.id, resolved.name), [resolved.id]);
-        if (active && imageURL) {
-          setArtistImages((current) => ({ ...current, [key]: imageURL }));
-        }
-      }));
+      for (let index = 0; index < artistLinks.length && active; index += 2) {
+        await Promise.all(artistLinks.slice(index, index + 2).map(async (artist) => {
+          const key = artist.id || artist.name;
+          const resolved = await resolveTrackArtist(artist, currentTrack || undefined);
+          const imageArtistId = resolved.id || artist.id;
+          if (!imageArtistId) return;
+          const imageURL = await getCachedArtistImage(key, () =>
+            getArtistCatalogImage(imageArtistId, artist.name), [imageArtistId]);
+          if (active && imageURL) {
+            setArtistImages((current) => ({ ...current, [key]: imageURL }));
+          }
+        }));
+      }
     };
     void loadImages().catch(() => {});
     return () => { active = false; };
-  }, [currentTrack, currentTrackKey, artistLinks]);
+  }, [currentTrack, currentTrackKey, artistLinks, visible, playerState.isBuffering]);
 
   const handleArtistPress = React.useCallback(
     async (artistId: string, artistName: string) => {

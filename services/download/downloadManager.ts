@@ -38,9 +38,10 @@ import type { TrackAlbumRef } from '../../models/Track/TrackModel';
 export type DownloadStatus = 'idle' | 'downloading' | 'completed' | 'error';
 
 export type TrackCatalogMetadata = {
+  artistCreditsVersion?: number;
   albumId?: string;
   albumAssociations?: TrackAlbumRef[];
-  artists?: { id: string; name: string }[];
+  artists?: { id: string; name: string; spotifyId?: string }[];
   albumArtists?: { id: string; name: string }[];
   trackNumber?: number;
   discNumber?: number;
@@ -1449,6 +1450,7 @@ const downloadTrackInternal = async (
     onProgress?.(0.9);
 
     const downloadedTrack: DownloadedTrack = {
+      artistCreditsVersion: effectiveTrack.artistCreditsVersion,
       albumId: effectiveTrack.albumId,
       albumAssociations: effectiveTrack.albumAssociations,
       artists: effectiveTrack.artists,

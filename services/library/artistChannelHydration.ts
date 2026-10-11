@@ -1,5 +1,6 @@
 import { getDownloadedTrack } from '../download/downloadManager';
-import { getArtistRecordingVideoId, artistIdentityKey, resolveTrackArtists } from '../search/artistIdentity';
+import { getArtistRecordingVideoId } from '../search/artistIdentity';
+import { ARTIST_CREDITS_VERSION, resolveTrackCredits } from '../search/trackCredits';
 import { getCatalogTracks, upsertCatalogTracks, type LibraryTrack } from './catalogLibrary';
 import { useLibraryStore } from '../../stores/useLibraryStore';
 
@@ -7,12 +8,12 @@ const queued = new Map<string, LibraryTrack>();
 const attempted = new Map<string, number>();
 let running = 0;
 
-/** Migrate saved credits from the exact linked video without holding up library rendering. */
+/** Recover complete saved credits, then attach verified channels without blocking rendering. */
 export const hydrateLibraryArtistChannels = (tracks: LibraryTrack[]) => {
   for (const track of tracks) {
-    if (track.artists?.length && track.artists.every((artist) => artistIdentityKey(artist.id).startsWith('youtube:'))) continue;
+    if (track.artistCreditsVersion === ARTIST_CREDITS_VERSION) continue;
     const key = JSON.stringify([track.spotifyId, track.youtubeVideoId, track.youtubeUrl]);
-    if (Date.now() - (attempted.get(key) || 0) < 60_000) continue;
+    if (Date.now() - (attempted.get(key) || 0) < 5 * 60_000) continue;
     attempted.set(key, Date.now());
     queued.set(key, track);
   }
@@ -27,14 +28,14 @@ const pump = () => {
     running += 1;
     void (async () => {
       const videoId = await getArtistRecordingVideoId(track);
-      if (!videoId) return;
-      const artists = await resolveTrackArtists({ ...track, youtubeVideoId: videoId });
-      if (!artists.length) return;
+      const { artists, artistCreditsVersion } = await resolveTrackCredits(track);
+      if (!artists.length || !artistCreditsVersion) return;
       // Do not restore an item removed or edited while its metadata was loading.
       const current = (await getCatalogTracks()).find((item) => item.spotifyId === track.spotifyId) ||
         await getDownloadedTrack(track.spotifyId);
       if (!current || await getArtistRecordingVideoId(current) !== videoId) return;
-      await upsertCatalogTracks([{ ...current, artists, youtubeVideoId: videoId,
+      if (JSON.stringify(current.artists) !== JSON.stringify(track.artists)) return;
+      await upsertCatalogTracks([{ ...current, artists, artistCreditsVersion,
         artistName: artists.map((artist) => artist.name).join(', ') }]);
       useLibraryStore.getState().refreshLibrary();
     })().catch(() => {}).finally(() => { running -= 1; pump(); });

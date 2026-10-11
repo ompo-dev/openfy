@@ -172,6 +172,10 @@ const sourceMatchCache = createAsyncResourceCache<CatalogResolveResult>({
   name: 'youtube source identity', category: 'player', maxEntries: 128,
   ttlFor: (result) => result.status === 'resolved' ? 6 * 60 * 60_000 : 10_000,
 });
+const spotifyMatchCache = createAsyncResourceCache<CatalogResolveResult>({
+  name: 'recording audio match', category: 'player', maxEntries: 128,
+  ttlFor: (result) => result.status === 'resolved' ? 30 * 60_000 : 5_000,
+});
 
 /** A music catalog can point one short song at a film containing several songs. */
 export const resolveCatalogYouTubeVideoId = (
@@ -284,6 +288,14 @@ export const resolveSpotifyTrackVideoId = async (
     return { status: 'resolved', videoId: cached.videoId, confidence: cached.confidence };
   }
 
+  const key = JSON.stringify([spotifyId, title, artists, durationMs]);
+  return spotifyMatchCache.getOrLoad(key, () => searchSpotifyTrackVideoId(spotifyId, title, artists, durationMs), 30 * 60_000);
+};
+
+const searchSpotifyTrackVideoId = async (
+  spotifyId: string, title: string, artists: string[], durationMs: number,
+): Promise<CatalogResolveResult> => {
+
   const canonicalArtists = splitCanonicalArtists(artists.join(', '));
   const primaryArtist = canonicalArtists[0] ?? '';
   const searchTitle = titleWithoutFeaturedCredits(title);
@@ -300,7 +312,7 @@ export const resolveSpotifyTrackVideoId = async (
     const canonical = { title, artists: canonicalArtists, durationMs, spotifyId };
     let completedSearches = 0;
 
-    for (const query of queries) {
+    await Promise.all(queries.map(async (query) => {
       recordDownloadDiagnostic(spotifyId, 'audio.youtube.search', { query });
 
       const searchResult = await retryNetworkOperation(
@@ -340,7 +352,7 @@ export const resolveSpotifyTrackVideoId = async (
           imageURL: video.best_thumbnail?.url,
         });
       }
-    }
+    }));
 
     if (!completedSearches) throw new Error('YouTube searches unavailable');
 
@@ -352,14 +364,14 @@ export const resolveSpotifyTrackVideoId = async (
     const channelIds = [...new Set(shortlist.map((item) => item.candidate.channelId).filter(
       (id): id is string => Boolean(id)
     ))].slice(0, 5);
-    for (let index = 0; index < channelIds.length; index += 2) {
-      await Promise.all(channelIds.slice(index, index + 2).map(async (channelId) => {
-        const count = await getSubscriberCount(client, channelId);
+    // Subscriber counts refine ranking, but must not add seconds to audio startup.
+    await Promise.all(channelIds.map(async (channelId) => {
+        const count = await withTimeout(getSubscriberCount(client, channelId), 'Channel ranking', 600)
+          .catch(() => undefined);
         candidates.forEach((candidate) => {
           if (candidate.channelId === channelId) candidate.subscriberCount = count;
         });
-      }));
-    }
+    }));
 
     const evaluated = [...candidates.values()].map((candidate) => rankYouTubeCandidate(candidate, canonical));
     evaluated.forEach((item) => recordDownloadDiagnostic(spotifyId,
@@ -403,4 +415,5 @@ export const _resetCatalogResolverForTests = (): void => {
   channelCounts.clear();
   sourceInfoCache.clear();
   sourceMatchCache.clear();
+  spotifyMatchCache.clear();
 };

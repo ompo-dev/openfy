@@ -16,6 +16,7 @@ jest.mock('../localAudioRepair', () => ({ prepareLocalAudioForPlayback: jest.fn(
 import { prepareLocalAudioForPlayback } from '../localAudioRepair';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as appSettings from '../../settings/appSettings';
+import * as nativeTransfer from '../nativeYouTubeTransfer';
 
 import {
   clearPreloadedSource,
@@ -71,6 +72,41 @@ const flushMicrotasks = async () => {
 };
 
 describe('playerService fades', () => {
+  it('does not stop the current native stream when an older play command finishes late', async () => {
+    (Platform as { OS: string }).OS = 'ios';
+    let finishOld!: (started: boolean) => void;
+    let markOldStarted!: () => void;
+    const oldStarted = new Promise<void>((resolve) => { markOldStarted = resolve; });
+    const spies = [
+      jest.spyOn(nativeTransfer, 'hasNativeYouTubePlayback').mockReturnValue(true),
+      jest.spyOn(nativeTransfer, 'hasNativeYouTubeAudioPreferences').mockReturnValue(false),
+      jest.spyOn(nativeTransfer, 'addNativeYouTubePlaybackListener').mockReturnValue(null),
+      jest.spyOn(nativeTransfer, 'getNativeYouTubePlaybackStatus').mockResolvedValue({
+        isPlaying: true, isLoaded: true, isBuffering: false,
+        positionMs: 0, durationMs: 180_000,
+      }),
+    ];
+    const stop = jest.spyOn(nativeTransfer, 'stopNativeYouTubePlayback').mockResolvedValue(undefined);
+    const nativePlay = jest.spyOn(nativeTransfer, 'playYouTubeVideoNatively')
+      .mockImplementationOnce(() => new Promise<boolean>((resolve) => {
+        finishOld = resolve;
+        markOldStarted();
+      }))
+      .mockResolvedValue(true);
+    try {
+      const old = loadAndPlay(nativeTransfer.toNativeYouTubePlaybackUri('oldVideo123'));
+      await oldStarted;
+      expect(await loadAndPlay(nativeTransfer.toNativeYouTubePlaybackUri('newVideo123'))).toBe(true);
+      stop.mockClear();
+      finishOld(true);
+      expect(await old).toBe(false);
+      expect(stop).not.toHaveBeenCalled();
+    } finally {
+      await unload();
+      [...spies, stop, nativePlay].forEach((spy) => spy.mockRestore());
+    }
+  });
+
   it('does not let delayed settings hydration replace a newer play request', async () => {
     let finishHydration!: (value: appSettings.AppSettings) => void;
     const hydration = jest.spyOn(appSettings, 'getAppSettings').mockImplementationOnce(

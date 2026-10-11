@@ -30,7 +30,8 @@ import { ProgressiveFlatList, ProgressiveList } from '../common/ProgressiveList'
 import { MarqueeText } from '../common/MarqueeText';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { getArtistCatalogImage } from '@api';
-import { artistIdentityKey, resolveTrackArtist, resolveTrackArtists } from '../../services/search/artistIdentity';
+import { artistIdentityKey, resolveTrackArtist } from '../../services/search/artistIdentity';
+import { resolveTrackCredits, type TrackCredit } from '../../services/search/trackCredits';
 import { getCachedArtistImage } from '@services';
 import { useDetailNavigation } from '@hooks';
 import { isSameRecording } from '../../services/library/trackIdentity';
@@ -86,6 +87,7 @@ export type CollectionDetailProps = {
 };
 
 const toPlayerTrack = (track: CollectionTrack, collectionName: string) => ({
+  artistCreditsVersion: track.artistCreditsVersion,
   spotifyId: track.id,
   title: track.title,
   artistName: track.subtitle,
@@ -284,7 +286,7 @@ export const CollectionDetail = ({
   } | null>(null);
   const [artistImages, setArtistImages] = React.useState<Record<string, string>>({});
   const [linkedCollectionArtists, setLinkedCollectionArtists] = React.useState<{
-    collectionId: string; artists: { id: string; name: string }[];
+    collectionId: string; artists: TrackCredit[];
   } | null>(null);
   const attemptedArtistImages = React.useRef(new Set<string>());
   const isMountedRef = React.useRef(true);
@@ -364,15 +366,16 @@ export const CollectionDetail = ({
       : tracks;
   const collectionArtists = React.useMemo(() => {
     const byKey = new Map<string, { id: string; name: string; imageURL?: string }>();
-    const addArtist = (artist: { id?: string; name?: string; imageURL?: string }) => {
+    const addArtist = (artist: { id?: string; name?: string; imageURL?: string; spotifyId?: string }) => {
       const name = artist.name?.trim();
       if (!name) return;
       const id = artist.id?.trim() || '';
-      const key = artistIdentityKey(id);
-      if (!key.startsWith('youtube:')) return;
+      const identity = artistIdentityKey(id);
+      const linked = identity && [...byKey.entries()].find(([, previous]) => artistIdentityKey(previous.id) === identity);
+      const key = linked ? linked[0] : artistIdentityKey(artist.spotifyId) || identity || normalizeArtistKey(name);
       const previous = byKey.get(key);
       byKey.set(key, {
-        id,
+        id: previous && artistIdentityKey(previous.id).startsWith('youtube:') ? previous.id : id,
         name: previous?.name || name,
         imageURL: artist.imageURL || previous?.imageURL,
       });
@@ -393,7 +396,7 @@ export const CollectionDetail = ({
         .slice(0, isArtistListVisible ? allArtistTracks.length : 4);
       for (const recording of recordings) {
         if (!active) return;
-        const linked = await resolveTrackArtists(recording);
+        const { artists: linked } = await resolveTrackCredits(recording);
         if (active && linked.length) setLinkedCollectionArtists((current) => ({ collectionId,
           artists: [...(current?.collectionId === collectionId ? current.artists : []), ...linked] }));
       }
@@ -433,7 +436,7 @@ export const CollectionDetail = ({
           const context = allArtistTracks.find((track) => track.artists?.some((credit) => credit.name === artist.name));
           const resolved = await resolveTrackArtist(artist, context);
           const canonicalId = resolved.id;
-          const imageArtistId = canonicalId;
+          const imageArtistId = canonicalId || artist.id;
           const imageURL = await getCachedArtistImage(
             artist.name,
             () => getArtistCatalogImage(imageArtistId, artist.name),

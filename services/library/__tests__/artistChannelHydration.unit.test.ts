@@ -1,7 +1,8 @@
 import { hydrateLibraryArtistChannels } from '../artistChannelHydration';
 import { getCatalogTracks, upsertCatalogTracks, type LibraryTrack } from '../catalogLibrary';
 import { getDownloadedTrack } from '../../download/downloadManager';
-import { getArtistRecordingVideoId, resolveTrackArtists } from '../../search/artistIdentity';
+import { getArtistRecordingVideoId } from '../../search/artistIdentity';
+import { resolveTrackCredits } from '../../search/trackCredits';
 import { useLibraryStore } from '../../../stores/useLibraryStore';
 
 jest.mock('../catalogLibrary', () => ({ getCatalogTracks: jest.fn(), upsertCatalogTracks: jest.fn() }));
@@ -10,6 +11,7 @@ jest.mock('../../search/artistIdentity', () => ({
   ...jest.requireActual('../../search/artistIdentity'),
   getArtistRecordingVideoId: jest.fn(), resolveTrackArtists: jest.fn(),
 }));
+jest.mock('../../search/trackCredits', () => ({ ARTIST_CREDITS_VERSION: 2, resolveTrackCredits: jest.fn() }));
 jest.mock('../../../stores/useLibraryStore', () => {
   const state = { refreshLibrary: jest.fn() };
   return { useLibraryStore: { getState: () => state } };
@@ -29,7 +31,7 @@ describe('saved recording channel migration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.mocked(getArtistRecordingVideoId).mockImplementation(async (item) => item.youtubeVideoId || '');
-    jest.mocked(resolveTrackArtists).mockResolvedValue(artists);
+    jest.mocked(resolveTrackCredits).mockResolvedValue({ artists, artistCreditsVersion: 2 });
     jest.mocked(getDownloadedTrack).mockResolvedValue(null);
     jest.mocked(upsertCatalogTracks).mockResolvedValue([]);
   });
@@ -40,8 +42,8 @@ describe('saved recording channel migration', () => {
     expect(hydrateLibraryArtistChannels([saved])).toBeUndefined();
     expect(upsertCatalogTracks).not.toHaveBeenCalled();
     await flush();
-    expect(resolveTrackArtists).toHaveBeenCalledWith(saved);
-    expect(upsertCatalogTracks).toHaveBeenCalledWith([{ ...saved, artists, artistName: 'Channel' }]);
+    expect(resolveTrackCredits).toHaveBeenCalledWith(saved);
+    expect(upsertCatalogTracks).toHaveBeenCalledWith([{ ...saved, artists, artistName: 'Channel', artistCreditsVersion: 2 }]);
     expect(useLibraryStore.getState().refreshLibrary).toHaveBeenCalledTimes(1);
   });
 
@@ -69,19 +71,35 @@ describe('saved recording channel migration', () => {
   });
 
   it('does not retry an unavailable video on every library refresh', async () => {
-    jest.mocked(resolveTrackArtists).mockResolvedValue([]);
+    jest.mocked(resolveTrackCredits).mockResolvedValue({ artists: [] });
     const saved = track('hydrate-unavailable');
     hydrateLibraryArtistChannels([saved]);
     await flush();
     hydrateLibraryArtistChannels([saved]);
     await flush();
-    expect(resolveTrackArtists).toHaveBeenCalledTimes(1);
+    expect(resolveTrackCredits).toHaveBeenCalledTimes(1);
   });
 
-  it('does not refetch credits that already point to YouTube channels', async () => {
-    hydrateLibraryArtistChannels([{ ...track('hydrate-native'), artists }]);
+  it('does not refetch verified complete credits on every refresh', async () => {
+    hydrateLibraryArtistChannels([{ ...track('hydrate-native'), artists, artistCreditsVersion: 2 }]);
     await flush();
-    expect(resolveTrackArtists).not.toHaveBeenCalled();
+    expect(resolveTrackCredits).not.toHaveBeenCalled();
     expect(useLibraryStore.getState().refreshLibrary).not.toHaveBeenCalled();
+  });
+
+  it('repairs previously truncated credits even if every saved participant has a native id', async () => {
+    const saved = { ...track('hydrate-truncated'), artists };
+    jest.mocked(getCatalogTracks).mockResolvedValue([saved]);
+    hydrateLibraryArtistChannels([saved]);
+    await flush();
+    expect(resolveTrackCredits).toHaveBeenCalledWith(saved);
+  });
+
+  it('does not overwrite new credit edits made during recovery', async () => {
+    const saved = track('hydrate-credit-edited');
+    jest.mocked(getCatalogTracks).mockResolvedValue([{ ...saved, artists: [{ id: 'edited', name: 'Edited' }] }]);
+    hydrateLibraryArtistChannels([saved]);
+    await flush();
+    expect(upsertCatalogTracks).not.toHaveBeenCalled();
   });
 });

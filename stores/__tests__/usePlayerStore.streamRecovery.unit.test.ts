@@ -60,6 +60,7 @@ jest.mock('../../services/search/artistIdentity', () => ({
   ...jest.requireActual('../../services/search/artistIdentity'),
   resolveTrackArtists: jest.fn().mockResolvedValue([]),
 }));
+jest.mock('../../services/search/trackCredits', () => ({ resolveTrackCredits: jest.fn().mockResolvedValue({ artists: [] }) }));
 
 import {
   hasNativeYouTubePlayback,
@@ -74,7 +75,7 @@ import {
 import { usePlayerStore, type PlayerTrack } from '../usePlayerStore';
 import * as FileSystem from 'expo-file-system/legacy';
 import { isTrackUnavailable, useTrackAvailabilityStore } from '../useTrackAvailabilityStore';
-import { resolveTrackArtists } from '../../services/search/artistIdentity';
+import { resolveTrackCredits, type TrackCredits } from '../../services/search/trackCredits';
 
 const sampleTrack: PlayerTrack = {
   spotifyId: 'track_123',
@@ -98,7 +99,7 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
     jest.mocked(resolveAudioUrl).mockReset();
     jest.mocked(resolveSpotifyTrackVideoId).mockReset();
     jest.mocked(resolveCatalogYouTubeVideoId).mockReset();
-    jest.mocked(resolveTrackArtists).mockReset().mockResolvedValue([]);
+    jest.mocked(resolveTrackCredits).mockReset().mockResolvedValue({ artists: [] });
     const { ensurePlaybackDiagnostics } = jest.requireMock('@services');
     (ensurePlaybackDiagnostics as jest.Mock)
       .mockReset()
@@ -121,15 +122,15 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
   });
 
   it('starts audio before channel credits finish and updates the current track and queue together', async () => {
-    let finish!: (artists: { id: string; name: string }[]) => void;
-    jest.mocked(resolveTrackArtists).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    let finish!: (credits: TrackCredits) => void;
+    jest.mocked(resolveTrackCredits).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     jest.mocked(resolveAudioUrl).mockResolvedValue({ url: 'https://media.test/credits.m4a', source: 'youtube' });
     jest.mocked(loadAndPlay).mockResolvedValue(true);
     await usePlayerStore.getState().playWithQueue([sampleTrack], 0);
     expect(loadAndPlay).toHaveBeenCalled();
     expect(usePlayerStore.getState().currentTrack?.artistName).toBe('Artista Teste');
     const artists = [{ id: 'ytartist_UCchannel~Channel', name: 'Channel' }];
-    finish(artists);
+    finish({ artists });
     await flushPromises();
     expect(usePlayerStore.getState().currentTrack).toMatchObject({ artists, artistName: 'Channel' });
     expect(usePlayerStore.getState().queue[0]).toBe(usePlayerStore.getState().currentTrack);
@@ -137,17 +138,17 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
   });
 
   it('ignores channel credits from an old recording after switching tracks', async () => {
-    let finishOld!: (artists: { id: string; name: string }[]) => void;
-    const pending = new Promise<{ id: string; name: string }[]>((resolve) => { finishOld = resolve; });
+    let finishOld!: (credits: TrackCredits) => void;
+    const pending = new Promise<TrackCredits>((resolve) => { finishOld = resolve; });
     const next = { ...sampleTrack, spotifyId: 'new-channel-recording', title: 'Next recording' };
     const artists = [{ id: 'ytartist_UCnew~New', name: 'New' }];
-    jest.mocked(resolveTrackArtists).mockImplementation(async (track) =>
-      track.title === sampleTrack.title ? pending : artists);
+    jest.mocked(resolveTrackCredits).mockImplementation(async (track) =>
+      track.title === sampleTrack.title ? pending : { artists });
     jest.mocked(resolveAudioUrl).mockResolvedValue({ url: 'https://media.test/channels.m4a', source: 'youtube' });
     jest.mocked(loadAndPlay).mockResolvedValue(true);
     await usePlayerStore.getState().playWithQueue([sampleTrack, next], 0);
     await usePlayerStore.getState().playNext();
-    finishOld([{ id: 'ytartist_UCold~Old', name: 'Old' }]);
+    finishOld({ artists: [{ id: 'ytartist_UCold~Old', name: 'Old' }] });
     await flushPromises();
     expect(usePlayerStore.getState().currentTrack).toMatchObject({ spotifyId: next.spotifyId, artists, artistName: 'New' });
   });

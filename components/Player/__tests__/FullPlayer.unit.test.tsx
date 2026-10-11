@@ -327,6 +327,20 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(getPlayerAlbum).not.toHaveBeenCalled();
   });
 
+  it('defers album requests until the current stream is no longer buffering', async () => {
+    const player = makePlayer({ albumId: 'MPREtest', albumName: 'KM2' });
+    jest.mocked(usePlayer).mockReturnValue({ ...player,
+      playerState: { ...player.playerState, isBuffering: true },
+    } as any);
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+    expect(getPlayerAlbum).not.toHaveBeenCalled();
+    jest.mocked(usePlayer).mockReturnValue({ ...player,
+      playerState: { ...player.playerState, isBuffering: false },
+    } as any);
+    await screen.rerender(<FullPlayer visible onClose={jest.fn()} />);
+    await waitFor(() => expect(getPlayerAlbum).toHaveBeenCalledWith('ytalbum_MPREtest'));
+  });
+
   it('does not navigate using an album that finished loading after a track change', async () => {
     let finish!: (album: any) => void;
     jest.mocked(getPlayerAlbum).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));

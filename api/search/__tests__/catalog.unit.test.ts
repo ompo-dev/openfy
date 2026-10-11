@@ -636,7 +636,7 @@ describe('public YouTube Music catalog', () => {
     expect(search).not.toHaveBeenCalled();
   });
 
-  it('does not replace a missing channel portrait with a Spotify or homonymous artist image', async () => {
+  it('uses the exact Spotify credit portrait without assigning it to a YouTube channel', async () => {
     jest.mocked(getSpotifyArtistImage).mockResolvedValue('https://images.example/spotify.jpg');
     jest.mocked(getYouTubeMusicClient).mockResolvedValue({
       music: {
@@ -647,7 +647,10 @@ describe('public YouTube Music catalog', () => {
 
     await expect(
       getArtistCatalogImage('1234567890123456789012', 'Artist without YTM portrait')
-    ).resolves.toBe('');
+    ).resolves.toBe('https://images.example/spotify.jpg');
+    expect(getSpotifyArtistImage).toHaveBeenCalledWith('1234567890123456789012');
+    jest.mocked(getSpotifyArtistImage).mockClear();
+    await expect(getArtistCatalogImage('ytartist_UCmissing~Artist', 'Artist')).resolves.toBe('');
     expect(getSpotifyArtistImage).not.toHaveBeenCalled();
   });
 });

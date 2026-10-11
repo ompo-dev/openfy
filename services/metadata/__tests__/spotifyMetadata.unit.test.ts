@@ -49,6 +49,14 @@ describe('public Spotify metadata', () => {
 
   afterEach(() => jest.useRealTimers());
 
+  it('merges truncated embed credits with complete public credits without loading the album', async () => {
+    pages.set(`embed/track/${TRACK_ID}`, embed({ ...trackEntity, artists: trackEntity.artists.slice(0, 1) }));
+    pages.set(`track/${TRACK_ID}`, publicPage('track', TRACK_ID, { ...trackEntity,
+      firstArtist: trackEntity.artists.slice(0, 1), otherArtists: trackEntity.artists.slice(1) }));
+    expect(await subject.fetchSpotifyTrackCredits(TRACK_ID)).toEqual(ARTISTS);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('combines live-shaped embed and public pages, preserving IDs and the widest cover', async () => {
     await expect(subject.fetchSpotifyTrackMetadata(TRACK_ID)).resolves.toEqual({
       spotifyId: TRACK_ID,

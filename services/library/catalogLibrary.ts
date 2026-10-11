@@ -11,6 +11,7 @@ import { albumAssociationsForTrack, mergeAlbumAssociations, type TrackAlbumRef }
 export type CatalogSourcePlatform = 'spotify' | 'youtube';
 
 export type CatalogTrackInput = {
+  artistCreditsVersion?: number;
   spotifyId: string;
   title: string;
   artistName: string;
@@ -19,7 +20,7 @@ export type CatalogTrackInput = {
   duration_ms: number;
   albumId?: string;
   albumAssociations?: TrackAlbumRef[];
-  artists?: { id: string; name: string }[];
+  artists?: { id: string; name: string; spotifyId?: string }[];
   albumArtists?: { id: string; name: string }[];
   trackNumber?: number;
   discNumber?: number;
@@ -75,7 +76,7 @@ const isCatalogTrack = (value: unknown): value is CatalogTrack => {
 };
 
 const normalizeArtists = (
-  artists?: { id: string; name: string }[]
+  artists?: { id: string; name: string; spotifyId?: string }[]
 ): { id: string; name: string }[] | undefined => {
   if (!artists?.length) return undefined;
   const unique = new Map<string, { id: string; name: string }>();
@@ -83,7 +84,7 @@ const normalizeArtists = (
     const name = artist.name?.trim();
     if (!name) continue;
     const id = artist.id?.trim() || '';
-    unique.set(id || name.toLocaleLowerCase(), { id, name });
+    unique.set(id || name.toLocaleLowerCase(), { ...artist, id, name });
   }
   return unique.size ? [...unique.values()] : undefined;
 };
@@ -108,6 +109,7 @@ const normalizeInput = (
     ...(albumAssociationsForTrack(input) || []),
   ]);
   return {
+    artistCreditsVersion: input.artistCreditsVersion || current?.artistCreditsVersion,
     spotifyId: input.spotifyId.trim(),
     title: input.title.trim() || current?.title || 'Música',
     artistName: input.artistName.trim() || current?.artistName || 'Artista',
@@ -149,6 +151,7 @@ const normalizeInput = (
 };
 
 const catalogInputFromDownload = (track: DownloadedTrack): CatalogTrackInput => ({
+  artistCreditsVersion: track.artistCreditsVersion,
   spotifyId: track.spotifyId,
   title: track.title,
   artistName: track.artistName,
@@ -319,6 +322,7 @@ export const getLibraryTracks = (): Promise<LibraryTrack[]> => {
 export const toDownloadTrackInput = (
   track: CatalogTrackInput
 ): DownloadTrackInput => ({
+  artistCreditsVersion: track.artistCreditsVersion,
   spotifyId: track.spotifyId,
   title: track.title,
   artistName: track.artistName,

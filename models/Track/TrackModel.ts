@@ -10,6 +10,7 @@ export type TrackAlbumRef = {
 };
 
 export type TrackModel = {
+  artistCreditsVersion?: number;
   id: string;
   title: string;
   subtitle: string;
@@ -27,7 +28,7 @@ export type TrackModel = {
   durationMs?: number;
   viewCount?: number;
   popularity?: number;
-  artists?: { id: string; name: string }[];
+  artists?: { id: string; name: string; spotifyId?: string }[];
   isSaved?: boolean;
   isDownloaded?: boolean;
   isPlaying?: boolean;

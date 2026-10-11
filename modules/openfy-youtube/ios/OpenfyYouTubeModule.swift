@@ -36,6 +36,19 @@ private actor NativeYouTubePreloadStore {
   }
 
   private var entries: [String: Entry] = [:]
+  private var resolving: [String: Task<YouTubeStreamDescriptor, Error>] = [:]
+
+  func resolve(_ key: String, load: @escaping @Sendable () async throws -> YouTubeStreamDescriptor) async throws -> YouTubeStreamDescriptor {
+    if let cached = get(key) { return cached.descriptor }
+    if let pending = resolving[key] { return try await pending.value }
+    let task = Task { try await load() }
+    resolving[key] = task
+    defer { resolving.removeValue(forKey: key) }
+    let descriptor = try await task.value
+    store(.init(descriptor: descriptor, initialAudio: Data(),
+      expiresAt: Date().addingTimeInterval(4 * 60)), for: key)
+    return descriptor
+  }
 
   func store(_ entry: Entry, for videoId: String) {
     entries = entries.filter { $0.value.expiresAt > Date() }
@@ -78,6 +91,7 @@ public final class OpenfyYouTubeModule: Module {
   private static let rangeClient = YouTubeHTTPRangeClient(session: session)
   private static let preloadedStreams = NativeYouTubePreloadStore()
   private var mediaSuggestionObserver: NSObjectProtocol?
+  @MainActor private var playbackGeneration = 0
   @MainActor
   private lazy var nativePlayer: OpenfyNativeYouTubePlayer = {
     let player = OpenfyNativeYouTubePlayer()
@@ -193,7 +207,7 @@ public final class OpenfyYouTubeModule: Module {
     }
 
     AsyncFunction("stopNativeYouTubeAsync") {
-      await self.nativePlayer.stop()
+      await self.stopNativePlayback()
     }
 
     AsyncFunction("getNativePlaybackStatusAsync") { () -> [String: Any] in
@@ -201,6 +215,13 @@ public final class OpenfyYouTubeModule: Module {
     }
   }
 
+  @MainActor
+  private func stopNativePlayback() {
+    playbackGeneration += 1
+    nativePlayer.stop()
+  }
+
+  @MainActor
   private func playNativeYouTube(
     videoId: String,
     metadata: [String: String]
@@ -208,6 +229,8 @@ public final class OpenfyYouTubeModule: Module {
     guard Self.isValidVideoId(videoId) else {
       throw Self.transferError("invalid_video_id")
     }
+    playbackGeneration += 1
+    let generation = playbackGeneration
 
     let quality = metadata["quality"] ?? "high"
     let key = "\(quality):\(videoId)"
@@ -216,13 +239,15 @@ public final class OpenfyYouTubeModule: Module {
     if let staged {
       descriptor = staged.descriptor
     } else {
-      descriptor = try await Self.resolveAudioDescriptor(videoId: videoId, quality: quality)
-      await Self.preloadedStreams.store(.init(descriptor: descriptor, initialAudio: Data(),
-        expiresAt: Date().addingTimeInterval(4 * 60)), for: key)
+      descriptor = try await Self.preloadedStreams.resolve(key) {
+        try await Self.resolveAudioDescriptor(videoId: videoId, quality: quality)
+      }
     }
     NSLog("[NATIVE] Using %@ stream preparation for %@", staged == nil ? "fresh" : "preloaded", videoId)
+    guard generation == playbackGeneration else { throw CancellationError() }
 
     try await self.nativePlayer.setChannelMode(metadata["channelMode"] ?? "stereo")
+    guard generation == playbackGeneration else { throw CancellationError() }
     try await self.nativePlayer.play(
       descriptor: descriptor,
       rangeClient: Self.rangeClient,
@@ -246,7 +271,11 @@ public final class OpenfyYouTubeModule: Module {
     if let cached, cached.initialAudio.count >= 64 * 1024 { return cached.initialAudio.count }
     let descriptor: YouTubeStreamDescriptor
     if let cached { descriptor = cached.descriptor }
-    else { descriptor = try await resolveAudioDescriptor(videoId: videoId, quality: quality) }
+    else {
+      descriptor = try await preloadedStreams.resolve(key) {
+        try await resolveAudioDescriptor(videoId: videoId, quality: quality)
+      }
+    }
     let prefixLength = min(Int64(128 * 1024), descriptor.contentLength)
     guard prefixLength > 0 else {
       throw StreamTransportError.invalidContentRange
