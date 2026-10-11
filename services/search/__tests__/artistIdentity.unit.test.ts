@@ -64,4 +64,45 @@ describe('artist identities', () => {
     expect(await resolveTrackArtist({ name: 'Sid' }, { title: 'Dueto', artistName: 'Sid, Tavin' }))
       .toEqual({ id: sid, name: 'Sid' });
   });
+
+  it('resolves a combined lead credit only after confirming the channel profile', async () => {
+    const channel = `UC${'s'.repeat(22)}`;
+    const search = jest.fn().mockResolvedValue({ songs: { contents: [{
+      title: 'Combined credit song', artists: [{ name: 'Sid & Tavin', channel_id: channel }],
+    }] } });
+    const getArtist = jest.fn().mockResolvedValue({ header: { title: 'Sid' } });
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: { search, getArtist } } as never);
+
+    expect(await resolveTrackArtist({ name: 'Sid' }, {
+      title: 'Combined credit song', artists: [{ name: 'Sid' }, { name: 'Tavin' }],
+    })).toEqual({ id: sid, name: 'Sid' });
+    expect(getArtist).toHaveBeenCalledWith(channel);
+  });
+
+  it('does not assign a combined duo profile to one of its members', async () => {
+    const getArtist = jest.fn().mockResolvedValue({ header: { title: 'Sid & Tavin' } });
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: {
+      search: jest.fn().mockResolvedValue({ songs: { contents: [{
+        title: 'Duo credit song', artists: [{ name: 'Sid & Tavin', channel_id: `UC${'b'.repeat(22)}` }],
+      }] } }), getArtist,
+    } } as never);
+
+    expect(await resolveTrackArtist({ name: 'Sid' }, {
+      title: 'Duo credit song', artistName: 'Sid, Tavin',
+    })).toEqual({ id: toYouTubeMusicArtistRouteId(undefined, 'Sid'), name: 'Sid' });
+  });
+
+  it('does not give the lead channel to a secondary collaborator in a combined credit', async () => {
+    const getArtist = jest.fn();
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: {
+      search: jest.fn().mockResolvedValue({ songs: { contents: [{
+        title: 'Secondary credit song', artists: [{ name: 'Sid & Tavin', channel_id: `UC${'s'.repeat(22)}` }],
+      }] } }), getArtist,
+    } } as never);
+
+    expect(await resolveTrackArtist({ name: 'Tavin' }, {
+      title: 'Secondary credit song', artistName: 'Sid, Tavin',
+    })).toEqual({ id: toYouTubeMusicArtistRouteId(undefined, 'Tavin'), name: 'Tavin' });
+    expect(getArtist).not.toHaveBeenCalled();
+  });
 });

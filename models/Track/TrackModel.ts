@@ -25,6 +25,8 @@ export type TrackModel = {
   youtubeVideoId?: string;
   youtubeUrl?: string;
   durationMs?: number;
+  viewCount?: number;
+  popularity?: number;
   artists?: { id: string; name: string }[];
   isSaved?: boolean;
   isDownloaded?: boolean;

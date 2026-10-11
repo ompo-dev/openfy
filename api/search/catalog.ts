@@ -62,6 +62,28 @@ const artistReferencesFromValue = (value: unknown) => asArray(value).map((entry)
 }).filter((artist) => artist.name);
 const validVideoId = (id?: string) => Boolean(id && /^[A-Za-z0-9_-]{11}$/.test(id));
 
+const trackViewCount = (item: YouTubeMusicItem): number | undefined => {
+  const data = asRecord(item);
+  const candidates = [data.view_count, data.views, ...asArray(data.flex_columns)
+    .map((column) => asString(asRecord(column).title))
+    .filter((text) => /\s(?:plays|views|reprodu[cç][oõ]es|visualiza[cç][oõ]es)$/i.test(text))];
+  for (const value of candidates) {
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
+    const text = asString(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase();
+    const match = text.match(/^(\d[\d.,\s]*)\s*(k|m|b|mil|mi|milhao|milhoes|bilhao|bilhoes)?(?:\s+(?:plays|views|reproducoes|visualizacoes))?$/);
+    if (!match) continue;
+    const unit = match[2];
+    const multiplier = ['k', 'mil'].includes(unit) ? 1_000
+      : ['m', 'mi', 'milhao', 'milhoes'].includes(unit) ? 1_000_000
+        : ['b', 'bilhao', 'bilhoes'].includes(unit) ? 1_000_000_000 : 1;
+    const amount = Number(multiplier === 1
+      ? match[1].replace(/[.,\s]/g, '')
+      : match[1].replace(/\s/g, '').replace(',', '.'));
+    if (Number.isFinite(amount)) return Math.round(amount * multiplier);
+  }
+  return undefined;
+};
+
 const normalizeArtistName = (value: string) =>
   value.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase();
 
@@ -221,6 +243,7 @@ export const toYouTubeMusicTrackModel = (item: YouTubeMusicItem): TrackModel | n
     durationMs: Number.isFinite(durationSeconds)
       ? Math.max(0, durationSeconds) * 1000
       : 0,
+    viewCount: trackViewCount(item),
     artists,
   };
 };
@@ -744,6 +767,12 @@ const loadYouTubeMusicArtistProfile = async (
       const id = asString(data.id) || asString(data.video_id);
       if (validVideoId(id) && !pageAndCatalogSongs.has(id)) {
         pageAndCatalogSongs.set(id, item);
+      } else if (validVideoId(id)) {
+        const previous = pageAndCatalogSongs.get(id)!;
+        const viewCount = trackViewCount(item);
+        if (viewCount !== undefined) {
+          pageAndCatalogSongs.set(id, { ...previous, view_count: viewCount });
+        }
       }
     }
   };

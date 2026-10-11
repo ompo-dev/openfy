@@ -12,6 +12,48 @@ const track = (
 });
 
 describe('mergeArtistProfileTracks', () => {
+  it('sorts highlights by views descending, using Spotify popularity when views are unavailable', () => {
+    const credit = [{ id: 'sid', name: 'Sid' }];
+    const result = mergeArtistProfileTracks({ artistId: 'sid', artistName: 'Sid',
+      contextualTracks: [], participationTracks: [], primaryTracks: [
+        { ...track('four-million', 'Fourth', credit), viewCount: 4_000_000 },
+        { ...track('no-views', 'No views', credit), popularity: 35 },
+        { ...track('twenty-nine-million', 'Second', credit), viewCount: 29_000_000 },
+        { ...track('eighty-four-million', 'First', credit), viewCount: 84_000_000 },
+        { ...track('popular-spotify', 'Popular Spotify', credit), popularity: 90 },
+      ],
+    });
+    expect(result.primaryTracks.map((item) => item.id)).toEqual([
+      'eighty-four-million', 'twenty-nine-million', 'four-million', 'popular-spotify', 'no-views',
+    ]);
+  });
+
+  it('keeps canonical artwork while enriching a duplicate with its play count', () => {
+    const canonical = { ...track('canonical', 'Same song', [{ id: 'sid', name: 'Sid' }]), imageURL: 'album.jpg' };
+    const result = mergeArtistProfileTracks({ artistId: 'sid', artistName: 'Sid',
+      contextualTracks: [], participationTracks: [], primaryTracks: [
+        canonical, { ...canonical, id: 'video', imageURL: 'video.jpg', viewCount: 12_000_000 },
+      ],
+    });
+    expect(result.primaryTracks).toEqual([expect.objectContaining({
+      id: 'canonical', imageURL: 'album.jpg', viewCount: 12_000_000,
+    })]);
+  });
+
+  it('does not duplicate a recording when its verified YouTube lead credit combines collaborators', () => {
+    const youtubeId = `ytartist_UC${'s'.repeat(22)}~Sid`;
+    const result = mergeArtistProfileTracks({ artistId: youtubeId, artistName: 'Sid',
+      contextualTracks: [], participationTracks: [], primaryTracks: [
+        { ...track('spotify-song', 'Isso Vale Minha Vida', [{ id: '05BrFNfdik79RdmOG1Ux1Q', name: 'Sid' },
+          { id: 'tavin', name: 'Tavin' }]), imageURL: 'album.jpg' },
+        { ...track('youtube-song', 'Isso Vale Minha Vida', [{ id: youtubeId, name: 'Sid & Tavin' }]),
+          imageURL: 'video.jpg', viewCount: 36_000_000 },
+      ],
+    });
+    expect(result.primaryTracks).toEqual([expect.objectContaining({
+      id: 'spotify-song', imageURL: 'album.jpg', viewCount: 36_000_000,
+    })]);
+  });
   it('does not add another artist with the same name but a different stable identity', () => {
     const artistId = '1234567890123456789012';
     const result = mergeArtistProfileTracks({ artistId, artistName: 'Sid', primaryTracks: [], participationTracks: [],

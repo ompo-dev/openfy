@@ -8,6 +8,7 @@ type ArtistTopTracksResponse = {
     name: string;
     duration_ms: number;
     explicit: boolean;
+    popularity?: number;
     artists: { id: string; name: string }[];
     album: { id: string; name: string; images: { url: string }[] };
   }[];
@@ -38,6 +39,7 @@ const loadArtistTopTracks = async (
     durationMs: track.duration_ms,
     artists: track.artists,
     explicit: track.explicit,
+    popularity: track.popularity,
   }));
 };
 

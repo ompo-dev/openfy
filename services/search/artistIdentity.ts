@@ -18,6 +18,9 @@ const normalize = (name: string) => name.normalize('NFKD').replace(/[\u0300-\u03
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' ? value as Record<string, unknown> : {};
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
+const referenceNames = (reference: unknown) => splitCanonicalArtists(
+  getYouTubeMusicText(record(reference).name).replace(/\s+&\s+/g, ',')
+).map(normalize);
 export const hasArtistIdentity = (id = '') => /^[A-Za-z0-9]{22}$/.test(id) ||
   /^UC[\w-]{22}$/.test(id) || (id.startsWith('ytartist_') && Boolean(parseYouTubeMusicArtistRoute(id).browseId));
 export const artistIdentityKey = (id = '') => {
@@ -55,13 +58,23 @@ export const resolveTrackArtist = async (
       const references = array(song.artists).length ? array(song.artists) : array(song.authors);
       const otherCredits = credits.map(normalize).filter((name) => name !== normalize(artist.name));
       if (otherCredits.length && !references.some((reference) =>
-        otherCredits.includes(normalize(getYouTubeMusicText(record(reference).name))))) continue;
+        referenceNames(reference).some((name) => otherCredits.includes(name)))) continue;
       for (const reference of references) {
         const credit = record(reference);
         const name = getYouTubeMusicText(credit.name);
         const channel = getYouTubeMusicText(credit.channel_id) || getYouTubeMusicText(credit.id);
-        if (normalize(name) === normalize(artist.name) && /^UC[\w-]{22}$/.test(channel)) {
+        if (!/^UC[\w-]{22}$/.test(channel)) continue;
+        if (normalize(name) === normalize(artist.name)) {
           return { id: toYouTubeMusicArtistRouteId(channel, name), name };
+        }
+        const names = referenceNames(reference);
+        if (names.length < 2 || names[0] !== normalize(artist.name) ||
+          !names.every((name) => credits.map(normalize).includes(name))) continue;
+        // A combined credit may link to the lead artist or to a separate duo.
+        // Verify the profile before assigning that channel to one collaborator.
+        const page = await withYouTubeMusicTimeout(client.music.getArtist(channel), 3_000).catch(() => null);
+        if (normalize(getYouTubeMusicText(page?.header?.title)) === normalize(artist.name)) {
+          return { id: toYouTubeMusicArtistRouteId(channel, artist.name), name: artist.name };
         }
       }
     }

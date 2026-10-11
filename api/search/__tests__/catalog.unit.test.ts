@@ -6,6 +6,7 @@ import {
   getCachedArtistSearchSeed,
   searchCatalog,
   getCatalogSearchSuggestions,
+  toYouTubeMusicTrackModel,
 } from '../catalog';
 import { getYouTubeMusicClient } from '../../../services/youtubeMusicClient';
 import { getSpotifyArtistImage } from '../../../services/metadata/spotifyMetadata';
@@ -24,6 +25,31 @@ jest.mock('../../../services/metadata/spotifyMetadata', () => ({
 
 describe('public YouTube Music catalog', () => {
   beforeEach(() => jest.clearAllMocks());
+
+  it.each([
+    ['84M plays', 84_000_000], ['1,2 mi reproduções', 1_200_000],
+    ['750K views', 750_000], ['1.234.567 visualizações', 1_234_567],
+  ])('reads the real track play count from %s', (label, expected) => {
+    expect(toYouTubeMusicTrackModel({ id: 'abcdefghijk', title: 'Song',
+      flex_columns: [{ title: 'Sid & Tavin' }, { title: label }] })?.viewCount).toBe(expected);
+  });
+
+  it('enriches header songs with play counts from the complete shelf instead of discarding duplicate IDs', async () => {
+    const song = { id: 'abcdefghijk', title: 'Popular song', item_type: 'song',
+      artists: [{ channel_id: 'UCplaycounts', name: 'Play counts' }] };
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: {
+      search: jest.fn().mockResolvedValue({ songs: { contents: [] } }),
+      getArtist: jest.fn().mockResolvedValue({ header: { title: 'Play counts' },
+        sections: [{ contents: [song] }],
+        getAllSongs: jest.fn().mockResolvedValue({ contents: [{ ...song,
+          flex_columns: [{ title: '84M plays' }] }] }),
+      }),
+    } } as never);
+
+    const profile = await getYouTubeMusicArtistProfile('ytartist_UCplaycounts~Play%20counts');
+    expect(profile.tracks).toHaveLength(1);
+    expect(profile.tracks[0]).toMatchObject({ title: 'Popular song', viewCount: 84_000_000 });
+  });
 
   it('publishes the real header and initial songs while catalog search is still pending', async () => {
     const id = 'ytartist_UCprogressive~Progressive';

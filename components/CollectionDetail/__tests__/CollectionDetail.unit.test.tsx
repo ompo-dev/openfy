@@ -324,6 +324,125 @@ describe('CollectionDetail', () => {
     expect(screen.queryByText('Crédito genérico')).toBeNull();
   });
 
+  it.each([
+    ['Tocar', false],
+    ['Tocar aleatório', true],
+  ] as const)('uses the same artist queue for a row and header %s, excluding hidden video variants', async (label, shuffle) => {
+    const artistTracks = Array.from({ length: 12 }, (_, index) => ({
+      id: `sotam-track-${index + 1}`,
+      title: `Sotam track ${index + 1}`,
+      subtitle: 'Sotam',
+      artists: [{ id: 'ytartist_sotam', name: 'Sotam' }],
+      imageURL: 'https://images.example/sotam-album.jpg',
+    }));
+    const screen = await renderCollection({
+      kind: 'artist',
+      collectionId: 'ytartist_sotam',
+      title: 'Sotam',
+      tracks: [
+        { ...artistTracks[0], id: 'uncredited-video', subtitle: '', artists: [],
+          imageURL: 'https://images.example/video-thumbnail.jpg' },
+        artistTracks[0],
+        { ...artistTracks[1], id: 'unknown-video', subtitle: 'Unknown',
+          artists: [{ id: '', name: 'Unknown' }] },
+        ...artistTracks.slice(1),
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByTestId('collection-track-list').props.data).toHaveLength(10));
+    await fireEvent.press(screen.getByLabelText('Tocar Sotam track 1'));
+    await waitFor(() => expect(playWithQueue).toHaveBeenCalledTimes(1));
+    const rowQueue = playWithQueue.mock.calls[0][0];
+    playWithQueue.mockClear();
+
+    await fireEvent.press(screen.getByLabelText(label));
+    await waitFor(() => expect(playWithQueue).toHaveBeenCalledWith(
+      rowQueue, 0, 'artist:ytartist_sotam', { shuffle }
+    ));
+    expect(rowQueue).toHaveLength(12);
+    expect(rowQueue.map((track: { spotifyId: string }) => track.spotifyId)).toEqual(artistTracks.map((track) => track.id));
+    expect(rowQueue).toEqual(artistTracks.map((track) => expect.objectContaining({
+      spotifyId: track.id, artistName: track.subtitle, artists: track.artists, imageURL: track.imageURL,
+    })));
+  });
+
+  it.each([
+    ['Tocar', false],
+    ['Tocar aleatório', true],
+  ] as const)('applies row eligibility to all resolved playlist pages for header %s', async (label, shuffle) => {
+    const nextPageTrack = { id: 'track-three', title: 'Next page', subtitle: 'Sotam' };
+    const resolveTracksForPlayback = jest.fn().mockResolvedValue([
+      { id: 'uncredited-video', title: 'Hidden video', subtitle: '' },
+      ...tracks,
+      { id: 'unknown-video', title: 'Unknown video', subtitle: 'Unknown artist' },
+      nextPageTrack,
+    ]);
+    const screen = await renderCollection({ kind: 'playlist', resolveTracksForPlayback });
+
+    await fireEvent.press(screen.getByLabelText(label));
+    await waitFor(() => expect(playWithQueue).toHaveBeenCalledWith(
+      [...tracks, nextPageTrack].map((track) => expect.objectContaining({ spotifyId: track.id })),
+      0, 'playlist:album-test', { shuffle }
+    ));
+    expect(resolveTracksForPlayback).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['Tocar', false],
+    ['Tocar aleatório', true],
+  ] as const)('keeps header %s consistent with the searched and sorted artist rows', async (label, shuffle) => {
+    const screen = await renderCollection({
+      kind: 'artist',
+      tracks: [
+        { id: 'z', title: 'Z song', subtitle: 'Sotam' },
+        { id: 'other', title: 'Other song', subtitle: 'Someone else' },
+        { id: 'hidden', title: 'Sotam video', subtitle: '' },
+        { id: 'a', title: 'A song', subtitle: 'Sotam' },
+      ],
+    });
+    await fireEvent.press(screen.getByLabelText('Ordenar por título'));
+    await fireEvent.press(screen.getByLabelText('Buscar'));
+    await fireEvent.changeText(await screen.findByLabelText('Buscar nesta coleção'), 'sotam');
+    await waitFor(() => expect(screen.getByTestId('collection-track-list').props.data.map((track: { id: string }) => track.id)).toEqual(['a', 'z']));
+
+    await fireEvent.press(screen.getByLabelText('Tocar Z song'));
+    await waitFor(() => expect(playWithQueue).toHaveBeenCalledWith(
+      [expect.objectContaining({ spotifyId: 'a' }), expect.objectContaining({ spotifyId: 'z' })],
+      1, 'artist:album-test', { shuffle: false }
+    ));
+    const rowQueue = playWithQueue.mock.calls[0][0];
+    playWithQueue.mockClear();
+    await fireEvent.press(screen.getByLabelText(label));
+    await waitFor(() => expect(playWithQueue).toHaveBeenCalledWith(rowQueue, 0, 'artist:album-test', { shuffle }));
+  });
+
+  it.each([false, true])('toggles an existing artist queue without rebuilding it when playing is %s', async (isPlaying) => {
+    jest.mocked(usePlayer).mockReturnValue(playerValue({
+      isPlaying,
+      queueSourceId: 'artist:ytartist_sotam:participations',
+    }) as any);
+    const screen = await renderCollection({ kind: 'artist', collectionId: 'ytartist_sotam', title: 'Sotam' });
+
+    await fireEvent.press(screen.getByLabelText(isPlaying ? 'Pausar' : 'Tocar'));
+    await waitFor(() => expect(togglePlayPause).toHaveBeenCalledTimes(1));
+    await fireEvent.press(screen.getByLabelText('Tocar aleatório'));
+    expect(toggleShuffle).toHaveBeenCalledTimes(1);
+    expect(playWithQueue).not.toHaveBeenCalled();
+  });
+
+  it.each(['Tocar', 'Tocar aleatório'])('does not create a queue of hidden variants when header %s has no eligible songs', async (label) => {
+    const screen = await renderCollection({
+      kind: 'artist',
+      tracks: [
+        { id: 'uncredited', title: 'Hidden video', subtitle: '' },
+        { id: 'unknown', title: 'Unknown video', subtitle: 'Artista desconhecido' },
+      ],
+    });
+
+    await fireEvent.press(screen.getByLabelText(label));
+    expect(playWithQueue).not.toHaveBeenCalled();
+  });
+
   it('paginates artist tracks by 10 and exposes the next page on demand', async () => {
     const artistTracks = Array.from({ length: 12 }, (_, index) => ({
       id: `artist-track-${index + 1}`,

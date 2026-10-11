@@ -60,6 +60,9 @@ export type YouTubeMusicItem = {
   selected?: boolean;
   primary?: YouTubeMusicItem | null;
   duration?: { seconds?: number };
+  view_count?: number | string;
+  views?: number | string;
+  flex_columns?: { title?: unknown }[];
   album?: { id?: string; name?: string };
   artists?: YouTubeMusicArtistRef[];
   authors?: YouTubeMusicArtistRef[];

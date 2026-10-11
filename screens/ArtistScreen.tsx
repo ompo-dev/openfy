@@ -330,6 +330,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
     };
     // Playback can supply a fallback name, but must not reload this route.
     const playbackArtistName = playbackArtistNameRef.current;
+    const routePreview = getDetailPreview('artist', artistId);
     setArtistError('');
     setIsProfileReady(false);
     const searchSeed = isYouTubeArtist
@@ -366,7 +367,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
 
     const earlyArtistName = isYouTubeArtist
       ? getYouTubeMusicArtistRouteName(artistId) || searchSeed?.artist.name || ''
-      : localArtistName || searchSeed?.artist.name || playbackArtistName;
+      : localArtistName || searchSeed?.artist.name || playbackArtistName || routePreview?.title || '';
     const earlyArtistImage = earlyArtistName
       ? getCachedArtistImage(
           earlyArtistName,
@@ -413,13 +414,15 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       waitingForSupplement = true;
       void (async () => {
         const context = additionalPrimaryTracks[0] || localProfile?.topTracks[0] ||
-          (await libraryPromise).find((track) => track.artists?.some((credit) => credit.id === routeId));
+          (await libraryPromise).find((track) => track.artists?.some((credit) => credit.id === routeId)) ||
+          routePreview?.tracks?.find((track) => track.artists?.some((credit) => credit.id === routeId));
         const resolved = await resolveTrackArtist({ id: routeId.startsWith('ytartist_') ? routeId : undefined,
           name: artistName }, context);
         if (!active) return null;
         if (hasArtistIdentity(routeId) && !hasArtistIdentity(resolved.id)) {
           waitingForSupplement = false;
           setIsProfileReady(true);
+          log.artist('public artist catalog identity unresolved', { artist: artistName, routeId, track: context?.title });
           return null;
         }
         watchCatalog(resolved.id, routeId);
@@ -457,6 +460,10 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             !publicReleases.albums.some((album) => normalizeReleaseTitle(album.title) === normalizeReleaseTitle(release.title))));
         setIsProfileReady(true);
         setArtistError('');
+        if (catalogProfile.artist.imageURL) {
+          void rememberCachedArtistImage(artistName, catalogProfile.artist.imageURL,
+            [routeId, catalogProfile.artist.id]).catch(() => {});
+        }
         log.artist('public artist catalog supplemented local profile', {
           artist: catalogProfile.artist.name,
           tracks: merged.primaryTracks.length,
@@ -828,7 +835,7 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
             setIsProfileReady(false);
             supplementFromPublicCatalog(localProfile.artist.name, artistId, localProfile);
         } else {
-          const currentArtistName = playbackArtistName;
+          const currentArtistName = earlyArtistName;
           if (currentArtistName) {
             setArtist({ id: artistId, type: 'artist', name: currentArtistName, imageURL: '' });
             setTopTracks([]);

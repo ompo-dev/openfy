@@ -160,6 +160,19 @@ const trackMatchesSearch = (track: CollectionTrack, query: string) => {
   return searchable.includes(query);
 };
 
+const selectCollectionTracks = (
+  tracks: CollectionTrack[],
+  query = '',
+  sortAscending = false
+) => {
+  const filtered = tracks.filter((track) =>
+    hasTrackArtistCredit(track) && trackMatchesSearch(track, query)
+  );
+  return sortAscending
+    ? [...filtered].sort((first, second) => first.title.localeCompare(second.title))
+    : filtered;
+};
+
 const toDownloadInput = (
   track: CollectionTrack,
   collectionName: string
@@ -321,14 +334,10 @@ export const CollectionDetail = ({
       totalDurationMs ?? tracks.reduce((total, track) => total + (track.durationMs || 0), 0),
   });
   const normalizedSearchQuery = normalizeSearchValue(searchQuery);
-  const matchingTracks = React.useMemo(() => {
-    const filtered = tracks.filter((track) =>
-      hasTrackArtistCredit(track) && trackMatchesSearch(track, normalizedSearchQuery)
-    );
-    return sortAscending
-      ? [...filtered].sort((first, second) => first.title.localeCompare(second.title))
-      : filtered;
-  }, [normalizedSearchQuery, sortAscending, tracks]);
+  const matchingTracks = React.useMemo(
+    () => selectCollectionTracks(tracks, normalizedSearchQuery, sortAscending),
+    [normalizedSearchQuery, sortAscending, tracks]
+  );
   const visibleTracks = React.useMemo(
     () => kind === 'artist' && !normalizedSearchQuery
       ? matchingTracks.slice(0, artistTrackLimit)
@@ -340,9 +349,7 @@ export const CollectionDetail = ({
       extraTrackSections
         .map((section) => ({
           ...section,
-          tracks: section.tracks.filter((track) =>
-            hasTrackArtistCredit(track) && trackMatchesSearch(track, normalizedSearchQuery)
-          ),
+          tracks: selectCollectionTracks(section.tracks, normalizedSearchQuery),
         }))
         .filter((section) => section.tracks.length > 0),
     [extraTrackSections, normalizedSearchQuery]
@@ -475,8 +482,7 @@ export const CollectionDetail = ({
       sourceId = collectionPlaybackId,
       shuffled = false
     ) => {
-      const playableTracks = sourceTracks;
-      const playerTracks = playableTracks.map((track) => toPlayerTrack(track, title));
+      const playerTracks = sourceTracks.map((track) => toPlayerTrack(track, title));
       if (playerTracks.length === 0) return;
       await playWithQueue(playerTracks, startIndex, sourceId, {
         shuffle: shuffled,
@@ -489,11 +495,19 @@ export const CollectionDetail = ({
     ]
   );
 
+  const resolveCollectionTracks = React.useCallback(async () => {
+    if (!resolveTracksForPlayback) return matchingTracks;
+    // Complete remote pages must follow the same selection as the rows.
+    return selectCollectionTracks(
+      await resolveTracksForPlayback(),
+      normalizedSearchQuery,
+      sortAscending
+    );
+  }, [matchingTracks, normalizedSearchQuery, resolveTracksForPlayback, sortAscending]);
+
   const playCollection = React.useCallback(
     async (shuffled = false, startIndex = 0) => {
-      const playableTracks = resolveTracksForPlayback
-        ? await resolveTracksForPlayback()
-        : tracks;
+      const playableTracks = await resolveCollectionTracks();
       await playTrackList(
         playableTracks,
         startIndex,
@@ -501,15 +515,13 @@ export const CollectionDetail = ({
         shuffled
       );
     },
-    [collectionPlaybackId, playTrackList, resolveTracksForPlayback, tracks]
+    [collectionPlaybackId, playTrackList, resolveCollectionTracks]
   );
 
   const handleAddToQueue = React.useCallback(async () => {
-    const playableTracks = resolveTracksForPlayback
-      ? await resolveTracksForPlayback()
-      : tracks;
+    const playableTracks = await resolveCollectionTracks();
     addToQueue(playableTracks.map((track) => toPlayerTrack(track, title)));
-  }, [addToQueue, resolveTracksForPlayback, title, tracks]);
+  }, [addToQueue, resolveCollectionTracks, title]);
 
   const handleAdd = React.useCallback(async () => {
     if (onAddTracksPress) {
