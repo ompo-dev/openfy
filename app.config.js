@@ -14,7 +14,8 @@ module.exports = {
       enabled: true,
       url: 'https://u.expo.dev/33b0281a-b127-47fe-ab16-e94caf272493',
       disableAntiBrickingMeasures: true,
-      checkAutomatically: 'ON_LOAD',
+      // Start the installed bundle first so update progress is visible in-app.
+      checkAutomatically: 'NEVER',
       fallbackToCacheTimeout: 0,
       useEmbeddedUpdate: true,
       requestHeaders: {

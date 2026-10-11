@@ -9,6 +9,7 @@ import { createAsyncResourceCache } from '../../src/application/asyncResourceCac
 import { parseYouTubeCount, rankYouTubeCandidate, type YouTubeCandidate } from './youtubeCandidateRanking';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
 import { retryNetworkOperation } from './networkRetry';
+import { markTrackUnavailable } from '../../stores/useTrackAvailabilityStore';
 import {
   getCatalogMapping,
   setCatalogMapping,
@@ -297,6 +298,7 @@ export const resolveSpotifyTrackVideoId = async (
     const client = await retryNetworkOperation(() => withTimeout(getSearchClient(), 'YouTube search client'));
     const candidates = new Map<string, YouTubeCandidate>();
     const canonical = { title, artists: canonicalArtists, durationMs, spotifyId };
+    let completedSearches = 0;
 
     for (const query of queries) {
       recordDownloadDiagnostic(spotifyId, 'audio.youtube.search', { query });
@@ -307,6 +309,7 @@ export const resolveSpotifyTrackVideoId = async (
           query, attempt, error: String(error),
         })
       )
+        .then((result) => { completedSearches++; return result; })
         .catch((error) => {
           recordDownloadDiagnostic(spotifyId, 'audio.youtube.search_failed', { query, error: String(error) });
           return { videos: [] };
@@ -338,6 +341,8 @@ export const resolveSpotifyTrackVideoId = async (
         });
       }
     }
+
+    if (!completedSearches) throw new Error('YouTube searches unavailable');
 
     // Compare all searches before choosing. A matching fan display name must
     // not preempt a later result from an official group/label channel.
@@ -388,6 +393,7 @@ export const resolveSpotifyTrackVideoId = async (
     return { status: 'not_found', reason: `search_error: ${error instanceof Error ? error.message : String(error)}` };
   }
 
+  markTrackUnavailable({ spotifyId, title }, 'no-canonical-match');
   return { status: 'not_found', reason: 'no_canonical_match' };
 };
 

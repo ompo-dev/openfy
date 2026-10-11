@@ -12,6 +12,7 @@ import {
   resolveSpotifyTrackVideoId,
   toDownloadTrackInput,
   upsertCatalogTracks,
+  setCatalogMapping,
 } from '@services';
 import { FullPlayer } from '../FullPlayer';
 import { getPlayerAlbum } from '../../../services/library/playerAlbum';
@@ -113,6 +114,7 @@ jest.mock('@services', () => ({
   getCachedArtistImage: jest.fn().mockResolvedValue(''),
   toDownloadTrackInput: jest.fn((track) => track),
   upsertCatalogTracks: jest.fn(),
+  setCatalogMapping: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('../../LocalPlaylist/TrackPlaylistPickerModal', () => ({
   TrackPlaylistPickerModal: (props: unknown) => mockTrackPlaylistPicker(props),
@@ -174,6 +176,7 @@ const makePlayer = (track = {}) => ({
   isPlayerVisible: true,
   playerState: { positionMs: 0, durationMs: 180000, isPlaying: false },
   playTrack: jest.fn().mockResolvedValue(undefined),
+  replaceQueueTrack: jest.fn(),
   playWithQueue: jest.fn().mockResolvedValue(undefined),
   togglePlayPause: jest.fn().mockResolvedValue(undefined),
   seekToPosition: jest.fn().mockResolvedValue(undefined),
@@ -513,6 +516,26 @@ describe('FullPlayer artist row and YouTube source', () => {
     );
   });
 
+  it('repairs the audio link without replacing the recording metadata or playlist identity', async () => {
+    const player = makePlayer({ youtubeVideoId: 'aaaaaaaaaaa' });
+    jest.mocked(usePlayer).mockReturnValue(player as never);
+    const screen = await render(<FullPlayer visible onClose={() => {}} />);
+    await fireEvent.press(screen.getByLabelText('Opções do YouTube'));
+    await fireEvent.press(screen.getByText('Editar link do YouTube'));
+    await fireEvent.changeText(screen.getByPlaceholderText('https://www.youtube.com/watch?v=...'),
+      'https://www.youtube.com/watch?v=bbbbbbbbbbb');
+    await fireEvent.press(screen.getByText('Atualizar Áudio'));
+    await waitFor(() => expect(player.playTrack).toHaveBeenCalled());
+    const repaired = { ...player.currentTrack, youtubeVideoId: 'bbbbbbbbbbb',
+      youtubeUrl: 'https://www.youtube.com/watch?v=bbbbbbbbbbb', isDownloaded: false,
+      localAudioPath: undefined, streamUrl: undefined, streamExpiresAt: undefined };
+    expect(setCatalogMapping).toHaveBeenCalledWith(sampleTrack.spotifyId,
+      expect.objectContaining({ videoId: 'bbbbbbbbbbb', source: 'user_direct' }));
+    expect(upsertCatalogTracks).toHaveBeenCalledWith([repaired]);
+    expect(player.replaceQueueTrack).toHaveBeenCalledWith(player.currentTrack, repaired);
+    expect(player.playTrack).toHaveBeenCalledWith(repaired, { setQueue: false });
+  });
+
   it('keeps YouTube Music artist aliases on the public catalog profile', async () => {
     const screen = await mountPlayer({
       youtubeVideoId: 'aaaaaaaaaaa',
@@ -525,7 +548,7 @@ describe('FullPlayer artist row and YouTube source', () => {
       '/(tabs)/library/artist/ytartist_name_Ebony',
       { dangerouslySingular: true }
     ));
-    expect(findArtistIdByName).toHaveBeenCalledWith('Ebony');
+    expect(findArtistIdByName).not.toHaveBeenCalled();
   });
 
   it('replaces the title with a sticky mini-player after the player scrolls away', async () => {

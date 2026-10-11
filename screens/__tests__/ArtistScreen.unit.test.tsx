@@ -28,6 +28,12 @@ import {
   rememberCachedArtistImage,
 } from '@services';
 import { ArtistScreen } from '../ArtistScreen';
+import { resolveTrackArtist } from '../../services/search/artistIdentity';
+import { toYouTubeMusicArtistRouteId } from '../../services/youtubeMusicClient';
+
+jest.mock('../../services/search/artistIdentity', () => ({
+  ...jest.requireActual('../../services/search/artistIdentity'), resolveTrackArtist: jest.fn(),
+}));
 
 jest.mock('@api', () => ({
   findArtistIdByName: jest.fn(),
@@ -106,6 +112,9 @@ describe('ArtistScreen', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.mocked(resolveTrackArtist).mockImplementation(async (artist) => ({
+      id: artist.id || toYouTubeMusicArtistRouteId(undefined, artist.name), name: artist.name,
+    }));
     jest.mocked(useDetailNavigation).mockReturnValue({
       openDetail,
       section: 'library',
@@ -328,7 +337,7 @@ describe('ArtistScreen', () => {
     expect(view.queryByText('Artista')).toBeNull();
   });
 
-  it('supplements a sparse Spotify discography for a YouTube search artist route', async () => {
+  it('keeps the YouTube identity even when a same-name Spotify lookup would succeed', async () => {
     const artistId = 'ytartist_UCspotify~Artista%20Real';
     const spotifyArtistId = '1234567890123456789012';
     jest.mocked(findArtistIdByName).mockResolvedValue(spotifyArtistId);
@@ -357,21 +366,28 @@ describe('ArtistScreen', () => {
         artists: [{ id: spotifyArtistId, name: 'Artista Real' }],
       }],
     } as never);
+    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
+      artist: { id: artistId, type: 'artist', name: 'Artista Real', imageURL: 'correct.jpg' },
+      tracks: [{ id: 'correct-song', title: 'Correct', artists: [{ id: artistId, name: 'Artista Real' }] }],
+      participationTracks: [], albums: [], singlesAndEps: [],
+    } as never);
 
     const view = await render(<ArtistScreen artistId={artistId} />);
 
     await waitFor(() => {
-      expect(view.getByText('track-count:2')).toBeTruthy();
+      expect(view.getByText('track-count:1')).toBeTruthy();
     });
     expect(view.getByText('Artista Real')).toBeTruthy();
     expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
-      'ytartist_~Artista%20Real'
+      artistId
     );
-    expect(getArtistDiscography).toHaveBeenCalledWith(spotifyArtistId);
+    expect(findArtistIdByName).not.toHaveBeenCalled();
+    expect(getArtistDiscography).not.toHaveBeenCalled();
   });
 
   it('enriches a sparse canonical artist profile with the full public catalog', async () => {
     const spotifyArtistId = '1234567890123456789012';
+    jest.mocked(resolveTrackArtist).mockResolvedValue({ id: 'ytartist_UCEbony~Ebony', name: 'Ebony' });
     const spotifyTracks = Array.from({ length: 19 }, (_, index) => ({
       id: `spotify-${index}`,
       title: `Spotify track ${index}`,
@@ -410,7 +426,7 @@ describe('ArtistScreen', () => {
       expect(view.getByText('track-count:64')).toBeTruthy();
     });
     expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
-      'ytartist_~Ebony'
+      'ytartist_UCEbony~Ebony'
     );
   });
 
@@ -442,12 +458,13 @@ describe('ArtistScreen', () => {
       expect(view.getByText('participation-count:1')).toBeTruthy();
     });
     expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
-      'ytartist_~Pedro%20Qualy'
+      artistId
     );
   });
 
   it('supplements a Spotify-id local profile with the public artist catalog', async () => {
     const spotifyArtistId = '1234567890123456789012';
+    jest.mocked(resolveTrackArtist).mockResolvedValue({ id: 'ytartist_UCartist~Artista%20existente', name: 'Artista existente' });
     jest.mocked(groupLocalArtists).mockReturnValue([{
       id: `spotify:${spotifyArtistId}`,
       spotifyArtistId,
@@ -472,7 +489,7 @@ describe('ArtistScreen', () => {
       expect(view.getByText('track-count:2')).toBeTruthy();
     });
     expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
-      'ytartist_~Artista%20existente'
+      'ytartist_UCartist~Artista%20existente'
     );
   });
 });

@@ -12,6 +12,15 @@ const track = (
 });
 
 describe('mergeArtistProfileTracks', () => {
+  it('does not add another artist with the same name but a different stable identity', () => {
+    const artistId = '1234567890123456789012';
+    const result = mergeArtistProfileTracks({ artistId, artistName: 'Sid', primaryTracks: [], participationTracks: [],
+      contextualTracks: [track('right-song', 'Correct', [{ id: artistId, name: 'Sid' }]),
+        track('wrong-song', 'Other', [{ id: '1234567890123456789013', name: 'SID' }])],
+    });
+    expect(result.primaryTracks.map((item) => item.id)).toEqual(['right-song']);
+  });
+
   it('includes a streamed contextual track in the primary artist profile', () => {
     const result = mergeArtistProfileTracks({
       artistId: 'pedro',

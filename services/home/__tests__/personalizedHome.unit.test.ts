@@ -77,6 +77,22 @@ describe('personalizedHome', () => {
     expect(home.pinnedArtists[0].artistId).toBe('artist-sotam');
   });
 
+  it('does not pin featured artists who have never been the primary artist of a listened recording', () => {
+    const collaborated = track('collab', 'Dueto', { id: 'primary', name: 'Principal' }, {
+      artistName: 'Principal, Participante', artists: [{ id: 'primary', name: 'Principal' },
+        { id: 'featured', name: 'Participante' }],
+    });
+    const history: UserProfile = { ...profile, recentlyPlayedTracks: [{
+      track: { id: 'collab', spotifyId: 'collab', title: 'Dueto', artists: ['Principal', 'Participante'],
+        primaryArtist: 'Principal, Participante', albumName: 'Album', imageURL: '', durationMs: 180000,
+        createdAt: collaborated.addedAt, updatedAt: collaborated.updatedAt },
+      lastPlayedAt: 1, playCount: 30,
+    }] };
+    const home = buildPersonalizedHome({ tracks: [collaborated], playlists: [], profile: history,
+      personalized: true, allowExplicitRecommendations: true });
+    expect(home.pinnedArtists.map((artist) => artist.title)).toEqual(['Principal']);
+  });
+
   it('does not fabricate pinned items when there is no listening history', () => {
     const home = buildPersonalizedHome({ tracks: library, playlists, profile, personalized: true, allowExplicitRecommendations: true });
     expect(home.pinnedArtists).toEqual([]);

@@ -13,12 +13,10 @@ export const SkeletonImage = ({
   style,
   ...imageProps
 }: SkeletonImageProps) => {
-  const [loaded, setLoaded] = React.useState(false);
   const sourceKey = typeof source === 'string' ? source : JSON.stringify(source);
-
-  React.useEffect(() => {
-    setLoaded(false);
-  }, [sourceKey]);
+  const currentSource = React.useRef(sourceKey);
+  currentSource.current = sourceKey;
+  const [loadedSource, setLoadedSource] = React.useState<string>();
 
   return (
     <View style={[style as StyleProp<ViewStyle>, styles.frame]}>
@@ -27,15 +25,15 @@ export const SkeletonImage = ({
         source={source}
         style={StyleSheet.absoluteFill}
         onLoad={(event) => {
-          setLoaded(true);
+          if (currentSource.current === sourceKey) setLoadedSource(sourceKey);
           onLoad?.(event);
         }}
         onError={(event) => {
-          setLoaded(true);
+          if (currentSource.current === sourceKey) setLoadedSource(sourceKey);
           onError?.(event);
         }}
       />
-      {!loaded ? (
+      {loadedSource !== sourceKey ? (
         <View pointerEvents="none" style={styles.skeleton} />
       ) : null}
     </View>

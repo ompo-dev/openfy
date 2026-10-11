@@ -15,6 +15,7 @@ import { log } from '../../utils/appLogger';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 import { createProgressiveResource } from '../../src/application/progressiveResource';
 import { getSpotifyArtistImage } from '../../services/metadata/spotifyMetadata';
+import { hasArtistIdentity, personalizeArtistSearch, type ArtistSearchContext } from '../../services/search/artistIdentity';
 
 export type CatalogSearchResults = {
   artists: ArtistModel[];
@@ -108,16 +109,6 @@ export const getYouTubeMusicArtistBiography = (artistRouteId: string) =>
       const data = asRecord(match);
       const author = asRecord(data.author);
       browseId = asString(data.id) || asString(author.channel_id) || asString(author.id);
-    } else if (routeName) {
-      const result = await withYouTubeMusicTimeout(client.music.search(routeName, { type: 'artist' }));
-      const candidates = asArray(asRecord(result?.artists).contents) as YouTubeMusicItem[];
-      const match = candidates.find((item) =>
-        normalizeArtistName(asString(asRecord(item).name) || asString(asRecord(item).title)) === normalizeArtistName(routeName)
-      );
-      const data = asRecord(match);
-      const author = asRecord(data.author);
-      const resolvedId = asString(data.id) || asString(author.channel_id) || asString(author.id);
-      if (resolvedId && resolvedId !== browseId) browseId = resolvedId;
     }
     return browseId ? loadChannelBiography(client, browseId) : '';
   }, 6 * 60 * 60_000);
@@ -364,7 +355,7 @@ const toArtistModel = (item: YouTubeMusicItem): ArtistModel | null => {
 const dedupeArtistResults = (artists: ArtistModel[]) => {
   const deduped = new Map<string, ArtistModel>();
   artists.forEach((artist) => {
-    const key = normalizeArtistName(artist.name);
+    const key = artist.id;
     const current = deduped.get(key);
     if (!current) {
       deduped.set(key, artist);
@@ -391,7 +382,7 @@ const rememberSearchSeeds = (results: CatalogSearchResults) => {
     const name = normalizeArtistName(artist.name);
     const foundTracks = results.tracks.filter((track) =>
       track.artists?.some((candidate) =>
-        candidate.id === artist.id || normalizeArtistName(candidate.name) === name
+        candidate.id === artist.id || (!hasArtistIdentity(candidate.id) && normalizeArtistName(candidate.name) === name)
       )
     );
     const existing = artistSearchSeeds.get(artist.id);
@@ -567,7 +558,7 @@ const searchCatalogUncached = async (
       .map(toArtistModel)
       .filter((artist): artist is ArtistModel => Boolean(artist)),
     ...artistsFromTrackCredits,
-  ]).slice(0, Math.min(limit, 8));
+  ]);
 
   const catalogResults: CatalogSearchResults = {
     artists,
@@ -625,15 +616,19 @@ export const getCatalogSearchSuggestions = (query: string): Promise<string[]> =>
 };
 
 /** Search YouTube Music's public catalog directly; no Spotify account/token is needed. */
-export const searchCatalog = (query: string, limit = 12): Promise<CatalogSearchResults> => {
+export const searchCatalog = async (query: string, limit = 12, context?: ArtistSearchContext): Promise<CatalogSearchResults> => {
   const cleanQuery = query.trim();
   if (!cleanQuery) return Promise.resolve({ artists: [], tracks: [] });
   const key = `${normalizeQuery(cleanQuery)}:${limit}`;
-  return catalogSearchCache.getOrLoad(
+  const results = await catalogSearchCache.getOrLoad(
     key,
     () => searchCatalogUncached(cleanQuery, limit),
     30_000
   );
+  const artists = context ? await personalizeArtistSearch(cleanQuery, results.artists, context) : results.artists;
+  const personalized = { ...results, artists: artists.slice(0, Math.min(limit, 8)) };
+  rememberSearchSeeds(personalized);
+  return personalized;
 };
 
 const loadYouTubeMusicArtistProfile = async (
@@ -700,17 +695,6 @@ const loadYouTubeMusicArtistProfile = async (
   });
   const initialSongSearch = routeName ? searchArtistSongs(routeName) : null;
   let page = await getArtistPage(browseId);
-  if (!page && routeName) {
-    const matchedBrowseId = await findArtistBrowseId(routeName);
-    if (matchedBrowseId && matchedBrowseId !== browseId) {
-      log.artist('catalog identity recovered by name', {
-        previousBrowseId: browseId,
-        matchedBrowseId,
-      });
-      browseId = matchedBrowseId;
-      page = await getArtistPage(browseId);
-    }
-  }
   if (!page) {
     finishSongCatalog({ ok: false, stage: 'profile-unavailable' });
     log.error('catalog artist profile exhausted retries', { artistRouteId, browseId });
@@ -751,7 +735,7 @@ const loadYouTubeMusicArtistProfile = async (
   let completeSongShelf: YouTubeMusicItem[] = [];
   const matchingArtistCredit = (item: YouTubeMusicItem) =>
     artistReferences(item).some((artist) =>
-      artist.id === browseId || normalizeArtistName(artist.name) === normalizeArtistName(name)
+      artist.id === browseId || (!artist.id && normalizeArtistName(artist.name) === normalizeArtistName(name))
     );
   const pageAndCatalogSongs = new Map<string, YouTubeMusicItem>();
   const addSongs = (items: YouTubeMusicItem[]) => {
@@ -821,7 +805,7 @@ const loadYouTubeMusicArtistProfile = async (
           };
       const credits = artistReferences(item);
       const artistCreditIndex = credits.findIndex((artist) =>
-        artist.id === browseId || normalizeArtistName(artist.name) === normalizeArtistName(name)
+        artist.id === browseId || (!artist.id && normalizeArtistName(artist.name) === normalizeArtistName(name))
       );
       if (artistCreditIndex > 0) participationTracks.push(track);
       else tracks.push(track);
@@ -957,7 +941,7 @@ const loadYouTubeMusicArtistImage = async (artistRouteId: string) => {
   const byName = artists.find(
     (item) => normalizeArtistName(nameOf(item)) === normalizeArtistName(routeName)
   );
-  return largestImage(byId || byName || {});
+  return largestImage(browseId ? byId || {} : byName || {});
 };
 
 /** Fetch only the artist search result image; home/feed do not need a full profile and track list. */
@@ -989,13 +973,10 @@ export const getArtistCatalogImage = async (
     ? artistId
     : toYouTubeMusicArtistRouteId(youtubeChannelId, name);
   if (/^[A-Za-z0-9]{22}$/.test(artistId)) {
-    const spotifyImage = await getSpotifyArtistImage(artistId).catch(() => null);
-    if (spotifyImage) return spotifyImage;
+    return (await getSpotifyArtistImage(artistId).catch(() => null)) || '';
   }
   const youtubeImage = await getYouTubeMusicArtistImage(routeId).catch(() => '');
   if (youtubeImage) return youtubeImage;
 
-  return /^[A-Za-z0-9]{22}$/.test(artistId)
-    ? (await getSpotifyArtistImage(artistId).catch(() => null)) || ''
-    : '';
+  return '';
 };

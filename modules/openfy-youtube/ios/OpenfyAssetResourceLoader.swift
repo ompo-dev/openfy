@@ -13,17 +13,22 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
   private let descriptor: YouTubeStreamDescriptor
   private let rangeClient: YouTubeHTTPRangeClient
   private let prefetchedPrefix: Data?
-  private let chunkSize: Int64 = 1024 * 1024 // 1 MB chunks
+  private let chunkSize: Int64 = 128 * 1024
+  private let onInitialAudio: (@Sendable (Data) -> Void)?
+  private var cachedInitialAudio: Data
   private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
 
   public init(
     descriptor: YouTubeStreamDescriptor,
     rangeClient: YouTubeHTTPRangeClient,
-    prefetchedPrefix: Data? = nil
+    prefetchedPrefix: Data? = nil,
+    onInitialAudio: (@Sendable (Data) -> Void)? = nil
   ) {
     self.descriptor = descriptor
     self.rangeClient = rangeClient
     self.prefetchedPrefix = prefetchedPrefix
+    self.onInitialAudio = onInitialAudio
+    self.cachedInitialAudio = prefetchedPrefix ?? Data()
     super.init()
   }
 
@@ -102,6 +107,16 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
     request.isByteRangeAccessSupported = true
   }
 
+  private func cacheInitialAudio(_ data: Data, offset: Int64) {
+    queue.async { [self] in
+      guard offset <= Int64(cachedInitialAudio.count), cachedInitialAudio.count < Int(chunkSize) else { return }
+      let overlap = max(0, cachedInitialAudio.count - Int(offset))
+      guard overlap < data.count else { return }
+      cachedInitialAudio.append(data.dropFirst(overlap).prefix(Int(chunkSize) - cachedInitialAudio.count))
+      onInitialAudio?(cachedInitialAudio)
+    }
+  }
+
   private func satisfy(
     _ loadingRequest: AVAssetResourceLoadingRequest,
     dataRequest: AVAssetResourceLoadingDataRequest
@@ -137,6 +152,7 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
       try Task.checkCancellation()
       guard !loadingRequest.isCancelled, !loadingRequest.isFinished else { return }
       dataRequest.respond(with: data)
+      cacheInitialAudio(data, offset: offset)
       NSLog("[RESOURCE] Responded %ld bytes (offset %lld -> %lld of %lld)",
             data.count, offset, offset + Int64(data.count), targetEnd + 1)
       offset += Int64(data.count)

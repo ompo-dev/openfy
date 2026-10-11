@@ -28,6 +28,8 @@ import { TrackRow } from '../common/TrackRow';
 import { ProgressiveList } from '../common/ProgressiveList';
 import { isSameRecording } from '../../services/library/trackIdentity';
 import { log } from '../../utils/appLogger';
+import { useFollowedArtistsStore } from '../../stores/useFollowedArtistsStore';
+import type { ArtistSearchContext } from '../../services/search/artistIdentity';
 import {
   clearSearchHistory, getSearchHistory, rememberSearchSelection, removeSearchHistoryEntry,
   searchHistoryKey, subscribeSearchHistory, type SearchHistoryEntry, type SearchSelection,
@@ -63,6 +65,10 @@ export const Home = () => {
   }));
   const { refreshLibrary } = useLibrarySelectedCategory();
   const { openDetail } = useDetailNavigation();
+  const followedArtists = useFollowedArtistsStore((state) => state.artists);
+  const searchContext = React.useRef<ArtistSearchContext>({ tracks: [...home.tracksById.values()], artists: followedArtists });
+  searchContext.current = { tracks: [...(currentTrack ? [currentTrack] : []),
+    ...home.continueListening, ...home.tracksById.values()], artists: followedArtists };
   const [query, setQuery] = React.useState('');
   const [searchActive, setSearchActive] = React.useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = React.useState(false);
@@ -178,7 +184,7 @@ export const Home = () => {
         queryLength: cleanQuery.length,
       });
       log.search('catalog query started', { length: cleanQuery.length });
-      void searchCatalog(cleanQuery)
+      void searchCatalog(cleanQuery, 12, searchContext.current)
         .then((nextResults) => {
           finishSearch({
             ok: true,
@@ -398,7 +404,7 @@ export const Home = () => {
                   const isSaved = savedTrackIds.has(track.id) || home.tracksById.has(track.id);
                   const isSaving = savingTrackIds.has(track.id);
                   return (
-                    <TrackRow key={track.id} title={track.title} subtitle={track.subtitle} imageURL={track.imageURL}
+                    <TrackRow track={track} key={track.id} title={track.title} subtitle={track.subtitle} imageURL={track.imageURL}
                       active={isSameRecording(currentTrack, toPlayerTrackFromSearch(track))} playing={isPlaying}
                       downloadState="idle" onDownload={() => {}}
                       onPress={() => playSearchTrack(track, results.tracks, 'home:search')} trailingAction={
@@ -448,7 +454,7 @@ export const Home = () => {
               <ArtistSearchRow key={searchHistoryKey(entry)} artist={entry.artist}
                 onPress={() => openArtist(entry.artist)} trailingAction={historyRemoveButton(entry)} />
             ) : (
-              <TrackRow key={searchHistoryKey(entry)} title={entry.track.title} subtitle={entry.track.subtitle} imageURL={entry.track.imageURL}
+              <TrackRow track={entry.track} key={searchHistoryKey(entry)} title={entry.track.title} subtitle={entry.track.subtitle} imageURL={entry.track.imageURL}
                 active={isSameRecording(currentTrack, toPlayerTrackFromSearch(entry.track))} playing={isPlaying}
                 downloadState="idle" onDownload={() => {}}
                 onPress={() => playSearchTrack(entry.track, historyTracks, 'home:search-history')}

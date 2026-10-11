@@ -198,7 +198,7 @@ export const ImportModal = ({
         showsVerticalScrollIndicator={false}
         renderItem={({ item, index }) => {
           const status = downloadsById.get(item.spotifyId)?.status;
-          return <TrackRow title={item.title} subtitle={item.artistName} imageURL={item.imageURL}
+          return <TrackRow track={item} title={item.title} subtitle={item.artistName} imageURL={item.imageURL}
             active={currentTrack?.spotifyId === item.spotifyId} playing={isPlaying}
             downloadState={item.isDownloaded || status === 'completed' ? 'completed' :
               ['queued', 'resolving', 'downloading'].includes(status || '') ? 'active' : 'idle'}

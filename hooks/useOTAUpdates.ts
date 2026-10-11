@@ -9,6 +9,7 @@ import { prepareTemporaryOTAUpdate } from '../services/updates/temporaryOTA';
 const MIN_UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
 type UpdateCheckerOptions = {
+  enabled?: boolean;
   canUseUpdates?: () => boolean;
   getNow?: () => number;
 };
@@ -174,7 +175,7 @@ export function useOTAUpdates(options: UpdateCheckerOptions = {}) {
   const activeRef = React.useRef(AppState.currentState === 'active');
 
   React.useEffect(() => {
-    if (!canCheckForUpdates()) return;
+    if (options.enabled === false || !canCheckForUpdates()) return;
 
     const discoverTemporaryUpdate = () => {
       if (!activeRef.current || pointerCheckRef.current) return;
@@ -253,7 +254,7 @@ export function useOTAUpdates(options: UpdateCheckerOptions = {}) {
       clearInterval(pointerInterval);
       subscription.remove();
     };
-  }, [canCheckForUpdates, getNow]);
+  }, [canCheckForUpdates, getNow, options.enabled]);
 
   return { isDownloading, lastResult };
 }

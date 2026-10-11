@@ -21,6 +21,7 @@ import { fetchLyrics } from '../../services/lyrics/lyricsService';
 import { prefetchTrackArtistData } from '../../services/library/artistProfilePrefetch';
 import { prefetchTrackAlbumData } from '../../services/library/playerAlbum';
 import { resetAppSettings, updateAppSettings } from '../../services/settings/appSettings';
+import { markTrackUnavailable, isTrackUnavailable, useTrackAvailabilityStore } from '../useTrackAvailabilityStore';
 
 jest.mock('react-native', () => ({ Platform: { OS: 'web' } }));
 jest.mock('expo-file-system/legacy', () => ({ getInfoAsync: jest.fn() }));
@@ -140,6 +141,7 @@ describe('queue preload window', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    useTrackAvailabilityStore.setState({ failures: {} });
     jest.mocked(getStatus).mockReturnValue(DEFAULT_STATE);
     queueTestRun += 1;
     tracks.forEach((track, index) => {
@@ -175,6 +177,77 @@ describe('queue preload window', () => {
       repeatMode: 'off',
       playTrack: realPlayTrack,
     });
+  });
+
+  it('keeps recent sources after jumping beyond the neighbor window', async () => {
+    await usePlayerStore.getState().playWithQueue(tracks, 0, 'library:songs');
+    await flushAsync();
+    await usePlayerStore.getState().playQueueIndex(4);
+    await flushAsync();
+    await usePlayerStore.getState().playQueueIndex(0);
+    expect(jest.mocked(resolveAudioUrl).mock.calls.filter(([title]) => title === tracks[0].title)).toHaveLength(1);
+    expect(loadAndPlay).toHaveBeenLastCalledWith('https://media.test/Anterior.m4a', expect.any(Function),
+      expect.any(Object), 0, tracks[0], { trackChangeAlreadyBegun: true });
+    expect(downloadTrack).not.toHaveBeenCalled();
+  });
+
+  it('starts explicit playback without waiting for a neighbor decoder preload', async () => {
+    let finishPreload!: () => void;
+    jest.mocked(preloadAudio).mockImplementation(() => new Promise<void>((resolve) => { finishPreload = resolve; }));
+    await usePlayerStore.getState().playWithQueue(tracks, 0);
+    await flushAsync();
+    const changingTrack = usePlayerStore.getState().playQueueIndex(1);
+    await flushAsync();
+    expect(loadAndPlay).toHaveBeenCalledWith('https://media.test/Atual.m4a', expect.any(Function),
+      expect.any(Object), 0, tracks[1], { trackChangeAlreadyBegun: true });
+    finishPreload();
+    await changingTrack;
+  });
+
+  it('excludes unavailable recordings from normal and shuffled collections', async () => {
+    markTrackUnavailable(tracks[1], 'no-canonical-match');
+    for (const shuffle of [false, true]) {
+      await usePlayerStore.getState().playWithQueue(tracks, 0, 'playlist:unavailable', { shuffle });
+      expect(usePlayerStore.getState().queue).toHaveLength(4);
+      expect(usePlayerStore.getState().queue).not.toContain(tracks[1]);
+    }
+  });
+
+  it('marks a failed recording and advances to a playable song', async () => {
+    jest.mocked(resolveAudioUrl).mockImplementation(async (title) => title === tracks[0].title
+      ? null : { url: `https://media.test/${title}.m4a`, format: 'm4a' });
+    await usePlayerStore.getState().playWithQueue(tracks, 0);
+    expect(isTrackUnavailable(tracks[0])).toBe(true);
+    expect(usePlayerStore.getState().currentTrack).toBe(tracks[1]);
+    expect(usePlayerStore.getState().isLoadingAudio).toBe(false);
+  });
+
+  it('stops instead of looping forever when every recording fails with repeat all', async () => {
+    usePlayerStore.setState({ repeatMode: 'all' });
+    jest.mocked(resolveAudioUrl).mockResolvedValue(null);
+    await usePlayerStore.getState().playWithQueue(tracks, 0);
+    expect(tracks.every((track) => isTrackUnavailable(track))).toBe(true);
+    expect(usePlayerStore.getState().isLoadingAudio).toBe(false);
+    expect(resolveAudioUrl).toHaveBeenCalledTimes(tracks.length);
+  });
+
+  it('lets an unavailable recording be selected individually for repair', async () => {
+    markTrackUnavailable(tracks[1], 'no-canonical-match');
+    usePlayerStore.setState({ isFullPlayerVisible: false });
+    await usePlayerStore.getState().playTrack(tracks[1]);
+    expect(usePlayerStore.getState().currentTrack).toBe(tracks[1]);
+    expect(usePlayerStore.getState().isFullPlayerVisible).toBe(true);
+    expect(loadAndPlay).not.toHaveBeenCalled();
+    expect(resolveAudioUrl).not.toHaveBeenCalled();
+  });
+
+  it('replaces a repaired source without changing the queue order or recording identity', () => {
+    usePlayerStore.setState({ queue: tracks, queueOriginalOrder: tracks, queueIndex: 1 });
+    const replacement = { ...tracks[1], youtubeVideoId: 'aaaaaaaaaaa' };
+    usePlayerStore.getState().replaceQueueTrack(tracks[1], replacement);
+    expect(usePlayerStore.getState().queue).toEqual([tracks[0], replacement, ...tracks.slice(2)]);
+    expect(usePlayerStore.getState().queueOriginalOrder).toEqual(usePlayerStore.getState().queue);
+    expect(usePlayerStore.getState().queueIndex).toBe(1);
   });
 
   it('rebuilds neighbors at the new quality without interrupting the current song', async () => {
@@ -227,10 +300,10 @@ describe('queue preload window', () => {
 
     expect(preloadAudio).toHaveBeenCalledWith(
       'https://media.test/Anterior.m4a',
-      45
+      8
     );
-    expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Próxima.m4a', 90);
-    expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Mais uma.m4a', 45);
+    expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Próxima.m4a', 8);
+    expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Mais uma.m4a', 8);
 
     await usePlayerStore.getState().playNext();
     await flushAsync();
@@ -351,25 +424,25 @@ describe('queue preload window', () => {
     const shuffledQueue = [...usePlayerStore.getState().queue];
     expect(preloadAudio).toHaveBeenCalledWith(
       `https://media.test/${shuffledQueue[1].title}.m4a`,
-      90
+      8
     );
     expect(preloadAudio).toHaveBeenCalledWith(
       `https://media.test/${shuffledQueue[2].title}.m4a`,
-      45
+      8
     );
 
     await usePlayerStore.getState().playNext();
     await flushAsync();
     expect(preloadAudio).toHaveBeenCalledWith(
       `https://media.test/${shuffledQueue[3].title}.m4a`,
-      45
+      8
     );
 
     await usePlayerStore.getState().playNext();
     await flushAsync();
     expect(preloadAudio).toHaveBeenCalledWith(
       `https://media.test/${shuffledQueue[4].title}.m4a`,
-      45
+      8
     );
     randomSpy.mockRestore();
   });
@@ -627,7 +700,7 @@ describe('queue preload window', () => {
 
       expect(usePlayerStore.getState().queueIndex).toBe(2);
       expect(usePlayerStore.getState().queueSourceId).toBe('playlist:daily');
-      expect(playTrack).toHaveBeenCalledWith(tracks[2], { setQueue: false });
+      expect(playTrack).toHaveBeenCalledWith(tracks[2], { setQueue: false, skipUnavailable: true });
     });
   });
 
@@ -663,6 +736,7 @@ describe('queue preload window', () => {
       expect(usePlayerStore.getState().queueIndex).toBe(2);
       expect(playTrack).toHaveBeenLastCalledWith(shuffledQueue[2], {
         setQueue: false,
+        skipUnavailable: true,
       });
       expect(randomSpy).toHaveBeenCalledTimes(tracks.length - 1);
 
@@ -670,6 +744,7 @@ describe('queue preload window', () => {
       expect(usePlayerStore.getState().queueIndex).toBe(1);
       expect(playTrack).toHaveBeenLastCalledWith(shuffledQueue[1], {
         setQueue: false,
+        skipUnavailable: true,
       });
       expect(randomSpy).toHaveBeenCalledTimes(tracks.length - 1);
     });

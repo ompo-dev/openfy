@@ -147,7 +147,7 @@ describe('Stream Recovery & Refusal Tests', () => {
       {
         updateInterval: 500,
         keepAudioSessionActive: true,
-        preferredForwardBufferDuration: 30,
+        preferredForwardBufferDuration: 5,
       }
     );
   });

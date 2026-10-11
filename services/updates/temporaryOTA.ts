@@ -75,18 +75,24 @@ export async function prepareTemporaryOTAUpdate(
   const now = options.now ?? Date.now;
   const pointerUrl = options.pointerUrl ?? TEMPORARY_OTA_POINTER_URL;
   const startedAt = now();
-  const response = await fetcher(`${pointerUrl}?_=${startedAt}`, {
-    headers: { 'cache-control': 'no-cache' },
-  });
-
-  if (response.status === 404 || response.status === 410) {
-    return { status: 'inactive' };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8_000);
+  let pointer: TemporaryOTAPointer | null;
+  try {
+    const response = await fetcher(`${pointerUrl}?_=${startedAt}`, {
+      headers: { 'cache-control': 'no-cache' },
+      signal: controller.signal,
+    });
+    if (response.status === 404 || response.status === 410) {
+      return { status: 'inactive' };
+    }
+    if (!response.ok) {
+      throw new Error(`OTA pointer request failed with HTTP ${response.status}.`);
+    }
+    pointer = parsePointer(await response.json());
+  } finally {
+    clearTimeout(timeout);
   }
-  if (!response.ok) {
-    throw new Error(`OTA pointer request failed with HTTP ${response.status}.`);
-  }
-
-  const pointer = parsePointer(await response.json());
   const expiresAt = pointer ? Date.parse(pointer.expiresAt) : 0;
   if (
     !pointer ||

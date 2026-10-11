@@ -319,7 +319,10 @@ export const buildPersonalizedHome = ({
     })).slice(0, 20);
   // Pinned artists reflect actual listens, not how many songs were imported.
   const listenedArtists = new Map<string, PersonalizedHomeArtist>();
-  recentEntries.forEach((entry) => entry.track.artists.forEach((name) => {
+  recentEntries.forEach((entry) => {
+    const name = tracksById.get(entry.track.spotifyId)?.artists?.[0]?.name ||
+      entry.track.artists[0] || entry.track.primaryArtist?.split(/\s*(?:,|&| feat\.?)\s*/i)[0];
+    if (!name || entry.playCount <= 0) return;
     const key = normalize(name);
     const savedArtist = tracksById.get(entry.track.spotifyId)?.artists?.find((artist) => normalize(artist.name) === key);
     const artistId = savedArtist?.id || toYouTubeMusicArtistRouteId(undefined, name);
@@ -329,7 +332,7 @@ export const buildPersonalizedHome = ({
       imageURL: followedArtists.find((artist) => artistFollowKey(artist.name) === artistFollowKey(name))?.imageURL || '',
       appearances: (current?.appearances || 0) + entry.playCount,
     });
-  }));
+  });
   const pinnedArtists = [...listenedArtists.values()]
     .sort((first, second) => second.appearances - first.appearances)
     .slice(0, 4);

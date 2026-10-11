@@ -3,6 +3,7 @@ import { toYouTubeMusicArtistRouteId } from '../youtubeMusicClient';
 import { prefetchImage } from '../images/imagePrefetch';
 import { isArtistFollowed } from './followedArtists';
 import { rememberDetailPreview } from '../navigation/detailPreview';
+import { resolveTrackArtist } from '../search/artistIdentity';
 
 const withPrefetchedPortrait = <T extends { imageURL?: string; artist?: { imageURL?: string } }>(request: Promise<T>): Promise<T> =>
   request.then((profile) => {
@@ -37,6 +38,7 @@ const getArtistApis = () => {
 
 type ArtistRef = { id?: string; name: string };
 type TrackArtistData = {
+  title?: string;
   artistName: string;
   artists?: ArtistRef[];
 };
@@ -82,6 +84,12 @@ const getTrackArtists = ({ artistName, artists }: TrackArtistData, limit = MAX_A
 
 /** Warm only the current track's credited artists; request/result caches are bounded by their API owners. */
 export const prefetchTrackArtistData = (track: TrackArtistData): void => {
+  if (track.title) {
+    void Promise.all(getTrackArtists(track, 16).map((artist) => resolveTrackArtist(artist,
+      { ...track, title: track.title! }))).then((artists) =>
+      prefetchTrackArtistData({ artistName: track.artistName, artists })).catch(() => {});
+    return;
+  }
   const artists = getTrackArtists(track);
   if (!artists.length) return;
   const artistApis = getArtistApis();
@@ -141,15 +149,8 @@ export const prefetchTrackArtistData = (track: TrackArtistData): void => {
         () => apis.getArtistCatalogImage(spotifyId || youtubeRouteId, name),
         [id, spotifyId, youtubeRouteId].filter(Boolean)
       );
-      // Local-library routes are name based, while public cards use the YTM
-      // channel route. Warm both keys so opening the current artist does not
-      // repeat the same catalog request after playback has already started.
-      const youtubeNameRoute = toYouTubeMusicArtistRouteId(undefined, name);
       const profileRequests: Promise<unknown>[] = [
-        withPrefetchedPortrait(apis.getYouTubeMusicArtistProfile(youtubeRouteId)),
-        ...(youtubeNameRoute !== youtubeRouteId
-          ? [withPrefetchedPortrait(apis.getYouTubeMusicArtistProfile(youtubeNameRoute))]
-          : []),
+        ...(!spotifyId ? [withPrefetchedPortrait(apis.getYouTubeMusicArtistProfile(youtubeRouteId))] : []),
         ...(spotifyId
           ? [Promise.all([
               withPrefetchedPortrait(apis.getArtist(spotifyId)),
@@ -221,14 +222,13 @@ export const prefetchArtistData = (artists: ArtistRef[]): void => {
     const request = new Promise<void>((resolve) => { finish = resolve; });
     const run = () => artistApis
       .then(async (apis) => {
-        const youtubeNameRoute = toYouTubeMusicArtistRouteId(undefined, artist.name);
         await Promise.allSettled([
           getCachedArtistImage(
             artist.name,
             () => apis.getArtistCatalogImage(spotifyId || youtubeRouteId, artist.name),
             [artist.id, spotifyId, youtubeRouteId].filter(Boolean)
           ),
-          withPrefetchedPortrait(apis.getYouTubeMusicArtistProfile(youtubeRouteId)).then(async (profile) => {
+          ...(!spotifyId ? [withPrefetchedPortrait(apis.getYouTubeMusicArtistProfile(youtubeRouteId)).then(async (profile) => {
             if (!isArtistFollowed(artist)) return;
             rememberDetailPreview('artist', youtubeRouteId, { title: profile.artist.name, imageURL: profile.artist.imageURL });
             for (const album of [...profile.albums, ...profile.singlesAndEps].slice(0, 2)) {
@@ -237,10 +237,7 @@ export const prefetchArtistData = (artists: ArtistRef[]): void => {
               await prefetchImage(album.imageURL).catch(() => {});
               if (album.id.startsWith('ytalbum_')) await apis.getYouTubeMusicAlbum(album.id).catch(() => {});
             }
-          }),
-          ...(youtubeNameRoute !== youtubeRouteId
-            ? [withPrefetchedPortrait(apis.getYouTubeMusicArtistProfile(youtubeNameRoute))]
-            : []),
+          })] : []),
           ...(spotifyId
             ? [Promise.all([
                 withPrefetchedPortrait(apis.getArtist(spotifyId)),

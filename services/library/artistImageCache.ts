@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 import { prefetchImage } from '../images/imagePrefetch';
+import { parseYouTubeMusicArtistRoute } from '../youtubeMusicClient';
 
-const STORAGE_KEY_PREFIX = 'openfy_artist_image_verified_v4:';
+const STORAGE_KEY_PREFIX = 'openfy_artist_image_verified_v5:';
 const IMAGE_CACHE_TTL_MS = 6 * 60 * 60_000;
 const MISSING_IMAGE_CACHE_TTL_MS = 60_000;
 const imageCache = createAsyncResourceCache<string>({
@@ -21,8 +22,11 @@ const getArtistCacheId = (artistName: string) => artistName
 
 const isRemoteImage = (value: string) => /^https?:\/\//i.test(value);
 
-const uniqueCacheIds = (artistName: string, aliases: string[] = []) =>
-  [...new Set([artistName, ...aliases].map(getArtistCacheId).filter(Boolean))];
+const uniqueCacheIds = (artistName: string, aliases: string[] = []) => {
+  const identities = aliases.filter((alias) => /^[A-Za-z0-9]{22}$/.test(alias) ||
+    /^UC[\w-]{22}$/.test(alias) || (alias.startsWith('ytartist_') && Boolean(parseYouTubeMusicArtistRoute(alias).browseId)));
+  return [...new Set((identities.length ? identities : [artistName, ...aliases]).map(getArtistCacheId).filter(Boolean))];
+};
 const getSpotifyArtistAlias = (aliases: string[]) =>
   aliases.find((alias) => /^[A-Za-z0-9]{22}$/.test(alias)) || '';
 const getYouTubeArtistAlias = (aliases: string[]) =>

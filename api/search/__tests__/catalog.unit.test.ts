@@ -275,7 +275,7 @@ describe('public YouTube Music catalog', () => {
     expect(profile.tracks).toMatchObject([{ id: 'yt_abcdefghijk', title: 'Tarôs' }]);
   });
 
-  it('recovers an artist profile by name after both original-id attempts fail', async () => {
+  it('does not replace a known artist identity with a homonym after a profile failure', async () => {
     const page = {
       header: {
         title: { toString: () => 'Pedro Qualy' },
@@ -300,15 +300,14 @@ describe('public YouTube Music catalog', () => {
       music: { search, getArtist },
     } as never);
 
-    const profile = await getYouTubeMusicArtistProfile(
+    await expect(getYouTubeMusicArtistProfile(
       'ytartist_stale-second~Pedro%20Qualy'
-    );
+    )).rejects.toThrow('Não foi possível carregar este artista agora.');
 
     expect(getArtist).toHaveBeenNthCalledWith(1, 'stale-second');
     expect(getArtist).toHaveBeenNthCalledWith(2, 'stale-second');
-    expect(search).toHaveBeenCalledWith('Pedro Qualy', { type: 'artist' });
-    expect(getArtist).toHaveBeenNthCalledWith(3, 'UCartist');
-    expect(profile.artist).toMatchObject({ name: 'Pedro Qualy' });
+    expect(search).not.toHaveBeenCalledWith('Pedro Qualy', { type: 'artist' });
+    expect(getArtist).toHaveBeenCalledTimes(2);
   });
 
   it('supplements incomplete artist pages and separates featured tracks from participations', async () => {

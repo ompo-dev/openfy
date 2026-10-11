@@ -39,15 +39,18 @@ private actor NativeYouTubePreloadStore {
 
   func store(_ entry: Entry, for videoId: String) {
     entries = entries.filter { $0.value.expiresAt > Date() }
+    if let cached = entries[videoId], cached.descriptor.sourceURL == entry.descriptor.sourceURL,
+       cached.initialAudio.count > entry.initialAudio.count { return }
     entries[videoId] = entry
-    while entries.count > 4 {
+    while entries.count > 12 {
       guard let oldest = entries.min(by: { $0.value.expiresAt < $1.value.expiresAt }) else { break }
       entries.removeValue(forKey: oldest.key)
     }
   }
 
-  func take(_ videoId: String) -> Entry? {
-    guard let entry = entries.removeValue(forKey: videoId), entry.expiresAt > Date() else {
+  func get(_ videoId: String) -> Entry? {
+    guard let entry = entries[videoId], entry.expiresAt > Date() else {
+      entries.removeValue(forKey: videoId)
       return nil
     }
     return entry
@@ -207,12 +210,15 @@ public final class OpenfyYouTubeModule: Module {
     }
 
     let quality = metadata["quality"] ?? "high"
-    let staged = await Self.preloadedStreams.take("\(quality):\(videoId)")
+    let key = "\(quality):\(videoId)"
+    let staged = await Self.preloadedStreams.get(key)
     let descriptor: YouTubeStreamDescriptor
     if let staged {
       descriptor = staged.descriptor
     } else {
       descriptor = try await Self.resolveAudioDescriptor(videoId: videoId, quality: quality)
+      await Self.preloadedStreams.store(.init(descriptor: descriptor, initialAudio: Data(),
+        expiresAt: Date().addingTimeInterval(4 * 60)), for: key)
     }
     NSLog("[NATIVE] Using %@ stream preparation for %@", staged == nil ? "fresh" : "preloaded", videoId)
 
@@ -221,7 +227,13 @@ public final class OpenfyYouTubeModule: Module {
       descriptor: descriptor,
       rangeClient: Self.rangeClient,
       metadata: OpenfyNowPlayingMetadata(values: metadata),
-      prefetchedAudio: staged?.initialAudio
+      prefetchedAudio: staged?.initialAudio,
+      onInitialAudio: { data in
+        Task {
+          await Self.preloadedStreams.store(.init(descriptor: descriptor, initialAudio: data,
+            expiresAt: Date().addingTimeInterval(4 * 60)), for: key)
+        }
+      }
     )
   }
 
@@ -229,8 +241,13 @@ public final class OpenfyYouTubeModule: Module {
     guard isValidVideoId(videoId) else {
       throw transferError("invalid_video_id")
     }
-    let descriptor = try await resolveAudioDescriptor(videoId: videoId, quality: quality)
-    let prefixLength = min(Int64(512 * 1024), descriptor.contentLength)
+    let key = "\(quality):\(videoId)"
+    let cached = await preloadedStreams.get(key)
+    if let cached, cached.initialAudio.count >= 64 * 1024 { return cached.initialAudio.count }
+    let descriptor: YouTubeStreamDescriptor
+    if let cached { descriptor = cached.descriptor }
+    else { descriptor = try await resolveAudioDescriptor(videoId: videoId, quality: quality) }
+    let prefixLength = min(Int64(128 * 1024), descriptor.contentLength)
     guard prefixLength > 0 else {
       throw StreamTransportError.invalidContentRange
     }

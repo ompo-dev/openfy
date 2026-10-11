@@ -1206,6 +1206,8 @@ const downloadTrackInternal = async (
     // the matched video in the native session before requesting a JS URL.
     let youtubeVideoId =
       track.youtubeVideoId || youtubeVideoIdFromTrackId(track.spotifyId);
+    const manualMapping = await getCatalogMapping(track.spotifyId);
+    if (manualMapping?.source === 'user_direct') youtubeVideoId = manualMapping.videoId;
     if (youtubeVideoId && /^[A-Za-z0-9]{22}$/.test(track.spotifyId)) {
       const mapping = await getCatalogMapping(track.spotifyId);
       if (!mapping || !isCurrentCatalogMapping(mapping)) {
@@ -1214,7 +1216,7 @@ const downloadTrackInternal = async (
       }
     }
     let sourceChanged = false;
-    if (youtubeVideoId) {
+    if (youtubeVideoId && manualMapping?.source !== 'user_direct') {
       const source = await resolveCatalogYouTubeVideoId({
         videoId: youtubeVideoId, title: track.title,
         artists: track.artists?.map((artist) => artist.name) || [track.artistName],

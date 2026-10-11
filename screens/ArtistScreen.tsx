@@ -42,6 +42,7 @@ import {
 import { log } from '../utils/appLogger';
 import { mergeArtistReleases, normalizeReleaseTitle } from '../services/library/artistReleases';
 import { getDetailPreview } from '../services/navigation/detailPreview';
+import { artistIdentityKey, hasArtistIdentity, resolveTrackArtist } from '../services/search/artistIdentity';
 
 export type ArtistScreenPropsType = {
   artistId: string;
@@ -108,6 +109,9 @@ const isRemotePrimaryArtist = (
 ) => {
   const primaryArtist = track.artists?.[0];
   if (!primaryArtist) return false;
+  const creditIdentity = artistIdentityKey(primaryArtist.id);
+  const profileIdentity = artistIdentityKey(artistId);
+  if (creditIdentity && profileIdentity) return creditIdentity === profileIdentity;
   if (primaryArtist.id && primaryArtist.id === artistId) return true;
   return Boolean(
     artistName &&
@@ -407,10 +411,21 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
       additionalParticipationTracks: TrackModel[] = []
     ) => {
       waitingForSupplement = true;
-      const catalogRouteId = toYouTubeMusicArtistRouteId(undefined, artistName);
-      watchCatalog(catalogRouteId, routeId);
-      void getYouTubeMusicArtistProfile(catalogRouteId).then((catalogProfile) => {
-        if (!active) return;
+      void (async () => {
+        const context = additionalPrimaryTracks[0] || localProfile?.topTracks[0] ||
+          (await libraryPromise).find((track) => track.artists?.some((credit) => credit.id === routeId));
+        const resolved = await resolveTrackArtist({ id: routeId.startsWith('ytartist_') ? routeId : undefined,
+          name: artistName }, context);
+        if (!active) return null;
+        if (hasArtistIdentity(routeId) && !hasArtistIdentity(resolved.id)) {
+          waitingForSupplement = false;
+          setIsProfileReady(true);
+          return null;
+        }
+        watchCatalog(resolved.id, routeId);
+        return getYouTubeMusicArtistProfile(resolved.id);
+      })().then((catalogProfile) => {
+        if (!active || !catalogProfile) return;
         waitingForSupplement = false;
         hasRemoteArtistProfile = true;
         const merged = mergeCatalogTracks(
@@ -619,6 +634,10 @@ export const ArtistScreen = ({ artistId }: ArtistScreenPropsType) => {
         });
       };
 
+      if (hasArtistIdentity(artistId)) {
+        loadYouTubeMusicProfile(artistId);
+        return cleanup;
+      }
       const routeArtistName = earlyArtistName;
       void (async () => {
         if (routeArtistName) {

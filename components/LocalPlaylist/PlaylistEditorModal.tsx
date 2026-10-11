@@ -63,7 +63,7 @@ export const PlaylistEditorModal = ({ onAddTracks, onClose, onSaved, playlist, t
       renderItem={({ item }) => {
         const removed = removedTrackIds.has(item.spotifyId);
         const label = `${removed ? 'Manter' : 'Remover'} ${item.title}`;
-        return <TrackRow title={item.title} subtitle={removed ? 'Será removida' : item.artistName}
+        return <TrackRow track={item} repairUnavailableOnPress={false} title={item.title} subtitle={removed ? 'Será removida' : item.artistName}
           imageURL={item.localImagePath || item.imageURL} accessibilityLabel={label} disabled={isSaving}
           active={false} playing={false} downloadState="idle" onDownload={() => {}}
           onPress={() => toggleRemoved(item.spotifyId)}

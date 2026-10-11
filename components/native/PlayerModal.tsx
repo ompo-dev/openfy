@@ -138,8 +138,8 @@ export function PlayerModal({ children, fullScreen = false, sharedArtworkTransit
 
 const styles = StyleSheet.create({
   layout: { flex: 1, justifyContent: 'flex-end', minHeight: 0 },
-  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.35)' },
-  surface: { minHeight: 0, backgroundColor: '#101116', overflow: 'hidden', width: '100%' },
+  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'transparent' },
+  surface: { minHeight: 0, backgroundColor: 'transparent', overflow: 'hidden', width: '100%' },
   fittedSurface: { flexShrink: 1, maxHeight: '90%', borderRadius: 28 },
   fullSurface: { flex: 1 },
   artworkLayout: { flex: 1 },

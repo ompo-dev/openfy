@@ -141,7 +141,7 @@ export const recordInteraction = async (
       spotifyId: track.spotifyId,
       title: track.title,
       artists: canonicalArtists,
-      primaryArtist: track.artistName,
+      primaryArtist: artist,
       albumName: track.albumName || 'Spotify',
       durationMs: track.duration_ms || 0,
       imageURL: track.imageURL || '',
@@ -150,6 +150,12 @@ export const recordInteraction = async (
     };
 
     if (existingIndex >= 0) {
+      const previous = profile.recentlyPlayedTracks[existingIndex].track;
+      profile.recentlyPlayedTracks[existingIndex].track = {
+        ...previous, ...canonical,
+        imageURL: canonical.imageURL || previous.imageURL,
+        createdAt: previous.createdAt,
+      };
       profile.recentlyPlayedTracks[existingIndex].lastPlayedAt = Date.now();
       if (interaction === 'play') {
         profile.recentlyPlayedTracks[existingIndex].playCount += 1;

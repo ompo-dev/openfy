@@ -36,7 +36,6 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppIcon as Ionicons, AppIcon as MaterialCommunityIcons } from '../native/AppIcon';
 import {
-  findArtistIdByName,
   getArtistCatalogImage,
   getYouTubeMusicArtistBiography,
 } from '@api';
@@ -56,7 +55,7 @@ import {
   moveLyricSegment,
   normalizeLyricSegments,
   parseSpotifyLink,
-  resolveDirectYouTubeTrack,
+  setCatalogMapping,
   resolveSpotifyTrackVideoId,
   getCachedArtistImage,
   resizeLyricGapEnd,
@@ -87,6 +86,9 @@ import { useConnectivityStore } from '../../stores/useConnectivityStore';
 import type { PlayerArtworkFrame } from '../../stores/usePlayerStore';
 import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 import { GlassBackdrop, GlassBackdropScope } from '../native/GlassBackdrop';
+import { resolveTrackArtist } from '../../services/search/artistIdentity';
+import { clearTrackUnavailable } from '../../stores/useTrackAvailabilityStore';
+import { PlayerSheetBackground } from './PlayerSheetBackground';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COVER_SIZE = Math.min(Math.max(240, SCREEN_WIDTH * 0.82), 340);
@@ -339,6 +341,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     updateLyricsSegments,
     artworkFlight,
     setArtworkFlight,
+    replaceQueueTrack,
   } = usePlayer();
 
   const [seeking, setSeeking] = React.useState(false);
@@ -650,13 +653,13 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     if (!primaryArtist) return;
     const key = primaryArtist.name;
     void (async () => {
+      const resolved = await resolveTrackArtist(primaryArtist, currentTrack || undefined);
       const imageURL = await getCachedArtistImage(key, () =>
-        getArtistCatalogImage(primaryArtist.id, primaryArtist.name),
-      [primaryArtist.id]);
+        getArtistCatalogImage(resolved.id, resolved.name), [resolved.id]);
       if (active) setPrimaryArtistImage(imageURL);
     })().catch(() => {});
     return () => { active = false; };
-  }, [currentTrackKey, primaryArtist, primaryArtist?.id, primaryArtist?.name]);
+  }, [currentTrack, currentTrackKey, primaryArtist, primaryArtist?.id, primaryArtist?.name]);
 
   const primaryArtistId = primaryArtist?.id || '';
   const primaryArtistName = primaryArtist?.name || '';
@@ -666,23 +669,23 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     setPrimaryArtistBiography('');
     setIsBiographyExpanded(false);
     if (!visible || !primaryArtistName) return;
-    const routeId = primaryArtistId.startsWith('ytartist_')
-      ? primaryArtistId
-      : `ytartist_name_${encodeURIComponent(primaryArtistName)}`;
-    void getYouTubeMusicArtistBiography(routeId).then((description) => {
+    if (/^[A-Za-z0-9]{22}$/.test(primaryArtistId)) return;
+    const routeId = primaryArtistId || `ytartist_name_${encodeURIComponent(primaryArtistName)}`;
+    void resolveTrackArtist({ id: routeId, name: primaryArtistName }, currentTrack || undefined)
+      .then((artist) => getYouTubeMusicArtistBiography(artist.id)).then((description) => {
       if (active) setPrimaryArtistBiography(description);
     }).catch(() => {});
     return () => { active = false; };
-  }, [currentTrackKey, primaryArtistId, primaryArtistName, visible]);
+  }, [currentTrack, currentTrackKey, primaryArtistId, primaryArtistName, visible]);
 
   React.useEffect(() => {
     let active = true;
     const loadImages = async () => {
       await Promise.all(artistLinks.map(async (artist) => {
-        const key = artist.name;
+        const key = artist.id || artist.name;
+        const resolved = await resolveTrackArtist(artist, currentTrack || undefined);
         const imageURL = await getCachedArtistImage(key, () =>
-          getArtistCatalogImage(artist.id, artist.name),
-        [artist.id]);
+          getArtistCatalogImage(resolved.id, resolved.name), [resolved.id]);
         if (active && imageURL) {
           setArtistImages((current) => ({ ...current, [key]: imageURL }));
         }
@@ -690,33 +693,16 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     };
     void loadImages().catch(() => {});
     return () => { active = false; };
-  }, [currentTrackKey, artistLinks]);
+  }, [currentTrack, currentTrackKey, artistLinks]);
 
   const handleArtistPress = React.useCallback(
     async (artistId: string, artistName: string) => {
-      const isYouTubeTrack = currentTrack?.spotifyId.startsWith('yt_') ||
-        Boolean(currentTrack?.youtubeVideoId);
-      const isSpotifyArtistId = /^[A-Za-z0-9]{22}$/.test(artistId);
-      const shouldResolveArtistName = !isSpotifyArtistId && (
-        !artistId || artistId.startsWith('ytartist_') || artistId.startsWith('local_artist_')
-      );
-
-      const canonicalArtistId = isSpotifyArtistId
-        ? artistId
-        : shouldResolveArtistName
-          ? await findArtistIdByName(artistName)
-          : '';
-      const targetArtistId = canonicalArtistId || artistId || (
-        isYouTubeTrack
-          ? `ytartist_name_${encodeURIComponent(artistName)}`
-          : `local_artist_${encodeURIComponent(artistName)}`
-      );
-      openDetail('artist', targetArtistId);
+      const resolved = await resolveTrackArtist({ id: artistId, name: artistName }, currentTrack || undefined);
+      openDetail('artist', resolved.id);
       requestAnimationFrame(onClose);
     },
     [
-      currentTrack?.spotifyId,
-      currentTrack?.youtubeVideoId,
+      currentTrack,
       onClose,
       openDetail,
     ]
@@ -1259,40 +1245,27 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     setIsUpdatingAudio(true);
 
     try {
-      const directTrack =
-        Platform.OS !== 'web'
-          ? await resolveDirectYouTubeTrack(parsedLink.id)
-          : null;
-      if (!directTrack) throw new Error('Could not resolve YouTube track');
-
-      const track = {
-        videoId: directTrack.videoId,
-        youtubeUrl: `https://www.youtube.com/watch?v=${directTrack.videoId}`,
-        streamUrl: directTrack.url,
-        title: directTrack.title,
-        artistName: directTrack.artistName,
-        albumName: 'YouTube Track',
-        imageURL: directTrack.imageURL || '',
-        duration_ms: directTrack.durationMs,
-        format: directTrack.format,
-      };
-      if (!track?.streamUrl || currentTrackRef.current !== trackBeingEdited)
-        return;
-
+      if (currentTrackRef.current !== trackBeingEdited) return;
       const nextTrack = {
-        spotifyId: `yt_${track.videoId}`,
-        title: track.title,
-        artistName: track.artistName,
-        albumName: track.albumName,
-        imageURL: track.imageURL || trackBeingEdited.imageURL,
-        duration_ms: track.duration_ms || trackBeingEdited.duration_ms,
-        streamUrl: track.streamUrl,
-        youtubeVideoId: track.videoId,
-        youtubeUrl: track.youtubeUrl,
+        ...trackBeingEdited,
+        localAudioPath: undefined,
+        ...(isCurrentTrackDownloaded ? { localImagePath: undefined } : {}),
+        isDownloaded: false,
+        streamUrl: undefined, streamExpiresAt: undefined,
+        youtubeVideoId: parsedLink.id,
+        youtubeUrl: `https://www.youtube.com/watch?v=${parsedLink.id}`,
       };
+      await setCatalogMapping(nextTrack.spotifyId, { videoId: parsedLink.id,
+        confirmedAt: Date.now(), confidence: 100, source: 'user_direct' });
+      if (isCurrentTrackDownloaded) await deleteDownloadedTrack(trackBeingEdited.spotifyId);
+      await upsertCatalogTracks([nextTrack]);
+      clearTrackUnavailable(trackBeingEdited);
+      replaceQueueTrack(trackBeingEdited, nextTrack);
+      refreshLibrary();
+      if (currentTrackRef.current !== trackBeingEdited) return;
       youtubeLinkRef.current = {
         trackKey: getTrackKey(nextTrack),
-        url: track.youtubeUrl,
+        url: nextTrack.youtubeUrl,
       };
       await playTrack(nextTrack, { setQueue: false });
       setIsEditModalVisible(false);
@@ -1661,7 +1634,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
           key={`${artist.id}-${artist.name}-${index}`}
           accessibilityLabel={`Abrir crédito de ${artist.name}`}
           artist={{ type: 'artist', id: artist.id || `local_artist_${encodeURIComponent(artist.name)}`,
-            name: artist.name, imageURL: artistImages[artist.name] || '' }}
+            name: artist.name, imageURL: artistImages[artist.id || artist.name] || '' }}
           subtitle={index === 0 ? 'Artista principal' : 'Participação'}
           onPress={() => void handleArtistPress(artist.id, artist.name)}
         />
@@ -1693,10 +1666,11 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
         <View ref={artworkTransition.containerRef} collapsable={false}
           onLayout={artworkTransition.captureFrames} style={styles.container}>
           <GlassBackdrop pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <PlayerSheetBackground artworkURL={artworkUrl}>
           <ArtworkBackground current={artworkUrl}
             previous={getTrackArtworkUri(previousTrack)}
             next={getTrackArtworkUri(nextTrack)} progress={artworkProgress} />
-          <View style={[styles.backgroundScrim, { pointerEvents: 'none' }]} />
+          </PlayerSheetBackground>
           </GlassBackdrop>
           {/* Grab Handle Header */}
           <View style={styles.topGrabRow}>
@@ -2172,7 +2146,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
               keyExtractor={(track, index) => `${track.spotifyId}:${index}`}
               renderItem={({ item, index }) => {
                 const status = downloads.find((job) => job.spotifyId === item.spotifyId)?.status;
-                return <TrackRow title={item.title} subtitle={item.artistName} imageURL={item.imageURL}
+                return <TrackRow track={item} title={item.title} subtitle={item.artistName} imageURL={item.imageURL}
                   active={queueIndex === index} playing={playerState.isPlaying}
                   downloadState={status === 'completed' ? 'completed' :
                     ['queued', 'resolving', 'downloading'].includes(status || '') ? 'active' : 'idle'}

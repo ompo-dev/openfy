@@ -16,6 +16,7 @@ import { TrackRow } from '../common/TrackRow';
 import { ProgressiveList } from '../common/ProgressiveList';
 import { getHomeRailCardSize, type HomeCardSize } from './homeCardSizing';
 import { rememberDetailPreview } from '../../services/navigation/detailPreview';
+import { isTrackUnavailable } from '../../stores/useTrackAvailabilityStore';
 
 export const homeTrackToPlayer = (track: PersonalizedHomeTrack) => ({ ...track, imageURL: track.localImagePath || track.imageURL });
 const releaseLabel = (release: HomeRelease) => ({ album: 'Álbum', single: 'Single', ep: 'EP', compilation: 'Coletânea', release: 'Lançamento' })[release.releaseType];
@@ -52,9 +53,9 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
   const { width } = useWindowDimensions();
   const largeTileSize = getHomeRailCardSize(width, 'large');
   const compactTileSize = getHomeRailCardSize(width, 'compact');
-  const { currentTrack, isPlaying, playWithQueue, togglePlayPause } = usePlayer((state) => ({
+  const { currentTrack, isPlaying, playTrack, playWithQueue, togglePlayPause } = usePlayer((state) => ({
     currentTrack: state.currentTrack, isPlaying: state.playerState.isPlaying,
-    playWithQueue: state.playWithQueue, togglePlayPause: state.togglePlayPause,
+    playTrack: state.playTrack, playWithQueue: state.playWithQueue, togglePlayPause: state.togglePlayPause,
   }));
   const { downloads, enqueueDownloads } = useDownloads();
   const { openDetail } = useDetailNavigation();
@@ -114,10 +115,12 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
   }, [portraitsKey]);
 
   const play = (tracks: PersonalizedHomeTrack[], index: number, source: string) => {
+    if (isTrackUnavailable(tracks[index])) { void playTrack(homeTrackToPlayer(tracks[index])); return; }
     if (currentTrack?.spotifyId === tracks[index].spotifyId) { void togglePlayPause(); return; }
     void playWithQueue(tracks.map(homeTrackToPlayer), index, source);
   };
   const renderTrack = (track: PersonalizedHomeTrack, index: number, tracks: PersonalizedHomeTrack[], source: string) => <TrackRow
+    track={track}
     key={track.spotifyId} title={track.title} subtitle={track.artistName}
     imageURL={track.localImagePath || track.imageURL}
     active={currentTrack?.spotifyId === track.spotifyId} playing={isPlaying}
@@ -129,7 +132,9 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
     const cardSize = size === 'compact' ? compactTileSize : largeTileSize;
     return tracks.map((track, index) => (
       <LoggedPressable key={track.spotifyId} style={[styles.tile, { width: cardSize }]} accessibilityLabel={`Tocar ${track.title}, ${track.artistName}`} onPress={() => play(tracks, index, source)}>
-        <Artwork uri={track.localImagePath || track.imageURL} size={cardSize} />
+        <Artwork uri={currentTrack?.spotifyId === track.spotifyId
+          ? currentTrack.localImagePath || currentTrack.imageURL || track.imageURL
+          : track.localImagePath || track.imageURL} size={cardSize} />
         <Text numberOfLines={1} style={[size === 'compact' ? styles.compactTileTitle : styles.tileTitle, currentTrack?.spotifyId === track.spotifyId && styles.active]}>{track.title}</Text>
         <Text numberOfLines={1} style={size === 'compact' ? styles.compactSubtitle : styles.subtitle}>{track.artistName}</Text>
       </LoggedPressable>

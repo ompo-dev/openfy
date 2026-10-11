@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -32,6 +32,8 @@ import { prefetchImage } from '../services/images/imagePrefetch';
 import { rememberDetailPreview } from '../services/navigation/detailPreview';
 import { rememberCachedArtistImage } from '../services/library/artistImageCache';
 import { useConnectivityStore } from '../stores/useConnectivityStore';
+import { useOTAStartupUpdate } from '../hooks/useOTAStartupUpdate';
+import { AppUpdateScreen } from '../components/Updates/AppUpdateScreen';
 
 import 'react-native-reanimated';
 
@@ -87,19 +89,8 @@ function PlayerOverlay() {
   );
 }
 
-function OTAUpdateOverlay({ visible }: { visible: boolean }) {
-  if (!visible) return null;
-  return (
-    <View style={styles.updateOverlay} pointerEvents="none">
-      <ActivityIndicator size="large" color="#1ED760" />
-      <Text style={styles.updateOverlayTitle}>Baixando atualização</Text>
-      <Text style={styles.updateOverlaySubtitle}>O Openfy ficará pronto em instantes.</Text>
-    </View>
-  );
-}
-
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     'SF-Regular': require('@assets/fonts/SF-Pro-Display-Regular.otf'),
     'SF-Semibold': require('@assets/fonts/SF-Pro-Display-Semibold.otf'),
     'SF-Bold': require('@assets/fonts/SF-Pro-Display-Semibold.otf'),
@@ -110,13 +101,22 @@ export default function RootLayout() {
     'SimplyRounded-BoldItalic': require('@assets/fonts/SF-Pro-Display-Semibold.otf'),
   });
 
-  const { isDownloading: isDownloadingUpdate } = useOTAUpdates();
+  const interfaceReady = fontsLoaded || !!fontError;
+  const startupUpdate = useOTAStartupUpdate(interfaceReady);
+  const { isDownloading: isDownloadingUpdate } = useOTAUpdates({ enabled: startupUpdate.settled });
+  const [updateDismissed, setUpdateDismissed] = React.useState(false);
+  const backgroundDownload = isDownloadingUpdate || startupUpdate.isNativeDownloading;
+  React.useEffect(() => {
+    if (!backgroundDownload) setUpdateDismissed(false);
+  }, [backgroundDownload]);
+  const updatePhase = startupUpdate.phase !== 'idle' ? startupUpdate.phase
+    : backgroundDownload && !updateDismissed ? 'downloading' : 'idle';
 
   React.useEffect(() => {
-    if (fontsLoaded) {
+    if (interfaceReady) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded]);
+  }, [interfaceReady]);
 
   React.useEffect(() => {
     log.nav('app started', { platform: Platform.OS });
@@ -126,7 +126,7 @@ export default function RootLayout() {
     });
   }, []);
 
-  if (!fontsLoaded) {
+  if (!interfaceReady) {
     return null;
   }
 
@@ -164,7 +164,12 @@ export default function RootLayout() {
                     <PlayerOverlay />
                     <GlobalConnectivity />
                     <LibraryImportFeedback />
-                    <OTAUpdateOverlay visible={isDownloadingUpdate} />
+                    <AppUpdateScreen phase={updatePhase} progress={startupUpdate.downloadProgress}
+                      onRetry={startupUpdate.phase === 'error' ? startupUpdate.retry : undefined}
+                      onContinue={() => {
+                        setUpdateDismissed(true);
+                        startupUpdate.continueToApp();
+                      }} />
                   </View>
                   </GlassBackdropProvider>
                   <StatusBar style="light" />
@@ -185,26 +190,5 @@ const styles = StyleSheet.create({
   },
   stackContent: {
     backgroundColor: '#121212',
-  },
-  updateOverlay: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(18, 18, 18, 0.96)',
-    zIndex: 100,
-    gap: 12,
-  },
-  updateOverlayTitle: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  updateOverlaySubtitle: {
-    color: '#A8A8A8',
-    fontSize: 14,
   },
 });

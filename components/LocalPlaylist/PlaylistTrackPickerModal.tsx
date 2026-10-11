@@ -98,6 +98,8 @@ export const PlaylistTrackPickerModal = ({
           const isSelected = selectedTrackIds.has(item.spotifyId);
           return (
             <TrackRow
+              track={item}
+              repairUnavailableOnPress={false}
               accessibilityLabel={
                 isExisting
                   ? `${item.title} já está na playlist`

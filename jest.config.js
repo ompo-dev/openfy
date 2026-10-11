@@ -10,6 +10,6 @@ module.exports = {
   ],
   moduleNameMapper: {
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
-    '\\.(png|jpg|jpeg|gif|svg)$': 'jest-transform-stub',
+    '\\.(png|jpg|jpeg|gif|svg)$': '<rootDir>/jest.asset-mock.js',
   },
 };

@@ -29,7 +29,8 @@ import { TrackRow } from '../common/TrackRow';
 import { ProgressiveFlatList, ProgressiveList } from '../common/ProgressiveList';
 import { MarqueeText } from '../common/MarqueeText';
 import { SkeletonImage } from '../common/SkeletonImage';
-import { findArtistIdByName, getArtistCatalogImage } from '@api';
+import { getArtistCatalogImage } from '@api';
+import { hasArtistIdentity, resolveTrackArtist } from '../../services/search/artistIdentity';
 import { getCachedArtistImage } from '@services';
 import { useDetailNavigation } from '@hooks';
 import { isSameRecording } from '../../services/library/trackIdentity';
@@ -365,7 +366,7 @@ export const CollectionDetail = ({
       const name = artist.name?.trim();
       if (!name) return;
       const id = artist.id?.trim() || '';
-      const key = normalizeArtistKey(name);
+      const key = hasArtistIdentity(id) ? id : normalizeArtistKey(name);
       const previous = byKey.get(key);
       byKey.set(key, {
         id: preferredArtistId(previous?.id || '', id),
@@ -399,21 +400,20 @@ export const CollectionDetail = ({
     );
     const unresolved = prioritizedArtists.filter((artist) =>
       !artist.imageURL &&
-      !artistImages[artist.name] &&
-      !artistImages[artist.id] &&
-      !attemptedArtistImages.current.has(normalizeArtistKey(artist.name))
+      !artistImages[artist.id || artist.name] &&
+      !attemptedArtistImages.current.has(artist.id || normalizeArtistKey(artist.name))
     );
     if (!unresolved.length) return;
     unresolved.forEach((artist) =>
-      attemptedArtistImages.current.add(normalizeArtistKey(artist.name))
+      attemptedArtistImages.current.add(artist.id || normalizeArtistKey(artist.name))
     );
     void (async () => {
       for (let index = 0; index < unresolved.length; index += 4) {
         const batch = await Promise.all(unresolved.slice(index, index + 4).map(async (artist) => {
-          const canonicalId = isSpotifyArtistId(artist.id)
-            ? artist.id
-            : await findArtistIdByName(artist.name);
-          const imageArtistId = canonicalId || artist.id;
+          const context = allArtistTracks.find((track) => track.artists?.some((credit) => credit.name === artist.name));
+          const resolved = await resolveTrackArtist(artist, context);
+          const canonicalId = resolved.id;
+          const imageArtistId = canonicalId;
           const imageURL = await getCachedArtistImage(
             artist.name,
             () => getArtistCatalogImage(imageArtistId, artist.name),
@@ -426,8 +426,7 @@ export const CollectionDetail = ({
           setArtistImages((current) => {
             const next = { ...current };
             successfulResults.forEach(([name, id, imageURL]) => {
-              next[name] = imageURL;
-              if (id) next[id] = imageURL;
+              next[id || name] = imageURL;
             });
             return next;
           });
@@ -439,12 +438,11 @@ export const CollectionDetail = ({
       );
       log.error('load collection artist images failed', { collectionId, error });
     });
-  }, [artistImageLoadLimit, artistImages, collectionArtists, collectionId, isArtistListVisible]);
+  }, [allArtistTracks, artistImageLoadLimit, artistImages, collectionArtists, collectionId, isArtistListVisible]);
 
   const handleCollectionArtistPress = React.useCallback(async (artist: { id: string; name: string }) => {
-    const canonicalId = isSpotifyArtistId(artist.id)
-      ? artist.id
-      : await findArtistIdByName(artist.name);
+    const context = allArtistTracks.find((track) => track.artists?.some((credit) => credit.name === artist.name));
+    const canonicalId = (await resolveTrackArtist(artist, context)).id;
     const resolvedArtist = { ...artist, id: canonicalId || artist.id };
     if (onArtistPress) {
       await onArtistPress(resolvedArtist.id, resolvedArtist.name);
@@ -456,7 +454,7 @@ export const CollectionDetail = ({
         ? resolvedArtist.id
         : `ytartist_name_${encodeURIComponent(resolvedArtist.name)}`;
     openDetail('artist', routeId);
-  }, [onArtistPress, openDetail]);
+  }, [allArtistTracks, onArtistPress, openDetail]);
 
   const openArtistList = React.useCallback(() => {
     setArtistImageLoadLimit(8);
@@ -621,6 +619,7 @@ export const CollectionDetail = ({
       );
       return (
         <TrackRow
+          track={item}
           title={item.title}
           subtitle={item.subtitle}
           imageURL={item.localImagePath || item.imageURL}
@@ -631,7 +630,10 @@ export const CollectionDetail = ({
           onPress={() => void playTrackList(sourceTracks, index, sourceId)}
           onDownload={() => handleDownloadTrack(item)}
           artists={shouldLinkArtists ? rowArtists : undefined}
-          onArtistPress={shouldLinkArtists ? onArtistPress : undefined}
+          onArtistPress={shouldLinkArtists ? async (id, name) => {
+            const resolved = await resolveTrackArtist({ id, name }, item);
+            await onArtistPress?.(resolved.id, resolved.name);
+          } : undefined}
         />
       );
     },
@@ -777,7 +779,7 @@ export const CollectionDetail = ({
                     style={styles.artistAvatarStack}
                   >
                     {collectionArtists.slice(0, 4).map((artist, index) => {
-      const uri = artist.imageURL || artistImages[artist.name] || artistImages[artist.id];
+      const uri = artist.imageURL || artistImages[artist.id || artist.name];
                       return (
                         <View key={`${artist.id}-${artist.name}`} style={[styles.artistAvatar, index > 0 && styles.artistAvatarOverlap, { zIndex: 4 - index }]}>
                           {uri ? <SkeletonImage source={{ uri }} cachePolicy="memory-disk" contentFit="cover" style={styles.artistAvatarImage} /> : <Ionicons name="person" size={15} color="#DDD" />}
@@ -985,7 +987,7 @@ export const CollectionDetail = ({
             >
               <ProgressiveList listKey={collectionId}>
               {collectionArtists.map((artist) => {
-                const uri = artist.imageURL || artistImages[artist.name] || artistImages[artist.id];
+                const uri = artist.imageURL || artistImages[artist.id || artist.name];
                 return (
                   <ArtistSearchRow
                     key={`artist-modal-${artist.id}-${artist.name}`}

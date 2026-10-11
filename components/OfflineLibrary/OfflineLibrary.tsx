@@ -317,6 +317,7 @@ export const OfflineLibrary = () => {
 
     const row = (
       <TrackRow
+        track={item}
         title={item.title}
         subtitle={item.artistName}
         imageURL={item.localImagePath || item.imageURL}

@@ -6,8 +6,14 @@ import { LoggedPressable } from '../native';
 import { DownloadActionIcon } from '../native/DownloadActionIcon';
 import { SoundWaveIcon } from '../Home/FriendActivityStatus/NoteBubble';
 import { SkeletonImage } from './SkeletonImage';
+import { hydrateTrackAvailability, isTrackUnavailable, useTrackAvailabilityStore,
+  type AvailabilityTrack } from '../../stores/useTrackAvailabilityStore';
+import { usePlayer } from '@context';
 
 type TrackRowProps = {
+  track?: AvailabilityTrack & { artistName?: string; subtitle?: string; albumName?: string;
+    imageURL?: string; duration_ms?: number; durationMs?: number; artists?: { id: string; name: string }[];
+    youtubeUrl?: string; albumId?: string };
   title: string;
   subtitle: string;
   imageURL?: string;
@@ -22,18 +28,29 @@ type TrackRowProps = {
   trailingAction?: React.ReactNode;
   accessibilityLabel?: string;
   disabled?: boolean;
+  repairUnavailableOnPress?: boolean;
 };
 
 export const TrackRow = React.memo(function TrackRow({
   title, subtitle, imageURL, trackNumber, active, playing, downloadState,
   onPress, onDownload, artists, onArtistPress, trailingAction,
-  accessibilityLabel, disabled = false,
+  accessibilityLabel, disabled = false, track, repairUnavailableOnPress = true,
 }: TrackRowProps) {
+  const { playTrack } = usePlayer((state) => ({ playTrack: state.playTrack }));
+  const unavailable = useTrackAvailabilityStore((state) => track ? isTrackUnavailable(track, state.failures) : false);
+  React.useEffect(() => { void hydrateTrackAvailability(); }, []);
+  const handlePress = () => {
+    if (!unavailable || !track || !repairUnavailableOnPress) { onPress(); return; }
+    void playTrack({ ...track,
+      spotifyId: track.spotifyId || track.id || '', title, artistName: track.artistName || subtitle,
+      albumName: track.albumName || 'Single', imageURL: imageURL || '',
+      duration_ms: track.duration_ms || track.durationMs || 0 });
+  };
   return (
     <LoggedPressable
-      accessibilityLabel={accessibilityLabel || `Tocar ${title}`}
+      accessibilityLabel={accessibilityLabel || (unavailable ? `Corrigir áudio de ${title}` : `Tocar ${title}`)}
       disabled={disabled}
-      onPress={onPress}
+      onPress={handlePress}
       style={[styles.row, active && playing && styles.rowActive, disabled && styles.rowDisabled]}
     >
       {trackNumber !== undefined ? (
@@ -52,6 +69,7 @@ export const TrackRow = React.memo(function TrackRow({
       )}
       <View style={styles.copy}>
         <View style={styles.titleRow}>
+          {unavailable ? <Ionicons name="alert-circle" size={16} color="#F6C85F" /> : null}
           {active && playing ? <SoundWaveIcon color="#1ED760" size={15} /> : null}
           <Text numberOfLines={1} style={[styles.title, active && styles.titleActive]}>
             {title}
@@ -77,8 +95,12 @@ export const TrackRow = React.memo(function TrackRow({
         ) : (
           <Text numberOfLines={1} style={styles.subtitle}>{subtitle}</Text>
         )}
+        {unavailable ? <Text style={styles.unavailable}>Áudio indisponível</Text> : null}
       </View>
-      {trailingAction || <LoggedPressable
+      {unavailable && repairUnavailableOnPress ? <LoggedPressable accessibilityLabel={`Editar link de ${title}`} style={styles.action}
+        onPress={(event) => { event.stopPropagation(); handlePress(); }}>
+        <Ionicons name="create-outline" size={20} color="#F6C85F" />
+      </LoggedPressable> : trailingAction || <LoggedPressable
         accessibilityRole="button"
         accessibilityLabel={downloadState === 'completed' ? `${title} está baixada` : `Baixar ${title}`}
         disabled={downloadState !== 'idle'}
@@ -115,5 +137,6 @@ const styles = StyleSheet.create({
   title: { color: '#FFFFFF', flexShrink: 1, fontFamily: 'SF-Semibold', fontSize: 14 },
   titleActive: { color: '#1ED760' },
   subtitle: { color: 'rgba(255,255,255,0.58)', fontFamily: 'SF-Regular', fontSize: 12 },
+  unavailable: { color: '#F6C85F', fontFamily: 'SF-Regular', fontSize: 11 },
   action: { alignItems: 'center', height: 42, justifyContent: 'center', width: 38 },
 });

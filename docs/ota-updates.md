@@ -30,8 +30,18 @@ The native URL override is experimental in `expo-updates`. The first installatio
 after this change must use the new IPA once; earlier installed builds cannot gain
 the native override support through JavaScript alone. When CI publishes an active
 window, the app prepares its temporary URL and asks to be fully closed and opened
-again. On that next launch, `expo-updates` checks the temporary server and loads
-the matching bundle. Later JavaScript-only pushes do not require another IPA.
+again. On that next launch, the installed bundle opens first, then checks the
+temporary server from JavaScript. The update screen shows checking, downloading
+(with native download progress when available), and applying before reloading
+the matching bundle. Users can retry a failure or continue using the installed
+version; dismissing the screen never triggers a late automatic restart. A
+download already in progress can finish in the background for the next launch.
+Expired windows and disabled automatic updates do not block app access.
+
+The native `checkAutomatically: NEVER` policy requires a new IPA/APK once. Older
+`ON_LOAD` builds can observe native startup downloads after JavaScript starts,
+but cannot show React UI while native code is still holding the launch screen.
+Later JavaScript-only pushes do not require another IPA.
 
 Updates only apply to a matching runtime version. Native modules, permissions,
 entitlements, or other native changes still require a new IPA/APK. The workflow

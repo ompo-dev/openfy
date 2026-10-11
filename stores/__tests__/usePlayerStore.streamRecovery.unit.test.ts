@@ -69,6 +69,7 @@ import {
 } from '@services';
 import { usePlayerStore, type PlayerTrack } from '../usePlayerStore';
 import * as FileSystem from 'expo-file-system/legacy';
+import { isTrackUnavailable, useTrackAvailabilityStore } from '../useTrackAvailabilityStore';
 
 const sampleTrack: PlayerTrack = {
   spotifyId: 'track_123',
@@ -81,10 +82,13 @@ const sampleTrack: PlayerTrack = {
 
 /** Deterministic promise/microtask flush helper (setTimeout 0 runs in next macrotask turn) */
 const flushPromises = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+let recoveryTestRun = 0;
 
 describe('usePlayerStore — Stream Recovery Integration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    sampleTrack.spotifyId = `recovery-test-${++recoveryTestRun}`;
+    useTrackAvailabilityStore.setState({ failures: {} });
     jest.mocked(loadAndPlay).mockReset();
     jest.mocked(resolveAudioUrl).mockReset();
     jest.mocked(resolveSpotifyTrackVideoId).mockReset();
@@ -108,6 +112,30 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
         durationMs: 0,
       },
     });
+  });
+
+  it('advances the collection if a mid-stream failure cannot be recovered', async () => {
+    const nextTrack = { ...sampleTrack, spotifyId: 'next-after-stream-failure', title: 'Next' };
+    let status!: (state: PlayerState) => void;
+    jest.mocked(resolveAudioUrl).mockImplementation(async (title, _artist, _id, _duration, _date, fresh) =>
+      title === sampleTrack.title && fresh ? null : { url: `https://media.test/${title}.m4a`, source: 'youtube' });
+    jest.mocked(loadAndPlay).mockImplementation(async (_source, callback) => {
+      status = callback!;
+      return true;
+    });
+    await usePlayerStore.getState().playWithQueue([sampleTrack, nextTrack], 0);
+    const failedStatus = status;
+    failedStatus({ isPlaying: false, isBuffering: false, isLoaded: false, positionMs: 40000,
+      durationMs: sampleTrack.duration_ms, error: 'HTTP 403 Forbidden' });
+    await flushPromises();
+    await flushPromises();
+    expect(isTrackUnavailable(sampleTrack)).toBe(true);
+    expect(usePlayerStore.getState().currentTrack).toBe(nextTrack);
+    const requestId = usePlayerStore.getState().activeRequestId;
+    failedStatus({ isPlaying: false, isBuffering: false, isLoaded: false, positionMs: 40000,
+      durationMs: sampleTrack.duration_ms, error: 'HTTP 403 Forbidden' });
+    await flushPromises();
+    expect(usePlayerStore.getState().activeRequestId).toBe(requestId);
   });
 
   it('routes a catalog-only track through the native iOS streaming engine', async () => {
@@ -505,7 +533,7 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
     await usePlayerStore.getState().playTrack(local);
     expect(loadAndPlay).toHaveBeenCalledTimes(2);
     expect(resolveAudioUrl).not.toHaveBeenCalled();
-    expect(usePlayerStore.getState().playerState.error).toBe('decoder error');
+    expect(usePlayerStore.getState().playerState.error).toBe('Áudio indisponível. Edite o link do YouTube.');
     jest.mocked(FileSystem.getInfoAsync).mockReset();
   });
 

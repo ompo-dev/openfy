@@ -6,6 +6,7 @@ import { Keyboard, StyleSheet } from 'react-native';
 import { useDownloads, usePlayer } from '@context';
 import { CollectionDetail } from '../CollectionDetail';
 import { getFollowedArtistsSnapshot } from '../../../services/library/followedArtists';
+import { markTrackUnavailable, useTrackAvailabilityStore } from '../../../stores/useTrackAvailabilityStore';
 
 const mockReplace = jest.fn();
 const mockPush = jest.fn();
@@ -142,11 +143,23 @@ describe('CollectionDetail', () => {
   });
   beforeEach(() => {
     jest.clearAllMocks();
+    useTrackAvailabilityStore.setState({ failures: {} });
     jest.mocked(useDownloads).mockReturnValue({
       downloads: [],
       enqueueDownloads: jest.fn(),
     } as any);
     jest.mocked(usePlayer).mockReturnValue(playerValue() as any);
+  });
+
+  it('marks an unavailable row and opens it individually for audio repair instead of starting the collection', async () => {
+    const playTrack = jest.fn();
+    jest.mocked(usePlayer).mockReturnValue(playerValue({ playTrack }) as never);
+    markTrackUnavailable(tracks[0], 'no-canonical-match');
+    const screen = await renderCollection();
+    expect(screen.getByText('Áudio indisponível')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText(`Editar link de ${tracks[0].title}`));
+    expect(playTrack).toHaveBeenCalledWith(expect.objectContaining({ spotifyId: tracks[0].id, title: tracks[0].title }));
+    expect(playWithQueue).not.toHaveBeenCalled();
   });
 
   it('immediately highlights the playing song when the album uses a different catalog ID', async () => {
@@ -212,7 +225,7 @@ describe('CollectionDetail', () => {
     );
 
     fireEvent.press(screen.getAllByLabelText('Abrir artista Artista sem id')[0]);
-    await waitFor(() => expect(onArtistPress).toHaveBeenCalledWith('', 'Artista sem id'));
+    await waitFor(() => expect(onArtistPress).toHaveBeenCalledWith('ytartist_~Artista%20sem%20id', 'Artista sem id'));
   });
 
   it('shows active shuffle and pause states for the current collection', async () => {

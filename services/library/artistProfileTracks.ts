@@ -1,4 +1,5 @@
 import { albumAssociationsForTrack, mergeAlbumAssociations, type TrackModel } from '@models';
+import { artistIdentityKey } from '../search/artistIdentity';
 
 const normalize = (value: string) =>
   value
@@ -19,9 +20,12 @@ const artistMatches = (
   artist: { id?: string; name: string },
   artistId: string,
   artistName: string
-) =>
-  Boolean(artist.id && artist.id === artistId) ||
-  normalize(artist.name) === normalize(artistName);
+) => {
+  const creditIdentity = artistIdentityKey(artist.id);
+  const profileIdentity = artistIdentityKey(artistId);
+  if (creditIdentity && profileIdentity) return creditIdentity === profileIdentity;
+  return Boolean(artist.id && artist.id === artistId) || normalize(artist.name) === normalize(artistName);
+};
 
 const uniqueTracks = (tracks: TrackModel[]): TrackModel[] => {
   const providerIds = new Map<string, number>();

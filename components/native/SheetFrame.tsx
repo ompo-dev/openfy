@@ -13,7 +13,7 @@ import { AppIcon } from './AppIcon';
 import { GlassSurface } from './GlassSurface';
 import { PlayerModal } from './PlayerModal';
 import { GlassBackdrop, GlassBackdropScope } from './GlassBackdrop';
-import { Image } from 'expo-image';
+import { PlayerSheetBackground } from '../Player/PlayerSheetBackground';
 import { ProgressiveFlatList } from '../common/ProgressiveList';
 
 interface SheetFrameProps {
@@ -128,12 +128,8 @@ export function SheetFrame({
     >
       <GlassBackdropScope>
         <GlassBackdrop pointerEvents="none" style={StyleSheet.absoluteFill}>
-          {artworkURL ? <Image source={{ uri: artworkURL }} cachePolicy="memory-disk"
-            contentFit="cover" blurRadius={28} pointerEvents="none"
-            style={[StyleSheet.absoluteFill, styles.artwork]} /> : null}
+          <PlayerSheetBackground artworkURL={artworkURL} />
         </GlassBackdrop>
-        <GlassSurface glass="regular" edgeEffects={false} pointerEvents="none"
-          style={[StyleSheet.absoluteFill, { borderRadius: size === 'full' ? 0 : 28 }]} />
         <View testID="sheet-frame-body" style={[styles.sheet, size === 'full' && { flex: 1 }]}>
           {handle}
           {header}

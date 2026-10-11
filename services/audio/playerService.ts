@@ -232,15 +232,13 @@ subscribeAppSettings((settings) => {
   void setAudioChannelMode(settings.audioChannelMode).catch((error) => log.error('audio output preference failed', error));
 });
 
-const getPlayerOptions = (durationMs?: number): AudioPlayerOptions & { channelMode?: AudioChannelMode } =>
+const getPlayerOptions = (): AudioPlayerOptions & { channelMode?: AudioChannelMode } =>
   Platform.OS === 'web'
     ? { updateInterval: 100, channelMode: getCachedAppSettings().audioChannelMode }
     : {
         updateInterval: 500,
         keepAudioSessionActive: true,
-        preferredForwardBufferDuration: durationMs && durationMs > 0
-          ? Math.min(600, Math.max(10, Math.ceil(durationMs / 1000)))
-          : Platform.OS === 'ios' ? 30 : 10,
+        preferredForwardBufferDuration: 5,
       };
 
 const stopVolumeRamp = () => {
@@ -855,7 +853,7 @@ export const loadAndPlay = async (
     }
     if (generation !== loadGeneration) return false;
     preloadedSources.delete(uri);
-    const playerOptions = getPlayerOptions(playbackDurationMs);
+    const playerOptions = getPlayerOptions();
     log.player('active track buffer target', {
       trackId: diagnosticTrack?.spotifyId,
       durationMs: playbackDurationMs,

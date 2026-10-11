@@ -724,7 +724,7 @@ export const MyNoteModal = ({
                   item.imageURL ||
                   '';
                 return (
-                  <TrackRow title={item.title} subtitle={item.artistName} imageURL={coverUri}
+                  <TrackRow track={item} repairUnavailableOnPress={false} title={item.title} subtitle={item.artistName} imageURL={coverUri}
                     active={isSelected} playing={isSelected} downloadState="completed" onDownload={() => {}}
                     onPress={() => {
                       try {

@@ -197,7 +197,7 @@ describe('playerService fades', () => {
     expect(createAudioPlayer).toHaveBeenCalledWith(uri, {
       updateInterval: 500,
       keepAudioSessionActive: true,
-      preferredForwardBufferDuration: 30,
+      preferredForwardBufferDuration: 5,
     });
     await preloadAudio('file:///next.m4a');
     expect(prepareLocalAudioForPlayback).toHaveBeenCalledWith('file:///next.m4a');
