@@ -305,6 +305,11 @@ export const getLibraryTracks = (): Promise<LibraryTrack[]> => {
   if (libraryTracksRequest) return libraryTracksRequest;
 
   libraryTracksRequest = loadLibraryTracks()
+    .then((tracks) => {
+      void import('./artistChannelHydration').then(({ hydrateLibraryArtistChannels }) =>
+        hydrateLibraryArtistChannels(tracks)).catch(() => {});
+      return tracks;
+    })
     .finally(() => {
       libraryTracksRequest = null;
     });

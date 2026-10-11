@@ -5,6 +5,7 @@ import type { LibraryTrack } from '../library/catalogLibrary';
 import type { LocalPlaylist } from '../library/localPlaylistManager';
 import type { TrackAlbumRef } from '../../models/Track/TrackModel';
 import { artistFollowKey, type FollowedArtist } from '../library/followedArtists';
+import { artistIdentityKey, canonicalArtistReference } from '../search/artistIdentity';
 import {
   getBestYouTubeMusicThumbnail,
   getYouTubeMusicClient,
@@ -325,10 +326,13 @@ export const buildPersonalizedHome = ({
     if (!name || entry.playCount <= 0) return;
     const key = normalize(name);
     const savedArtist = tracksById.get(entry.track.spotifyId)?.artists?.find((artist) => normalize(artist.name) === key);
-    const artistId = savedArtist?.id || toYouTubeMusicArtistRouteId(undefined, name);
-    const current = listenedArtists.get(key);
-    listenedArtists.set(key, {
-      id: artistId, artistId, spotifyArtistId: artistId, title: name,
+    const linked = savedArtist ? canonicalArtistReference(savedArtist) : null;
+    const artistId = linked?.id || '';
+    const channelKey = artistIdentityKey(artistId);
+    if (!channelKey.startsWith('youtube:')) return;
+    const current = listenedArtists.get(channelKey);
+    listenedArtists.set(channelKey, {
+      id: artistId, artistId, spotifyArtistId: artistId, title: linked?.name || name,
       imageURL: followedArtists.find((artist) => artistFollowKey(artist.name) === artistFollowKey(name))?.imageURL || '',
       appearances: (current?.appearances || 0) + entry.playCount,
     });
@@ -424,10 +428,9 @@ export const buildPersonalizedHome = ({
   remoteDiscoveries.forEach((track) => {
     track.artists?.forEach((artist) => {
       const title = artist.name?.trim();
-      const artistId = artist.id?.trim() ||
-        `ytartist_name_${encodeURIComponent(title || '')}`;
+      const artistId = artist.id?.trim() || '';
       if (
-        !title ||
+        !title || !artistIdentityKey(artistId).startsWith('youtube:') ||
         knownArtistIds.has(artistId) ||
         knownArtistNames.has(normalize(title))
       ) return;

@@ -2,17 +2,15 @@ import * as React from 'react';
 
 import { CollectionDetail, LocalAlbum } from '@components';
 import {
-  findArtistIdByName,
   getAlbum,
   getCachedAlbum,
   getCachedYouTubeMusicAlbum,
-  getArtist,
   getYouTubeMusicAlbum,
   isYouTubeMusicAlbumId,
   type YouTubeMusicAlbum,
 } from '@api';
 import { useDetailNavigation } from '@hooks';
-import { AlbumModel, ArtistModel } from '@models';
+import { AlbumModel } from '@models';
 import { getDisplayTime } from '@utils';
 import { prefetchArtistData } from '@services';
 import { withLibraryAlbumTracks } from '../services/library/albumMetadata';
@@ -116,7 +114,6 @@ const YouTubeMusicAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
 const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
   const { openDetail } = useDetailNavigation();
   const [album, setAlbum] = React.useState<AlbumModel | null>(() => getCachedAlbum(albumId) || null);
-  const [artists, setArtists] = React.useState<ArtistModel[]>([]);
   const [error, setError] = React.useState('');
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [refreshSequence, setRefreshSequence] = React.useState(0);
@@ -133,14 +130,6 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
       .then((albumData) => {
         if (!active) return;
         setAlbum(albumData);
-        albumData.artists.forEach(({ id }) => {
-          void getArtist(id).then((artistData) => {
-            if (!active) return;
-            setArtists((current) => [...current.filter((artist) => artist.id !== id), artistData]
-              .sort((a, b) => albumData.artists.findIndex((ref) => ref.id === a.id) - albumData.artists.findIndex((ref) => ref.id === b.id)));
-            prefetchArtistData([artistData]);
-          }).catch(() => {});
-        });
       })
       .catch((error) => {
         if (active) {
@@ -158,10 +147,8 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
   }, [albumId, refreshSequence]);
 
   const handleArtistPress = React.useCallback(
-    async (artistId: string, artistName: string) => {
-      const targetArtistId =
-        artistId || (await findArtistIdByName(artistName));
-      if (targetArtistId) openDetail('artist', targetArtistId);
+    async (artistId: string) => {
+      if (artistId.startsWith('ytartist_')) openDetail('artist', artistId);
     },
     [openDetail]
   );
@@ -189,7 +176,6 @@ const RemoteAlbumScreen = ({ albumId }: AlbumScreenPropsType) => {
       trackCount={album.tracks.total}
       totalDurationMs={album.duration}
       tracks={album.tracks.items}
-      artists={artists.map(({ id, name, imageURL }) => ({ id, name, imageURL }))}
       disableTrackArtistLinks
       onArtistPress={handleArtistPress}
       onRefresh={refresh}

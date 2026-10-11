@@ -654,6 +654,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     const key = primaryArtist.name;
     void (async () => {
       const resolved = await resolveTrackArtist(primaryArtist, currentTrack || undefined);
+      if (!resolved.id) return;
       const imageURL = await getCachedArtistImage(key, () =>
         getArtistCatalogImage(resolved.id, resolved.name), [resolved.id]);
       if (active) setPrimaryArtistImage(imageURL);
@@ -669,8 +670,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     setPrimaryArtistBiography('');
     setIsBiographyExpanded(false);
     if (!visible || !primaryArtistName) return;
-    if (/^[A-Za-z0-9]{22}$/.test(primaryArtistId)) return;
-    const routeId = primaryArtistId || `ytartist_name_${encodeURIComponent(primaryArtistName)}`;
+    const routeId = primaryArtistId;
     void resolveTrackArtist({ id: routeId, name: primaryArtistName }, currentTrack || undefined)
       .then((artist) => getYouTubeMusicArtistBiography(artist.id)).then((description) => {
       if (active) setPrimaryArtistBiography(description);
@@ -684,6 +684,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       await Promise.all(artistLinks.map(async (artist) => {
         const key = artist.id || artist.name;
         const resolved = await resolveTrackArtist(artist, currentTrack || undefined);
+        if (!resolved.id) return;
         const imageURL = await getCachedArtistImage(key, () =>
           getArtistCatalogImage(resolved.id, resolved.name), [resolved.id]);
         if (active && imageURL) {
@@ -698,6 +699,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   const handleArtistPress = React.useCallback(
     async (artistId: string, artistName: string) => {
       const resolved = await resolveTrackArtist({ id: artistId, name: artistName }, currentTrack || undefined);
+      if (!resolved.id) return;
       openDetail('artist', resolved.id);
       requestAnimationFrame(onClose);
     },

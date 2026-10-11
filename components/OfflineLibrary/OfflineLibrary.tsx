@@ -277,15 +277,16 @@ export const OfflineLibrary = () => {
 
   React.useEffect(() => {
     if (libraryView !== 'artists' || !normalizedQuery) return;
-    const artistsToLoad = visibleCollections
-      .slice(0, 12)
-      .filter((artist) => artist.title && !requestedArtistCounts.current.has(artist.id));
+    const visibleIds = new Set(visibleCollections.slice(0, 12).map((item) => item.id));
+    const artistsToLoad = localArtists.filter(
+      (artist) => visibleIds.has(artist.id) && artist.title && !requestedArtistCounts.current.has(artist.id)
+    );
     if (!artistsToLoad.length) return;
     artistsToLoad.forEach((artist) => requestedArtistCounts.current.add(artist.id));
     void Promise.all(artistsToLoad.map(async (artist) => {
       try {
         const profile = await getYouTubeMusicArtistProfile(
-          `ytartist_name_${encodeURIComponent(artist.title)}`
+          artist.routeId || artist.spotifyArtistId || artist.id
         );
         return { id: artist.id, count: profile.tracks.length };
       } catch {
@@ -303,7 +304,7 @@ export const OfflineLibrary = () => {
         ...Object.fromEntries(resolved.map((value) => [value.id, value.count])),
       }));
     });
-  }, [libraryView, normalizedQuery, visibleCollections]);
+  }, [libraryView, localArtists, normalizedQuery, visibleCollections]);
 
   const renderTrack = ({ item, index }: { item: LibraryTrack; index: number }) => {
     const isCurrentTrack = currentTrack?.spotifyId === item.spotifyId;

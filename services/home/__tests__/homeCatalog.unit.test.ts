@@ -11,7 +11,7 @@ jest.mock('../homeRadio', () => ({ loadHomeRadio: jest.fn().mockResolvedValue([]
 const release = (id: string, title: string, releaseDate: string): HomeRelease => ({
   id, title, releaseDate, artistName: 'Ebony', artistId: 'artist', artistImageURL: '', imageURL: '', releaseType: 'album',
 });
-const seed = (name: string) => ({ name, score: 1 });
+const seed = (name: string) => ({ id: 'ytartist_UC' + name + '~' + name, name, score: 1 });
 const profile = (id: string) => ({ artist: { id: 'artist', imageURL: 'portrait' }, albums: [{
   id, title: id, imageURL: 'cover', subtitle: '2026 · album', releaseDate: '2026-09-12', releaseType: 'album',
 }], singlesAndEps: [] });

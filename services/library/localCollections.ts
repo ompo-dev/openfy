@@ -187,7 +187,9 @@ export const groupLibraryArtists = (tracks: LibraryTrack[], followed: FollowedAr
     if (primary) add(primary, track);
     const albumPrimaries = [track.albumArtists?.[0],
       ...(track.albumAssociations?.map((album) => album.albumArtists?.[0]) || [])];
-    albumPrimaries.forEach((artist) => { if (artist) add(artist, track); });
+    albumPrimaries.forEach((artist) => {
+      if (artist && artistIdentityKey(artist.id).startsWith('youtube:')) add(artist, track);
+    });
   });
   followed.forEach((artist) => {
     const canonical = canonicalArtistReference(artist);

@@ -1,541 +1,141 @@
-import { render, waitFor } from '@testing-library/react-native';
-
-import {
-  findArtistIdByName,
-  getArtist,
-  getArtistCatalogImage,
-  getArtistDiscography,
-  getArtistTopTracks,
-  getCachedArtistSearchSeed,
-  getYouTubeMusicArtistBiography,
-  getYouTubeMusicArtistImage,
-  getYouTubeMusicArtistProfile,
-  getYouTubeMusicAlbum,
-  isYouTubeMusicAlbumId,
-} from '@api';
+import { act, render, waitFor } from '@testing-library/react-native';
+import { getArtist, findArtistIdByName, getCachedYouTubeMusicArtistProfile, getCachedArtistSearchSeed,
+  getYouTubeMusicArtistProfile, subscribeYouTubeMusicArtistProfile } from '@api';
 import { usePlayer } from '@context';
-import { useDetailNavigation } from '@hooks';
-import {
-  getCachedArtistImage,
-  getLibraryTracks,
-  getUserProfile,
-  groupLocalAlbums,
-  groupLocalArtists,
-  isTrackParticipantArtist,
-  isTrackPrimaryArtist,
-  mergeArtistProfileTracks,
-  prefetchArtistData,
-  rememberCachedArtistImage,
-} from '@services';
+import { getLibraryTracks, rememberCachedArtistImage } from '@services';
 import { ArtistScreen } from '../ArtistScreen';
 import { resolveTrackArtist } from '../../services/search/artistIdentity';
-import { toYouTubeMusicArtistRouteId } from '../../services/youtubeMusicClient';
-import { rememberDetailPreview } from '../../services/navigation/detailPreview';
 
 jest.mock('../../services/search/artistIdentity', () => ({
   ...jest.requireActual('../../services/search/artistIdentity'), resolveTrackArtist: jest.fn(),
 }));
-
 jest.mock('@api', () => ({
-  findArtistIdByName: jest.fn(),
-  getArtist: jest.fn(),
-  getCachedArtist: jest.fn(),
-  getCachedYouTubeMusicArtistProfile: jest.fn(),
-  subscribeYouTubeMusicArtistProfile: jest.fn(() => () => {}),
-  subscribeArtistDiscography: jest.fn(() => () => {}),
+  getArtist: jest.fn(), findArtistIdByName: jest.fn(),
+  getCachedYouTubeMusicArtistProfile: jest.fn(), getCachedArtistSearchSeed: jest.fn(),
+  getYouTubeMusicArtistProfile: jest.fn(), subscribeYouTubeMusicArtistProfile: jest.fn(() => () => {}),
+  getYouTubeMusicAlbum: jest.fn().mockResolvedValue({ artists: [] }),
   getArtistCatalogImage: jest.fn().mockResolvedValue(''),
-  getArtistDiscography: jest.fn(),
-  getArtistTopTracks: jest.fn(),
-  getYouTubeMusicArtistImage: jest.fn(),
-  getYouTubeMusicArtistBiography: jest.fn().mockResolvedValue(''),
-  getYouTubeMusicArtistProfile: jest.fn(),
-  getYouTubeMusicAlbum: jest.fn(),
-  isYouTubeMusicAlbumId: jest.fn(() => false),
-  getCachedArtistSearchSeed: jest.fn(),
 }));
 jest.mock('@context', () => ({ usePlayer: jest.fn() }));
-jest.mock('@hooks', () => ({ useDetailNavigation: jest.fn() }));
 jest.mock('@services', () => ({
-  getCachedArtistImage: jest.fn(),
-  rememberCachedArtistImage: jest.fn(),
-  getLibraryTracks: jest.fn(),
-  getUserProfile: jest.fn(),
-  groupLocalAlbums: jest.fn(),
-  groupLocalArtists: jest.fn(),
-  isTrackParticipantArtist: jest.fn(),
-  isTrackPrimaryArtist: jest.fn(),
-  mergeArtistProfileTracks: jest.fn(),
-  prefetchArtistData: jest.fn(),
+  getLibraryTracks: jest.fn(), rememberCachedArtistImage: jest.fn().mockResolvedValue(undefined),
+  getCachedArtistImage: jest.fn().mockResolvedValue(''),
 }));
 jest.mock('@components', () => {
-  const React = jest.requireActual('react');
-  const { Text, View } = jest.requireActual('react-native');
-  return {
-    CollectionDetail: ({ title, tracks, imageURL, extraTrackSections, description, metadata }: {
-      title: string;
-      tracks: unknown[];
-      imageURL: string;
-      extraTrackSections?: Array<{ id: string; tracks: unknown[] }>;
-      description?: string;
-      metadata?: string;
-    }) =>
-      React.createElement(
-        View,
-        null,
-        React.createElement(Text, null, title),
-        React.createElement(Text, { testID: 'artist-image' }, imageURL || 'no-artist-image'),
-        React.createElement(Text, null, `track-count:${tracks.length}`),
-        React.createElement(Text, null, `participation-count:${extraTrackSections?.find((section) => section.id === 'participations')?.tracks.length || 0}`),
-        React.createElement(Text, { testID: 'artist-description' }, description || '<empty>'),
-        React.createElement(Text, { testID: 'artist-metadata' }, metadata || '<empty>')
-      ),
-  };
+  const React = jest.requireActual<typeof import('react')>('react');
+  const { Text, View } = jest.requireActual<typeof import('react-native')>('react-native');
+  return { CollectionDetail: ({ title, collectionId, tracks, imageURL, loadingError, extraTrackSections }: any) =>
+    React.createElement(View, null,
+      React.createElement(Text, null, title),
+      React.createElement(Text, { testID: 'channel-id' }, collectionId),
+      React.createElement(Text, { testID: 'artist-image' }, imageURL || '<empty>'),
+      React.createElement(Text, null, 'track-count:' + tracks.length),
+      React.createElement(Text, null, 'participation-count:' + (extraTrackSections?.[0]?.tracks.length || 0)),
+      React.createElement(Text, null, loadingError || '<no-error>')) };
 });
 jest.mock('../../components/Slider', () => ({ Slider: () => null }));
-jest.mock('../../services/metadata/spotifyMetadata', () => ({
-  getSpotifyArtistImage: jest.fn().mockResolvedValue(''),
-}));
 
-const localTrack = {
-  spotifyId: 'saved-track',
-  title: 'Faixa salva',
-  artistName: 'Artista existente',
-  albumName: 'Álbum salvo',
-  duration_ms: 180_000,
-  imageURL: 'https://images.example/cover.jpg',
-  artists: [{ id: 'existing-artist-id', name: 'Artista existente' }],
-  albumArtists: [{ id: 'existing-artist-id', name: 'Artista existente' }],
-};
+const id = 'ytartist_UCnative~Native';
+const recording = { id: 'yt_abcdefghijk', youtubeVideoId: 'abcdefghijk', title: 'Song',
+  subtitle: 'Native', artists: [{ id, name: 'Native' }] };
+const channelProfile = { artist: { id, type: 'artist', name: 'Native', imageURL: 'portrait.jpg' },
+  tracks: [recording], participationTracks: [], albums: [], singlesAndEps: [] };
 
-describe('ArtistScreen', () => {
-  let consoleError: jest.SpyInstance;
-  const openDetail = jest.fn();
-
+describe('YouTube-native artist screen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.mocked(resolveTrackArtist).mockImplementation(async (artist) => ({
-      id: artist.id || toYouTubeMusicArtistRouteId(undefined, artist.name), name: artist.name,
-    }));
-    jest.mocked(useDetailNavigation).mockReturnValue({
-      openDetail,
-      section: 'library',
-    } as never);
-    consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
     jest.mocked(usePlayer).mockReturnValue({ currentTrack: null } as never);
-    jest.mocked(getLibraryTracks).mockResolvedValue([localTrack] as never);
-    jest.mocked(getCachedArtistImage).mockResolvedValue('');
-    jest.mocked(getYouTubeMusicArtistImage).mockResolvedValue('');
-    jest.mocked(getYouTubeMusicArtistBiography).mockResolvedValue('');
-    jest.mocked(getCachedArtistSearchSeed).mockReturnValue(null);
-    jest.mocked(isYouTubeMusicAlbumId).mockReturnValue(false);
-    jest.mocked(getArtistCatalogImage).mockResolvedValue('');
-    jest.mocked(rememberCachedArtistImage).mockResolvedValue(undefined);
-    jest.mocked(getYouTubeMusicArtistProfile).mockRejectedValue(new Error('YTM profile unavailable'));
-    jest.mocked(getUserProfile).mockResolvedValue({ recentlyPlayedTracks: [] } as never);
-    jest.mocked(groupLocalArtists).mockReturnValue([{
-      id: 'spotify:existing-artist-id',
-      spotifyArtistId: 'existing-artist-id',
-      title: 'Artista existente',
-      imageURL: '',
-      tracks: [localTrack],
-    }] as never);
-    jest.mocked(groupLocalAlbums).mockReturnValue([] as never);
-    jest.mocked(isTrackPrimaryArtist).mockReturnValue(true);
-    jest.mocked(isTrackParticipantArtist).mockReturnValue(false);
-    jest.mocked(mergeArtistProfileTracks).mockImplementation((value) => ({
-      primaryTracks: [...value.primaryTracks, ...value.contextualTracks.filter((track) => {
-        const primaryArtist = track.artists?.[0];
-        const matches = primaryArtist?.id === value.artistId ||
-          primaryArtist?.name.toLocaleLowerCase() === value.artistName.toLocaleLowerCase();
-        return matches && !value.primaryTracks.some((primary) => primary.id === track.id);
-      })],
-      participationTracks: value.participationTracks,
-    }));
-    jest.mocked(getArtist).mockRejectedValue(new Error('Spotify profile unavailable'));
-    jest.mocked(findArtistIdByName).mockResolvedValue('');
-    jest.mocked(getArtistTopTracks).mockResolvedValue([] as never);
-    jest.mocked(getArtistDiscography).mockResolvedValue({ albums: [], singlesAndEps: [], tracks: [] });
-  });
-
-  afterEach(() => consoleError.mockRestore());
-
-  it('keeps the loaded profile visible when playback enters and leaves its artist', async () => {
-    const artistId = 'ytartist_UCstable~Stable%20artist';
-    const profile = {
-      artist: {
-        id: artistId,
-        type: 'artist',
-        name: 'Stable artist',
-        imageURL: 'https://images.example/stable.jpg',
-      },
-      tracks: [{ id: 'yt_stable', title: 'Stable song', artists: [{ id: artistId, name: 'Stable artist' }] }],
-      participationTracks: [],
-      albums: [],
-      singlesAndEps: [],
-    };
-    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue(profile as never);
-    const view = await render(<ArtistScreen artistId={artistId} />);
-    await waitFor(() => expect(view.getByText('track-count:1')).toBeTruthy());
-    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledTimes(1);
-
-    // A new load would stall and replace the already interactive profile.
-    jest.mocked(getYouTubeMusicArtistProfile).mockImplementation(() => new Promise(() => {}));
-    jest.mocked(usePlayer).mockReturnValue({
-      currentTrack: { ...localTrack, artists: [{ id: artistId, name: 'Stable artist' }] },
-    } as never);
-    await view.rerender(<ArtistScreen artistId={artistId} />);
-    expect(view.getByText('track-count:1')).toBeTruthy();
-    expect(view.getByTestId('artist-image').props.children).toBe(profile.artist.imageURL);
-    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledTimes(1);
-
-    jest.mocked(usePlayer).mockReturnValue({ currentTrack: localTrack } as never);
-    await view.rerender(<ArtistScreen artistId={artistId} />);
-    expect(view.getByText('track-count:1')).toBeTruthy();
-    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledTimes(1);
-  });
-
-  it('warms release participant portraits without loading their full profiles', async () => {
-    const artistId = 'ytartist_UCowner~Release%20owner';
-    jest.mocked(isYouTubeMusicAlbumId).mockReturnValue(true);
-    jest.mocked(getCachedArtistImage).mockImplementation(async (_name, loader) => loader());
-    jest.mocked(getArtistCatalogImage).mockResolvedValue('https://images.example/participant.jpg');
-    jest.mocked(getYouTubeMusicAlbum).mockResolvedValue({
-      artists: [{ id: 'ytartist_UCguest~Guest', name: 'Guest' }],
-    } as never);
-    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
-      artist: { id: artistId, type: 'artist', name: 'Release owner', imageURL: 'owner.jpg' },
-      tracks: [],
-      participationTracks: [],
-      albums: [{ id: 'ytalbum_release', type: 'album', title: 'Release' }],
-      singlesAndEps: [],
-    } as never);
-    await render(<ArtistScreen artistId={artistId} />);
-    await waitFor(() => expect(getArtistCatalogImage).toHaveBeenCalledWith('ytartist_UCguest~Guest', 'Guest'));
-    expect(getYouTubeMusicAlbum).toHaveBeenCalledWith('ytalbum_release');
-    expect(prefetchArtistData).not.toHaveBeenCalled();
-    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps existing local artist profiles visible when remote Spotify data fails', async () => {
-    const view = await render(<ArtistScreen artistId="existing-artist-id" />);
-
-    await waitFor(() => {
-      expect(view.getByText('Artista existente')).toBeTruthy();
-      expect(view.getByText('track-count:1')).toBeTruthy();
-    });
-  });
-
-  it('uses the canonical Spotify artist id for a legacy name-only route', async () => {
-    const spotifyArtistId = '1234567890123456789012';
-    jest.mocked(findArtistIdByName).mockResolvedValue(spotifyArtistId);
-    jest.mocked(getArtist).mockResolvedValue({
-      id: spotifyArtistId,
-      type: 'artist',
-      name: 'Ebony',
-      imageURL: '',
-    } as never);
-
-    await render(<ArtistScreen artistId="ytartist_name_Ebony" />);
-
-    await waitFor(() => {
-      expect(getArtist).toHaveBeenCalledWith(spotifyArtistId);
-    });
-    expect(openDetail).not.toHaveBeenCalled();
-  });
-
-  it('does not let a late local-library response overwrite the full public artist catalog', async () => {
-    const artistId = 'ytartist_UCEbony~Ebony';
-    const remoteTracks = [
-      { id: 'catalog-1', title: 'Catalog one', artists: [{ name: 'Ebony' }] },
-      { id: 'catalog-2', title: 'Catalog two', artists: [{ name: 'Ebony' }] },
-    ];
-    jest.mocked(findArtistIdByName).mockResolvedValue('');
-    jest.mocked(getLibraryTracks).mockImplementation(() => new Promise((resolve) => {
-      setTimeout(() => resolve([localTrack] as never), 25);
-    }));
-    jest.mocked(groupLocalArtists).mockReturnValue([{
-      id: 'spotify:ebony-id',
-      spotifyArtistId: 'ebony-id',
-      title: 'Ebony',
-      imageURL: '',
-      tracks: [localTrack],
-    }] as never);
-    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
-      artist: { id: artistId, type: 'artist', name: 'Ebony', imageURL: '' },
-      tracks: remoteTracks,
-      participationTracks: [],
-    } as never);
-
-    const view = await render(<ArtistScreen artistId={artistId} />);
-    await waitFor(() => expect(view.getByText('track-count:2')).toBeTruthy());
-    await new Promise((resolve) => setTimeout(resolve, 40));
-
-    expect(view.getByText('track-count:2')).toBeTruthy();
-  });
-
-  it('never uses a song cover as the artist portrait when the remote profile is unavailable', async () => {
-    const view = await render(
-      <ArtistScreen artistId="ytartist_UCartist~Artista%20existente" />
-    );
-
-    await waitFor(() => {
-      expect(view.getByText('Artista existente')).toBeTruthy();
-      expect(view.getByTestId('artist-image').props.children).toBe('no-artist-image');
-    });
-    expect(view.queryByText('https://images.example/cover.jpg')).toBeNull();
-  });
-
-  it('keeps the artist portrait and tracks found in search when profile loading fails', async () => {
-    const artistId = 'ytartist_UCseed~Seed%20artist';
-    const seedTrack = {
-      id: 'yt_abcdefghijk',
-      title: 'Seed track',
-      subtitle: 'Seed artist',
-      imageURL: 'https://images.example/seed-cover.jpg',
-      durationMs: 180_000,
-      artists: [{ id: artistId, name: 'Seed artist' }],
-    };
-    jest.mocked(getCachedArtistSearchSeed).mockReturnValue({
-      artist: {
-        id: artistId,
-        type: 'artist',
-        name: 'Seed artist',
-        imageURL: 'https://images.example/seed-portrait.jpg',
-      },
-      tracks: [seedTrack],
-    } as never);
-    const view = await render(<ArtistScreen artistId={artistId} />);
-
-    await waitFor(() => {
-      expect(view.getByText('Seed artist')).toBeTruthy();
-      expect(view.getByTestId('artist-image').props.children).toBe(
-        'https://images.example/seed-portrait.jpg'
-      );
-      expect(view.getByText('track-count:1')).toBeTruthy();
-    });
-  });
-
-  it('passes remote catalog tracks and participations without generic profile text', async () => {
-    const artistId = 'ytartist_UCremote~Remote%20artist';
-    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
-      artist: {
-        id: artistId,
-        type: 'artist',
-        name: 'Remote artist',
-        imageURL: 'https://images.example/remote-artist.jpg',
-      },
-      tracks: [{ id: 'primary-track', title: 'Primary', artists: [] }],
-      participationTracks: [{ id: 'guest-track', title: 'Guest', artists: [] }],
-    } as never);
-    const view = await render(<ArtistScreen artistId={artistId} />);
-
-    await waitFor(() => {
-      expect(view.getByText('track-count:1')).toBeTruthy();
-      expect(view.getByText('participation-count:1')).toBeTruthy();
-    });
-    expect(view.getByTestId('artist-description').props.children).toBe('<empty>');
-    expect(view.getByTestId('artist-metadata').props.children).toBe('<empty>');
-    expect(view.queryByText('Artista')).toBeNull();
-  });
-
-  it('keeps the YouTube identity even when a same-name Spotify lookup would succeed', async () => {
-    const artistId = 'ytartist_UCspotify~Artista%20Real';
-    const spotifyArtistId = '1234567890123456789012';
-    jest.mocked(findArtistIdByName).mockResolvedValue(spotifyArtistId);
-    jest.mocked(getArtist).mockResolvedValue({
-      id: spotifyArtistId,
-      type: 'artist',
-      name: 'Artista Real',
-      imageURL: 'https://images.example/spotify-artist.jpg',
-    } as never);
-    jest.mocked(getArtistTopTracks).mockResolvedValue([{
-      id: 'spotify-popular-track',
-      title: 'Faixa popular oficial',
-      artists: [{ id: spotifyArtistId, name: 'Artista Real' }],
-    }] as never);
-    jest.mocked(getArtistDiscography).mockResolvedValue({
-      albums: [{
-        id: 'spotify-album',
-        type: 'album',
-        title: 'Álbum oficial',
-        imageURL: 'https://images.example/album.jpg',
-        subtitle: '2025 · album',
-      }],
-      tracks: [{
-        id: 'spotify-catalog-track',
-        title: 'Faixa do catálogo oficial',
-        artists: [{ id: spotifyArtistId, name: 'Artista Real' }],
-      }],
-    } as never);
-    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
-      artist: { id: artistId, type: 'artist', name: 'Artista Real', imageURL: 'correct.jpg' },
-      tracks: [{ id: 'correct-song', title: 'Correct', artists: [{ id: artistId, name: 'Artista Real' }] }],
-      participationTracks: [], albums: [], singlesAndEps: [],
-    } as never);
-
-    const view = await render(<ArtistScreen artistId={artistId} />);
-
-    await waitFor(() => {
-      expect(view.getByText('track-count:1')).toBeTruthy();
-    });
-    expect(view.getByText('Artista Real')).toBeTruthy();
-    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
-      artistId
-    );
-    expect(findArtistIdByName).not.toHaveBeenCalled();
-    expect(getArtistDiscography).not.toHaveBeenCalled();
-  });
-
-  it('enriches a sparse canonical artist profile with the full public catalog', async () => {
-    const spotifyArtistId = '1234567890123456789012';
-    jest.mocked(resolveTrackArtist).mockResolvedValue({ id: 'ytartist_UCEbony~Ebony', name: 'Ebony' });
-    const spotifyTracks = Array.from({ length: 19 }, (_, index) => ({
-      id: `spotify-${index}`,
-      title: `Spotify track ${index}`,
-      artists: [{ id: spotifyArtistId, name: 'Ebony' }],
-    }));
-    const publicTracks = Array.from({ length: 45 }, (_, index) => ({
-      id: `youtube-${index}`,
-      title: `Public track ${index}`,
-      artists: [{ name: 'Ebony' }],
-    }));
-    jest.mocked(getArtist).mockResolvedValue({
-      id: spotifyArtistId,
-      type: 'artist',
-      name: 'Ebony',
-      imageURL: '',
-    } as never);
-    jest.mocked(getArtistTopTracks).mockResolvedValue([] as never);
-    jest.mocked(getArtistDiscography).mockResolvedValue({
-      albums: [],
-      tracks: spotifyTracks,
-    } as never);
-    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
-      artist: {
-        id: 'ytartist_UCEbony~Ebony',
-        type: 'artist',
-        name: 'Ebony',
-        imageURL: 'https://images.example/ebony.jpg',
-      },
-      tracks: publicTracks,
-      participationTracks: [],
-    } as never);
-
-    const view = await render(<ArtistScreen artistId={spotifyArtistId} />);
-
-    await waitFor(() => {
-      expect(view.getByText('track-count:64')).toBeTruthy();
-    });
-    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
-      'ytartist_UCEbony~Ebony'
-    );
-  });
-
-  it('falls back to the public YouTube Music catalog when Spotify has no session', async () => {
-    const artistId = 'ytartist_UCpedro~Pedro%20Qualy';
-    const spotifyArtistId = '1234567890123456789012';
-    jest.mocked(findArtistIdByName).mockResolvedValue(spotifyArtistId);
-    jest.mocked(getArtist).mockResolvedValue(null as never);
-    jest.mocked(getArtistTopTracks).mockResolvedValue([] as never);
-    jest.mocked(getArtistDiscography).mockRejectedValue(new Error('Spotify session missing'));
-    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
-      artist: {
-        id: artistId,
-        type: 'artist',
-        name: 'Pedro Qualy',
-        imageURL: 'https://images.example/pedro.jpg',
-      },
-      tracks: [
-        { id: 'yt_first', title: 'Tarôs', artists: [{ name: 'Pedro Qualy' }] },
-        { id: 'yt_second', title: 'Papel de Parede', artists: [{ name: 'Pedro Qualy' }] },
-      ],
-      participationTracks: [{ id: 'yt_feature', title: 'Participação', artists: [{ name: 'Other' }, { name: 'Pedro Qualy' }] }],
-    } as never);
-
-    const view = await render(<ArtistScreen artistId={artistId} />);
-
-    await waitFor(() => {
-      expect(view.getByText('track-count:2')).toBeTruthy();
-      expect(view.getByText('participation-count:1')).toBeTruthy();
-    });
-    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
-      artistId
-    );
-  });
-
-  it('supplements a Spotify-id local profile with the public artist catalog', async () => {
-    const spotifyArtistId = '1234567890123456789012';
-    jest.mocked(resolveTrackArtist).mockResolvedValue({ id: 'ytartist_UCartist~Artista%20existente', name: 'Artista existente' });
-    jest.mocked(groupLocalArtists).mockReturnValue([{
-      id: `spotify:${spotifyArtistId}`,
-      spotifyArtistId,
-      title: 'Artista existente',
-      imageURL: '',
-      tracks: [localTrack],
-    }] as never);
-    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
-      artist: {
-        id: 'ytartist_UCartist~Artista%20existente',
-        type: 'artist',
-        name: 'Artista existente',
-        imageURL: 'https://images.example/artist.jpg',
-      },
-      tracks: [{ id: 'yt_full_catalog', title: 'Faixa fora da biblioteca' }],
-      participationTracks: [],
-    } as never);
-
-    const view = await render(<ArtistScreen artistId={spotifyArtistId} />);
-
-    await waitFor(() => {
-      expect(view.getByText('track-count:2')).toBeTruthy();
-    });
-    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(
-      'ytartist_UCartist~Artista%20existente'
-    );
-  });
-
-  it('loads Sid without a Spotify session and caches the verified public portrait for both identities', async () => {
-    const spotifyId = '05BrFNfdik79RdmOG1Ux1Q';
-    const youtubeId = toYouTubeMusicArtistRouteId('UCNhFr4PMhJTIU5CvkzQUNuQ', 'Sid');
-    const saved = { ...localTrack, title: 'Isso Vale Minha Vida', artistName: 'Sid, Tavin',
-      artists: [{ id: spotifyId, name: 'Sid' }, { id: 'tavin', name: 'Tavin' }] };
-    jest.mocked(getLibraryTracks).mockResolvedValue([saved] as never);
-    jest.mocked(groupLocalArtists).mockReturnValue([{
-      id: `spotify:${spotifyId}`, spotifyArtistId: spotifyId, title: 'Sid', tracks: [saved],
-    }] as never);
-    jest.mocked(getArtistDiscography).mockRejectedValue(new Error('Entre no Spotify para carregar esses dados.'));
-    jest.mocked(resolveTrackArtist).mockResolvedValue({ id: youtubeId, name: 'Sid' });
-    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
-      artist: { id: youtubeId, type: 'artist', name: 'Sid', imageURL: 'https://images.example/sid.jpg' },
-      tracks: [{ id: 'yt_public_song', title: 'Outra faixa do Sid', subtitle: 'Sid', artists: [{ id: youtubeId, name: 'Sid' }] }],
-      participationTracks: [], albums: [], singlesAndEps: [],
-    } as never);
-
-    const view = await render(<ArtistScreen artistId={spotifyId} />);
-    await waitFor(() => expect(view.getByTestId('artist-image').props.children).toBe('https://images.example/sid.jpg'));
-    expect(view.getByText('track-count:2')).toBeTruthy();
-    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(youtubeId);
-    expect(resolveTrackArtist).toHaveBeenCalledWith({ id: undefined, name: 'Sid' }, expect.objectContaining({ title: saved.title }));
-    expect(rememberCachedArtistImage).toHaveBeenCalledWith('Sid', 'https://images.example/sid.jpg', [spotifyId, youtubeId]);
-  });
-
-  it('uses the clicked artist preview as public catalog context when Spotify and the local library are unavailable', async () => {
-    const spotifyId = 'p'.repeat(22);
-    const youtubeId = toYouTubeMusicArtistRouteId(`UC${'p'.repeat(22)}`, 'Preview artist');
-    const track = { id: 'known-preview-song', title: 'Known preview song', subtitle: 'Preview artist',
-      artists: [{ id: spotifyId, name: 'Preview artist' }] };
-    rememberDetailPreview('artist', spotifyId, { title: 'Preview artist', tracks: [track] });
     jest.mocked(getLibraryTracks).mockResolvedValue([]);
-    jest.mocked(groupLocalArtists).mockReturnValue([]);
-    jest.mocked(resolveTrackArtist).mockResolvedValue({ id: youtubeId, name: 'Preview artist' });
-    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue({
-      artist: { id: youtubeId, type: 'artist', name: 'Preview artist', imageURL: 'preview.jpg' },
-      tracks: [track], participationTracks: [], albums: [], singlesAndEps: [],
-    } as never);
+    jest.mocked(getCachedArtistSearchSeed).mockReturnValue(null);
+    jest.mocked(getCachedYouTubeMusicArtistProfile).mockReturnValue(null);
+    jest.mocked(getYouTubeMusicArtistProfile).mockResolvedValue(channelProfile as never);
+    jest.mocked(resolveTrackArtist).mockResolvedValue({ id: '', name: 'Native' });
+  });
 
-    const view = await render(<ArtistScreen artistId={spotifyId} />);
-    await waitFor(() => expect(view.getByTestId('artist-image').props.children).toBe('preview.jpg'));
-    expect(resolveTrackArtist).toHaveBeenCalledWith({ id: undefined, name: 'Preview artist' }, track);
-    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(youtubeId);
+  it('loads the linked YouTube channel and never consults Spotify for an artist profile', async () => {
+    const screen = await render(<ArtistScreen artistId={id} />);
+    await waitFor(() => expect(screen.getByText('track-count:1')).toBeTruthy());
+    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(id);
+    expect(screen.getByTestId('channel-id').props.children).toBe(id);
+    expect(getArtist).not.toHaveBeenCalled();
+    expect(findArtistIdByName).not.toHaveBeenCalled();
+    expect(rememberCachedArtistImage).toHaveBeenCalledWith('Native', 'portrait.jpg', [id]);
+  });
+
+  it('does not manufacture a channel for a name-only route', async () => {
+    await render(<ArtistScreen artistId="ytartist_name_Native" />);
+    await waitFor(() => expect(getLibraryTracks).toHaveBeenCalled());
+    expect(getYouTubeMusicArtistProfile).not.toHaveBeenCalled();
+    expect(findArtistIdByName).not.toHaveBeenCalled();
+  });
+
+  it('migrates a legacy link only through its saved recording channel reference', async () => {
+    const legacy = { ...recording, artists: [{ id: 'legacy-provider-id', name: 'Native' }] };
+    jest.mocked(getLibraryTracks).mockResolvedValue([legacy] as never);
+    jest.mocked(resolveTrackArtist).mockResolvedValue({ id, name: 'Native' });
+    const screen = await render(<ArtistScreen artistId="legacy-provider-id" />);
+    await waitFor(() => expect(screen.getByText('track-count:1')).toBeTruthy());
+    expect(resolveTrackArtist).toHaveBeenCalledWith(legacy.artists[0], legacy);
+    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledWith(id);
+    expect(screen.getByTestId('channel-id').props.children).toBe(id);
+  });
+
+  it('does not supplement a channel catalog with same-name library recordings', async () => {
+    jest.mocked(getLibraryTracks).mockResolvedValue([{ ...recording, id: 'foreign',
+      artists: [{ id: 'ytartist_UCother~Native', name: 'Native' }] }] as never);
+    const screen = await render(<ArtistScreen artistId={id} />);
+    await waitFor(() => expect(screen.getByText('track-count:1')).toBeTruthy());
+    expect(getLibraryTracks).not.toHaveBeenCalled();
+  });
+
+  it('publishes channel metadata before the full catalog resolves', async () => {
+    let publish!: (value: typeof channelProfile) => void;
+    let finish!: (value: typeof channelProfile) => void;
+    jest.mocked(subscribeYouTubeMusicArtistProfile).mockImplementation((_, listener) => {
+      publish = listener as typeof publish;
+      return () => {};
+    });
+    jest.mocked(getYouTubeMusicArtistProfile).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const screen = await render(<ArtistScreen artistId={id} />);
+    await act(async () => publish({ ...channelProfile, tracks: [] }));
+    expect(screen.getByTestId('artist-image').props.children).toBe('portrait.jpg');
+    await act(async () => finish(channelProfile));
+    expect(screen.getByText('track-count:1')).toBeTruthy();
+  });
+
+  it('keeps playback changes from resetting the loaded profile', async () => {
+    const screen = await render(<ArtistScreen artistId={id} />);
+    await waitFor(() => expect(screen.getByText('track-count:1')).toBeTruthy());
+    jest.mocked(usePlayer).mockReturnValue({ currentTrack: recording } as never);
+    await screen.rerender(<ArtistScreen artistId={id} />);
+    jest.mocked(usePlayer).mockReturnValue({ currentTrack: null } as never);
+    await screen.rerender(<ArtistScreen artistId={id} />);
+    expect(getYouTubeMusicArtistProfile).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('artist-image').props.children).toBe('portrait.jpg');
+  });
+
+  it('keeps only explicitly linked search seed recordings if the channel is offline', async () => {
+    jest.mocked(getCachedArtistSearchSeed).mockReturnValue({ artist: channelProfile.artist,
+      tracks: [recording, { ...recording, id: 'other', artists: [{ id: 'ytartist_UCother~Native', name: 'Native' }] }] } as never);
+    jest.mocked(getYouTubeMusicArtistProfile).mockRejectedValue(new Error('Offline'));
+    const screen = await render(<ArtistScreen artistId={id} />);
+    await waitFor(() => expect(screen.getByText('track-count:1')).toBeTruthy());
+    expect(screen.getByTestId('artist-image').props.children).toBe('portrait.jpg');
+    expect(getArtist).not.toHaveBeenCalled();
+  });
+
+  it('uses the channel header identity even when opened through an old alias', async () => {
+    const screen = await render(<ArtistScreen artistId="ytartist_UCnative~Old%20alias" />);
+    await waitFor(() => expect(screen.getByText('Native')).toBeTruthy());
+    expect(screen.getByTestId('channel-id').props.children).toBe(id);
+  });
+
+  it('unsubscribes the progressive channel resource when leaving the profile', async () => {
+    const stop = jest.fn();
+    jest.mocked(subscribeYouTubeMusicArtistProfile).mockReturnValue(stop);
+    const screen = await render(<ArtistScreen artistId={id} />);
+    await waitFor(() => expect(screen.getByText('track-count:1')).toBeTruthy());
+    await screen.unmount();
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 });

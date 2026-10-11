@@ -45,10 +45,10 @@ const playlists: LocalPlaylist[] = [{
 }];
 
 const library = [
-  track('track-sotam-1', 'Primeira', { id: 'artist-sotam', name: 'Sotam' }),
-  track('track-sotam-2', 'Segunda', { id: 'artist-sotam', name: 'Sotam' }),
-  track('track-pedro-1', 'Terceira', { id: 'artist-pedro', name: 'Pedro Qualy' }),
-  track('track-outro-1', 'Quarta', { id: 'artist-outro', name: 'Outro Artista' }),
+  track('track-sotam-1', 'Primeira', { id: 'ytartist_UCsotam~Sotam', name: 'Sotam' }),
+  track('track-sotam-2', 'Segunda', { id: 'ytartist_UCsotam~Sotam', name: 'Sotam' }),
+  track('track-pedro-1', 'Terceira', { id: 'ytartist_UCpedro~Pedro', name: 'Pedro Qualy' }),
+  track('track-outro-1', 'Quarta', { id: 'ytartist_UCother~Outro', name: 'Outro Artista' }),
 ];
 
 describe('personalizedHome', () => {
@@ -74,12 +74,12 @@ describe('personalizedHome', () => {
     expect(home.continueListening.map((item) => item.title)).toEqual(['Segunda', 'Terceira', 'Primeira']);
     expect(home.pinnedTracks.map((item) => item.title)).toEqual(['Primeira', 'Terceira', 'Segunda']);
     expect(home.pinnedArtists.map((item) => [item.title, item.appearances])).toEqual([['Sotam', 14], ['Pedro Qualy', 5]]);
-    expect(home.pinnedArtists[0].artistId).toBe('artist-sotam');
+    expect(home.pinnedArtists[0].artistId).toBe('ytartist_UCsotam~Sotam');
   });
 
   it('does not pin featured artists who have never been the primary artist of a listened recording', () => {
-    const collaborated = track('collab', 'Dueto', { id: 'primary', name: 'Principal' }, {
-      artistName: 'Principal, Participante', artists: [{ id: 'primary', name: 'Principal' },
+    const collaborated = track('collab', 'Dueto', { id: 'ytartist_UCprimary~Principal', name: 'Principal' }, {
+      artistName: 'Principal, Participante', artists: [{ id: 'ytartist_UCprimary~Principal', name: 'Principal' },
         { id: 'featured', name: 'Participante' }],
     });
     const history: UserProfile = { ...profile, recentlyPlayedTracks: [{
@@ -123,7 +123,7 @@ describe('personalizedHome', () => {
     expect(new Set(first.quickPicks.map((item) => item.spotifyId)).size).toBe(
       first.quickPicks.length
     );
-    expect(first.seeds[0]).toMatchObject({ id: 'artist-sotam', name: 'Sotam' });
+    expect(first.seeds[0]).toMatchObject({ id: 'ytartist_UCsotam~Sotam', name: 'Sotam' });
     expect(first.artists).toEqual([]);
     expect(first.playlists[0].id).toBe('playlist-1');
   });
@@ -213,8 +213,8 @@ describe('personalizedHome', () => {
       title: 'Colaboração nova',
       artistName: 'Sotam, Artista Nova',
       artists: [
-        { id: 'artist-sotam', name: 'Sotam' },
-        { id: 'artist-new', name: 'Artista Nova' },
+        { id: 'ytartist_UCsotam~Sotam', name: 'Sotam' },
+        { id: 'ytartist_UCnew~New', name: 'Artista Nova' },
       ],
       albumName: 'Single',
       imageURL: 'https://images.example/new.jpg',
@@ -233,7 +233,7 @@ describe('personalizedHome', () => {
 
     expect(home.artists).toEqual([
       expect.objectContaining({
-        spotifyArtistId: 'artist-new',
+        spotifyArtistId: 'ytartist_UCnew~New',
         title: 'Artista Nova',
         imageURL: '',
       }),

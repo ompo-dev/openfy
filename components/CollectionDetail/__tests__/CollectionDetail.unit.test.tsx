@@ -92,6 +92,7 @@ const tracks = [
     id: 'track-one',
     title: 'Primeira música',
     subtitle: 'Artista sem id',
+    artists: [{ id: 'ytartist_UCfirst~Artista%20sem%20id', name: 'Artista sem id' }],
     albumName: 'Álbum teste',
     durationMs: 180_000,
   },
@@ -99,6 +100,7 @@ const tracks = [
     id: 'track-two',
     title: 'Outra faixa',
     subtitle: 'Segundo artista',
+    artists: [{ id: 'ytartist_UCsecond~Segundo%20artista', name: 'Segundo artista' }],
     albumName: 'Álbum teste',
     durationMs: 210_000,
   },
@@ -131,7 +133,7 @@ const renderCollection = (props = {}) =>
 
 describe('CollectionDetail', () => {
   it('follows and unfollows from the profile instead of sharing', async () => {
-    const screen = await renderCollection({ kind: 'artist', collectionId: 'ytartist_follow-test', title: 'Follow Test' });
+    const screen = await renderCollection({ kind: 'artist', collectionId: 'ytartist_UCfollow-test~Follow%20Test', title: 'Follow Test' });
     const follow = await screen.findByLabelText('Seguir artista');
     await waitFor(() => expect(follow.props.accessibilityState?.disabled).not.toBe(true));
     await fireEvent.press(follow);
@@ -207,7 +209,7 @@ describe('CollectionDetail', () => {
     dismiss.mockRestore();
   });
 
-  it('plays a single shuffled queue and exposes fallback artist links', async () => {
+  it('plays a single shuffled queue and exposes linked channel artists', async () => {
     const onArtistPress = jest.fn();
     const screen = await renderCollection({ onArtistPress });
 
@@ -225,7 +227,7 @@ describe('CollectionDetail', () => {
     );
 
     fireEvent.press(screen.getAllByLabelText('Abrir artista Artista sem id')[0]);
-    await waitFor(() => expect(onArtistPress).toHaveBeenCalledWith('ytartist_~Artista%20sem%20id', 'Artista sem id'));
+    await waitFor(() => expect(onArtistPress).toHaveBeenCalledWith('ytartist_UCfirst~Artista%20sem%20id', 'Artista sem id'));
   });
 
   it('shows active shuffle and pause states for the current collection', async () => {
@@ -295,8 +297,14 @@ describe('CollectionDetail', () => {
   it('lists every credited artist from the collection and removes add and overflow actions', async () => {
     const screen = await renderCollection({
       tracks: [
-        { id: 'one', title: 'Faixa 1', subtitle: 'Principal, Participação' },
-        { id: 'two', title: 'Faixa 2', subtitle: 'Principal, Outra participação' },
+        { id: 'one', title: 'Faixa 1', subtitle: 'Principal, Participação', artists: [
+          { id: 'ytartist_UCprincipal~Principal', name: 'Principal' },
+          { id: 'ytartist_UCguest1~Guest', name: 'Participação' },
+        ] },
+        { id: 'two', title: 'Faixa 2', subtitle: 'Principal, Outra participação', artists: [
+          { id: 'ytartist_UCprincipal~Principal', name: 'Principal' },
+          { id: 'ytartist_UCguest2~Guest', name: 'Outra participação' },
+        ] },
       ],
       metadata: 'EP · 4 músicas · 12 min',
     });
@@ -471,6 +479,7 @@ describe('CollectionDetail', () => {
         id: 'track-three',
         title: 'Faixa de outra página',
         subtitle: 'Artista da página seguinte',
+        artists: [{ id: 'ytartist_UCnext~Next', name: 'Artista da página seguinte' }],
       },
     ]);
     const screen = await renderCollection({

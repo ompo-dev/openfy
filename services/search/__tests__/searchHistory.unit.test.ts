@@ -2,7 +2,7 @@ import type { ArtistModel, TrackModel } from '@models';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({ getItem: jest.fn(), setItem: jest.fn() }));
 
-const artist: ArtistModel = { type: 'artist', id: 'ytartist_sotam', name: 'Sotam', imageURL: 'artist.jpg' };
+const artist: ArtistModel = { type: 'artist', id: 'ytartist_UCsotam~Sotam', name: 'Sotam', imageURL: 'artist.jpg' };
 const track: TrackModel = { id: 'yt_song', title: 'Sinceramente', subtitle: 'Sotam, Rob, Vertigo',
   imageURL: 'cover.jpg', youtubeVideoId: 'abcdefghijk', durationMs: 150000, albumId: 'album',
   albumAssociations: [{ id: 'album', name: 'Album' }] };
@@ -42,8 +42,8 @@ describe('selected search history', () => {
       history.rememberSearchSelection({ kind: 'track', track }),
       history.rememberSearchSelection({ kind: 'artist', artist }),
     ]);
-    expect((await history.getSearchHistory()).map(history.searchHistoryKey)).toEqual(['artist:youtube:sotam', 'track:yt_song']);
-    await history.removeSearchHistoryEntry('artist:youtube:sotam');
+    expect((await history.getSearchHistory()).map(history.searchHistoryKey)).toEqual(['artist:youtube:UCsotam', 'track:yt_song']);
+    await history.removeSearchHistoryEntry('artist:youtube:UCsotam');
     expect(await history.getSearchHistory()).toMatchObject([{ track }]);
     await history.clearSearchHistory();
     expect(await history.getSearchHistory()).toEqual([]);

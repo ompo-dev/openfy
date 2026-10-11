@@ -1,7 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getYouTubeMusicArtistProfile } from '../../api/search/catalog';
-import { getArtistDiscography } from '../../api/artists/artistDiscography';
-import { toYouTubeMusicArtistRouteId } from '../youtubeMusicClient';
+import { artistIdentityKey, resolveTrackArtist } from '../search/artistIdentity';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 import { loadHomeRadio } from './homeRadio';
 import {
@@ -12,7 +11,7 @@ import {
 } from './personalizedHome';
 
 const TTL = 6 * 60 * 60_000;
-const STORAGE_KEY = 'openfy_home_catalog_v1';
+const STORAGE_KEY = 'openfy_home_catalog_v2';
 const cache = createAsyncResourceCache<HomeCatalog>({
   name: 'home release catalog', category: 'home', maxEntries: 4,
   shouldCache: (catalog) => Boolean(catalog.releases.length || catalog.similarTracks.length),
@@ -50,17 +49,14 @@ export const loadHomeCatalog = (
     } catch {}
     const groups: HomeRelease[][] = [];
     const loadReleases = async (seed: RecommendationSeed): Promise<HomeRelease[]> => {
-      const route = seed.id?.startsWith('ytartist_')
-        ? seed.id : toYouTubeMusicArtistRouteId(undefined, seed.name);
+      const recording = anchors.find((track) => track.artists?.some((credit) => credit.id === seed.id ||
+        normalize(credit.name) === normalize(seed.name)));
+      const route = artistIdentityKey(seed.id).startsWith('youtube:')
+        ? seed.id! : (await resolveTrackArtist({ id: seed.id, name: seed.name }, recording)).id;
+      if (!route) return [];
       let profile: Awaited<ReturnType<typeof getYouTubeMusicArtistProfile>> | undefined;
       try { profile = await getYouTubeMusicArtistProfile(route); } catch {}
-      let items = profile ? [...profile.albums, ...profile.singlesAndEps] : [];
-      if (!items.length && seed.id && /^[A-Za-z0-9]{22}$/.test(seed.id)) {
-        try {
-          const discography = await getArtistDiscography(seed.id);
-          items = [...discography.albums, ...discography.singlesAndEps];
-        } catch {}
-      }
+      const items = profile ? [...profile.albums, ...profile.singlesAndEps] : [];
       return items.slice(0, 24).map((item) => ({
         id: item.id, title: item.title, imageURL: item.imageURL,
         artistName: seed.name, artistId: profile?.artist.id || route,

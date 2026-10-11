@@ -30,7 +30,7 @@ import { ProgressiveFlatList, ProgressiveList } from '../common/ProgressiveList'
 import { MarqueeText } from '../common/MarqueeText';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { getArtistCatalogImage } from '@api';
-import { hasArtistIdentity, resolveTrackArtist } from '../../services/search/artistIdentity';
+import { artistIdentityKey, resolveTrackArtist, resolveTrackArtists } from '../../services/search/artistIdentity';
 import { getCachedArtistImage } from '@services';
 import { useDetailNavigation } from '@hooks';
 import { isSameRecording } from '../../services/library/trackIdentity';
@@ -113,14 +113,6 @@ const normalizeSearchValue = (value: string) =>
     .trim();
 
 const normalizeArtistKey = (value: string) => normalizeSearchValue(value).replace(/\s+/g, ' ');
-
-const isSpotifyArtistId = (value: string) => /^[A-Za-z0-9]{22}$/.test(value);
-
-const preferredArtistId = (current: string, next: string) => {
-  if (!current) return next;
-  if (isSpotifyArtistId(next) && !isSpotifyArtistId(current)) return next;
-  return current;
-};
 
 const getTrackArtists = (track: CollectionTrack) => {
   if (track.artists?.length) return track.artists;
@@ -255,7 +247,7 @@ export const CollectionDetail = ({
   const followPending = React.useRef(false);
   const following = followedArtists.some((artist) => matchesFollowedArtist(artist, { id: collectionId, name: title }));
   const handleFollow = async () => {
-    if (followPending.current) return;
+    if (followPending.current || !artistIdentityKey(collectionId).startsWith('youtube:')) return;
     followPending.current = true;
     setSavingFollow(true);
     try {
@@ -291,6 +283,9 @@ export const CollectionDetail = ({
     tracks: CollectionTrack[];
   } | null>(null);
   const [artistImages, setArtistImages] = React.useState<Record<string, string>>({});
+  const [linkedCollectionArtists, setLinkedCollectionArtists] = React.useState<{
+    collectionId: string; artists: { id: string; name: string }[];
+  } | null>(null);
   const attemptedArtistImages = React.useRef(new Set<string>());
   const isMountedRef = React.useRef(true);
   const { downloads, enqueueDownloads } = useDownloads();
@@ -373,10 +368,11 @@ export const CollectionDetail = ({
       const name = artist.name?.trim();
       if (!name) return;
       const id = artist.id?.trim() || '';
-      const key = hasArtistIdentity(id) ? id : normalizeArtistKey(name);
+      const key = artistIdentityKey(id);
+      if (!key.startsWith('youtube:')) return;
       const previous = byKey.get(key);
       byKey.set(key, {
-        id: preferredArtistId(previous?.id || '', id),
+        id,
         name: previous?.name || name,
         imageURL: artist.imageURL || previous?.imageURL,
       });
@@ -385,8 +381,25 @@ export const CollectionDetail = ({
     [...allArtistTracks, ...extraTrackSections.flatMap((section) => section.tracks)].forEach((track) =>
       getTrackArtists(track).forEach(addArtist)
     );
+    if (linkedCollectionArtists?.collectionId === collectionId) linkedCollectionArtists.artists.forEach(addArtist);
     return [...byKey.values()];
-  }, [allArtistTracks, artists, extraTrackSections]);
+  }, [allArtistTracks, artists, collectionId, extraTrackSections, linkedCollectionArtists]);
+
+  React.useEffect(() => {
+    let active = true;
+    void (async () => {
+      const recordings = allArtistTracks.filter((track) => !track.artists?.length ||
+        track.artists.some((artist) => !artistIdentityKey(artist.id).startsWith('youtube:')))
+        .slice(0, isArtistListVisible ? allArtistTracks.length : 4);
+      for (const recording of recordings) {
+        if (!active) return;
+        const linked = await resolveTrackArtists(recording);
+        if (active && linked.length) setLinkedCollectionArtists((current) => ({ collectionId,
+          artists: [...(current?.collectionId === collectionId ? current.artists : []), ...linked] }));
+      }
+    })().catch(() => {});
+    return () => { active = false; };
+  }, [allArtistTracks, collectionId, isArtistListVisible]);
 
   React.useEffect(() => {
     isMountedRef.current = true;
@@ -450,17 +463,13 @@ export const CollectionDetail = ({
   const handleCollectionArtistPress = React.useCallback(async (artist: { id: string; name: string }) => {
     const context = allArtistTracks.find((track) => track.artists?.some((credit) => credit.name === artist.name));
     const canonicalId = (await resolveTrackArtist(artist, context)).id;
-    const resolvedArtist = { ...artist, id: canonicalId || artist.id };
+    if (!canonicalId) return;
+    const resolvedArtist = { ...artist, id: canonicalId };
     if (onArtistPress) {
       await onArtistPress(resolvedArtist.id, resolvedArtist.name);
       return;
     }
-    const routeId = resolvedArtist.id.startsWith('ytartist_') || resolvedArtist.id.startsWith('local_artist_')
-      ? resolvedArtist.id
-      : resolvedArtist.id && isSpotifyArtistId(resolvedArtist.id)
-        ? resolvedArtist.id
-        : `ytartist_name_${encodeURIComponent(resolvedArtist.name)}`;
-    openDetail('artist', routeId);
+    openDetail('artist', resolvedArtist.id);
   }, [allArtistTracks, onArtistPress, openDetail]);
 
   const openArtistList = React.useCallback(() => {
@@ -644,7 +653,7 @@ export const CollectionDetail = ({
           artists={shouldLinkArtists ? rowArtists : undefined}
           onArtistPress={shouldLinkArtists ? async (id, name) => {
             const resolved = await resolveTrackArtist({ id, name }, item);
-            await onArtistPress?.(resolved.id, resolved.name);
+            if (resolved.id) await onArtistPress?.(resolved.id, resolved.name);
           } : undefined}
         />
       );
@@ -875,7 +884,8 @@ export const CollectionDetail = ({
                   accessibilityLabel={kind === 'artist' ? (following ? 'Deixar de seguir artista' : 'Seguir artista') : onEditPress ? 'Editar playlist' :
                     collectionSaved ? (kind === 'album' ? 'Álbum salvo' : 'Playlist salva') : (kind === 'album' ? 'Salvar álbum' : 'Salvar playlist')}
                   accessibilityState={{ selected: kind === 'artist' ? following : collectionSaved, busy: savingFollow || savingCollection }}
-                  disabled={kind === 'artist' ? (savingFollow || !followsReady) : !onEditPress && (savingCollection || collectionSaved)}
+                  disabled={kind === 'artist' ? (savingFollow || !followsReady || !artistIdentityKey(collectionId).startsWith('youtube:'))
+                    : !onEditPress && (savingCollection || collectionSaved)}
                   onPress={() => void (kind === 'artist' ? handleFollow() : onEditPress ? onEditPress() : handleSaveCollection())}
                   style={[styles.pillAction, kind === 'artist' && styles.followAction]}
                 >

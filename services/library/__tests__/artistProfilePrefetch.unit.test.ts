@@ -1,10 +1,10 @@
 import { _clearArtistProfilePrefetchForTests, _getActivePrefetchedArtistKeysForTests,
   prefetchTrackArtistData } from '../artistProfilePrefetch';
-import { resolveTrackArtist } from '../../search/artistIdentity';
+import { resolveTrackArtists } from '../../search/artistIdentity';
 import { getYouTubeMusicArtistProfile } from '../../../api/search/catalog';
 
 jest.mock('../../search/artistIdentity', () => ({
-  ...jest.requireActual('../../search/artistIdentity'), resolveTrackArtist: jest.fn(),
+  ...jest.requireActual('../../search/artistIdentity'), resolveTrackArtists: jest.fn(),
 }));
 jest.mock('../artistImageCache', () => ({ getCachedArtistImage: jest.fn().mockResolvedValue('') }));
 jest.mock('../../images/imagePrefetch', () => ({ prefetchImage: jest.fn().mockResolvedValue(true) }));
@@ -23,27 +23,27 @@ describe('current track artist warmup', () => {
   beforeEach(() => { jest.clearAllMocks(); _clearArtistProfilePrefetchForTests(); });
 
   it('does not replace the current artists when an older recording lookup finishes later', async () => {
-    let finishOld!: (value: { id: string; name: string }) => void;
-    jest.mocked(resolveTrackArtist).mockImplementation((artist) => artist.name === 'Old'
+    let finishOld!: (value: { id: string; name: string }[]) => void;
+    jest.mocked(resolveTrackArtists).mockImplementation((track) => track.artistName === 'Old'
       ? new Promise((resolve) => { finishOld = resolve; })
-      : Promise.resolve({ id: 'ytartist_UCNew~New', name: 'New' }));
+      : Promise.resolve([{ id: 'ytartist_UCNew~New', name: 'New' }]));
     prefetchTrackArtistData({ title: 'Old song', artistName: 'Old' });
     prefetchTrackArtistData({ title: 'New song', artistName: 'New' });
     await flush();
     expect(_getActivePrefetchedArtistKeysForTests()).toEqual(['youtube:UCNew']);
-    finishOld({ id: 'ytartist_UCOld~Old', name: 'Old' });
+    finishOld([{ id: 'ytartist_UCOld~Old', name: 'Old' }]);
     await flush();
     expect(_getActivePrefetchedArtistKeysForTests()).toEqual(['youtube:UCNew']);
     expect(getYouTubeMusicArtistProfile).not.toHaveBeenCalledWith('ytartist_UCOld~Old');
   });
 
   it('coalesces aliases before requesting the same artist catalog twice', async () => {
-    jest.mocked(resolveTrackArtist).mockImplementation(async (artist) => ({ id: artist.id!, name: artist.name }));
+    jest.mocked(resolveTrackArtists).mockResolvedValue([{ id: 'ytartist_UCSame~Sotam', name: 'Sotam' }]);
     prefetchTrackArtistData({ title: 'Same artist song', artistName: 'Sotam, RND', artists: [
       { id: 'ytartist_UCSame~Sotam', name: 'Sotam' }, { id: 'ytartist_UCSame~RND', name: 'RND' },
     ] });
     await flush();
     expect(_getActivePrefetchedArtistKeysForTests()).toEqual(['youtube:UCSame']);
-    expect(resolveTrackArtist).toHaveBeenCalledTimes(1);
+    expect(resolveTrackArtists).toHaveBeenCalledTimes(1);
   });
 });

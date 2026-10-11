@@ -1,6 +1,5 @@
 import {
   getAlbum,
-  getArtist,
   getPlaylist,
   getPlaylistItems,
   getYouTubeMusicAlbum,
@@ -9,11 +8,12 @@ import {
 } from '../../api';
 import { getDetailPreview } from './detailPreview';
 import { prefetchImage } from '../images/imagePrefetch';
+import { artistIdentityKey } from '../search/artistIdentity';
+import { toYouTubeMusicArtistRouteId } from '../youtubeMusicClient';
 
 type DetailType = 'album' | 'artist' | 'playlist' | 'episode' | 'show';
 
 const pending = new Map<string, Promise<unknown>>();
-const isSpotifyId = (value: string) => /^[A-Za-z0-9]{22}$/.test(value);
 
 const loadDetail = (type: DetailType, id: string): Promise<unknown> | null => {
   if (!id || id.startsWith('local_') || id.startsWith('home_mix_')) return null;
@@ -25,8 +25,9 @@ const loadDetail = (type: DetailType, id: string): Promise<unknown> | null => {
     return playlist;
   });
   if (type === 'artist') {
-    if (isSpotifyId(id)) return getArtist(id);
-    if (id.startsWith('ytartist_')) return getYouTubeMusicArtistProfile(id);
+    if (artistIdentityKey(id).startsWith('youtube:')) {
+      return getYouTubeMusicArtistProfile(id.startsWith('UC') ? toYouTubeMusicArtistRouteId(id, '') : id);
+    }
   }
   return null;
 };

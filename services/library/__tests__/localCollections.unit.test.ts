@@ -108,16 +108,22 @@ describe('groupLocalArtists', () => {
   });
   it('limits library artists to primary credits and follows, preserving complete credits elsewhere', () => {
     const tracks = [{ spotifyId: 'one', artistName: 'Ebony, Rob', artists: [
-      { id: 'ebony', name: 'Ebony' }, { id: 'rob', name: 'Rob' },
-    ], albumName: 'Album', albumArtists: [{ id: 'album-owner', name: 'Album Owner' }] }];
-    const followed = [{ id: 'ytartist_sotam', name: 'Sotam', imageURL: 'portrait.jpg', followedAt: 1 },
-      { id: 'ytartist_ebony', name: 'Ebony', imageURL: 'ebony.jpg', followedAt: 2 }];
+      { id: 'ytartist_UCebony~Ebony', name: 'Ebony' }, { id: 'ytartist_UCrob~Rob', name: 'Rob' },
+    ], albumName: 'Album', albumArtists: [{ id: 'ytartist_UCalbumOwner~Album%20Owner', name: 'Album Owner' }] }];
+    const followed = [{ id: 'ytartist_UCsotam~Sotam', name: 'Sotam', imageURL: 'portrait.jpg', followedAt: 1 },
+      { id: 'ytartist_UCebony~Ebony', name: 'Ebony', imageURL: 'ebony.jpg', followedAt: 2 }];
     const artists = groupLibraryArtists(tracks as any, followed);
     expect(artists.map((item) => item.title)).toEqual(['Ebony', 'Sotam', 'Album Owner']);
-    expect(artists[0]).toMatchObject({ routeId: 'ytartist_ebony', following: true, imageURL: 'ebony.jpg' });
+    expect(artists[0]).toMatchObject({ routeId: 'ytartist_UCebony~Ebony', following: true, imageURL: 'ebony.jpg' });
     expect(artists[1].tracks).toEqual([]);
     expect(groupLocalArtists(tracks as any).map((item) => item.title)).toContain('Rob');
     expect(groupLibraryArtists(tracks as any, []).map((item) => item.title)).not.toContain('Sotam');
+  });
+  it('does not duplicate a linked channel using stale imported album credits', () => {
+    const tracks = [{ spotifyId: 'migrated', artistName: 'Channel', albumName: 'Album',
+      artists: [{ id: 'ytartist_UCchannel~Channel', name: 'Channel' }],
+      albumArtists: [{ id: '1234567890123456789012', name: 'Channel' }] }];
+    expect(groupLibraryArtists(tracks as any, []).map((artist) => artist.id)).toEqual(['youtube:UCchannel']);
   });
   it('uses verified identities without splitting names containing punctuation', () => {
     const artists = groupLocalArtists([

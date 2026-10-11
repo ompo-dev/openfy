@@ -65,9 +65,28 @@ describe('public YouTube Music catalog', () => {
     expect(current.tracks).toHaveLength(1);
     expect(current.tracks[0].subtitle).toBe('Sotam');
     expect(getArtist).toHaveBeenCalledTimes(1);
-    expect(search).toHaveBeenCalledWith('Sotam', { type: 'song' });
-    expect(search).not.toHaveBeenCalledWith('RND', expect.anything());
+    expect(search).not.toHaveBeenCalled();
     expect(listener).toHaveBeenCalled();
+  });
+
+  it('accepts the actual channel id without requiring a display-name route', async () => {
+    const channel = `UC${'r'.repeat(22)}`;
+    const getArtist = jest.fn().mockResolvedValue({ header: { title: 'Native channel' }, sections: [] });
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: { getArtist } } as never);
+    expect((await getYouTubeMusicArtistProfile(channel)).artist.id).toBe(`ytartist_${channel}~Native%20channel`);
+    expect(getArtist).toHaveBeenCalledWith(channel);
+  });
+
+  it('does not invent artist profiles from credits lacking a channel endpoint', async () => {
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: {
+      search: jest.fn().mockResolvedValue({
+        songs: { contents: [{ id: 'abcdefghijk', title: 'Unlinked credit', artists: [{ name: 'Sid' }] }] },
+        artists: { contents: [{ name: 'Sid' }] },
+      }),
+    } } as never);
+    const results = await searchCatalog('unlinked artist endpoint regression');
+    expect(results.artists).toEqual([]);
+    expect(results.tracks[0].artists).toEqual([{ id: '', name: 'Sid' }]);
   });
 
   it('excludes related videos, uncredited recordings and same-name foreign artists from a profile queue', async () => {
@@ -109,7 +128,7 @@ describe('public YouTube Music catalog', () => {
     expect(profile.tracks[0]).toMatchObject({ title: 'Popular song', viewCount: 84_000_000 });
   });
 
-  it('publishes the real header and initial songs while catalog search is still pending', async () => {
+  it('publishes the real header and initial songs while the channel shelf is still pending', async () => {
     const id = 'ytartist_UCprogressive~Progressive';
     let finishSearch!: (value: unknown) => void;
     const page = {
@@ -117,10 +136,11 @@ describe('public YouTube Music catalog', () => {
         thumbnail: { contents: [{ url: 'https://images.example/progressive.jpg', width: 800 }] } },
       sections: [{ contents: [{ id: 'abcdefghijk', title: 'First song', item_type: 'song',
         artists: [{ channel_id: 'UCprogressive', name: 'Progressive' }] }] }],
+      getAllSongs: jest.fn(() => new Promise((resolve) => { finishSearch = resolve; })),
     };
     jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: {
       getArtist: jest.fn().mockResolvedValue(page),
-      search: jest.fn(() => new Promise((resolve) => { finishSearch = resolve; })),
+      search: jest.fn(),
     } } as never);
     let notify!: () => void;
     const initial = new Promise<void>((resolve) => { notify = resolve; });
@@ -134,7 +154,7 @@ describe('public YouTube Music catalog', () => {
       artist: expect.objectContaining({ name: 'Progressive', imageURL: 'https://images.example/progressive.jpg' }),
       tracks: [expect.objectContaining({ title: 'First song' })],
     })]);
-    finishSearch({ songs: { contents: [] } });
+    finishSearch({ contents: [] });
     await full;
     unsubscribe();
   });
@@ -330,7 +350,7 @@ describe('public YouTube Music catalog', () => {
         id: 'abcdefghijk',
         title: 'Tarôs',
         item_type: 'song',
-        artists: [{ channel_id: 'stale', name: 'Pedro Qualy' }],
+        artists: [{ channel_id: 'UCstale', name: 'Pedro Qualy' }],
         duration: { seconds: 240 },
       }] }],
     };
@@ -345,13 +365,12 @@ describe('public YouTube Music catalog', () => {
     } as never);
 
     const profile = await getYouTubeMusicArtistProfile(
-      'ytartist_stale~Pedro%20Qualy'
+      'ytartist_UCstale~Pedro%20Qualy'
     );
 
-    expect(getArtist).toHaveBeenNthCalledWith(1, 'stale');
-    expect(getArtist).toHaveBeenNthCalledWith(2, 'stale');
-    expect(search).toHaveBeenCalledWith('Pedro Qualy', { type: 'song' });
-    expect(search).not.toHaveBeenCalledWith('Pedro Qualy', { type: 'artist' });
+    expect(getArtist).toHaveBeenNthCalledWith(1, 'UCstale');
+    expect(getArtist).toHaveBeenNthCalledWith(2, 'UCstale');
+    expect(search).not.toHaveBeenCalled();
     expect(profile.artist).toMatchObject({
       name: 'Pedro Qualy',
       imageURL: 'https://images.example/profile.jpg',
@@ -385,16 +404,16 @@ describe('public YouTube Music catalog', () => {
     } as never);
 
     await expect(getYouTubeMusicArtistProfile(
-      'ytartist_stale-second~Pedro%20Qualy'
+      'ytartist_UCstale-second~Pedro%20Qualy'
     )).rejects.toThrow('Não foi possível carregar este artista agora.');
 
-    expect(getArtist).toHaveBeenNthCalledWith(1, 'stale-second');
-    expect(getArtist).toHaveBeenNthCalledWith(2, 'stale-second');
+    expect(getArtist).toHaveBeenNthCalledWith(1, 'UCstale-second');
+    expect(getArtist).toHaveBeenNthCalledWith(2, 'UCstale-second');
     expect(search).not.toHaveBeenCalledWith('Pedro Qualy', { type: 'artist' });
     expect(getArtist).toHaveBeenCalledTimes(2);
   });
 
-  it('supplements incomplete artist pages and separates featured tracks from participations', async () => {
+  it('loads the channel song shelf and separates primary credits from participations', async () => {
     const page = {
       header: {
         title: 'Yago Oproprio',
@@ -407,8 +426,7 @@ describe('public YouTube Music catalog', () => {
         artists: [{ channel_id: 'UCyago', name: 'Yago Oproprio' }],
       }] }],
     };
-    const search = jest.fn().mockResolvedValue({
-      songs: { contents: [
+    const songShelf = { contents: [
         {
           id: 'abcdefghijk',
           title: 'Only track on profile page',
@@ -416,7 +434,7 @@ describe('public YouTube Music catalog', () => {
         },
         {
           id: 'lmnopqrstuv',
-          title: 'More songs found in search',
+          title: 'More songs in the channel catalog',
           album: {
             name: 'The album',
             thumbnail: [{ url: 'https://images.example/album-cover=w120-h120-l90-rj', width: 120 }],
@@ -436,9 +454,10 @@ describe('public YouTube Music catalog', () => {
           title: 'Unrelated result',
           artists: [{ channel_id: 'UCother', name: 'Other artist' }],
         },
-      ] },
-    });
-    const getArtist = jest.fn().mockResolvedValue(page);
+      ] };
+    const search = jest.fn();
+    const getAllSongs = jest.fn().mockResolvedValue(songShelf);
+    const getArtist = jest.fn().mockResolvedValue({ ...page, getAllSongs });
     jest.mocked(getYouTubeMusicClient).mockResolvedValue({
       music: { search, getArtist },
     } as never);
@@ -447,15 +466,36 @@ describe('public YouTube Music catalog', () => {
       'ytartist_UCyago~Yago%20Oproprio'
     );
 
-    expect(search).toHaveBeenCalledWith('Yago Oproprio', { type: 'song' });
+    expect(getAllSongs).toHaveBeenCalledTimes(1);
+    expect(search).not.toHaveBeenCalled();
     expect(profile.tracks.map((track) => track.title)).toEqual([
       'Only track on profile page',
-      'More songs found in search',
+      'More songs in the channel catalog',
     ]);
     expect(profile.tracks[1].imageURL).toBe('https://images.example/album-cover=w720-h720-l90-rj');
     expect(profile.participationTracks.map((track) => track.title)).toEqual([
       'Yago as a guest',
     ]);
+  });
+
+  it('keeps the most viewed own-channel recordings first after new catalog pages arrive', async () => {
+    const own = (id: string, title: string, views: number) => ({ id, title, view_count: views,
+      artists: [{ channel_id: 'UCranked', name: 'Ranked' }] });
+    const getArtist = jest.fn().mockResolvedValue({
+      header: { title: 'Ranked', thumbnail: [{ url: 'https://images.example/ranked.jpg', width: 720 }] },
+      sections: [{ contents: [own('abcdefghijk', 'Less viewed', 10)] }],
+      getAllSongs: jest.fn().mockResolvedValue({ contents: [own('lmnopqrstuv', 'Most viewed', 1_000_000)] }),
+    });
+    jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: { getArtist } } as never);
+    const snapshots: string[][] = [];
+    const stop = subscribeYouTubeMusicArtistProfile('ytartist_UCranked~Ranked', (profile) => {
+      snapshots.push(profile.tracks.map((track) => track.title));
+    });
+    const profile = await getYouTubeMusicArtistProfile('ytartist_UCranked~Ranked');
+    stop();
+    expect(snapshots[0]).toEqual(['Less viewed']);
+    expect(profile.tracks.map((track) => track.title)).toEqual(['Most viewed', 'Less viewed']);
+    expect(snapshots.at(-1)).toEqual(['Most viewed', 'Less viewed']);
   });
 
   it('loads complete artist song shelves and their continuation pages', async () => {
@@ -506,7 +546,7 @@ describe('public YouTube Music catalog', () => {
       header: { title: 'Catalog artist' },
       sections: [
         {
-          header: { title: 'Albums' },
+          header: { title: 'Álbuns' },
           contents: [{
             id: 'MPREb-album',
             item_type: 'album',
@@ -596,7 +636,7 @@ describe('public YouTube Music catalog', () => {
     expect(search).not.toHaveBeenCalled();
   });
 
-  it('falls back to the public Spotify portrait only when YouTube has no image', async () => {
+  it('does not replace a missing channel portrait with a Spotify or homonymous artist image', async () => {
     jest.mocked(getSpotifyArtistImage).mockResolvedValue('https://images.example/spotify.jpg');
     jest.mocked(getYouTubeMusicClient).mockResolvedValue({
       music: {
@@ -607,7 +647,7 @@ describe('public YouTube Music catalog', () => {
 
     await expect(
       getArtistCatalogImage('1234567890123456789012', 'Artist without YTM portrait')
-    ).resolves.toBe('https://images.example/spotify.jpg');
-    expect(getSpotifyArtistImage).toHaveBeenCalledWith('1234567890123456789012');
+    ).resolves.toBe('');
+    expect(getSpotifyArtistImage).not.toHaveBeenCalled();
   });
 });

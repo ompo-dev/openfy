@@ -92,6 +92,17 @@ describe('getCachedArtistImage', () => {
     expect(second).not.toHaveBeenCalled();
   });
 
+  it('does not bridge two channel portraits through a shared imported provider id', async () => {
+    const importedId = '1234567890123456789012';
+    await getCachedArtistImage('Sid', async () => 'https://images.test/rapper.jpg',
+      [importedId, 'ytartist_UCrapper~Sid']);
+    _clearArtistImageMemoryCacheForTests();
+    const load = jest.fn().mockResolvedValue('https://images.test/band.jpg');
+    expect(await getCachedArtistImage('SID', load, [importedId, 'ytartist_UCband~SID']))
+      .toBe('https://images.test/band.jpg');
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
   it('does not lowercase case-sensitive channel IDs in persistent cache keys', async () => {
     await getCachedArtistImage('Artist', async () => 'https://images.test/one.jpg', ['ytartist_UCAbC~Artist']);
     _clearArtistImageMemoryCacheForTests();

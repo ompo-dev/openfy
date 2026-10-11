@@ -161,9 +161,9 @@ const sampleTrack = {
   title: 'A song',
   artistName: 'First Artist, Second Artist, Third Artist',
   artists: [
-    { id: 'first', name: 'First Artist' },
-    { id: 'second', name: 'Second Artist' },
-    { id: 'third', name: 'Third Artist' },
+    { id: 'ytartist_UCfirst~First', name: 'First Artist' },
+    { id: 'ytartist_UCsecond~Second', name: 'Second Artist' },
+    { id: 'ytartist_UCthird~Third', name: 'Third Artist' },
   ],
   albumName: 'An album',
   duration_ms: 180000,
@@ -501,17 +501,17 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(screen.queryByTestId('player-lyric-preview-next')).toBeNull();
   });
 
-  it('opens the canonical artist profile for downloaded tracks when a Spotify artist id is available', async () => {
-    const spotifyArtistId = '1234567890123456789012';
+  it('opens the explicitly linked channel for downloaded tracks', async () => {
+    const channelId = 'ytartist_UCebony~Ebony';
     const screen = await mountPlayer({
       localAudioPath: 'file:///music/downloaded.m4a',
-      artists: [{ id: spotifyArtistId, name: 'Ebony' }],
+      artists: [{ id: channelId, name: 'Ebony' }],
     });
 
     await fireEvent.press(screen.getByLabelText('Abrir artista Ebony'));
 
     expect(mockNavigate).toHaveBeenLastCalledWith(
-      `/(tabs)/library/artist/${spotifyArtistId}`,
+      `/(tabs)/library/artist/${channelId}`,
       { dangerouslySingular: true }
     );
   });
@@ -536,7 +536,7 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(player.playTrack).toHaveBeenCalledWith(repaired, { setQueue: false });
   });
 
-  it('keeps YouTube Music artist aliases on the public catalog profile', async () => {
+  it('does not invent a channel for an unresolved name-only artist alias', async () => {
     const screen = await mountPlayer({
       youtubeVideoId: 'aaaaaaaaaaa',
       artists: [{ id: 'ytartist_name_Ebony', name: 'Ebony' }],
@@ -544,10 +544,7 @@ describe('FullPlayer artist row and YouTube source', () => {
 
     await fireEvent.press(screen.getByLabelText('Abrir artista Ebony'));
 
-    await waitFor(() => expect(mockNavigate).toHaveBeenLastCalledWith(
-      '/(tabs)/library/artist/ytartist_name_Ebony',
-      { dangerouslySingular: true }
-    ));
+    expect(mockNavigate).not.toHaveBeenCalled();
     expect(findArtistIdByName).not.toHaveBeenCalled();
   });
 

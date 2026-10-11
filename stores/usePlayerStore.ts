@@ -67,6 +67,7 @@ import { prefetchTrackAlbumData } from '../services/library/playerAlbum';
 import { isSameRecording } from '../services/library/trackIdentity';
 import { hydrateTrackAvailability, isTrackUnavailable, markTrackUnavailable, clearTrackUnavailable } from './useTrackAvailabilityStore';
 import { getCatalogMapping } from '../services/audio/catalogMappingCache';
+import { resolveTrackArtists } from '../services/search/artistIdentity';
 
 export type PlayerTrack = TrackCatalogMetadata & {
   spotifyId: string;
@@ -1170,6 +1171,14 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     if (success) {
       clearTrackUnavailable(track);
       prefetchTrackArtistData(track);
+      void resolveTrackArtists(track).then((artists) => {
+        if (!artists.length || get().activeRequestId !== requestId) return;
+        const current = get().currentTrack;
+        if (!current) return;
+        const enriched = { ...current, artists, artistName: artists.map((artist) => artist.name).join(', ') };
+        set({ currentTrack: enriched });
+        get().replaceQueueTrack(current, enriched);
+      }).catch(() => {});
       prefetchTrackAlbumData(track);
       void ensurePlaybackDiagnostics(track).catch(() => {});
       recordInteraction(track, 'play').catch(() => {});
