@@ -1,6 +1,5 @@
 import * as React from 'react';
 import {
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -11,6 +10,7 @@ import { type LibraryTrack } from '@services';
 import { SheetFrame } from '../native';
 import { TrackRow } from '../common/TrackRow';
 import { ProgressiveFlatList } from '../common/ProgressiveList';
+import { PlaylistSheetAction } from './PlaylistForm';
 
 type PlaylistTrackPickerModalProps = {
   existingTrackIds: string[];
@@ -74,7 +74,8 @@ export const PlaylistTrackPickerModal = ({
 
   return (
     <SheetFrame visible={visible} title="Adicionar músicas" onClose={onClose} scroll={false}
-      contentHeight={42 + 46 + 56 + Math.max(1, visibleTracks.length) * 64}>
+      headerTrailing={<PlaylistSheetAction label={confirmLabel} disabled={!selectedCount} onPress={confirm} />}
+      contentHeight={72 + Math.max(1, visibleTracks.length) * 64}>
       <TextInput
         autoCapitalize="none"
         autoCorrect={false}
@@ -119,23 +120,14 @@ export const PlaylistTrackPickerModal = ({
         showsVerticalScrollIndicator={false}
         style={styles.trackList}
       />
-      <Pressable
-        accessibilityLabel={confirmLabel}
-        accessibilityRole="button"
-        disabled={selectedCount === 0}
-        onPress={confirm}
-        style={[styles.confirmButton, selectedCount === 0 && styles.confirmButtonDisabled]}
-      >
-        <Text style={styles.confirmButtonText}>{confirmLabel}</Text>
-      </Pressable>
     </SheetFrame>
   );
 };
 
 const styles = StyleSheet.create({
   searchInput: {
-    backgroundColor: '#252525',
-    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 8,
     color: '#FFFFFF',
     fontFamily: 'SF-Regular',
     fontSize: 14,
@@ -146,61 +138,10 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
   },
-  trackRow: {
-    alignItems: 'center',
-    borderBottomColor: 'rgba(255, 255, 255, 0.09)',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: 10,
-    minHeight: 62,
-    paddingVertical: 8,
-  },
-  trackRowDisabled: {
-    opacity: 0.58,
-  },
-  cover: {
-    borderRadius: 4,
-    height: 42,
-    width: 42,
-  },
-  coverFallback: {
-    alignItems: 'center',
-    backgroundColor: '#292929',
-    justifyContent: 'center',
-  },
-  copy: {
-    flex: 1,
-    gap: 3,
-  },
-  title: {
-    color: '#FFFFFF',
-    fontFamily: 'SF-Semibold',
-    fontSize: 14,
-  },
-  subtitle: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontFamily: 'SF-Regular',
-    fontSize: 12,
-  },
   empty: {
     color: 'rgba(255, 255, 255, 0.62)',
     fontFamily: 'SF-Regular',
     paddingVertical: 28,
     textAlign: 'center',
-  },
-  confirmButton: {
-    alignItems: 'center',
-    backgroundColor: '#1ED760',
-    borderRadius: 999,
-    height: 46,
-    justifyContent: 'center',
-  },
-  confirmButtonDisabled: {
-    backgroundColor: '#3A3A3A',
-  },
-  confirmButtonText: {
-    color: '#07120A',
-    fontFamily: 'SF-Bold',
-    fontSize: 14,
   },
 });

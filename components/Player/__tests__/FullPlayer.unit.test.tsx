@@ -227,6 +227,29 @@ const getLastArtworkProps = () =>
   mockSwipeableArtwork.mock.calls.at(-1)?.[0] as Record<string, any>;
 
 describe('FullPlayer artist row and YouTube source', () => {
+  it('opens the source only after closing and retains the lower lyrics button', async () => {
+    const onClose = jest.fn();
+    const state = { ...makePlayer(), queueSourceId: 'playlist:home_mix_radio_sotam' };
+    jest.mocked(usePlayer).mockReturnValue(state as any);
+    const screen = await render(<FullPlayer visible onClose={onClose} />);
+    expect(screen.getByLabelText('Abrir letras sincronizadas')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText('Abrir playlist de origem'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/(tabs)/library/playlist/home_mix_radio_sotam', { dangerouslySingular: true }));
+    expect(onClose.mock.invocationCallOrder[0]).toBeLessThan(mockNavigate.mock.invocationCallOrder[0]);
+    expect(state.playTrack).not.toHaveBeenCalled();
+    expect(state.playWithQueue).not.toHaveBeenCalled();
+  });
+
+  it('opens the active queue for songs without a collection source', async () => {
+    const state = { ...makePlayer(), queue: [sampleTrack], queueSourceId: 'search:term' };
+    jest.mocked(usePlayer).mockReturnValue(state as any);
+    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
+    await fireEvent.press(screen.getByLabelText('Abrir fila de reprodução'));
+    expect(screen.getByText('Fila de reprodução')).toBeTruthy();
+    await fireEvent.press(await screen.findByLabelText('Tocar A song'));
+    expect(state.playQueueIndex).toHaveBeenCalledWith(0);
+  });
   const originalPlatform = Platform.OS;
 
   beforeEach(() => {

@@ -68,7 +68,9 @@ import {
 } from '@services';
 import { GlassSurface, LoggedPressable, PlayerModal, SheetFrame } from '../native';
 import { ArtistSearchRow } from '../Home/ArtistSearchRow';
-import { ProgressiveList } from '../common/ProgressiveList';
+import { ProgressiveFlatList, ProgressiveList } from '../common/ProgressiveList';
+import { TrackRow } from '../common/TrackRow';
+import { getPlaybackOrigin } from '../../services/navigation/playbackOrigin';
 import { getPlayerAlbum, getTrackAlbumRouteId, type PlayerAlbum } from '../../services/library/playerAlbum';
 import { PlayerDetailCard } from './PlayerDetailCard';
 import { TrackPlaylistPickerModal } from '../LocalPlaylist/TrackPlaylistPickerModal';
@@ -330,6 +332,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     playPrevious,
     queue,
     queueIndex,
+    queueSourceId,
     lyricsData,
     isLoadingLyrics,
     repeatMode,
@@ -341,6 +344,9 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   const [seeking, setSeeking] = React.useState(false);
   const [seekValue, setSeekValue] = React.useState(0);
   const [showLyricsFull, setShowLyricsFull] = React.useState(false);
+  const [isQueueVisible, setIsQueueVisible] = React.useState(false);
+  const afterCloseRef = React.useRef<(() => void) | null>(null);
+  const playbackOrigin = getPlaybackOrigin(queueSourceId);
   const [hasOpenedLyrics, setHasOpenedLyrics] = React.useState(false);
   const [isLyricsEditing, setIsLyricsEditing] = React.useState(false);
   const [draftLyricSegments, setDraftLyricSegments] = React.useState<
@@ -517,13 +523,19 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     if (artworkMeasurementTimerRef.current) clearTimeout(artworkMeasurementTimerRef.current);
   }, []);
 
+  const closeAndNavigate = React.useCallback(() => {
+    const action = afterCloseRef.current;
+    afterCloseRef.current = null;
+    onClose();
+    if (action) requestAnimationFrame(action);
+  }, [onClose]);
   const finishPlayerClose = React.useCallback(() => {
     if (!closingPlayerRef.current) return;
     closingPlayerRef.current = false;
     setIsPlayerClosing(false);
     setArtworkFlight?.(null);
-    onClose();
-  }, [onClose, setArtworkFlight]);
+    closeAndNavigate();
+  }, [closeAndNavigate, setArtworkFlight]);
 
   const handleClose = React.useCallback(() => {
     if (closingPlayerRef.current) return;
@@ -532,7 +544,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       return;
     }
     if (!artworkFlight || !artworkUrl) {
-      onClose();
+      closeAndNavigate();
       return;
     }
     closingPlayerRef.current = true;
@@ -549,7 +561,14 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       );
     });
     if (!measuring) finishPlayerClose();
-  }, [artworkFlight, artworkTransitioning, artworkUrl, finishPlayerClose, flyPlayerArtwork, isArtworkEntrancePending, measurePlayerArtwork, onClose]);
+  }, [artworkFlight, artworkTransitioning, artworkUrl, closeAndNavigate, finishPlayerClose, flyPlayerArtwork, isArtworkEntrancePending, measurePlayerArtwork]);
+
+  const openPlaybackOrigin = () => {
+    if (!playbackOrigin) { setIsQueueVisible(true); return; }
+    const origin = playbackOrigin;
+    afterCloseRef.current = () => openDetail(origin.kind, origin.id);
+    handleClose();
+  };
 
   React.useEffect(() => {
     if (artworkTransition.transitioning || isArtworkEntrancePending) return;
@@ -1720,14 +1739,16 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   ? 'Confirmar sincronização da letra'
                   : showLyricsFull
                     ? 'Editar sincronização da letra'
-                    : 'Abrir letras sincronizadas'
+                    : playbackOrigin?.kind === 'album' ? 'Abrir álbum de origem'
+                      : playbackOrigin?.kind === 'playlist' ? 'Abrir playlist de origem'
+                        : playbackOrigin?.kind === 'artist' ? 'Abrir artista de origem' : 'Abrir fila de reprodução'
               }
               onPress={
                 isLyricsEditing
                   ? () => void confirmLyricsEditing()
                   : showLyricsFull
                     ? beginLyricsEditing
-                    : openLyricsView
+                    : openPlaybackOrigin
               }
               style={styles.headerIconButton}
               tintColor={
@@ -1742,7 +1763,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                     ? 'checkmark'
                     : showLyricsFull
                       ? 'pencil-outline'
-                      : 'chatbubble-ellipses-outline'
+                      : playbackOrigin?.kind === 'album' ? 'disc' : 'list'
                 }
                 size={22}
                 color={
@@ -2144,6 +2165,22 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
             {!isLyricsEditing ? renderArtistDetails() : null}
             </ScrollView>
             </GestureDetector>
+
+          <SheetFrame visible={isQueueVisible} title="Fila de reprodução" artworkURL={artworkUrl}
+            onClose={() => setIsQueueVisible(false)} scroll={false} contentHeight={Math.max(64, queue.length * 64)}>
+            <ProgressiveFlatList data={queue} listKey={queueSourceId || 'queue'}
+              keyExtractor={(track, index) => `${track.spotifyId}:${index}`}
+              renderItem={({ item, index }) => {
+                const status = downloads.find((job) => job.spotifyId === item.spotifyId)?.status;
+                return <TrackRow title={item.title} subtitle={item.artistName} imageURL={item.imageURL}
+                  active={queueIndex === index} playing={playerState.isPlaying}
+                  downloadState={status === 'completed' ? 'completed' :
+                    ['queued', 'resolving', 'downloading'].includes(status || '') ? 'active' : 'idle'}
+                  onDownload={() => enqueueDownloads([toDownloadTrackInput(item)])}
+                  onPress={() => { void playQueueIndex(index); setIsQueueVisible(false); }} />;
+              }}
+              showsVerticalScrollIndicator={false} />
+          </SheetFrame>
 
           <TrackPlaylistPickerModal
             onAdded={() => {

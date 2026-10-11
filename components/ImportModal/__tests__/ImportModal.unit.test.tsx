@@ -1,9 +1,14 @@
 import * as React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { ImportModal } from '../ImportModal';
 import { useDownloads, usePlayer } from '@context';
 import { parseSpotifyLink, upsertCatalogTracks } from '@services';
-import { fetchSpotifyTrackMetadata } from '../../../services/metadata/spotifyMetadata';
+import { fetchSpotifyCollectionMetadata, fetchSpotifyTrackMetadata } from '../../../services/metadata/spotifyMetadata';
+import { _clearLibraryImportsForTests, getImportJob, startLibraryImport, subscribeImports } from '../../../services/library/libraryImports';
+
+jest.mock('../../../services/background/importNotifications', () => ({
+  prepareImportNotifications: jest.fn().mockResolvedValue(false), notifyLibraryImport: jest.fn(),
+}));
 
 jest.mock('@context', () => ({ useDownloads: jest.fn(), usePlayer: jest.fn() }));
 jest.mock('@services', () => ({
@@ -30,12 +35,49 @@ const enqueue = jest.fn();
 
 describe('music import sheet', () => {
   beforeEach(() => {
+    _clearLibraryImportsForTests();
     jest.clearAllMocks();
     jest.mocked(useDownloads).mockReturnValue({ downloads: [], enqueueDownloads: enqueue } as any);
     jest.mocked(usePlayer).mockReturnValue({ currentTrack: null, isPlaying: false, playWithQueue: jest.fn() } as any);
     jest.mocked(parseSpotifyLink).mockReturnValue({ platform: 'spotify', type: 'track', id: 'track-id' });
     jest.mocked(fetchSpotifyTrackMetadata).mockResolvedValue(track);
     jest.mocked(upsertCatalogTracks).mockResolvedValue([]);
+  });
+
+  it('finishes and publishes completion after closing and unmounting the sheet', async () => {
+    let resolveMetadata!: (value: typeof track) => void;
+    jest.mocked(fetchSpotifyTrackMetadata).mockReturnValueOnce(new Promise((resolve) => { resolveMetadata = resolve; }));
+    const onClose = jest.fn();
+    const completed = jest.fn();
+    const unsubscribe = subscribeImports((job) => { if (job.status === 'completed') completed(job); });
+    const screen = await render(<ImportModal visible initialInput="link" onClose={onClose} />);
+    await fireEvent.press(screen.getByLabelText('Adicionar à biblioteca'));
+    const pending = startLibraryImport('link');
+    expect(fetchSpotifyTrackMetadata).toHaveBeenCalledTimes(1);
+    await fireEvent.press(screen.getByLabelText('Fechar'));
+    expect(onClose).toHaveBeenCalled();
+    await screen.unmount();
+    await act(async () => { resolveMetadata(track); await pending; });
+    expect(upsertCatalogTracks).toHaveBeenCalledTimes(1);
+    expect(completed).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'completed', destination: { kind: 'track', id: 'track-id' },
+    }));
+    expect(getImportJob('spotify:track:track-id')?.status).toBe('completed');
+    unsubscribe();
+  });
+
+  it('imports album membership and opens the saved album, not another edition of the recording', async () => {
+    jest.mocked(parseSpotifyLink).mockReturnValue({ platform: 'spotify', type: 'album', id: 'deluxe' });
+    jest.mocked(fetchSpotifyCollectionMetadata).mockResolvedValue({
+      title: 'KM2 de luxo', coverUrl: 'https://images.test/deluxe.jpg',
+      tracks: [{ ...track, albumId: 'km2', artists: [], albumArtists: [] }],
+    });
+    const job = await startLibraryImport('album-link');
+    expect(job.status).toBe('completed');
+    expect(job.destination).toEqual({ kind: 'album', id: 'local_album_spotify%3Adeluxe' });
+    expect(upsertCatalogTracks).toHaveBeenCalledWith([expect.objectContaining({
+      albumId: 'km2', albumAssociations: [expect.objectContaining({ id: 'deluxe', name: 'KM2 de luxo' })],
+    })]);
   });
 
   it('replaces add with download after saving and does not resolve the same link again', async () => {

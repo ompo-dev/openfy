@@ -5,7 +5,6 @@ import {
   Keyboard,
   Platform,
   RefreshControl,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -38,6 +37,8 @@ import { rememberDetailPreview } from '../../services/navigation/detailPreview';
 import { useFollowedArtistsStore } from '../../stores/useFollowedArtistsStore';
 import { matchesFollowedArtist, setArtistFollowed } from '../../services/library/followedArtists';
 import { ArtistSearchRow } from '../Home/ArtistSearchRow';
+import { isCollectionSaved, saveCollection } from '../../services/library/savedCollections';
+import { useLibraryStore } from '../../stores/useLibraryStore';
 
 type CollectionTrack = TrackModel & {
   localAudioPath?: string;
@@ -72,7 +73,6 @@ export type CollectionDetailProps = {
   onDeletePress?: () => void | Promise<void>;
   onEditPress?: () => void | Promise<void>;
   onEndReached?: () => void;
-  onSharePress?: () => void | Promise<void>;
   resolveTracksForPlayback?: () => Promise<CollectionTrack[]>;
   sectionTitle?: string;
   disableTrackArtistLinks?: boolean;
@@ -99,6 +99,7 @@ const toPlayerTrack = (track: CollectionTrack, collectionName: string) => ({
   albumAssociations: track.albumAssociations,
   albumArtists: track.albumArtists,
   trackNumber: track.trackNumber,
+  discNumber: track.discNumber,
   youtubeVideoId: track.youtubeVideoId,
   youtubeUrl: track.youtubeUrl,
 });
@@ -173,6 +174,7 @@ const toDownloadInput = (
   albumAssociations: track.albumAssociations,
   albumArtists: track.albumArtists,
   trackNumber: track.trackNumber,
+  discNumber: track.discNumber,
   youtubeVideoId: track.youtubeVideoId,
   youtubeUrl: track.youtubeUrl,
 });
@@ -195,7 +197,6 @@ export const CollectionDetail = ({
   onDeletePress,
   onEditPress,
   onEndReached,
-  onSharePress,
   resolveTracksForPlayback,
   sectionTitle,
   disableTrackArtistLinks = false,
@@ -209,6 +210,34 @@ export const CollectionDetail = ({
   const followedArtists = useFollowedArtistsStore((state) => state.artists);
   const followsReady = useFollowedArtistsStore((state) => state.ready);
   const [savingFollow, setSavingFollow] = React.useState(false);
+  const libraryRevision = useLibraryStore((state) => state.libraryRevision);
+  const [collectionSaved, setCollectionSaved] = React.useState(Boolean(onEditPress));
+  const [savingCollection, setSavingCollection] = React.useState(false);
+  const collectionSavePending = React.useRef(false);
+  React.useEffect(() => {
+    if (kind === 'artist' || onEditPress) return;
+    let active = true;
+    setCollectionSaved(false);
+    void isCollectionSaved(kind, collectionId, tracks.map((track) => ({ spotifyId: track.id })), trackCount)
+      .then((saved) => { if (active) setCollectionSaved(saved); }).catch(() => {});
+    return () => { active = false; };
+  }, [collectionId, kind, libraryRevision, onEditPress, tracks, trackCount]);
+  const handleSaveCollection = async () => {
+    if (kind === 'artist' || collectionSaved || collectionSavePending.current) return;
+    collectionSavePending.current = true;
+    setSavingCollection(true);
+    try {
+      const allTracks = resolveTracksForPlayback ? await resolveTracksForPlayback() : tracks;
+      await saveCollection({ kind, id: collectionId, title, imageURL, imageURLs, artists, description,
+        tracks: allTracks.map((track) => toDownloadInput(track, title)) });
+      setCollectionSaved(true);
+    } catch {
+      Alert.alert('Biblioteca', 'Não foi possível salvar. Tente novamente.');
+    } finally {
+      collectionSavePending.current = false;
+      setSavingCollection(false);
+    }
+  };
   const followPending = React.useRef(false);
   const following = followedArtists.some((artist) => matchesFollowedArtist(artist, { id: collectionId, name: title }));
   const handleFollow = async () => {
@@ -561,16 +590,6 @@ export const CollectionDetail = ({
     }
   }, [collectionId, kind, resolveTracksForPlayback]);
 
-  const handleShare = React.useCallback(async () => {
-    if (onSharePress) {
-      await onSharePress();
-      return;
-    }
-    try {
-      await Share.share({ message: `${title} · Openfy Music` });
-    } catch {}
-  }, [onSharePress, title]);
-
   const handleBack = React.useCallback(() => {
     if (router.canGoBack()) {
       router.back();
@@ -839,16 +858,17 @@ export const CollectionDetail = ({
                 <View style={styles.pillDivider} />
                 <LoggedPressable
                   accessibilityRole="button"
-                  accessibilityLabel={kind === 'artist' ? (following ? 'Deixar de seguir artista' : 'Seguir artista') : onEditPress ? 'Editar playlist' : 'Compartilhar'}
-                  accessibilityState={{ selected: kind === 'artist' && following, busy: savingFollow }}
-                  disabled={kind === 'artist' && (savingFollow || !followsReady)}
-                  onPress={() => void (kind === 'artist' ? handleFollow() : onEditPress ? onEditPress() : handleShare())}
+                  accessibilityLabel={kind === 'artist' ? (following ? 'Deixar de seguir artista' : 'Seguir artista') : onEditPress ? 'Editar playlist' :
+                    collectionSaved ? (kind === 'album' ? 'Álbum salvo' : 'Playlist salva') : (kind === 'album' ? 'Salvar álbum' : 'Salvar playlist')}
+                  accessibilityState={{ selected: kind === 'artist' ? following : collectionSaved, busy: savingFollow || savingCollection }}
+                  disabled={kind === 'artist' ? (savingFollow || !followsReady) : !onEditPress && (savingCollection || collectionSaved)}
+                  onPress={() => void (kind === 'artist' ? handleFollow() : onEditPress ? onEditPress() : handleSaveCollection())}
                   style={[styles.pillAction, kind === 'artist' && styles.followAction]}
                 >
-                  {savingFollow ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons
-                    name={kind === 'artist' ? (following ? 'checkmark' : 'add') : onEditPress ? 'pencil-outline' : 'share-outline'}
+                  {savingFollow || savingCollection ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons
+                    name={kind === 'artist' ? (following ? 'checkmark' : 'add') : onEditPress ? 'pencil-outline' : collectionSaved ? 'checkmark' : 'add'}
                     size={21}
-                    color={kind === 'artist' && following ? '#1ED760' : '#FFFFFF'}
+                    color={(kind === 'artist' ? following : !onEditPress && collectionSaved) ? '#1ED760' : '#FFFFFF'}
                   />}
                   {kind === 'artist' ? <Text style={[styles.followLabel, following && { color: '#1ED760' }]}>
                     {following ? 'Seguindo' : 'Seguir'}

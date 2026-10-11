@@ -20,6 +20,7 @@ import { MiniPlayer, FullPlayer } from '@components';
 import { PlayerWidgetSync } from '../components/Player/PlayerWidgetSync';
 import { PlayerMediaSuggestionsSync } from '../components/Player/PlayerMediaSuggestionsSync';
 import { GlobalConnectivity } from '../components/GlobalConnectivity/GlobalConnectivity';
+import { LibraryImportFeedback } from '../components/ImportModal/LibraryImportFeedback';
 import { registerBackgroundDownloadTask } from '@services';
 import { useOTAUpdates } from '@hooks';
 import { installErrorLogging, log } from '@utils';
@@ -162,6 +163,7 @@ export default function RootLayout() {
                     </Stack>
                     <PlayerOverlay />
                     <GlobalConnectivity />
+                    <LibraryImportFeedback />
                     <OTAUpdateOverlay visible={isDownloadingUpdate} />
                   </View>
                   </GlassBackdropProvider>

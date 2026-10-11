@@ -47,7 +47,7 @@ export const LocalAlbum = ({ albumId }: { albumId: string }) => {
   return (
     <CollectionDetail
       kind="album"
-      collectionId={album.id}
+      collectionId={`local_album_${encodeURIComponent(albumId)}`}
       title={album.name}
       imageURL={album.imageURL}
       metadata={`${album.partial ? 'Na biblioteca' : album.artists.map((artist) => artist.name).join(', ')} • ${album.tracks.length} ${

@@ -2,7 +2,6 @@ import * as React from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   StyleSheet,
   Text,
   View,
@@ -19,7 +18,10 @@ import {
   type LibraryTrack,
   type LocalPlaylist,
 } from '@services';
-import { LoggedPressable, SheetFrame } from '../native';
+import { GlassSurface, LoggedPressable, SheetFrame } from '../native';
+import { ProgressiveFlatList } from '../common/ProgressiveList';
+import { PlaylistCreateModal } from './PlaylistCreateModal';
+import { PlaylistSheetAction } from './PlaylistForm';
 import { log } from '../../utils/appLogger';
 
 type TrackPlaylistPickerModalProps = {
@@ -40,6 +42,8 @@ export function TrackPlaylistPickerModal({
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isCreateVisible, setIsCreateVisible] = React.useState(false);
+  const savePending = React.useRef(false);
 
   React.useEffect(() => {
     if (!visible) return;
@@ -75,7 +79,7 @@ export function TrackPlaylistPickerModal({
 
   const toggle = React.useCallback(
     (playlist: LocalPlaylist) => {
-      if (playlist.trackIds.includes(track.spotifyId)) return;
+      if (savePending.current || playlist.trackIds.includes(track.spotifyId)) return;
       setSelectedIds((current) => {
         const next = new Set(current);
         if (next.has(playlist.id)) next.delete(playlist.id);
@@ -87,7 +91,8 @@ export function TrackPlaylistPickerModal({
   );
 
   const confirm = React.useCallback(async () => {
-    if (!selectedIds.size || isSaving) return;
+    if (!selectedIds.size || savePending.current) return;
+    savePending.current = true;
     setIsSaving(true);
     log.playlist('add track started', {
       trackId: track.spotifyId,
@@ -99,7 +104,9 @@ export function TrackPlaylistPickerModal({
       await upsertCatalogTracks([track]);
       await Promise.all(
         [...selectedIds].map((playlistId) =>
-          addTracksToLocalPlaylist(playlistId, [track.spotifyId])
+          addTracksToLocalPlaylist(playlistId, [track.spotifyId]).then((saved) => {
+            if (saved === null) throw new Error('Playlist removida');
+          })
         )
       );
       await onAdded?.(selectedIds.size);
@@ -115,9 +122,10 @@ export function TrackPlaylistPickerModal({
         'Tente novamente sem fechar o aplicativo.'
       );
     } finally {
+      savePending.current = false;
       setIsSaving(false);
     }
-  }, [isSaving, onAdded, onClose, selectedIds, track]);
+  }, [onAdded, onClose, selectedIds, track]);
 
   const selectedCount = selectedIds.size;
 
@@ -125,7 +133,15 @@ export function TrackPlaylistPickerModal({
     <SheetFrame
       onClose={onClose}
       scroll={false}
-      contentHeight={104 + (isLoading ? 260 : Math.max(96, playlists.length * 62))}
+      contentHeight={112 + (isLoading ? 64 : Math.max(64, playlists.length * 64))}
+      artworkURL={track.imageURL}
+      headerTrailing={<PlaylistSheetAction label={`Adicionar em ${selectedCount} playlist${selectedCount === 1 ? '' : 's'}`}
+        disabled={!selectedCount} busy={isSaving} onPress={() => void confirm()} />}
+      nested={<PlaylistCreateModal visible={isCreateVisible} onClose={() => setIsCreateVisible(false)}
+        onCreated={(playlist) => {
+          setPlaylists((current) => [...current.filter((item) => item.id !== playlist.id), playlist]);
+          setSelectedIds((current) => new Set([...current, playlist.id]));
+        }} />}
       title="Adicionar à playlist"
       visible={visible}
     >
@@ -137,12 +153,13 @@ export function TrackPlaylistPickerModal({
           <ActivityIndicator color="#FFFFFF" />
         </View>
       ) : (
-        <FlatList
+        <ProgressiveFlatList
+          listKey={track.spotifyId}
           data={playlists}
           keyExtractor={(playlist) => playlist.id}
           ListEmptyComponent={
             <Text style={styles.emptyText}>
-              Crie uma playlist na Biblioteca para adicionar esta música.
+              Nenhuma playlist.
             </Text>
           }
           renderItem={({ item }) => {
@@ -164,7 +181,7 @@ export function TrackPlaylistPickerModal({
                 }
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: alreadyAdded || selected }}
-                disabled={alreadyAdded}
+                disabled={alreadyAdded || isSaving}
                 onPress={() => toggle(item)}
                 style={[styles.row, alreadyAdded && styles.rowDisabled]}
               >
@@ -195,25 +212,12 @@ export function TrackPlaylistPickerModal({
           style={styles.list}
         />
       )}
-      <LoggedPressable
-        accessibilityLabel={`Adicionar em ${selectedCount} playlist${selectedCount === 1 ? '' : 's'}`}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: selectedCount === 0 || isSaving }}
-        disabled={selectedCount === 0 || isSaving}
-        onPress={() => void confirm()}
-        style={[
-          styles.confirmButton,
-          (selectedCount === 0 || isSaving) && styles.confirmButtonDisabled,
-        ]}
-      >
-        {isSaving ? (
-          <ActivityIndicator color="#07120A" />
-        ) : (
-          <Text style={styles.confirmText}>
-            Adicionar em {selectedCount} playlist
-            {selectedCount === 1 ? '' : 's'}
-          </Text>
-        )}
+      <LoggedPressable accessibilityLabel="Nova playlist" accessibilityRole="button" disabled={isSaving}
+        onPress={() => setIsCreateVisible(true)}>
+        <GlassSurface glass="regular" isInteractive style={styles.confirmButton}>
+          <Ionicons name="add" size={20} color="#1ED760" />
+          <Text style={styles.confirmText}>Nova playlist</Text>
+        </GlassSurface>
       </LoggedPressable>
     </SheetFrame>
   );
@@ -257,7 +261,7 @@ const styles = StyleSheet.create({
   },
   loading: {
     alignItems: 'center',
-    height: 260,
+    height: 64,
     justifyContent: 'center',
   },
   list: { flex: 1, minHeight: 0 },
@@ -267,7 +271,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     gap: 11,
-    minHeight: 62,
+    minHeight: 64,
     paddingVertical: 8,
   },
   rowDisabled: { opacity: 0.62 },
@@ -295,16 +299,16 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.58)',
     fontFamily: 'SF-Regular',
     paddingHorizontal: 20,
-    paddingVertical: 52,
+    paddingVertical: 18,
     textAlign: 'center',
   },
   confirmButton: {
     alignItems: 'center',
-    backgroundColor: '#1ED760',
     borderRadius: 8,
     height: 46,
+    flexDirection: 'row',
+    gap: 8,
     justifyContent: 'center',
   },
-  confirmButtonDisabled: { backgroundColor: '#3A3A3A' },
-  confirmText: { color: '#07120A', fontFamily: 'SF-Bold', fontSize: 14 },
+  confirmText: { color: '#FFFFFF', fontFamily: 'SF-Semibold', fontSize: 14 },
 });

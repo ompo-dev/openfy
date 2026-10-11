@@ -9,8 +9,9 @@ jest.mock('../../native', () => {
 
   return {
     LoggedPressable: MockPressable,
-    SheetFrame: ({ children }: { children: React.ReactNode }) =>
-      mockReact.createElement(MockView, null, children),
+    GlassSurface: MockView,
+    SheetFrame: ({ children, headerTrailing, visible }: any) => visible
+      ? mockReact.createElement(MockView, null, headerTrailing, children) : null,
   };
 });
 
