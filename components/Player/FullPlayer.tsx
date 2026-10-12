@@ -13,7 +13,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
   Dimensions,
 } from 'react-native';
@@ -52,6 +51,8 @@ import {
   upsertCatalogTracks,
 } from '@services';
 import { GlassSurface, LoggedPressable, PlayerModal, SheetFrame } from '../native';
+import { Section as ModalSection, SettingsRow, Divider, TextField, HeaderIconButton } from '../gym';
+import { SettingIcon } from '../gym/SettingIcon';
 import { ArtistSearchRow } from '../Home/ArtistSearchRow';
 import { ProgressiveFlatList, ProgressiveList } from '../common/ProgressiveList';
 import { TrackRow } from '../common/TrackRow';
@@ -290,6 +291,7 @@ function PlayerGlassButton({
     >
       <GlassSurface
         glass={glass}
+        testID={testID ? `${testID}-surface` : undefined}
         tintColor={tintColor}
         isInteractive={!!onPress && !disabled}
         style={[styles.glassButtonSurface, surfaceStyle]}
@@ -1867,7 +1869,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                 <PlayerGlassButton accessibilityLabel="Faixa anterior" disabled={!canGoPrevious} onPress={handlePlayPrevious} style={styles.seekControlBtn}>
                   <Ionicons name="play-back" size={32} color={canGoPrevious ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} />
                 </PlayerGlassButton>
-                <PlayerGlassButton accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'} glass="thick" onPress={togglePlayPause} style={styles.playPauseCircle} tintColor="rgba(255,255,255,0.92)">
+                <PlayerGlassButton testID="player-play" accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'} glass="regular" onPress={togglePlayPause} style={styles.playPauseCircle}>
                   {playerState.isBuffering && !playerState.isPlaying ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name={playerState.isPlaying ? 'pause' : 'play'} size={34} color="#FFFFFF" style={!playerState.isPlaying ? { marginLeft: 3 } : undefined} />}
                 </PlayerGlassButton>
                 <PlayerGlassButton accessibilityLabel="Próxima faixa" disabled={!canGoNext} onPress={handlePlayNext} style={styles.seekControlBtn}>
@@ -1885,8 +1887,15 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
             </GestureDetector>
 
           <SheetFrame visible={isQueueVisible} title="Fila de reprodução" artworkURL={artworkUrl}
-            onClose={() => setIsQueueVisible(false)} scroll={false} contentHeight={Math.max(64, queue.length * 64)}>
+            onClose={() => setIsQueueVisible(false)} scroll={false} contentHeight={56 + Math.max(64, queue.length * 64)}>
+            <View style={styles.queueSummary}>
+              <SettingIcon name="list" />
+              <Text numberOfLines={1} style={styles.queueTitle}>{playbackOrigin?.kind === 'album' ? currentTrack.albumName || 'Album'
+                : playbackOrigin?.kind === 'artist' ? currentTrack.artistName : playbackOrigin?.kind === 'playlist' ? 'Playlist' : 'Fila atual'}</Text>
+              <Text style={styles.queueCount}>{queue.length}</Text>
+            </View>
             <ProgressiveFlatList data={queue} listKey={queueSourceId || 'queue'}
+              style={styles.queueList}
               keyExtractor={(track, index) => `${track.spotifyId}:${index}`}
               renderItem={({ item, index }) => {
                 const status = downloads.find((job) => job.spotifyId === item.spotifyId)?.status;
@@ -1925,50 +1934,35 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
               </View>
               <Text style={styles.actionSheetSubtitle}>Fonte de áudio correspondente no YouTube</Text>
             </View>
-            <LoggedPressable style={styles.actionSheetItem} onPress={handleGoToYoutube}>
-              <Ionicons name="open-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.actionSheetItemText}>Ir para o vídeo do YouTube</Text>
-            </LoggedPressable>
-            <View style={styles.actionSheetDivider} />
-            <LoggedPressable style={styles.actionSheetItem} onPress={handleOpenEditLinkModal}>
-              <Ionicons name="create-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.actionSheetItemText}>Editar link do YouTube</Text>
-            </LoggedPressable>
-            <View style={styles.actionSheetDivider} />
-            <LoggedPressable style={[styles.actionSheetItem, styles.actionSheetCancelItem]}
-              onPress={() => setIsActionModalVisible(false)}>
-              <Text style={styles.actionSheetCancelText}>Cancelar</Text>
-            </LoggedPressable>
+            <ModalSection label="YouTube">
+              <SettingsRow title="Ir para o vídeo do YouTube" leading={<SettingIcon name="open-outline" />}
+                onPress={handleGoToYoutube} />
+              <Divider />
+              <SettingsRow title="Editar link do YouTube" leading={<SettingIcon name="create-outline" />}
+                onPress={handleOpenEditLinkModal} />
+            </ModalSection>
           </SheetFrame>
           <SheetFrame
             visible={isEditModalVisible}
             title="Editar link do YouTube"
             artworkURL={artworkUrl}
             onClose={() => setIsEditModalVisible(false)}
+            headerTrailing={<HeaderIconButton icon="check" filled label="Atualizar Áudio" busy={isUpdatingAudio}
+              disabled={!customLinkInput.trim()} onPress={() => void handleConfirmEditLink()} />}
           >
-            <View style={styles.inputWrapper}>
-              <Ionicons name="link" size={18} color="rgba(255,255,255,0.6)" style={styles.inputIcon} />
-              <TextInput
+            <ModalSection label="Fonte de audio">
+              <TextField label="Link do YouTube"
                 value={customLinkInput}
                 onChangeText={setCustomLinkInput}
                 placeholder="https://www.youtube.com/watch?v=..."
                 placeholderTextColor="rgba(255,255,255,0.4)"
-                style={styles.textInput}
                 autoCapitalize="none"
                 autoCorrect={false}
                 selectTextOnFocus
                 returnKeyType="done"
+                onSubmitEditing={() => void handleConfirmEditLink()}
               />
-            </View>
-            <View style={styles.modalButtonRow}>
-              <LoggedPressable style={styles.modalCancelBtn} onPress={() => setIsEditModalVisible(false)}>
-                <Text style={styles.modalCancelBtnText}>Cancelar</Text>
-              </LoggedPressable>
-              <LoggedPressable style={styles.modalConfirmBtn} onPress={handleConfirmEditLink} disabled={isUpdatingAudio}>
-                {isUpdatingAudio ? <ActivityIndicator size="small" color="#000000" /> :
-                  <Text style={styles.modalConfirmBtnText}>Atualizar Áudio</Text>}
-              </LoggedPressable>
-            </View>
+            </ModalSection>
           </SheetFrame>
           {!sharedArtworkPresentation ? artworkTransition.overlay : null}
         </View>
@@ -1979,6 +1973,10 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
 };
 
 const styles = StyleSheet.create({
+  queueSummary: { flexDirection: 'row', alignItems: 'center', minHeight: 56, gap: 12, paddingHorizontal: 16 },
+  queueTitle: { flex: 1, minWidth: 0, color: '#F2F2F2', fontSize: 16, fontFamily: 'SF-Regular' },
+  queueCount: { color: '#9E9E9E', fontSize: 13, fontVariant: ['tabular-nums'] },
+  queueList: { backgroundColor: '#303030', borderRadius: 22, paddingHorizontal: 8 },
   albumDetailsSection: { marginBottom: 22 },
   gestureRoot: {
     flex: 1,

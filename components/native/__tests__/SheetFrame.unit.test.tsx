@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, within } from '@testing-library/react-native';
 import { Dimensions, PanResponder, StyleSheet, Text } from 'react-native';
 import * as Motion from 'react-native-reanimated';
 import { SheetFrame } from '../SheetFrame';
@@ -35,6 +35,17 @@ describe('shared player modal surface', () => {
     expect(screen.getByLabelText('Fechar')).toBeTruthy();
     expect(screen.getByText('Back')).toBeTruthy();
     expect(screen.getByText('Copy')).toBeTruthy();
+  });
+
+  it('separates the two header actions around the title and balances their reserved width', async () => {
+    const screen = await render(<SheetFrame visible title="Provedor" onClose={jest.fn()}
+      headerTrailing={<Text>Refresh</Text>}><Text>Contents</Text></SheetFrame>);
+    const leading = screen.getByTestId('sheet-header-leading');
+    const trailing = screen.getByTestId('sheet-header-trailing');
+    expect(within(leading).getByLabelText('Fechar')).toBeTruthy();
+    expect(within(trailing).getByText('Refresh')).toBeTruthy();
+    expect(within(trailing).queryByLabelText('Fechar')).toBeNull();
+    expect(StyleSheet.flatten(leading.props.style).width).toBe(StyleSheet.flatten(trailing.props.style).width);
   });
 
   it('lets editors request space but shrink to the available keyboard-safe height', async () => {

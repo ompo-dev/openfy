@@ -18,7 +18,9 @@ import {
   type LibraryTrack,
   type LocalPlaylist,
 } from '@services';
-import { GlassSurface, LoggedPressable, SheetFrame } from '../native';
+import { SheetFrame } from '../native';
+import { SettingsRow, Chevron } from '../gym';
+import { SettingIcon } from '../gym/SettingIcon';
 import { ProgressiveFlatList } from '../common/ProgressiveList';
 import { PlaylistCreateModal } from './PlaylistCreateModal';
 import { PlaylistSheetAction } from './PlaylistForm';
@@ -133,7 +135,7 @@ export function TrackPlaylistPickerModal({
     <SheetFrame
       onClose={onClose}
       scroll={false}
-      contentHeight={112 + (isLoading ? 64 : Math.max(64, playlists.length * 64))}
+      contentHeight={100 + (isLoading ? 64 : Math.max(64, playlists.length * 72))}
       artworkURL={track.imageURL}
       headerTrailing={<PlaylistSheetAction label={`Adicionar em ${selectedCount} playlist${selectedCount === 1 ? '' : 's'}`}
         disabled={!selectedCount} busy={isSaving} onPress={() => void confirm()} />}
@@ -173,7 +175,7 @@ export function TrackPlaylistPickerModal({
               }),
             ].filter(Boolean))].slice(0, 4);
             return (
-              <LoggedPressable
+              <SettingsRow title={item.title}
                 accessibilityLabel={
                   alreadyAdded
                     ? `${track.title} já está em ${item.title}`
@@ -183,20 +185,11 @@ export function TrackPlaylistPickerModal({
                 accessibilityState={{ checked: alreadyAdded || selected }}
                 disabled={alreadyAdded || isSaving}
                 onPress={() => toggle(item)}
-                style={[styles.row, alreadyAdded && styles.rowDisabled]}
-              >
-                <PlaylistArtwork title={item.title} imageURLs={artworkURLs} />
-                <View style={styles.copy}>
-                  <Text numberOfLines={1} style={styles.title}>
-                    {item.title}
-                  </Text>
-                  <Text numberOfLines={1} style={styles.subtitle}>
-                    {alreadyAdded
+                leading={<PlaylistArtwork title={item.title} imageURLs={artworkURLs} />}
+                subtitle={alreadyAdded
                       ? 'Já adicionada'
                       : `${item.trackIds.length} música${item.trackIds.length === 1 ? '' : 's'}`}
-                  </Text>
-                </View>
-                <Ionicons
+                trailing={<Ionicons
                   color={alreadyAdded || selected ? '#1ED760' : '#8B8B8B'}
                   name={
                     alreadyAdded || selected
@@ -204,21 +197,17 @@ export function TrackPlaylistPickerModal({
                       : 'ellipse-outline'
                   }
                   size={23}
-                />
-              </LoggedPressable>
+                />} />
             );
           }}
           showsVerticalScrollIndicator={false}
           style={styles.list}
         />
       )}
-      <LoggedPressable accessibilityLabel="Nova playlist" accessibilityRole="button" disabled={isSaving}
-        onPress={() => setIsCreateVisible(true)}>
-        <GlassSurface glass="regular" isInteractive style={styles.confirmButton}>
-          <Ionicons name="add" size={20} color="#1ED760" />
-          <Text style={styles.confirmText}>Nova playlist</Text>
-        </GlassSurface>
-      </LoggedPressable>
+      <View style={styles.createRow}>
+        <SettingsRow title="Nova playlist" disabled={isSaving} onPress={() => setIsCreateVisible(true)}
+          leading={<SettingIcon name="add" />} trailing={<Chevron />} />
+      </View>
     </SheetFrame>
   );
 }
@@ -264,7 +253,8 @@ const styles = StyleSheet.create({
     height: 64,
     justifyContent: 'center',
   },
-  list: { flex: 1, minHeight: 0 },
+  list: { flex: 1, minHeight: 0, marginVertical: 12, borderRadius: 22, backgroundColor: '#303030' },
+  createRow: { borderRadius: 22, backgroundColor: '#303030', overflow: 'hidden' },
   row: {
     alignItems: 'center',
     borderBottomColor: 'rgba(255,255,255,0.08)',

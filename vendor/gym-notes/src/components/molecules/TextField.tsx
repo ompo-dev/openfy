@@ -12,7 +12,7 @@ export function TextField({ label, hint, inputRef, style, ...props }: TextInputP
   const colors = useColors();
   return (
     <View style={styles.apiKeyField}>
-      <AppText variant="body">{label}</AppText>
+      <AppText variant="body" numberOfLines={1} style={styles.label}>{label}</AppText>
       {hint ? (
         <AppText variant="caption" color={colors.textTertiary}>
           {hint}
@@ -36,6 +36,7 @@ export function TextField({ label, hint, inputRef, style, ...props }: TextInputP
 }
 
 const styles = StyleSheet.create({
+  label: { fontSize: 16, lineHeight: 22 },
   apiKeyField: {
     gap: Spacing.two,
     paddingHorizontal: Spacing.four,

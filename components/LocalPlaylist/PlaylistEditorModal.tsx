@@ -5,7 +5,8 @@ import { AppIcon, SheetFrame } from '../native';
 import { TrackRow } from '../common/TrackRow';
 import { ProgressiveFlatList } from '../common/ProgressiveList';
 import { PlaylistForm, PlaylistSheetAction } from './PlaylistForm';
-import { HeaderIconButton } from '../gym';
+import { HeaderIconButton, SettingsRow, Chevron } from '../gym';
+import { SettingIcon } from '../gym/SettingIcon';
 
 type PlaylistEditorModalProps = {
   onAddTracks: () => void; onClose: () => void; onSaved: () => void | Promise<void>;
@@ -17,6 +18,7 @@ export const PlaylistEditorModal = ({ onAddTracks, onClose, onSaved, playlist, t
   const [description, setDescription] = React.useState(playlist.description || '');
   const [removedTrackIds, setRemovedTrackIds] = React.useState<Set<string>>(new Set());
   const [isSaving, setIsSaving] = React.useState(false);
+  const [headerHeight, setHeaderHeight] = React.useState(400);
   const pending = React.useRef(false);
   const session = React.useRef('');
   React.useEffect(() => {
@@ -51,18 +53,20 @@ export const PlaylistEditorModal = ({ onAddTracks, onClose, onSaved, playlist, t
     nested={nested}
     hideDefaultClose headerLeading={<HeaderIconButton icon="x" onPress={onClose} />}
     artworkURL={tracks[0]?.localImagePath || tracks[0]?.imageURL || playlist.coverImageURLs?.[0]}
-    scroll={false} contentHeight={300 + Math.max(1, tracks.length) * 64}
+    scroll={false} contentHeight={headerHeight + Math.max(1, tracks.length) * 64}
     headerTrailing={<PlaylistSheetAction label="Salvar playlist" onPress={() => void save()}
       disabled={!title.trim()} busy={isSaving} />}>
     <ProgressiveFlatList data={tracks} listKey={playlist.id} keyExtractor={(track) => track.spotifyId}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false}
-      ListHeaderComponent={<>
+      ListHeaderComponent={<View onLayout={({ nativeEvent }) => setHeaderHeight(nativeEvent.layout.height)}>
         <PlaylistForm title={title} description={description} onTitleChange={setTitle} onDescriptionChange={setDescription} disabled={isSaving} />
         <View style={styles.trackHeader}>
-          <Text style={styles.sectionTitle}>Músicas · {playlist.trackIds.filter((id) => !removedTrackIds.has(id)).length}</Text>
-          <PlaylistSheetAction label="Adicionar músicas" icon="add" onPress={() => void save(true)} disabled={!title.trim()} busy={isSaving} />
+          <SettingsRow title="Adicionar músicas" leading={<SettingIcon name="add" />}
+            accessibilityLabel="Adicionar músicas" disabled={!title.trim() || isSaving}
+            trailing={<Chevron />} onPress={() => void save(true)} />
         </View>
-      </>}
+        <Text style={styles.sectionTitle}>Músicas · {playlist.trackIds.filter((id) => !removedTrackIds.has(id)).length}</Text>
+      </View>}
       ListEmptyComponent={<Text style={styles.empty}>Esta playlist ainda não tem músicas.</Text>}
       renderItem={({ item }) => {
         const removed = removedTrackIds.has(item.spotifyId);
@@ -76,7 +80,7 @@ export const PlaylistEditorModal = ({ onAddTracks, onClose, onSaved, playlist, t
   </SheetFrame>;
 };
 const styles = StyleSheet.create({
-  trackHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48, marginBottom: 4 },
-  sectionTitle: { color: '#FFFFFF', fontFamily: 'SF-Semibold', fontSize: 14 },
+  trackHeader: { borderRadius: 22, overflow: 'hidden', backgroundColor: '#303030', marginVertical: 16 },
+  sectionTitle: { color: '#9E9E9E', fontFamily: 'SF-Regular', fontSize: 14, marginLeft: 16, marginBottom: 8 },
   empty: { color: 'rgba(255,255,255,0.6)', fontFamily: 'SF-Regular', fontSize: 13, paddingVertical: 18, textAlign: 'center' },
 });

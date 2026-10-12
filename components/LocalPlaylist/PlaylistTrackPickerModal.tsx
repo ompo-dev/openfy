@@ -2,7 +2,7 @@ import * as React from 'react';
 import {
   StyleSheet,
   Text,
-  TextInput,
+  View,
 } from 'react-native';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 
@@ -11,6 +11,7 @@ import { SheetFrame } from '../native';
 import { TrackRow } from '../common/TrackRow';
 import { ProgressiveFlatList } from '../common/ProgressiveList';
 import { PlaylistSheetAction } from './PlaylistForm';
+import { Section, TextField } from '../gym';
 
 type PlaylistTrackPickerModalProps = {
   existingTrackIds: string[];
@@ -28,6 +29,7 @@ export const PlaylistTrackPickerModal = ({
   visible,
 }: PlaylistTrackPickerModalProps) => {
   const [query, setQuery] = React.useState('');
+  const [headerHeight, setHeaderHeight] = React.useState(132);
   const [selectedTrackIds, setSelectedTrackIds] = React.useState<Set<string>>(
     new Set()
   );
@@ -75,16 +77,17 @@ export const PlaylistTrackPickerModal = ({
   return (
     <SheetFrame visible={visible} title="Adicionar músicas" onClose={onClose} scroll={false}
       headerTrailing={<PlaylistSheetAction label={confirmLabel} disabled={!selectedCount} onPress={confirm} />}
-      contentHeight={72 + Math.max(1, visibleTracks.length) * 64}>
-      <TextInput
+      contentHeight={headerHeight + Math.max(1, visibleTracks.length) * 64}>
+      <View style={styles.searchField} onLayout={({ nativeEvent }) => setHeaderHeight(nativeEvent.layout.height)}>
+      <Section label="Biblioteca"><TextField label="Buscar" accessibilityLabel="Buscar na biblioteca"
         autoCapitalize="none"
         autoCorrect={false}
         onChangeText={setQuery}
         placeholder="Buscar na biblioteca"
         placeholderTextColor="#858585"
-        style={styles.searchInput}
         value={query}
-      />
+      /></Section>
+      </View>
       <ProgressiveFlatList
         listKey={query}
         data={visibleTracks}
@@ -127,19 +130,13 @@ export const PlaylistTrackPickerModal = ({
 };
 
 const styles = StyleSheet.create({
-  searchInput: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 8,
-    color: '#FFFFFF',
-    fontFamily: 'SF-Regular',
-    fontSize: 14,
-    height: 42,
-    paddingHorizontal: 12,
-  },
   trackList: {
     flex: 1,
     minHeight: 0,
+    borderRadius: 22,
+    backgroundColor: '#303030',
   },
+  searchField: { paddingBottom: 16 },
   empty: {
     color: 'rgba(255, 255, 255, 0.62)',
     fontFamily: 'SF-Regular',

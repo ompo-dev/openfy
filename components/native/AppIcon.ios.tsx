@@ -52,6 +52,7 @@ export const APP_SF_SYMBOLS: Record<AppIconName, SFSymbol> = {
   'volume-low': 'speaker.wave.1.fill',
   'volume-mute': 'speaker.slash.fill',
   'list': 'list.bullet',
+  'reorder-three': 'line.3.horizontal',
   'grid': 'square.grid.2x2.fill',
   'time': 'clock',
   'star': 'star.fill',

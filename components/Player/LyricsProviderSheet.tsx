@@ -1,6 +1,8 @@
 import * as React from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { SheetFrame, AppIcon, LoggedPressable, NativeIconButton } from '../native';
+import { ActivityIndicator, StyleSheet, Text } from 'react-native';
+import { SheetFrame, AppIcon, NativeIconButton } from '../native';
+import { Divider, Section, SettingsRow } from '../gym';
+import { SettingIcon } from '../gym/SettingIcon';
 import { usePlayerStore } from '../../stores/usePlayerStore';
 import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 import { LYRICS_PROVIDERS, lyricsProviderName, type LyricsProviderSelection } from '../../services/lyrics/lyricsSources';
@@ -55,15 +57,16 @@ export const LyricsProviderSheet = ({ visible, onClose }: { visible: boolean; on
         void usePlayerStore.getState().refreshLyrics(true);
         setRefresh((value) => ({ trackId: track?.spotifyId || '', version: value.version + 1 }));
       }} />}>
-    <LoggedPressable accessibilityRole="radio" accessibilityState={{ checked: selected === 'auto' }}
-      accessibilityLabel="Provedor automatico" onPress={() => select('auto')} style={styles.row}>
-      <AppIcon name="sparkles" color="#FFFFFF" size={22} />
-      <View style={styles.copy}><Text style={styles.name}>Automatico</Text>
-        <Text style={styles.detail}>{!enabled ? 'Letras desativadas' : loading ? 'Buscando' : lyrics ? lyricsProviderName(lyrics.source) : 'Sem letra disponivel'}</Text></View>
-      {selected === 'auto' ? <AppIcon name="checkmark" color="#1DB954" size={22} /> : null}
-    </LoggedPressable>
+    <Section label="Selecao">
+      <SettingsRow title="Automatico" accessibilityRole="radio" accessibilityState={{ checked: selected === 'auto' }}
+        accessibilityLabel="Provedor automatico" onPress={() => select('auto')}
+        leading={<SettingIcon name="sparkles" />}
+        subtitle={!enabled ? 'Letras desativadas' : loading ? 'Buscando' : lyrics ? lyricsProviderName(lyrics.source) : 'Sem letra disponivel'}
+        trailing={selected === 'auto' ? <AppIcon name="checkmark" color="#4ADE80" size={22} /> : null} />
+    </Section>
     {probing ? <ActivityIndicator accessibilityLabel="Buscando provedores disponiveis" color="#FFFFFF" /> : null}
-    {order.filter((id) => (available[id] || lyrics?.source === id) && enabled && !disabled.includes(id)).map((id) => {
+    {order.some((id) => (available[id] || lyrics?.source === id) && enabled && !disabled.includes(id)) ? <Section label="Disponiveis">
+    {order.filter((id) => (available[id] || lyrics?.source === id) && enabled && !disabled.includes(id)).map((id, index) => {
       const provider = LYRICS_PROVIDERS.find((entry) => entry.id === id)!;
       const result = available[id] || (lyrics?.source === id ? lyrics : undefined);
       const unavailable = !enabled || disabled.includes(id);
@@ -74,23 +77,20 @@ export const LyricsProviderSheet = ({ visible, onClose }: { visible: boolean; on
         attempts[id] === 'restricted' ? 'Acesso restrito pelo provedor (401/403)' :
         attempts[id] === 'missing' ? 'Letra nao encontrada' : attempts[id] === 'error' ? 'Falha no provedor' :
             attempts[id] === 'found' ? 'Disponivel' : provider.timing === 'word' ? 'Palavras / linhas' : provider.timing === 'line' ? 'Linhas' : 'Texto';
-      return <LoggedPressable key={id} accessibilityRole="radio" accessibilityLabel={provider.name}
-        accessibilityState={{ checked: selected === id, disabled: unavailable }} disabled={unavailable}
-        onPress={() => select(id)} style={[styles.row, unavailable && styles.disabled]}>
-        <AppIcon name="musical-note" color="#D0D0D5" size={21} />
-        <View style={styles.copy}><Text style={styles.name}>{provider.name}</Text><Text style={styles.detail}>{status}</Text></View>
-        {attempts[id] === 'loading' ? <ActivityIndicator color="#FFFFFF" /> : selected === id ?
-          <AppIcon name="checkmark" color="#1DB954" size={22} /> : null}
-      </LoggedPressable>;
+      return <React.Fragment key={id}>
+        {index > 0 ? <Divider /> : null}
+        <SettingsRow title={provider.name} subtitle={status} accessibilityRole="radio" accessibilityLabel={provider.name}
+          accessibilityState={{ checked: selected === id }} disabled={unavailable}
+          onPress={() => select(id)} leading={<SettingIcon name="musical-note" />}
+          trailing={attempts[id] === 'loading' ? <ActivityIndicator color="#FFFFFF" /> : selected === id ?
+            <AppIcon name="checkmark" color="#4ADE80" size={22} /> : null} />
+      </React.Fragment>;
     })}
+    </Section> : null}
     {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
   </SheetFrame>;
 };
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 13,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.12)' },
-  copy: { flex: 1, minWidth: 0 }, name: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
-  detail: { color: '#B6B6BD', fontSize: 12, marginTop: 4 }, disabled: { opacity: 0.45 },
   error: { color: '#FF8585', paddingVertical: 12, fontSize: 13 },
 });

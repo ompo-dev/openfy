@@ -8,11 +8,10 @@ import {
   ActivityIndicator,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { AppIcon as Ionicons, AppIcon as MaterialCommunityIcons } from '../native/AppIcon';
+import { AppIcon as Ionicons } from '../native/AppIcon';
 
 import { parseSpotifyLink } from '@services';
 import { useDownloads, usePlayer } from '@context';
@@ -22,6 +21,8 @@ import { ProgressiveFlatList } from '../common/ProgressiveList';
 import { getImportJob, revalidateImport, startLibraryImport, subscribeImports, type TrackPreview } from '../../services/library/libraryImports';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
 import { showOfflineActionMessage } from '../../services/network/offlineFeedback';
+import { Chevron, Section, SettingsRow, TextField } from '../gym';
+import { SettingIcon } from '../gym/SettingIcon';
 
 type ImportModalProps = {
   visible: boolean;
@@ -38,6 +39,7 @@ export const ImportModal = ({
 }: ImportModalProps) => {
   const [inputText, setInputText] = React.useState('');
   const [error, setError] = React.useState('');
+  const [headerHeight, setHeaderHeight] = React.useState(212);
   const [, updateJob] = React.useReducer((revision) => revision + 1, 0);
   const parsedInput = parseSpotifyLink(inputText.trim());
   const inputKey = parsedInput ? `${parsedInput.platform}:${parsedInput.type}:${parsedInput.id}` : '';
@@ -131,9 +133,10 @@ export const ImportModal = ({
   }).length;
 
   const inputSection = (
-    <View style={styles.inputSection}>
+    <View style={styles.inputSection} onLayout={({ nativeEvent }) => setHeaderHeight(nativeEvent.layout.height)}>
       <View style={styles.inputRow}>
-        <TextInput
+        <View style={styles.inputField}>
+        <TextField label="Link"
           accessibilityLabel="Link da música, álbum ou playlist"
           style={styles.textInput}
           value={inputText}
@@ -146,25 +149,20 @@ export const ImportModal = ({
           returnKeyType="done"
           onSubmitEditing={() => void handleImport()}
         />
+        </View>
         <LoggedPressable accessibilityLabel="Colar link" disabled={isLoading}
           onPress={() => void handlePasteFromClipboard()}>
           <GlassSurface glass="regular" isInteractive style={styles.iconButton}>
-            <MaterialCommunityIcons name="clipboard-text-outline" size={21} color="#FFFFFF" />
+            <Ionicons name="clipboard-outline" size={21} color="#2E9BFF" />
           </GlassSurface>
         </LoggedPressable>
       </View>
       {displayedError ? <Text accessibilityRole="alert" style={styles.errorText}>{displayedError}</Text> : null}
-      {!added ? (
-        <LoggedPressable accessibilityRole="button" accessibilityLabel="Adicionar à biblioteca"
-          disabled={isLoading} onPress={() => void handleImport()}>
-          <GlassSurface glass="regular" isInteractive style={[styles.importButton, isLoading && styles.disabled]}>
-            {isLoading ? <ActivityIndicator color="#FFFFFF" size="small" /> : <>
-              <Ionicons name="add" size={20} color="#1ED760" />
-              <Text style={styles.actionText}>Adicionar à biblioteca</Text>
-            </>}
-          </GlassSurface>
-        </LoggedPressable>
-      ) : null}
+      {!added ? <Section label="Biblioteca">
+        <SettingsRow title="Adicionar à biblioteca" accessibilityLabel="Adicionar à biblioteca"
+          leading={<SettingIcon name="add" />} disabled={isLoading} onPress={handleImport}
+          trailing={isLoading ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Chevron />} />
+      </Section> : null}
       {tracks.length ? (
         <View style={styles.resultsHeader}>
           <Text style={styles.resultsCount}>
@@ -174,7 +172,7 @@ export const ImportModal = ({
             <LoggedPressable accessibilityRole="button" accessibilityLabel="Baixar todas as músicas"
               onPress={handleDownloadAll}>
               <GlassSurface glass="regular" isInteractive style={styles.downloadAllButton}>
-                <Ionicons name="download-outline" size={18} color="#FFFFFF" />
+                <Ionicons name="download-outline" size={18} color="#2E9BFF" />
                 <Text style={styles.actionText}>Baixar</Text>
               </GlassSurface>
             </LoggedPressable>
@@ -187,7 +185,7 @@ export const ImportModal = ({
   return (
     <SheetFrame visible={visible} title="Adicionar músicas" onClose={handleClose}
       scroll={false} artworkURL={tracks[0]?.imageURL}
-      contentHeight={(added ? 128 : tracks.length ? 184 : 132) + (displayedError ? 36 : 0) + tracks.length * 64}>
+      contentHeight={headerHeight + tracks.length * 64}>
       <ProgressiveFlatList
         listKey={inputKey}
         data={tracks}
@@ -215,15 +213,13 @@ export const ImportModal = ({
 
 const styles = StyleSheet.create({
   inputSection: { gap: 12, paddingBottom: 8 },
-  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  textInput: { flex: 1, minWidth: 0, height: 44, backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 8, paddingHorizontal: 12, color: '#FFFFFF', fontSize: 14, fontFamily: 'SF-Regular' },
-  iconButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  importButton: { minHeight: 44, borderRadius: 8, flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center' },
-  disabled: { opacity: 0.6 },
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#303030', borderRadius: 18 },
+  textInput: { minWidth: 0, color: '#F2F2F2', fontFamily: 'SF-Regular' },
+  inputField: { flex: 1, minWidth: 0 },
+  iconButton: { width: 44, height: 44, marginRight: 12, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   actionText: { color: '#FFFFFF', fontSize: 14, fontFamily: 'SF-Semibold' },
   errorText: { color: '#FF6969', fontSize: 12, fontFamily: 'SF-Regular' },
   resultsHeader: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   resultsCount: { flex: 1, color: 'rgba(255,255,255,0.6)', fontSize: 12, fontFamily: 'SF-Regular' },
-  downloadAllButton: { minHeight: 36, paddingHorizontal: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  downloadAllButton: { minHeight: 44, paddingHorizontal: 12, borderRadius: 22, flexDirection: 'row', alignItems: 'center', gap: 7 },
 });

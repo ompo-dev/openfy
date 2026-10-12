@@ -232,6 +232,12 @@ const getLastArtworkProps = () =>
   mockSwipeableArtwork.mock.calls.at(-1)?.[0] as Record<string, any>;
 
 describe('FullPlayer artist row and YouTube source', () => {
+  it('keeps the play surface untinted so the white glyph remains visible', async () => {
+    const screen = await mountPlayer();
+    const surface = screen.getByTestId('player-play-surface');
+    expect(surface.props.tintColor).toBeUndefined();
+    expect(StyleSheet.flatten(surface.props.style).backgroundColor).toBeUndefined();
+  });
   it('opens the source only after closing and retains the lower lyrics button', async () => {
     const onClose = jest.fn();
     const state = { ...makePlayer(), queueSourceId: 'playlist:home_mix_radio_sotam' };
@@ -540,7 +546,7 @@ describe('FullPlayer artist row and YouTube source', () => {
     await fireEvent.press(screen.getByText('Editar link do YouTube'));
     await fireEvent.changeText(screen.getByPlaceholderText('https://www.youtube.com/watch?v=...'),
       'https://www.youtube.com/watch?v=bbbbbbbbbbb');
-    await fireEvent.press(screen.getByText('Atualizar Áudio'));
+    await fireEvent.press(screen.getByLabelText('Atualizar Áudio'));
     await waitFor(() => expect(player.playTrack).toHaveBeenCalled());
     const repaired = { ...player.currentTrack, youtubeVideoId: 'bbbbbbbbbbb',
       youtubeUrl: 'https://www.youtube.com/watch?v=bbbbbbbbbbb', isDownloaded: false,

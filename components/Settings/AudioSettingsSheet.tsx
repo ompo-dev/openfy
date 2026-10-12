@@ -8,6 +8,7 @@ import { EQUALIZER_FREQUENCIES, EQUALIZER_PRESETS, equalizerFilters, equalizerHe
 import type { AppSettings } from '../../services/settings/appSettings';
 import { log } from '../../utils/appLogger';
 import { NativeSegmented, Section, SettingsRow, Toggle, ValueTrailing, OptionMenu } from '../gym';
+import { SettingIcon } from '../gym/SettingIcon';
 
 const NumericSlider = ({ label, value, min, max, step, disabled, onChange, suffix = '' }: {
   label: string; value: number; min: number; max: number; step: number; suffix?: string;
@@ -83,7 +84,7 @@ export const AudioSettingsSheet = ({ visible, onClose }: { visible: boolean; onC
     <NumericSlider label="Alcance do pre-carregamento" value={settings.preloadRadius} min={1} max={3} step={1}
       disabled={!settings.preloadNextTrack} onChange={(value) => change('preloadRadius', value)} />
     <Section label="Equalizador">
-    <SettingsRow title="Equalizador" trailing={<View pointerEvents={unavailable ? 'none' : 'auto'} style={unavailable ? styles.disabled : undefined}>
+    <SettingsRow title="Equalizador" leading={<SettingIcon name="options" />} trailing={<View pointerEvents={unavailable ? 'none' : 'auto'} style={unavailable ? styles.disabled : undefined}>
       <Toggle label="Equalizador" disabled={unavailable} value={settings.equalizerEnabled} onValueChange={(value) => change('equalizerEnabled', value)} /></View>} />
     </Section>
     {unavailable ? <Text style={styles.error}>Instale o novo build nativo para usar equalizador e balanceamento.</Text> : null}
@@ -94,7 +95,7 @@ export const AudioSettingsSheet = ({ visible, onClose }: { visible: boolean; onC
     </View>
     {settings.equalizerMode === 'manual' ? <>
       <Section label="Preset">
-      <SettingsRow title="Preset do equalizador" disabled={inactive}
+      <SettingsRow title="Preset" leading={<SettingIcon name="musical-notes" />} disabled={inactive}
         onPress={() => { log.ui('equalizer presets toggled', { visible: !presets }); setPresets(!presets); }}
         trailing={<ValueTrailing label={Object.entries(EQUALIZER_PRESETS).find(([, bands]) =>
           bands.every((gain, i) => gain === settings.equalizerBands[i]))?.[0] || 'Personalizado'} />} />
@@ -113,7 +114,7 @@ export const AudioSettingsSheet = ({ visible, onClose }: { visible: boolean; onC
         onChange={(value) => change('equalizerToneX', value)} />
       <NumericSlider label="Medios" value={settings.equalizerToneY} min={-5} max={5} step={1} disabled={inactive}
         onChange={(value) => change('equalizerToneY', value)} />
-      <Section label="Tonalidade"><SettingsRow title="Foco nos medios"
+      <Section label="Tonalidade"><SettingsRow title="Foco nos medios" leading={<SettingIcon name="pulse" />}
         trailing={<View pointerEvents={inactive ? 'none' : 'auto'} style={inactive ? styles.disabled : undefined}>
           <Toggle label="Foco nos medios" disabled={inactive} value={settings.equalizerFocused}
             onValueChange={(value) => change('equalizerFocused', value)} /></View>} /></Section>

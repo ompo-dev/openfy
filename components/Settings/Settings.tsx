@@ -11,6 +11,7 @@ import {
 import Constants from 'expo-constants';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAppSettings } from '@context';
 import { checkForOTAUpdateNow } from '@hooks';
@@ -23,7 +24,7 @@ import {
   type AppSettings,
   type DownloadStorageInfo,
 } from '@services';
-import { AppIcon, LoggedPressable, NativeIconButton, SheetFrame } from '../native';
+import { AppIcon, GlassSurface, LoggedPressable, NativeIconButton, SheetFrame } from '../native';
 import { AUDIO_QUALITY_LABELS } from '../../services/audio/audioPreferences';
 import { getAudioCapabilities, getAudioOutputDiagnostics, getAudioDiagnosticsSnapshot, getPlayerState } from '../../services/audio/playerService';
 import { usePlayerStore } from '../../stores/usePlayerStore';
@@ -40,8 +41,11 @@ import { formatStorageSize, StorageManagerModal } from './StorageManagerModal';
 import { AudioSettingsSheet } from './AudioSettingsSheet';
 import { LyricsSettingsSheet } from './LyricsSettingsSheet';
 import { clearImageCache } from '../../services/images/imagePrefetch';
-import { AppText, Section as GymSection, SettingsRow, Toggle, Chevron, NativeSegmented, useAppModalStore } from '../gym';
+import { AppText, Section as GymSection, SettingsRow, Toggle, Chevron, NativeSegmented, OptionMenu, useAppModalStore } from '../gym';
 import { useSettingsModal } from '../gym/useSettingsModal';
+import { SettingIcon } from '../gym/SettingIcon';
+import { useTransientNotice } from '../../hooks/useTransientNotice';
+import type { AppModalAnchor } from '../gym/appModals';
 
 type LibrarySummary = {
   downloads: number;
@@ -67,9 +71,7 @@ const SettingRow = ({
   value: boolean;
 }) => (
   <SettingsRow title={label} subtitle={description} leading={
-    <View style={styles.settingIcon}>
-      <AppIcon color="#D8D8DC" name={icon} size={19} />
-    </View>
+    <SettingIcon name={icon} />
   } trailing={<Toggle label={label}
       onValueChange={onValueChange}
       value={value}
@@ -95,15 +97,9 @@ const ActionRow = ({
     disabled={disabled}
     onPress={onPress}
     leading={
-    <View style={styles.settingIcon}>
-      <AppIcon
-        color={destructive ? '#FF6B6B' : '#D8D8DC'}
-        name={icon}
-        size={19}
-      />
-    </View>
+    <SettingIcon name={icon} color={destructive ? '#FF6B6B' : undefined} />
     } trailing={<View style={styles.actionTrailing}>
-      {detail ? <AppText variant="secondary" numberOfLines={2} style={styles.detailText}>{detail}</AppText> : null}
+      {detail ? <AppText variant="secondary" numberOfLines={1} style={styles.detailText}>{detail}</AppText> : null}
       <Chevron />
     </View>} />
 );
@@ -114,6 +110,7 @@ const Section = ({ title, children }: { title: string; children: React.ReactNode
 
 export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { settings, setSetting, resetSettings } = useAppSettings();
   const [summary, setSummary] = React.useState(EMPTY_SUMMARY);
   const [storage, setStorage] = React.useState(EMPTY_STORAGE);
@@ -137,11 +134,22 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
   const [checkingUpdate, setCheckingUpdate] = React.useState(false);
   const developerVisible = settings.developerTools;
   const [qualityPicker, setQualityPicker] = React.useState<'streamingQuality' | 'downloadQuality' | null>(null);
+  const [qualityAnchor, setQualityAnchor] = React.useState<AppModalAnchor | null>(null);
+  const streamingRow = React.useRef<View>(null);
+  const downloadRow = React.useRef<View>(null);
   const [diagnosticsText, setDiagnosticsText] = React.useState<string | null>(null);
   const [clearingImages, setClearingImages] = React.useState(false);
   const [notice, setNotice] = React.useState('');
+  useTransientNotice(notice || undefined, () => setNotice(''));
   const [saving, setSaving] = React.useState(false);
   const capabilities = getAudioCapabilities();
+  const qualityOptions = (['high', 'economy'] as const).map((value) => ({ value, label: value === 'economy' ? 'Economia' : AUDIO_QUALITY_LABELS[value] }));
+  const openQualityMenu = (key: 'streamingQuality' | 'downloadQuality') => {
+    if (!capabilities.quality) { setNotice('A qualidade nativa requer o novo build do app.'); return; }
+    const ref = key === 'streamingQuality' ? streamingRow : downloadRow;
+    ref.current?.measureInWindow((x, y, width, height) => setQualityAnchor({ x, y, width, height }));
+    setQualityPicker(key);
+  };
   const [performanceMetrics, setPerformanceMetrics] = React.useState(
     getPerformanceMetricSummary
   );
@@ -325,6 +333,18 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
 
   return (
     <SheetFrame visible={rootVisible} title="Configurações" size="full" onClose={closeSettings}
+      overlay={<><OptionMenu visible={qualityPicker !== null} anchor={qualityAnchor}
+        selectedValue={qualityPicker ? settings[qualityPicker] : settings.streamingQuality}
+        options={qualityOptions} onClose={() => setQualityPicker(null)}
+        onSelect={(quality) => { if (qualityPicker) change(qualityPicker)(quality); setQualityPicker(null); }} />
+        {notice ? <GlassSurface glass="regular" style={[styles.noticePosition, { bottom: insets.bottom + 16 }]}>
+          <LoggedPressable accessibilityRole="button" accessibilityLabel="Dispensar aviso"
+            onPress={() => setNotice('')} style={styles.notice}>
+            <Text accessibilityRole="alert" style={styles.noticeText}>{notice}</Text>
+            <AppIcon name="close" size={18} color="#FFFFFF" />
+          </LoggedPressable>
+        </GlassSurface> : null}
+      </>}
       nested={<>
         <StorageManagerModal visible={storageVisible} onClose={() => setStorageVisible(false)}
           onStorageChanged={(nextStorage) => {
@@ -333,15 +353,6 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
           }} />
         <AudioSettingsSheet visible={audioVisible} onClose={() => setAudioVisible(false)} />
         <LyricsSettingsSheet visible={lyricsVisible} onClose={() => setLyricsVisible(false)} />
-        <SheetFrame visible={qualityPicker !== null} title={qualityPicker === 'downloadQuality' ? 'Qualidade dos downloads' : 'Qualidade do streaming'}
-          onClose={() => setQualityPicker(null)}>
-          <GymSection label="Qualidade">
-          {(['high', 'economy'] as const).map((quality) => <SettingsRow key={quality}
-            title={AUDIO_QUALITY_LABELS[quality]} subtitle={quality === 'high' ? 'Maior bitrate disponível na fonte.' : 'Menor bitrate disponível na fonte.'}
-            trailing={qualityPicker && settings[qualityPicker] === quality ? <AppIcon name="checkmark" color="#4ADE80" size={22} /> : null}
-            onPress={() => { if (qualityPicker) change(qualityPicker)(quality); setQualityPicker(null); }} />)}
-          </GymSection>
-        </SheetFrame>
         <SheetFrame visible={diagnosticsText !== null} title="Diagnósticos" size="full" onClose={() => setDiagnosticsText(null)}
           headerTrailing={<NativeIconButton iconName="copy" systemImage="doc.on.doc" label="Copiar diagnósticos"
             onPress={() => void Clipboard.setStringAsync(diagnosticsText || '').then(() => setNotice('Diagnósticos copiados.')).catch(() => setNotice('Não foi possível copiar.'))} />}>
@@ -383,9 +394,12 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
             </Text>
           </View>
           <View style={styles.separator} />
-          <ActionRow icon="musical-notes" label="Qualidade do streaming"
-            detail={AUDIO_QUALITY_LABELS[settings.streamingQuality]}
-            onPress={() => capabilities.quality ? setQualityPicker('streamingQuality') : setNotice('A qualidade nativa requer o novo build do app.')} />
+          <View ref={streamingRow} collapsable={false}>
+            <SettingsRow title="Streaming" accessibilityLabel="Qualidade do streaming" leading={<SettingIcon name="musical-notes" />}
+              disabled={!capabilities.quality} onPress={() => openQualityMenu('streamingQuality')}
+              select={{ value: settings.streamingQuality, options: qualityOptions,
+                onSelect: (value) => change('streamingQuality')(value as AppSettings['streamingQuality']) }} />
+          </View>
           <Text style={styles.statusText}>Vale para as próximas músicas. Arquivos baixados mantêm sua qualidade.</Text>
           <View style={styles.separator} />
           <SettingRow
@@ -415,9 +429,12 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
         </Section>
 
         <Section title="DOWNLOADS">
-          <ActionRow icon="download" label="Qualidade dos novos downloads"
-            detail={AUDIO_QUALITY_LABELS[settings.downloadQuality]}
-            onPress={() => capabilities.quality ? setQualityPicker('downloadQuality') : setNotice('A qualidade nativa requer o novo build do app.')} />
+          <View ref={downloadRow} collapsable={false}>
+            <SettingsRow title="Qualidade" accessibilityLabel="Qualidade dos downloads" leading={<SettingIcon name="download" />}
+              disabled={!capabilities.quality} onPress={() => openQualityMenu('downloadQuality')}
+              select={{ value: settings.downloadQuality, options: qualityOptions,
+                onSelect: (value) => change('downloadQuality')(value as AppSettings['downloadQuality']) }} />
+          </View>
           <View style={styles.separator} />
           <SettingRow
             description="Avisa quando um lote termina, inclusive em segundo plano."
@@ -568,8 +585,6 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
             onPress={restoreDefaults}
           />
         </Section>
-      {notice ? <LoggedPressable accessibilityRole="button" accessibilityLabel="Dispensar aviso"
-        onPress={() => setNotice('')} style={styles.notice}><Text style={styles.noticeText}>{notice}</Text><AppIcon name="close" size={18} color="#FFFFFF" /></LoggedPressable> : null}
     </SheetFrame>
   );
 };
@@ -580,7 +595,7 @@ const styles = StyleSheet.create({
   settingIcon: { width: 26, alignItems: 'center', justifyContent: 'center' },
   separator: { backgroundColor: 'rgba(255,255,255,0.09)', height: StyleSheet.hairlineWidth, marginLeft: 16 },
   audioBlock: { padding: 16, gap: 12 },
-  settingLabel: { color: '#F2F2F2', fontSize: 18, fontFamily: 'SF-Regular', letterSpacing: 0 },
+  settingLabel: { color: '#F2F2F2', fontSize: 16, fontFamily: 'SF-Regular', letterSpacing: 0 },
   settingDescription: { color: '#C8C8C8', fontSize: 13, lineHeight: 18, fontFamily: 'SF-Regular' },
   statusText: { color: '#C8C8C8', fontSize: 13, lineHeight: 18, paddingHorizontal: 16, paddingVertical: 12 },
   summaryRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 12 },
@@ -597,7 +612,8 @@ const styles = StyleSheet.create({
   aboutRow: { flexDirection: 'row', alignItems: 'center', minHeight: 56, paddingHorizontal: 16 },
   actionLabel: { flex: 1, minWidth: 0, color: '#F2F2F2', fontFamily: 'SF-Regular', fontSize: 18 },
   actionDetail: { color: '#C8C8C8', maxWidth: '40%', flexShrink: 1, textAlign: 'right', fontSize: 15 },
-  notice: { padding: 16, borderRadius: 18, backgroundColor: '#404040', flexDirection: 'row', alignItems: 'center', gap: 12 },
+  noticePosition: { position: 'absolute', left: 16, right: 16, borderRadius: 18, zIndex: 40 },
+  notice: { padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
   noticeText: { flex: 1, color: '#F2F2F2', fontSize: 13, lineHeight: 19 },
   diagnosticsCode: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: '#D6E6E1', fontSize: 12, lineHeight: 19 },
 });

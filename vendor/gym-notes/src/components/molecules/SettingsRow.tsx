@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, type AccessibilityProps } from 'react-native';
 import { LoggedPressable } from '@/components/atoms/Logged';
 
 import { AppIcon, type AppIconName } from '@/components/atoms/AppIcon';
@@ -24,7 +24,8 @@ export interface SettingsSelectOption {
   label: string;
 }
 
-interface SettingsRowProps {
+export interface SettingsRowProps extends AccessibilityProps {
+  testID?: string;
   leading?: ReactNode;
   disabled?: boolean;
   icon?: AppIconName;
@@ -60,11 +61,15 @@ export function SettingsRow({
   trailing,
   onPress,
   select,
+  accessibilityLabel,
+  accessibilityRole = 'button',
+  accessibilityState,
+  testID,
 }: SettingsRowProps) {
   const colors = useColors();
   const scheme = useAppColorScheme();
 
-  if (select && IOS_NATIVE_ENABLED) {
+  if (select && IOS_NATIVE_ENABLED && !disabled) {
     // Native Menu (not Picker) in the trailing slot so we control the look:
     // the value in the app's secondary text colour + a single chevron.down,
     // matching the other value rows instead of the blue "⇅" default Picker.
@@ -79,11 +84,11 @@ export function SettingsRow({
           </View>
         ) : null}
         <View style={styles.text}>
-          <AppText variant="body" color={titleColor} numberOfLines={2}>
+          <AppText variant="body" color={titleColor} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={styles.title}>
             {title}
           </AppText>
           {subtitle ? (
-            <AppText variant="secondary" color={colors.textSecondary} numberOfLines={2}>
+            <AppText variant="secondary" color={colors.textSecondary} numberOfLines={2} style={styles.subtitle}>
               {subtitle}
             </AppText>
           ) : null}
@@ -147,11 +152,11 @@ export function SettingsRow({
       ) : null}
 
       <View style={styles.text}>
-        <AppText variant="body" color={titleColor} numberOfLines={2}>
+        <AppText variant="body" color={titleColor} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={styles.title}>
           {title}
         </AppText>
         {subtitle ? (
-          <AppText variant="secondary" color={colors.textSecondary} numberOfLines={2}>
+          <AppText variant="secondary" color={colors.textSecondary} numberOfLines={2} style={styles.subtitle}>
             {subtitle}
           </AppText>
         ) : null}
@@ -166,12 +171,13 @@ export function SettingsRow({
   return (
     <LoggedPressable
       disabled={disabled}
-      accessibilityState={{ disabled }}
+      testID={testID}
+      accessibilityState={{ ...accessibilityState, disabled }}
       onPress={onPress}
-      accessibilityRole="button"
+      accessibilityRole={accessibilityRole}
       // Derived from the text the row already shows, so every settings row is
       // labelled without each call site repeating its title.
-      accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
+      accessibilityLabel={accessibilityLabel ?? (subtitle ? `${title}, ${subtitle}` : title)}
       style={({ pressed }) => (pressed ? styles.pressed : undefined)}>
       {content}
     </LoggedPressable>
@@ -193,8 +199,11 @@ const styles = StyleSheet.create({
   },
   text: {
     flex: 1,
+    minWidth: 0,
     gap: Spacing.half,
   },
+  title: { fontSize: 16, lineHeight: 22, letterSpacing: 0 },
+  subtitle: { fontSize: 13, lineHeight: 18, letterSpacing: 0 },
   trailing: {
     flexShrink: 0,
   },

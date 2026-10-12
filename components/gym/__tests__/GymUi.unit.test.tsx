@@ -58,5 +58,6 @@ it('retains native switches, functional segmented selections and Gym row dimensi
   expect(toggle).toHaveBeenCalledWith(false);
   await fireEvent.press(screen.getByLabelText('Mono'));
   expect(selection).toHaveBeenCalledWith('mono');
-  expect(StyleSheet.flatten(screen.getByText('Pre-carregar').props.style)).toMatchObject({ fontSize: 18, letterSpacing: 0 });
+  expect(StyleSheet.flatten(screen.getByText('Pre-carregar').props.style)).toMatchObject({ fontSize: 16, letterSpacing: 0 });
+  expect(screen.getByText('Pre-carregar').props.numberOfLines).toBe(1);
 });

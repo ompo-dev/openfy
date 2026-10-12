@@ -19,6 +19,14 @@ its controls and modal material use this same copied UI.
 actions. `SettingsRow`, `NativeSegmented` and `GlassSurfaceFallback` obtain the
 color scheme from Openfy's dark app theme instead of the device theme.
 
+Modal headers balance the leading/trailing action widths and put the close action
+opposite a single confirmation/refresh action. Row and field titles use compact
+16-point type, with one-line row titles and accessibility states for selectors.
+Streaming/download quality use the same native menu/fallback option menu as Gym's
+settings. Lyrics provider priority uses `react-native-reorderable-list` within the
+copied sheet, including long-press handles, optimistic ordering, persistence
+rollback and screen-reader reorder actions.
+
 `TextField` was extracted from the copied `settings/ApiKeysSheet.tsx` field,
 keeping its layout/styles while accepting non-secret playlist fields and logging
 input boundaries. `HeaderIconButton` is exported for playlist save/close actions

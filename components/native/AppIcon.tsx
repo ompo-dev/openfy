@@ -50,6 +50,7 @@ export type AppIconName =
   | 'volume-low'
   | 'volume-mute'
   | 'list'
+  | 'reorder-three'
   | 'grid'
   | 'time'
   | 'star'

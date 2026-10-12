@@ -69,6 +69,7 @@ export function SheetFrame({
   const [headerHeight, setHeaderHeight] = useState(0);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [scrolled, setScrolled] = useState(false);
+  const [sideWidths, setSideWidths] = useState({ leading: 44, trailing: 44 });
   const dragY = useRef(new Animated.Value(0)).current;
   const sheetRef = useRef<View>(null);
   const sheetTop = useRef(0);
@@ -129,15 +130,29 @@ export function SheetFrame({
     </LoggedPressable>
   );
 
+  const leadingAction = headerLeading || (!hideDefaultClose ? closeButton : null);
+  const trailingAction = <>{headerTrailing}{headerLeading && !hideDefaultClose ? closeButton : null}</>;
+  const sideWidth = Math.max(sideWidths.leading, sideWidths.trailing, 44);
   const header = centerTitle ? (
     <View style={styles.centerHeader}>
-      <View style={styles.headerSide}>{headerLeading}</View>
-      <AppText variant="heading" numberOfLines={1} style={styles.centerTitle}>
+      <View testID="sheet-header-leading" style={[styles.headerSide, { width: sideWidth }]}>
+        <View style={styles.actions} onLayout={({ nativeEvent }) => {
+          const width = nativeEvent.layout.width;
+          setSideWidths((current) => current.leading === width ? current : { ...current, leading: width });
+        }}>
+          {leadingAction}
+        </View>
+      </View>
+      <AppText variant="heading" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.centerTitle}>
         {title}
       </AppText>
-      <View style={[styles.headerSide, styles.headerSideEnd]}>
-        {headerTrailing}
-        {hideDefaultClose ? null : closeButton}
+      <View testID="sheet-header-trailing" style={[styles.headerSide, styles.headerSideEnd, { width: sideWidth }]}>
+        <View style={styles.actions} onLayout={({ nativeEvent }) => {
+          const width = nativeEvent.layout.width;
+          setSideWidths((current) => current.trailing === width ? current : { ...current, trailing: width });
+        }}>
+          {trailingAction}
+        </View>
       </View>
     </View>
   ) : (
@@ -363,6 +378,8 @@ const styles = StyleSheet.create({
   },
   centerTitle: {
     flex: 1,
+    minWidth: 0,
+    fontSize: 18,
     textAlign: "center",
   },
   headerSide: {
@@ -371,8 +388,6 @@ const styles = StyleSheet.create({
   },
   headerSideEnd: {
     alignItems: "flex-end",
-    flexDirection: "row",
-    gap: Spacing.two,
   },
   content: {
     flexShrink: 1,

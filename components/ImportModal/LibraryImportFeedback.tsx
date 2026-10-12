@@ -8,6 +8,7 @@ import { usePlayerStore } from '../../stores/usePlayerStore';
 import { subscribeImports, type ImportJob } from '../../services/library/libraryImports';
 import { getImportDestination, type ImportDestination } from '../../services/background/importNotifications';
 import { AppIcon, GlassSurface, LoggedPressable } from '../native';
+import { useTransientNotice } from '../../hooks/useTransientNotice';
 
 export function LibraryImportFeedback() {
   const { openDetail } = useDetailNavigation();
@@ -56,6 +57,8 @@ export function LibraryImportFeedback() {
   }, [open]);
 
   const notice = notices[0];
+  useTransientNotice(notice ? `${notice.key}:${notice.status}` : undefined,
+    () => setNotices((current) => current.filter((job) => job.key !== notice?.key)));
   if (!notice) return null;
   const dismiss = () => setNotices((current) => current.filter((job) => job.key !== notice.key));
   return <View style={[styles.position, { bottom: 176 + insets.bottom }]}>
