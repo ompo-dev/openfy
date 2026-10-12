@@ -33,12 +33,13 @@ export const loadHomeCatalog = (
   seeds: RecommendationSeed[],
   anchors: PersonalizedHomeTrack[],
   force = false,
-  onUpdate?: (catalog: HomeCatalog) => void
+  onUpdate?: (catalog: HomeCatalog) => void,
+  variation = 0
 ): Promise<HomeCatalog> => {
   const selected = seeds.filter((seed) => seed.matchArtist !== false).slice(0, 5);
   if (!selected.length) return Promise.resolve({ releases: [], similarTracks: [] });
   const key = JSON.stringify(selected.map((seed) => [seed.id, normalize(seed.name)]));
-  return cache.getOrLoad(force ? `${key}:refresh` : key, async () => {
+  return cache.getOrLoad(force ? `${key}:refresh:${variation}` : key, async () => {
     let previous: HomeCatalog | undefined;
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
@@ -66,7 +67,7 @@ export const loadHomeCatalog = (
         ? seed.id! : (await resolveTrackArtist({ id: seed.id, name: seed.name }, recording)).id;
       if (!route) return [];
       let profile: Awaited<ReturnType<typeof getYouTubeMusicArtistProfile>> | undefined;
-      try { profile = await getYouTubeMusicArtistProfile(route); } catch {}
+      try { profile = await getYouTubeMusicArtistProfile(route, force); } catch {}
       const items = profile ? [...profile.albums, ...profile.singlesAndEps] : [];
       return items.slice(0, 24).map((item) => ({
         id: item.id, title: item.title, imageURL: item.imageURL,
@@ -84,7 +85,7 @@ export const loadHomeCatalog = (
         const releases = await loadReleases(seed).catch(() => []);
         groups.set(seed.name, releases);
         onUpdate?.(snapshot());
-        const tracks = await loadHomeRadio(seed, anchors).catch(() => []);
+        const tracks = await loadHomeRadio(seed, anchors, force, variation).catch(() => []);
         if (tracks.length) radios.set(seed.name, { seed, tracks });
         onUpdate?.(snapshot());
       }

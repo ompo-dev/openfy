@@ -135,7 +135,6 @@ export const ImportModal = ({
   const inputSection = (
     <View style={styles.inputSection} onLayout={({ nativeEvent }) => setHeaderHeight(nativeEvent.layout.height)}>
       <View style={styles.inputRow}>
-        <View style={styles.inputField}>
         <TextField label="Link"
           accessibilityLabel="Link da música, álbum ou playlist"
           style={styles.textInput}
@@ -148,14 +147,12 @@ export const ImportModal = ({
           autoCorrect={false}
           returnKeyType="done"
           onSubmitEditing={() => void handleImport()}
-        />
-        </View>
-        <LoggedPressable accessibilityLabel="Colar link" disabled={isLoading}
+          trailing={<LoggedPressable accessibilityLabel="Colar link" disabled={isLoading}
           onPress={() => void handlePasteFromClipboard()}>
           <GlassSurface glass="regular" isInteractive style={styles.iconButton}>
             <Ionicons name="clipboard-outline" size={21} color="#2E9BFF" />
           </GlassSurface>
-        </LoggedPressable>
+        </LoggedPressable>} />
       </View>
       {displayedError ? <Text accessibilityRole="alert" style={styles.errorText}>{displayedError}</Text> : null}
       {!added ? <Section label="Biblioteca">
@@ -213,10 +210,9 @@ export const ImportModal = ({
 
 const styles = StyleSheet.create({
   inputSection: { gap: 12, paddingBottom: 8 },
-  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#303030', borderRadius: 18 },
+  inputRow: { backgroundColor: '#303030', borderRadius: 8, overflow: 'hidden' },
   textInput: { minWidth: 0, color: '#F2F2F2', fontFamily: 'SF-Regular' },
-  inputField: { flex: 1, minWidth: 0 },
-  iconButton: { width: 44, height: 44, marginRight: 12, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  iconButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   actionText: { color: '#FFFFFF', fontSize: 14, fontFamily: 'SF-Semibold' },
   errorText: { color: '#FF6969', fontSize: 12, fontFamily: 'SF-Regular' },
   resultsHeader: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },

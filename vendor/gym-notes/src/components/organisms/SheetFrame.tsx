@@ -103,7 +103,7 @@ export function SheetFrame({
       else Animated.spring(dragY, { toValue: 0, useNativeDriver: Platform.OS !== 'web', damping: 24, stiffness: 260 }).start();
     },
     onPanResponderTerminate: () => Animated.spring(dragY, { toValue: 0, useNativeDriver: Platform.OS !== 'web' }).start(),
-  }), [dragY, isFull, scroll]);
+  }), [dragY, isFull]);
   const scrollBottomInset = Math.max(
     contentBottomInset,
     keyboardInset > 0 ? keyboardInset + Spacing.five : 0,
@@ -216,7 +216,11 @@ export function SheetFrame({
             // Native content (a SwiftUI Form) scrolls itself and needs bounded
             // height, so fill instead of nesting it in a ScrollView. It clears
             // the floating glass header via paddingTop.
-            <View style={[styles.fill, { paddingTop: chrome ? headerHeight : 0 }]}>{children}</View>
+            <View testID="gym-sheet-custom-content" style={[styles.fill, chrome && {
+              paddingTop: headerHeight + Spacing.four,
+              paddingHorizontal: Spacing.four,
+              paddingBottom: Spacing.four + insets.bottom + scrollBottomInset,
+            }]}>{children}</View>
           )}
 
           {chrome ? <View

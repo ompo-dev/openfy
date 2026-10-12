@@ -84,7 +84,7 @@ export function SettingsRow({
           </View>
         ) : null}
         <View style={styles.text}>
-          <AppText variant="body" color={titleColor} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={styles.title}>
+          <AppText variant="body" color={titleColor} numberOfLines={1} ellipsizeMode="tail" style={styles.title}>
             {title}
           </AppText>
           {subtitle ? (
@@ -152,7 +152,7 @@ export function SettingsRow({
       ) : null}
 
       <View style={styles.text}>
-        <AppText variant="body" color={titleColor} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={styles.title}>
+        <AppText variant="body" color={titleColor} numberOfLines={1} ellipsizeMode="tail" style={styles.title}>
           {title}
         </AppText>
         {subtitle ? (
@@ -186,6 +186,8 @@ export function SettingsRow({
 
 const styles = StyleSheet.create({
   row: {
+    minWidth: 0,
+    alignSelf: 'stretch',
     minHeight: Metrics.rowMinHeight,
     flexDirection: 'row',
     alignItems: 'center',

@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import { ImportModal } from '../ImportModal';
 import { useDownloads, usePlayer } from '@context';
 import { parseSpotifyLink, upsertCatalogTracks } from '@services';
@@ -64,6 +65,15 @@ describe('music import sheet', () => {
     }));
     expect(getImportJob('spotify:track:track-id')?.status).toBe('completed');
     unsubscribe();
+  });
+
+  it('aligns paste with the link input and preserves modal side margins', async () => {
+    const screen = await render(<ImportModal visible onClose={jest.fn()} />);
+    const row = screen.getByTestId('gym-text-field-input-row');
+    expect(within(row).getByLabelText('Colar link')).toBeTruthy();
+    expect(within(row).getByLabelText('Link da música, álbum ou playlist')).toBeTruthy();
+    expect(StyleSheet.flatten(row.props.style)).toMatchObject({ flexDirection: 'row', alignItems: 'center' });
+    expect(StyleSheet.flatten(screen.getByTestId('gym-sheet-custom-content').props.style).paddingHorizontal).toBe(16);
   });
 
   it('imports album membership and opens the saved album, not another edition of the recording', async () => {

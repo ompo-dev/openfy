@@ -94,6 +94,15 @@ describe('TrackPlaylistPickerModal', () => {
     );
   });
 
+  it('places the create action before the scrolling playlist list', async () => {
+    const screen = await render(<TrackPlaylistPickerModal onClose={jest.fn()} track={track} visible />);
+    await screen.findByText('Favoritas');
+    const create = screen.getByTestId('playlist-create-shortcut');
+    const list = screen.getByTestId('playlist-picker-list');
+    expect(create.parent).toBe(list.parent);
+    expect(create.parent!.children.indexOf(create)).toBeLessThan(create.parent!.children.indexOf(list));
+  });
+
   it('shows playlist artwork from its saved tracks', async () => {
     mockGetLocalPlaylists.mockResolvedValue([
       {

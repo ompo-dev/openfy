@@ -75,6 +75,17 @@ describe('shared player modal surface', () => {
     expect(screen.getByTestId('gym-sheet-scroll')).toBeTruthy();
   });
 
+  it('gives custom scrolling content the same side margins and bottom clearance as regular sheets', async () => {
+    const screen = await render(<SheetFrame visible scroll={false} title="Letras" onClose={jest.fn()}>
+      <Text>Settings</Text>
+    </SheetFrame>);
+    const style = StyleSheet.flatten(screen.getByTestId('gym-sheet-custom-content').props.style);
+    expect(style.paddingHorizontal).toBe(16);
+    expect(style.paddingTop).toBeGreaterThanOrEqual(16);
+    expect(style.paddingBottom).toBeGreaterThanOrEqual(16);
+    expect(style.flex).toBe(1);
+  });
+
   it('lets the shared artwork flight own player presentation and dismissal without another slide', async () => {
     const onClose = jest.fn();
     const screen = await render(<PlayerModal visible fullScreen sharedArtworkTransition onRequestClose={onClose}>

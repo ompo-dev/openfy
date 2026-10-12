@@ -60,4 +60,5 @@ it('retains native switches, functional segmented selections and Gym row dimensi
   expect(selection).toHaveBeenCalledWith('mono');
   expect(StyleSheet.flatten(screen.getByText('Pre-carregar').props.style)).toMatchObject({ fontSize: 16, letterSpacing: 0 });
   expect(screen.getByText('Pre-carregar').props.numberOfLines).toBe(1);
+  expect(screen.getByText('Pre-carregar').props.adjustsFontSizeToFit).not.toBe(true);
 });

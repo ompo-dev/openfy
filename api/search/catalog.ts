@@ -843,12 +843,16 @@ const artistProfileCache = createAsyncResourceCache<YouTubeMusicArtistProfile>({
 });
 
 export const getYouTubeMusicArtistProfile = (
-  artistRouteId: string
-): Promise<YouTubeMusicArtistProfile> => artistProfileCache.getOrLoad(
-  artistIdentityKey(artistRouteId) || artistRouteId,
-  () => loadYouTubeMusicArtistProfile(artistRouteId),
-  ARTIST_PROFILE_CACHE_MS
-);
+  artistRouteId: string,
+  force = false
+): Promise<YouTubeMusicArtistProfile> => {
+  const key = artistIdentityKey(artistRouteId) || artistRouteId;
+  return artistProfileCache.getOrLoad(force ? `${key}:refresh` : key, async () => {
+    const profile = await loadYouTubeMusicArtistProfile(artistRouteId);
+    if (force) artistProfileCache.set(key, profile, ARTIST_PROFILE_CACHE_MS);
+    return profile;
+  }, force ? 0 : ARTIST_PROFILE_CACHE_MS);
+};
 
 export const getCachedYouTubeMusicArtistProfile = (artistRouteId: string) =>
   artistProfileCache.peek(artistIdentityKey(artistRouteId) || artistRouteId) ||

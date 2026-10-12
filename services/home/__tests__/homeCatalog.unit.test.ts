@@ -66,5 +66,6 @@ describe('home release catalog', () => {
     expect((await loadHomeCatalog(seeds, [], true, updates)).releases[0].id).toBe('two');
     expect(updates.mock.calls.every(([partial]) => partial.releases[0].id === 'two')).toBe(true);
     expect(getYouTubeMusicArtistProfile).toHaveBeenCalledTimes(3);
+    expect(jest.mocked(getYouTubeMusicArtistProfile).mock.calls.every(([, force]) => force === true)).toBe(true);
   });
 });

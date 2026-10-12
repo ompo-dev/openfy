@@ -142,6 +142,7 @@ export const usePersonalizedHome = () => {
       forceRefreshRef.current = false;
       if (forceRefresh) finishManualRefresh.current = null;
       const cachedSnapshot = snapshotCache.get(snapshotKey);
+      const variation = (cachedSnapshot?.snapshot.refreshRevision || 0) + (forceRefresh ? 1 : 0);
 
       if (cachedSnapshot) {
         setHome(cachedSnapshot.snapshot);
@@ -192,6 +193,10 @@ export const usePersonalizedHome = () => {
             playlists,
             profile,
             tracks,
+            seed: `${new Date().toISOString().slice(0, 10)}:${variation}`,
+            refreshRevision: variation,
+            previousRecommendationIds: forceRefresh
+              ? new Set(cachedSnapshot?.snapshot.discoveries.map((track) => track.spotifyId) || []) : undefined,
           });
         const finishLocalBuild = log.time('home', 'local recommendation snapshot build', {
           tracks: tracks.length,
@@ -229,7 +234,8 @@ export const usePersonalizedHome = () => {
           seeds,
           [...localSnapshot.continueListening, ...localSnapshot.quickPicks],
           forceRefresh,
-          (next) => { catalog = next; publish(build(latestDiscoveries)); }
+          (next) => { catalog = next; publish(build(latestDiscoveries)); },
+          variation
         ).then((next) => {
           catalog = next;
           publish(build(latestDiscoveries));
@@ -245,7 +251,8 @@ export const usePersonalizedHome = () => {
             seeds,
             new Set(tracks.map((track) => track.spotifyId)),
             settings.allowExplicitRecommendations,
-            forceRefresh
+            forceRefresh,
+            { variation, previousTrackIds: new Set(cachedSnapshot?.snapshot.discoveries.map((track) => track.spotifyId) || []) }
           );
           finishDiscoveries({ ok: true, tracks: discoveries.length });
           if (active && request === generation.current) {

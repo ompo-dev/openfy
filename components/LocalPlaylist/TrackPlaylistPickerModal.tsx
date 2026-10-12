@@ -150,12 +150,17 @@ export function TrackPlaylistPickerModal({
       <Text numberOfLines={1} style={styles.trackTitle}>
         {track.title}
       </Text>
+      <View testID="playlist-create-shortcut" style={styles.createRow}>
+        <SettingsRow title="Nova playlist" disabled={isSaving} onPress={() => setIsCreateVisible(true)}
+          leading={<SettingIcon name="add" />} trailing={<Chevron />} />
+      </View>
       {isLoading ? (
         <View style={styles.loading}>
           <ActivityIndicator color="#FFFFFF" />
         </View>
       ) : (
         <ProgressiveFlatList
+          testID="playlist-picker-list"
           listKey={track.spotifyId}
           data={playlists}
           keyExtractor={(playlist) => playlist.id}
@@ -175,7 +180,7 @@ export function TrackPlaylistPickerModal({
               }),
             ].filter(Boolean))].slice(0, 4);
             return (
-              <SettingsRow title={item.title}
+              <View style={styles.playlistRow}><SettingsRow title={item.title}
                 accessibilityLabel={
                   alreadyAdded
                     ? `${track.title} já está em ${item.title}`
@@ -197,17 +202,13 @@ export function TrackPlaylistPickerModal({
                       : 'ellipse-outline'
                   }
                   size={23}
-                />} />
+                />} /></View>
             );
           }}
           showsVerticalScrollIndicator={false}
           style={styles.list}
         />
       )}
-      <View style={styles.createRow}>
-        <SettingsRow title="Nova playlist" disabled={isSaving} onPress={() => setIsCreateVisible(true)}
-          leading={<SettingIcon name="add" />} trailing={<Chevron />} />
-      </View>
     </SheetFrame>
   );
 }
@@ -253,8 +254,9 @@ const styles = StyleSheet.create({
     height: 64,
     justifyContent: 'center',
   },
-  list: { flex: 1, minHeight: 0, marginVertical: 12, borderRadius: 22, backgroundColor: '#303030' },
-  createRow: { borderRadius: 22, backgroundColor: '#303030', overflow: 'hidden' },
+  list: { flex: 1, minHeight: 0, marginTop: 12 },
+  playlistRow: { backgroundColor: '#303030', borderRadius: 8, marginBottom: 8, overflow: 'hidden' },
+  createRow: { marginTop: 12, borderRadius: 8, backgroundColor: '#303030', overflow: 'hidden' },
   row: {
     alignItems: 'center',
     borderBottomColor: 'rgba(255,255,255,0.08)',
