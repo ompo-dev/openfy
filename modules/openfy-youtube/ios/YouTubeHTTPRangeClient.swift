@@ -58,6 +58,7 @@ private struct ContentRange {
  */
 public final class YouTubeHTTPRangeClient: Sendable {
   private let session: URLSession
+  private let cache = YouTubePlaybackRangeCache()
 
   public init(session: URLSession) {
     self.session = session
@@ -72,6 +73,11 @@ public final class YouTubeHTTPRangeClient: Sendable {
     start: Int64,
     end: Int64
   ) async throws -> Data {
+    let cacheKey = "\(descriptor.sourceURL.absoluteString):\(start)-\(end)"
+    if let cached = await cache.get(cacheKey) {
+      NSLog("[RANGE] Reused %ld cached bytes for %@", cached.count, descriptor.videoId)
+      return cached
+    }
     NSLog("[RANGE] GET bytes=%lld-%lld for %@", start, end, descriptor.videoId)
     var request = URLRequest(url: descriptor.sourceURL)
     request.httpMethod = "GET"
@@ -111,6 +117,7 @@ public final class YouTubeHTTPRangeClient: Sendable {
 
     NSLog("[RANGE] 206 bytes %lld-%lld/%lld (received %ld bytes)",
           parsed.start, parsed.end, parsed.total, data.count)
+    await cache.store(data, for: cacheKey)
     return data
   }
 

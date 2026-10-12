@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Animated, Keyboard, KeyboardAvoidingView, Modal, PanResponder, Platform, ScrollView, StyleSheet, type KeyboardEvent, View } from "react-native";
+  Animated, Keyboard, KeyboardAvoidingView, Modal, PanResponder, Platform, ScrollView, StyleSheet, type KeyboardEvent, type LayoutChangeEvent, type GestureResponderHandlers, type ModalProps, View } from "react-native";
+import Motion from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LoggedPressable } from "@/components/atoms/Logged";
@@ -16,11 +17,23 @@ import { t } from "@/i18n";
 const AnimatedSafeAreaView = Animated.createAnimatedComponent(SafeAreaView);
 
 interface SheetFrameProps {
+  testID?: string;
+  chrome?: boolean;
+  /** The cover and player surface share a single animation clock. */
+  transition?: {
+    surfaceStyle: ComponentProps<typeof Motion.View>['style'];
+    backdropStyle: ComponentProps<typeof Motion.View>['style'];
+    panHandlers: GestureResponderHandlers;
+    surfaceRef: RefObject<View | null>;
+    onSurfaceLayout: (event: LayoutChangeEvent) => void;
+    overlay?: ReactNode;
+    overlayRef?: RefObject<View | null>;
+  };
   visible: boolean;
   title: string;
   onClose: () => void;
   onDismiss?: () => void;
-  onShow?: () => void;
+  onShow?: ModalProps['onShow'];
   children: ReactNode;
   headerLeading?: ReactNode;
   headerTrailing?: ReactNode;
@@ -46,6 +59,9 @@ interface SheetFrameProps {
 }
 
 export function SheetFrame({
+  testID = 'gym-sheet-modal',
+  chrome = true,
+  transition,
   visible,
   title,
   onClose,
@@ -79,7 +95,7 @@ export function SheetFrame({
   useEffect(() => { if (visible) { dragY.setValue(0); scrollY.current = 0; } }, [visible, dragY]);
   const drag = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_, gesture) => !isFull &&
-      (gesture.y0 < sheetTop.current + 100 || (scroll && scrollY.current <= 0)) &&
+      gesture.y0 < sheetTop.current + 100 &&
       gesture.dy > 8 && gesture.dy > Math.abs(gesture.dx) * 1.4,
     onPanResponderMove: (_, gesture) => dragY.setValue(Math.max(0, gesture.dy)),
     onPanResponderRelease: (_, gesture) => {
@@ -176,6 +192,7 @@ export function SheetFrame({
         <View style={[styles.fill, { backgroundColor: colors.background }]}>
           {scroll ? (
             <ScrollView
+              testID="gym-sheet-scroll"
               style={styles.fill}
               contentContainerStyle={[
                 styles.contentFull,
@@ -199,10 +216,10 @@ export function SheetFrame({
             // Native content (a SwiftUI Form) scrolls itself and needs bounded
             // height, so fill instead of nesting it in a ScrollView. It clears
             // the floating glass header via paddingTop.
-            <View style={[styles.fill, { paddingTop: headerHeight }]}>{children}</View>
+            <View style={[styles.fill, { paddingTop: chrome ? headerHeight : 0 }]}>{children}</View>
           )}
 
-          <View
+          {chrome ? <View
             style={styles.headerBar}
             onLayout={({ nativeEvent }) =>
               setHeaderHeight(nativeEvent.layout.height)
@@ -217,7 +234,7 @@ export function SheetFrame({
             ) : null}
             {handle}
             {header}
-          </View>
+          </View> : null}
           {overlay}
           {nested}
         </View>
@@ -226,15 +243,28 @@ export function SheetFrame({
     return (
       <Modal
         visible={visible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        allowSwipeDismissal
-        testID="gym-sheet-modal"
+        animationType={transition ? 'none' : 'slide'}
+        presentationStyle={transition ? 'overFullScreen' : 'pageSheet'}
+        transparent={Boolean(transition)}
+        allowSwipeDismissal={!transition}
+        testID={testID}
         onRequestClose={onClose}
         onDismiss={onDismiss}
         onShow={onShow}
       >
-        {page}
+        {transition ? <View style={[styles.fill, { paddingTop: insets.top + 8 }]}>
+          <Motion.View pointerEvents="none" testID="player-modal-backdrop"
+            style={[StyleSheet.absoluteFill, transition.backdropStyle]} />
+          <Motion.View ref={transition.surfaceRef} collapsable={false} onLayout={transition.onSurfaceLayout}
+            {...transition.panHandlers} testID="player-modal-surface"
+            style={[styles.fill, styles.playerSurface, transition.surfaceStyle]}>{children}</Motion.View>
+          <View ref={transition.overlayRef} collapsable={false} pointerEvents="none"
+            testID="player-modal-artwork-layer" style={[StyleSheet.absoluteFill, { top: insets.top + 8 }]}>
+            {transition.overlay}
+          </View>
+          {overlay}
+          {nested}
+        </View> : <View testID={chrome ? undefined : 'player-modal-surface'} style={styles.fill}>{page}</View>}
       </Modal>
     );
   }
@@ -267,7 +297,7 @@ export function SheetFrame({
       onRequestClose={onClose}
       onDismiss={onDismiss}
       onShow={onShow}
-      testID="gym-sheet-modal"
+      testID={testID}
     >
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={[styles.modal, { backgroundColor: colors.overlay }]}>
@@ -285,8 +315,7 @@ export function SheetFrame({
           pointerEvents="box-none">
           <GlassSurface glass="regular" style={styles.sheet} testID="gym-sheet-surface">
             <View ref={sheetRef} collapsable={false} onLayout={() => sheetRef.current?.measureInWindow((_, y) => { sheetTop.current = y; })} />
-            {handle}
-            {header}
+            {chrome ? <>{handle}{header}</> : null}
             {content}
           </GlassSurface>
           {overlay}
@@ -298,6 +327,7 @@ export function SheetFrame({
 }
 
 const styles = StyleSheet.create({
+  playerSurface: { borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden', minHeight: 0 },
   modal: {
     flex: 1,
     justifyContent: "flex-end",

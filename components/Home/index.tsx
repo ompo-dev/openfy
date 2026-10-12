@@ -156,9 +156,10 @@ export const Home = () => {
 
   useFocusEffect(
     React.useCallback(() => () => {
-      resetSearch();
-      log.nav('discover search cleared on blur');
-    }, [resetSearch])
+      dismissSearchKeyboard();
+      setSuggestionsOpen(false);
+      log.nav('discover search preserved on blur');
+    }, [dismissSearchKeyboard])
   );
 
   React.useEffect(() => {

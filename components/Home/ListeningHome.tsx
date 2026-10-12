@@ -20,6 +20,8 @@ import { isTrackUnavailable } from '../../stores/useTrackAvailabilityStore';
 
 export const homeTrackToPlayer = (track: PersonalizedHomeTrack) => ({ ...track, imageURL: track.localImagePath || track.imageURL });
 const releaseLabel = (release: HomeRelease) => ({ album: 'Álbum', single: 'Single', ep: 'EP', compilation: 'Coletânea', release: 'Lançamento' })[release.releaseType];
+const shelves = <T,>(items: T[], count: number): T[][] => Array.from(
+  { length: Math.ceil(items.length / count) }, (_, index) => items.slice(index * count, (index + 1) * count));
 
 function Artwork({ uri, size, artist = false }: { uri?: string; size: number; artist?: boolean }) {
   const shape = { width: size, height: size, borderRadius: artist ? size / 2 : 6 };
@@ -88,10 +90,25 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
   const pinnedArtists = home.pinnedArtists;
   const releases = home.releases || [];
   const playlists = home.playlists || [];
-  const similar = home.similarTracks?.length ? home.similarTracks : home.discoveries;
+  const releaseShelves = shelves(releases, 6);
+  const discoveryShelves = shelves(home.discoveries, 8);
+  const spotlightArtists = new Set<string>();
+  const spotlights = releases.filter((release) => {
+    if (spotlightArtists.has(release.artistId)) return false;
+    spotlightArtists.add(release.artistId);
+    return true;
+  }).slice(0, 3);
   const discoveryArtists = home.artists.filter((artist) => !pinnedArtists.some((pinned) =>
     pinned.title.toLocaleLowerCase() === artist.title.toLocaleLowerCase())).slice(0, 6);
   const seed = home.seeds?.[0];
+  const radios = home.radios?.length ? home.radios : seed && home.similarTracks?.length
+    ? [{ seed, tracks: home.similarTracks }] : [];
+  const radioArtwork = new Set<string>();
+  const radioShelves = radios.map((radio) => ({ ...radio, suggestions: radio.tracks.filter((track) => {
+    if (radioArtwork.has(track.spotifyId)) return false;
+    radioArtwork.add(track.spotifyId);
+    return true;
+  }).slice(0, 8) }));
   const portraitCandidates = React.useMemo(() => [...pinnedArtists, ...home.artists].slice(0, 10), [pinnedArtists, home.artists]);
   const portraitsKey = portraitCandidates.map((artist) => `${artist.artistId}:${artist.title}`).join('|');
   const portraitsRef = React.useRef(portraitCandidates);
@@ -128,10 +145,10 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
     downloadState={track.isDownloaded ? 'completed' : downloads.some((download) => download.spotifyId === track.spotifyId && download.status !== 'error') ? 'active' : 'idle'}
     onDownload={() => enqueueDownloads([homeTrackToPlayer(track)])}
   />;
-  const trackTiles = (tracks: PersonalizedHomeTrack[], source: string, size: HomeCardSize = 'compact') => {
+  const trackTiles = (tracks: PersonalizedHomeTrack[], source: string, size: HomeCardSize = 'compact', selection = tracks) => {
     const cardSize = size === 'compact' ? compactTileSize : largeTileSize;
-    return tracks.map((track, index) => (
-      <LoggedPressable key={track.spotifyId} style={[styles.tile, { width: cardSize }]} accessibilityLabel={`Tocar ${track.title}, ${track.artistName}`} onPress={() => play(tracks, index, source)}>
+    return selection.map((track) => (
+      <LoggedPressable key={track.spotifyId} style={[styles.tile, { width: cardSize }]} accessibilityLabel={`Tocar ${track.title}, ${track.artistName}`} onPress={() => play(tracks, tracks.indexOf(track), source)}>
         <Artwork uri={currentTrack?.spotifyId === track.spotifyId
           ? currentTrack.localImagePath || currentTrack.imageURL || track.imageURL
           : track.localImagePath || track.imageURL} size={cardSize} />
@@ -182,52 +199,52 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
         </LoggedPressable>;
       })}</Rail>
     </Section> : null}
-    {releases.length ? <Section key="releases" title="Novos lançamentos para você" icon={<AppIcon name="sparkles" size={22} color="#1ED760" />}>
-      <Rail>{releases.map((release) => <LoggedPressable key={release.id} style={[styles.tile, { width: largeTileSize }]} accessibilityLabel={`Abrir ${releaseLabel(release)} ${release.title}`}
+    {releaseShelves.map((items, shelfIndex) => <Section key={`releases-${shelfIndex}`} title={shelfIndex === 0 ? 'Novos lançamentos para você' : 'Mais lançamentos para você'} icon={<AppIcon name="sparkles" size={22} color="#1ED760" />}>
+      <Rail>{items.map((release) => <LoggedPressable key={release.id} style={[styles.tile, { width: largeTileSize }]} accessibilityLabel={`Abrir ${releaseLabel(release)} ${release.title}`}
         onPressIn={() => prefetchDetail('album', release.id)} onPress={() => openDetail('album', release.id, 'home')}>
         <Artwork uri={release.imageURL} size={largeTileSize} />
         <Text numberOfLines={1} style={styles.tileTitle}>{release.title}</Text>
         <Text numberOfLines={1} style={styles.subtitle}>{release.artistName}</Text>
         <Text style={styles.releaseMeta}>{[releaseLabel(release), release.releaseDate.slice(0, 4)].filter(Boolean).join(' · ')}</Text>
       </LoggedPressable>)}</Rail>
-    </Section> : null}
-    {releases[0] ? <View key="spotlight" style={styles.spotlightSection}>
-      <LoggedPressable style={styles.artistHeading} accessibilityLabel={`Abrir artista ${releases[0].artistName}`} onPress={() => openDetail('artist', releases[0].artistId, 'home')}>
-        <Artwork uri={releases[0].artistImageURL} size={46} artist />
-        <View style={styles.flexCopy}><Text style={styles.subtitle}>Lançamento de</Text><Text numberOfLines={1} style={styles.artistTitle}>{releases[0].artistName}</Text></View>
+    </Section>)}
+    {spotlights.map((release) => <View key={`spotlight-${release.artistId}`} style={styles.spotlightSection}>
+      <LoggedPressable style={styles.artistHeading} accessibilityLabel={`Abrir artista ${release.artistName}`} onPress={() => openDetail('artist', release.artistId, 'home')}>
+        <Artwork uri={release.artistImageURL} size={46} artist />
+        <View style={styles.flexCopy}><Text style={styles.subtitle}>Lançamento de</Text><Text numberOfLines={1} style={styles.artistTitle}>{release.artistName}</Text></View>
       </LoggedPressable>
       <View style={styles.spotlight}>
         <LoggedPressable style={{ width: Math.min(126, (width - 36) * 0.38), minHeight: 126 }}
-          accessibilityLabel={`Abrir álbum ${releases[0].title}`} onPress={() => openDetail('album', releases[0].id, 'home')}>
-          <SkeletonImage source={{ uri: releases[0].imageURL }} cachePolicy="memory-disk" contentFit="cover" style={StyleSheet.absoluteFill} />
+          accessibilityLabel={`Abrir álbum ${release.title}`} onPress={() => openDetail('album', release.id, 'home')}>
+          <SkeletonImage source={{ uri: release.imageURL }} cachePolicy="memory-disk" contentFit="cover" style={StyleSheet.absoluteFill} />
         </LoggedPressable>
         <View style={styles.spotlightCopy}>
-          <Text style={styles.subtitle}>{releaseLabel(releases[0])}</Text>
-          <Text numberOfLines={3} style={styles.spotlightTitle}>{releases[0].title}</Text>
-          <LoggedPressable accessibilityLabel={`Tocar ${releases[0].title}`} disabled={Boolean(startingRelease)} onPress={() => void startRelease(releases[0])} style={styles.spotlightPlay}>
+          <Text style={styles.subtitle}>{releaseLabel(release)}</Text>
+          <Text numberOfLines={3} style={styles.spotlightTitle}>{release.title}</Text>
+          <LoggedPressable accessibilityLabel={`Tocar ${release.title}`} disabled={Boolean(startingRelease)} onPress={() => void startRelease(release)} style={styles.spotlightPlay}>
             <GlassSurface isInteractive style={styles.playButton}>
               <View style={styles.playForeground}>
-                {startingRelease ? <ActivityIndicator color="#FFFFFF" /> : <AppIcon name="play" size={22} color="#FFFFFF" />}
+                {startingRelease === release.id ? <ActivityIndicator color="#FFFFFF" /> : <AppIcon name="play" size={22} color="#FFFFFF" />}
               </View>
             </GlassSurface>
           </LoggedPressable>
         </View>
       </View>
-    </View> : null}
+    </View>)}
     {mostPlayed.length ? <Section key="most-played" title="Não sai do seu fone" icon={<AppIcon name="headset" size={22} color="#1ED760" />} onShowAll={() => openDetail('playlist', 'home_mix_most_played', 'home')}>
       <ProgressiveList>
       {mostPlayed.slice(0, 5).map((track, index) => renderTrack(track, index, mostPlayed, 'home:most-played'))}
       </ProgressiveList>
     </Section> : null}
-    {seed && similar.length ? <Section key="similar" title={`Parecido com ${seed.name}`} icon={<AppIcon name="radio" size={22} color="#1ED760" />}>
+    {radioShelves.map(({ seed: radioSeed, tracks, suggestions }) => <Section key={`similar-${radioSeed.id || radioSeed.name}`} title={`Parecido com ${radioSeed.name}`} icon={<AppIcon name="radio" size={22} color="#1ED760" />}>
       <Rail>
-        <LoggedPressable key="radio" style={[styles.tile, { width: largeTileSize }]} accessibilityLabel={`Abrir rádio de ${seed.name}`} onPress={() => openDetail('playlist', homeRadioPlaylistId(seed.name), 'home')}>
-          <PlaylistMosaic imageURLs={[...new Set(similar.map((track) => track.imageURL).filter(Boolean))]} size={largeTileSize} />
-          <Text style={styles.tileTitle} numberOfLines={1}>Rádio de {seed.name}</Text><Text style={styles.subtitle}>Playlist</Text>
+        <LoggedPressable key="radio" style={[styles.tile, { width: largeTileSize }]} accessibilityLabel={`Abrir rádio de ${radioSeed.name}`} onPress={() => openDetail('playlist', homeRadioPlaylistId(radioSeed.name), 'home')}>
+          <PlaylistMosaic imageURLs={[...new Set(tracks.map((track) => track.imageURL).filter(Boolean))]} size={largeTileSize} />
+          <Text style={styles.tileTitle} numberOfLines={1}>Rádio de {radioSeed.name}</Text><Text style={styles.subtitle}>Playlist</Text>
         </LoggedPressable>
-        {trackTiles(similar.slice(0, 8), 'home:similar', 'large')}
+        {trackTiles(tracks, `playlist:${homeRadioPlaylistId(radioSeed.name)}`, 'large', suggestions)}
       </Rail>
-    </Section> : null}
+    </Section>)}
     {discoveryArtists.length ? <Section key="artists" title="Artistas para descobrir" icon={<AppIcon name="sparkles" size={22} color="#1ED760" />}>
       <Rail>{discoveryArtists.map((artist) => <LoggedPressable key={artist.artistId} style={[styles.tile, { width: compactTileSize }]}
         accessibilityLabel={`Abrir artista ${artist.title}`} onPressIn={() => prefetchDetail('artist', artist.artistId)}
@@ -236,9 +253,9 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
         <Text numberOfLines={1} style={styles.compactTileTitle}>{artist.title}</Text><Text style={styles.compactSubtitle}>Artista</Text>
       </LoggedPressable>)}</Rail>
     </Section> : null}
-    {home.discoveries.length ? <Section key="discoveries" title={home.discoveryTitle} icon={<AppIcon name="disc" size={22} color="#1ED760" />} onShowAll={() => openDetail('playlist', 'home_mix_discover', 'home')}>
-      <Rail>{trackTiles(home.discoveries, 'home:discover', 'compact')}</Rail>
-    </Section> : null}
+    {discoveryShelves.map((items, shelfIndex) => <Section key={`discoveries-${shelfIndex}`} title={shelfIndex === 0 ? home.discoveryTitle : 'Mais descobertas para você'} icon={<AppIcon name="disc" size={22} color="#1ED760" />} onShowAll={() => openDetail('playlist', 'home_mix_discover', 'home')}>
+      <Rail>{trackTiles(home.discoveries, 'home:discover', 'compact', items)}</Rail>
+    </Section>)}
   </ProgressiveList>;
 }
 

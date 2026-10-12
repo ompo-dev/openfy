@@ -58,7 +58,8 @@ export function LibraryImportFeedback() {
 
   const notice = notices[0];
   useTransientNotice(notice ? `${notice.key}:${notice.status}` : undefined,
-    () => setNotices((current) => current.filter((job) => job.key !== notice?.key)));
+    () => setNotices((current) => current.filter((job) => job.key !== notice?.key)), 6000,
+    notice ? notice.status === 'completed' ? `Adicionado a biblioteca: ${notice.title}` : notice.error : undefined);
   if (!notice) return null;
   const dismiss = () => setNotices((current) => current.filter((job) => job.key !== notice.key));
   return <View style={[styles.position, { bottom: 176 + insets.bottom }]}>

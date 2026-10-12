@@ -358,6 +358,13 @@ jobs:
             scripts/check-youtube-playback-duration.swift -o "$RUNNER_TEMP/check-youtube-playback-duration"
           "$RUNNER_TEMP/check-youtube-playback-duration"
 
+      - name: Validar cache de inicializacao do streaming
+        run: |
+          xcrun swiftc -parse-as-library \
+            modules/openfy-youtube/ios/YouTubePlaybackCache.swift \
+            scripts/check-youtube-playback-cache.swift -o "$RUNNER_TEMP/check-youtube-playback-cache"
+          "$RUNNER_TEMP/check-youtube-playback-cache"
+
       - name: Conferir resposta PCM do equalizador
         run: |
           xcrun clang -std=c11 -Wall -Wextra -Werror \
@@ -389,6 +396,7 @@ jobs:
             -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
             -import-objc-header node_modules/expo-audio/ios/AudioTapProcessor.h \
             modules/openfy-youtube/ios/YouTubeRequestRetry.swift \
+            modules/openfy-youtube/ios/YouTubePlaybackCache.swift \
             modules/openfy-youtube/ios/YouTubePlaybackDurationPolicy.swift \
             modules/openfy-youtube/ios/YouTubeStreamDescriptor.swift \
             modules/openfy-youtube/ios/YouTubeHTTPRangeClient.swift \

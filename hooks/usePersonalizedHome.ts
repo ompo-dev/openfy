@@ -180,6 +180,7 @@ export const usePersonalizedHome = () => {
         let catalog: HomeCatalog = {
           releases: cachedSnapshot?.snapshot.releases || [],
           similarTracks: cachedSnapshot?.snapshot.similarTracks || [],
+          radios: cachedSnapshot?.snapshot.radios || [],
         };
         const build = (discoveries: PersonalizedHomeTrack[]) =>
           buildPersonalizedHome({
@@ -227,7 +228,8 @@ export const usePersonalizedHome = () => {
         const catalogRequest = loadHomeCatalog(
           seeds,
           [...localSnapshot.continueListening, ...localSnapshot.quickPicks],
-          forceRefresh
+          forceRefresh,
+          (next) => { catalog = next; publish(build(latestDiscoveries)); }
         ).then((next) => {
           catalog = next;
           publish(build(latestDiscoveries));

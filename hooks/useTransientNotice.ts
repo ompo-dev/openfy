@@ -2,9 +2,12 @@ import { useEffect, useRef } from 'react';
 import { AccessibilityInfo } from 'react-native';
 
 /** Repeated renders do not extend the same notice indefinitely. */
-export function useTransientNotice(identity: string | undefined, dismiss: () => void, duration = 6000) {
+export function useTransientNotice(identity: string | undefined, dismiss: () => void, duration = 6000, announcement?: string) {
   const current = useRef({ identity, dismiss });
   current.current = { identity, dismiss };
+  useEffect(() => {
+    if (identity && announcement) AccessibilityInfo.announceForAccessibility(announcement);
+  }, [identity, announcement]);
   useEffect(() => {
     if (!identity) return;
     let active = true;

@@ -14,7 +14,7 @@ type SheetFrameProps = React.ComponentProps<typeof GymSheetFrame> & {
 
 /** Gym owns presentation and layout; this bridge only bounds Openfy's virtualized content. */
 export function SheetFrame({ children, contentHeight, artworkURL: _artworkURL, closeLabel: _closeLabel,
-  centerTitle = true, keyboardAwareScroll = true, size = 'sheet', scroll = true, ...props }: SheetFrameProps) {
+  centerTitle = true, keyboardAwareScroll = true, size = 'full', scroll = true, ...props }: SheetFrameProps) {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const boundedHeight = contentHeight === undefined ? undefined : Math.min(contentHeight,

@@ -43,6 +43,7 @@ public final class OpenfyNativeYouTubePlayer {
   private var streamDurationSeconds = 0.0
   private var catalogDurationSeconds = 0.0
   private var didJustFinish = false
+  private var reportedFirstAudio = false
   private var channelProcessor: AudioTapProcessor?
   private var mono = false
   private var equalizer: [Double] = [1, 0]
@@ -84,6 +85,7 @@ public final class OpenfyNativeYouTubePlayer {
   }
 
   public var onPlaybackEnded: (() -> Void)?
+  public var onDiagnostic: ((String, Double, String) -> Void)?
   public var onNextTrack: (() -> Void)?
   public var onPreviousTrack: (() -> Void)?
 
@@ -98,9 +100,11 @@ public final class OpenfyNativeYouTubePlayer {
     prefetchedAudio: Data? = nil,
     onInitialAudio: (@Sendable (Data) -> Void)? = nil
   ) async throws {
+    let startedAt = Date()
     // 1. Clean up any existing playback session
     stop()
     didJustFinish = false
+    reportedFirstAudio = false
     nowPlayingMetadata = metadata
     streamDurationSeconds = descriptor.durationMs / 1000.0
     catalogDurationSeconds = metadata.durationMs / 1000.0
@@ -148,11 +152,15 @@ public final class OpenfyNativeYouTubePlayer {
     }
 
     // Diagnostic KVO state observations
-    itemStatusObserver = item.observe(\.status, options: [.new]) { item, _ in
+    itemStatusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
       switch item.status {
       case .readyToPlay:
         NSLog("[PLAYER] item.status = readyToPlay")
-        Task { @MainActor [weak self] in self?.updateNowPlayingInfo() }
+        Task { @MainActor [weak self] in
+          guard let self, self.player === player else { return }
+          self.onDiagnostic?("item-ready", Date().timeIntervalSince(startedAt) * 1000, descriptor.videoId)
+          self.updateNowPlayingInfo()
+        }
       case .failed:
         NSLog("[PLAYER] item.status = failed, error: %@", item.error?.localizedDescription ?? "nil")
       case .unknown:
@@ -162,7 +170,7 @@ public final class OpenfyNativeYouTubePlayer {
       }
     }
 
-    timeControlStatusObserver = player.observe(\.timeControlStatus, options: [.new]) { player, _ in
+    timeControlStatusObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
       switch player.timeControlStatus {
       case .playing:
         NSLog("[PLAYER] timeControlStatus = playing")
@@ -174,7 +182,14 @@ public final class OpenfyNativeYouTubePlayer {
       @unknown default:
         break
       }
-      Task { @MainActor [weak self] in self?.updateNowPlayingInfo() }
+      Task { @MainActor [weak self] in
+        guard let self, self.player === player else { return }
+        if player.timeControlStatus == .playing && !self.reportedFirstAudio {
+          self.reportedFirstAudio = true
+          self.onDiagnostic?("first-audio", Date().timeIntervalSince(startedAt) * 1000, descriptor.videoId)
+        }
+        self.updateNowPlayingInfo()
+      }
     }
 
     updateNowPlayingInfo()
@@ -184,6 +199,7 @@ public final class OpenfyNativeYouTubePlayer {
     )
     try await setChannelMode(mono ? "mono" : "stereo")
     guard self.player === player else { return }
+    onDiagnostic?("processing-ready", Date().timeIntervalSince(startedAt) * 1000, descriptor.videoId)
     player.playImmediately(atRate: playbackRate)
   }
 

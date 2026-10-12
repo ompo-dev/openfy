@@ -1488,9 +1488,8 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   style={styles.scrolledMiniPlayer}
                 />
               ) : (
-                <Text style={styles.headerContext} numberOfLines={1}>
-                  {currentTrack.title || 'Reproduzindo'}
-                </Text>
+                <MarqueeText testID="player-title-marquee" text={currentTrack.title || 'Reproduzindo'}
+                  align="center" scrollMode="left" active={visible} style={styles.headerContext} />
               )}
             </View>
             <PlayerGlassButton
@@ -2041,8 +2040,8 @@ const styles = StyleSheet.create({
   },
   headerContext: {
     color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 17,
+    fontWeight: '600',
     letterSpacing: 0,
     marginTop: 0,
   },

@@ -90,6 +90,7 @@ public final class OpenfyYouTubeModule: Module {
 
   private static let rangeClient = YouTubeHTTPRangeClient(session: session)
   private static let preloadedStreams = NativeYouTubePreloadStore()
+  private static let guestSession = YouTubeGuestSession()
   private var mediaSuggestionObserver: NSObjectProtocol?
   @MainActor private var playbackGeneration = 0
   @MainActor
@@ -104,6 +105,9 @@ public final class OpenfyYouTubeModule: Module {
     player.onPreviousTrack = { [weak self] in
       self?.sendEvent("onNativeRemotePrevious")
     }
+    player.onDiagnostic = { [weak self] stage, elapsedMs, videoId in
+      self?.sendEvent("onNativePlaybackDiagnostic", ["stage": stage, "durationMs": elapsedMs, "videoId": videoId])
+    }
     return player
   }()
 
@@ -114,6 +118,7 @@ public final class OpenfyYouTubeModule: Module {
       "onNativePlaybackEnded",
       "onNativeRemoteNext",
       "onNativeRemotePrevious",
+      "onNativePlaybackDiagnostic",
       "onSuggestedMediaPlayback"
     )
 
@@ -243,6 +248,7 @@ public final class OpenfyYouTubeModule: Module {
     let quality = metadata["quality"] ?? "high"
     let key = "\(quality):\(videoId)"
     let staged = await Self.preloadedStreams.get(key)
+    let resolutionStarted = Date()
     let descriptor: YouTubeStreamDescriptor
     if let staged {
       descriptor = staged.descriptor
@@ -253,6 +259,8 @@ public final class OpenfyYouTubeModule: Module {
     }
     NSLog("[NATIVE] Using %@ stream preparation for %@", staged == nil ? "fresh" : "preloaded", videoId)
     guard generation == playbackGeneration else { throw CancellationError() }
+    sendEvent("onNativePlaybackDiagnostic", ["stage": "descriptor-resolved",
+      "durationMs": Date().timeIntervalSince(resolutionStarted) * 1000, "cached": staged != nil, "videoId": videoId])
 
     try await self.nativePlayer.setChannelMode(metadata["channelMode"] ?? "stereo")
     guard generation == playbackGeneration else { throw CancellationError() }
@@ -524,14 +532,14 @@ public final class OpenfyYouTubeModule: Module {
     }
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
-    request.timeoutInterval = 10
+    request.timeoutInterval = 3
     request.setValue(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
       forHTTPHeaderField: "User-Agent"
     )
     request.setValue("en-US", forHTTPHeaderField: "Accept-Language")
     request.setValue("https://www.youtube.com/sw.js", forHTTPHeaderField: "Referer")
-    let (data, response) = try await YouTubeRequestRetry.data(for: request, session: session)
+    let (data, response) = try await YouTubeRequestRetry.data(for: request, session: session, maximumAttempts: 1)
     guard let httpResponse = response as? HTTPURLResponse,
       (200...299).contains(httpResponse.statusCode),
       let body = String(data: data, encoding: .utf8) else {
@@ -551,15 +559,18 @@ public final class OpenfyYouTubeModule: Module {
   private static func guestPlayerResponse(
     videoId: String
   ) async throws -> (payload: [String: Any], response: HTTPURLResponse) {
-    let visitorData = try? await freshVisitorData()
+    let visitorData = await guestSession.get()
     let initial = try await playerResponse(videoId: videoId, visitorData: visitorData)
-    guard playerStatus(from: initial.payload) == "LOGIN_REQUIRED",
-      let responseContext = initial.payload["responseContext"] as? [String: Any],
-      let issuedVisitor = responseContext["visitorData"] as? String,
-      !issuedVisitor.isEmpty else {
-      return initial
+    let responseContext = initial.payload["responseContext"] as? [String: Any]
+    let issuedVisitor = responseContext?["visitorData"] as? String
+    await guestSession.store(issuedVisitor)
+    guard playerStatus(from: initial.payload) == "LOGIN_REQUIRED" else { return initial }
+    if let issuedVisitor, !issuedVisitor.isEmpty, issuedVisitor != visitorData {
+      return try await playerResponse(videoId: videoId, visitorData: issuedVisitor)
     }
-    return try await playerResponse(videoId: videoId, visitorData: issuedVisitor)
+    guard let refreshed = try? await guestSession.refresh({ try await freshVisitorData() }),
+      refreshed != visitorData else { return initial }
+    return try await playerResponse(videoId: videoId, visitorData: refreshed)
   }
 
   private static func playerResponse(
@@ -602,7 +613,7 @@ public final class OpenfyYouTubeModule: Module {
 
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
-    request.timeoutInterval = 15
+    request.timeoutInterval = 8
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.setValue("*/*", forHTTPHeaderField: "Accept")
     for (name, value) in GuestPlayerClient.mediaHeaders {
@@ -615,7 +626,7 @@ public final class OpenfyYouTubeModule: Module {
     }
     request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-    let (data, response) = try await YouTubeRequestRetry.data(for: request, session: session)
+    let (data, response) = try await YouTubeRequestRetry.data(for: request, session: session, maximumAttempts: 2)
     guard let httpResponse = response as? HTTPURLResponse else {
       throw transferError("player_non_http_response")
     }

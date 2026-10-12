@@ -196,6 +196,27 @@ describe('queue preload window', () => {
     expect(downloadTrack).not.toHaveBeenCalled();
   });
 
+  it('defers lyric providers and neighbor warmups until the selected stream actually plays', async () => {
+    let status!: NonNullable<Parameters<typeof loadAndPlay>[1]>;
+    jest.mocked(loadAndPlay).mockImplementationOnce(async (_source, update) => {
+      status = update!;
+      status({ ...DEFAULT_STATE, isBuffering: true });
+      return true;
+    });
+    await usePlayerStore.getState().playWithQueue(tracks, 0);
+    await flushAsync();
+    expect(fetchLyrics).not.toHaveBeenCalled();
+    expect(preloadAudio).not.toHaveBeenCalled();
+    status({ ...DEFAULT_STATE, isLoaded: true, isPlaying: true });
+    await flushAsync();
+    expect(fetchLyrics).toHaveBeenCalled();
+    expect(preloadAudio).toHaveBeenCalled();
+    const calls = jest.mocked(fetchLyrics).mock.calls.filter(([title]) => title === tracks[0].title).length;
+    status({ ...DEFAULT_STATE, isLoaded: true, isPlaying: true, positionMs: 1000 });
+    await flushAsync();
+    expect(jest.mocked(fetchLyrics).mock.calls.filter(([title]) => title === tracks[0].title)).toHaveLength(calls);
+  });
+
   it('starts explicit playback without waiting for a neighbor decoder preload', async () => {
     let finishPreload!: () => void;
     jest.mocked(preloadAudio).mockImplementation(() => new Promise<void>((resolve) => { finishPreload = resolve; }));

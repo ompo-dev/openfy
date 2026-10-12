@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, within } from '@testing-library/react-native';
 import { Settings } from '../Settings';
 import { DEFAULT_APP_SETTINGS } from '../../../services/settings/appSettings';
 import { useAppModalStore } from '../../gym';
@@ -40,6 +40,8 @@ it('automatically clears a transient settings notice', async () => {
   const screen = await render(<Settings onClose={() => {}} />);
   await fireEvent.press(screen.getByLabelText('Limpar logs'));
   expect(screen.getByText('Logs da sessão limpos.')).toBeTruthy();
+  expect(within(screen.getByTestId('gym-sheet-scroll')).queryByText('Logs da sessão limpos.')).toBeNull();
+  expect(screen.getByText('Logs da sessão limpos.').props.accessibilityRole).not.toBe('alert');
   await act(() => jest.advanceTimersByTime(6000));
   expect(screen.queryByText('Logs da sessão limpos.')).toBeNull();
   await screen.unmount();

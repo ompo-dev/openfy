@@ -35,6 +35,7 @@ export type NativeYouTubePreloadResult = { bytes: number };
 export type NativeYouTubePlaybackEvent =
   | 'onNativePlaybackEnded'
   | 'onNativeRemoteNext'
+  | 'onNativePlaybackDiagnostic'
   | 'onNativeRemotePrevious';
 
 type NativeSubscription = { remove(): void };
@@ -72,7 +73,7 @@ type OpenfyYouTubeNativeModule = {
   getNativePlaybackStatusAsync?(): Promise<unknown>;
   addListener?(
     eventName: NativeYouTubePlaybackEvent,
-    listener: () => void
+    listener: (payload?: unknown) => void
   ): NativeSubscription;
 };
 
@@ -243,7 +244,7 @@ Promise<NativeYouTubePlaybackStatus | null> => {
 
 export const addNativeYouTubePlaybackListener = (
   eventName: NativeYouTubePlaybackEvent,
-  listener: () => void
+  listener: (payload?: unknown) => void
 ): NativeSubscription | null => {
   try {
     return getNativeModule()?.addListener?.(eventName, listener) || null;

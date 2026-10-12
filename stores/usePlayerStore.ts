@@ -845,11 +845,12 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       return null;
     })();
 
+    let lyricsStarted = false;
     const startLyricsLoading = () => {
+      if (lyricsStarted || get().activeRequestId !== requestId) return;
+      lyricsStarted = true;
       void get().refreshLyrics();
     };
-
-    startLyricsLoading();
 
     // Execute Audio resolution
     const finishResolution = log.time('player', 'audio source resolution', {
@@ -872,6 +873,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     }
 
     if (!streamSource) {
+      startLyricsLoading();
       finishTransition({ ok: false, stage: 'source-resolution' });
       console.warn(
         `[PlayerStore #${requestId}] Failed to resolve audio for: "${track.title}"`
@@ -927,6 +929,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const failPlayback = async () => {
       if (get().activeRequestId !== requestId || playbackFailureHandled) return;
       playbackFailureHandled = true;
+      startLyricsLoading();
       if (useConnectivityStore.getState().status !== 'offline') markTrackUnavailable(track, 'playback-failed');
       set({ isLoadingAudio: false, playerState: { ...DEFAULT_STATE, error: 'Áudio indisponível. Edite o link do YouTube.' } });
       await unload();
@@ -994,6 +997,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
       if (state.isPlaying && !didStartPlayback) {
         didStartPlayback = true;
+        startLyricsLoading();
         log.player('audio playback started', { trackId: track.spotifyId,
           durationMs: Date.now() - requestedAt, mediaDurationMs: currentDuration });
         warmQueueNeighbors(get().queue, get().queueIndex);
@@ -1186,14 +1190,12 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       }).catch(() => {});
       void ensurePlaybackDiagnostics(track).catch(() => {});
       recordInteraction(track, 'play').catch(() => {});
-      warmQueueNeighbors(get().queue, get().queueIndex);
       set((state) => ({
         isLoadingAudio: false,
         history: [track, ...state.history.slice(0, 49)],
       }));
 
     } else {
-      startLyricsLoading();
       void ensurePlaybackDiagnostics(track).catch(() => {});
       // A native file load error must not resolve a different online recording.
       if (activeStreamUri.startsWith('file:')) { await failPlayback(); return; }

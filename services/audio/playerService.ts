@@ -768,7 +768,13 @@ const loadAndPlayNativeYouTube = async (
     const previous = addNativeYouTubePlaybackListener('onNativeRemotePrevious', () => {
       runRemoteCommand('previous');
     });
-    nativeYouTubeSubscriptions = [ended, next, previous].filter(
+    const diagnostic = addNativeYouTubePlaybackListener('onNativePlaybackDiagnostic', (payload?: unknown) => {
+      if (generation === loadGeneration && payload && typeof payload === 'object' &&
+          'videoId' in payload && payload.videoId === videoId) {
+        log.player('native startup stage', { ...payload });
+      }
+    });
+    nativeYouTubeSubscriptions = [ended, next, previous, diagnostic].filter(
       (subscription): subscription is { remove(): void } => Boolean(subscription)
     );
 

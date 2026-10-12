@@ -73,6 +73,7 @@ export type HomeRelease = {
 export type HomeCatalog = {
   releases: HomeRelease[];
   similarTracks: PersonalizedHomeTrack[];
+  radios?: { seed: RecommendationSeed; tracks: PersonalizedHomeTrack[] }[];
 };
 
 export type PersonalizedHomeSnapshot = {
@@ -89,6 +90,7 @@ export type PersonalizedHomeSnapshot = {
   pinnedArtists: PersonalizedHomeArtist[];
   releases: HomeRelease[];
   similarTracks: PersonalizedHomeTrack[];
+  radios?: { seed: RecommendationSeed; tracks: PersonalizedHomeTrack[] }[];
   seeds: RecommendationSeed[];
   tracksById: Map<string, LibraryTrack>;
 };
@@ -395,7 +397,7 @@ export const buildPersonalizedHome = ({
       : remoteDiscoveries.length
         ? remoteDiscoveries
       : rankedLibrary.filter((track) => !recentIds.has(track.spotifyId)),
-    12
+    32
   );
   const albums = groupLocalAlbums(tracks)
     .sort((first, second) => {
@@ -472,6 +474,9 @@ export const buildPersonalizedHome = ({
     pinnedTracks: mostPlayed.slice(0, 4),
     pinnedArtists,
     releases: catalog?.releases || [],
+    radios: catalog?.radios?.map((radio) => ({ ...radio,
+      tracks: diverseTracks(radio.tracks.filter((track) => allowExplicitRecommendations || !track.explicit), 20),
+    })).filter((radio) => radio.tracks.length),
     similarTracks: diverseTracks((catalog?.similarTracks || remoteDiscoveries).filter((track) =>
       allowExplicitRecommendations || !track.explicit
     ), 16),

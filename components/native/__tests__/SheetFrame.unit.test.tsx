@@ -18,7 +18,7 @@ describe('shared player modal surface', () => {
   afterEach(() => jest.restoreAllMocks());
   it('fits short content in a transparent sheet and closes with the supplied action', async () => {
     const onClose = jest.fn();
-    const screen = await render(<SheetFrame visible title="Artistas" onClose={onClose}><Text>Contents</Text></SheetFrame>);
+    const screen = await render(<SheetFrame visible size="sheet" title="Artistas" onClose={onClose}><Text>Contents</Text></SheetFrame>);
     const modal = screen.getByTestId('gym-sheet-modal');
     expect(modal.props.animationType).toBe('slide');
     expect(modal.props.transparent).toBe(true);
@@ -58,13 +58,21 @@ describe('shared player modal surface', () => {
     expect(content.flexShrink).toBe(1);
   });
 
-  it('keeps the music player in a full native page sheet', async () => {
+  it('uses the shared Gym modal for the player with header-only dismissal', async () => {
     const onClose = jest.fn();
     const screen = await render(<PlayerModal visible fullScreen onRequestClose={onClose}><Text>Player</Text></PlayerModal>);
-    expect(screen.getByTestId('player-modal').props.presentationStyle).toBe('pageSheet');
-    expect(screen.getByTestId('player-modal').props.transparent).not.toBe(true);
+    expect(screen.getByTestId('player-modal').props.presentationStyle).toBe('overFullScreen');
+    expect(screen.getByTestId('player-modal').props.transparent).toBe(true);
     expect(StyleSheet.flatten(screen.getByTestId('player-modal-surface').props.style).flex).toBe(1);
-    expect(screen.getByTestId('player-modal').props.allowSwipeDismissal).toBe(true);
+    expect(screen.getByTestId('player-modal').props.allowSwipeDismissal).toBe(false);
+  });
+
+  it('defaults queue, imports and settings to the main Gym page presentation', async () => {
+    const screen = await render(<SheetFrame visible title="Fila" onClose={jest.fn()}><Text>Contents</Text></SheetFrame>);
+    const modal = screen.getByTestId('gym-sheet-modal');
+    expect(modal.props.presentationStyle).toBe('pageSheet');
+    expect(modal.props.transparent).toBe(false);
+    expect(screen.getByTestId('gym-sheet-scroll')).toBeTruthy();
   });
 
   it('lets the shared artwork flight own player presentation and dismissal without another slide', async () => {
@@ -118,9 +126,10 @@ describe('shared player modal surface', () => {
       <Text>Player</Text>
     </PlayerModal>;
     const screen = await render(view());
-    const pan = create.mock.calls.at(-1)![0];
+    const pan = create.mock.calls.find(([config]) => config.onPanResponderGrant)![0];
     const event = {} as any;
-    const gesture = { y0: 300, dy: 40, dx: 0, vy: 0 } as any;
+    const gesture = { y0: 50, dy: 40, dx: 0, vy: 0 } as any;
+    expect(pan.onMoveShouldSetPanResponderCapture!(event, { ...gesture, y0: 300, dy: 160, vy: 2 })).toBe(false);
     expect(pan.onMoveShouldSetPanResponderCapture!(event, gesture)).toBe(true);
     await act(() => {
       pan.onPanResponderGrant!(event, gesture);
@@ -176,7 +185,7 @@ describe('shared player modal surface', () => {
     const screen = await render(<PlayerModal visible fullScreen sharedArtworkTransition scrollOffset={offset}>
       <Text>Player</Text>
     </PlayerModal>);
-    const pan = create.mock.calls.at(-1)![0];
+    const pan = create.mock.calls.find(([config]) => config.onPanResponderGrant)![0];
     const event = {} as any;
     const down = { y0: 50, dy: 30, dx: 0, vy: 0 } as any;
     expect(pan.onMoveShouldSetPanResponderCapture!(event, down)).toBe(true);
@@ -198,7 +207,7 @@ describe('shared player modal surface', () => {
 
   it('dismisses a fitted sheet by tapping outside it', async () => {
     const onClose = jest.fn();
-    const screen = await render(<SheetFrame visible title="Test" onClose={onClose}><Text>Contents</Text></SheetFrame>);
+    const screen = await render(<SheetFrame visible size="sheet" title="Test" onClose={onClose}><Text>Contents</Text></SheetFrame>);
     await fireEvent.press(screen.getByTestId('gym-sheet-backdrop'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });

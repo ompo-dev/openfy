@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { fireEvent, render } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { ListeningHome } from '../ListeningHome';
 import { EMPTY_PERSONALIZED_HOME, type PersonalizedHomeSnapshot, type PersonalizedHomeTrack } from '../../../services/home/personalizedHome';
 import { getPlayerAlbum } from '../../../services/library/playerAlbum';
@@ -73,6 +73,21 @@ describe('ListeningHome', () => {
   it('shows a skeleton while initial data is loading', async () => {
     const view = await render(<ListeningHome home={EMPTY_PERSONALIZED_HOME} loading />);
     expect(view.getByTestId('home-skeleton')).toBeTruthy();
+  });
+
+  it('shows multiple different radio and discovery shelves and plays the complete radio queue', async () => {
+    const second = { ...song, spotifyId: 'two', title: 'Outra', artistName: 'Sotam' };
+    const discoveries = Array.from({ length: 17 }, (_, index) => ({ ...song, spotifyId: `discovery-${index}`, title: `Descoberta ${index}` }));
+    const expanded = { ...home, discoveries, radios: [
+      { seed: { name: 'Ebony', score: 1 }, tracks: [song] },
+      { seed: { name: 'Sotam', score: 1 }, tracks: [song, second] },
+    ] };
+    const view = await render(<ListeningHome home={expanded} loading={false} />);
+    expect(await view.findByText('Parecido com Ebony')).toBeTruthy();
+    expect(await view.findByText('Parecido com Sotam')).toBeTruthy();
+    await waitFor(() => expect(view.getAllByText('Mais descobertas para você')).toHaveLength(2));
+    await fireEvent.press(await view.findByLabelText('Tocar Outra, Sotam'));
+    expect(mockPlay).toHaveBeenCalledWith([song, second], 1, expect.stringMatching(/^playlist:home_mix_radio_/));
   });
 
   it('opens dynamic listening collections as playlist pages, not modals', async () => {

@@ -39,3 +39,15 @@ it('gives screen-reader users more time and leaves no timer after unmount', asyn
   expect(dismiss).toHaveBeenCalledTimes(1);
   jest.useRealTimers();
 });
+
+it('announces a notice without moving accessibility focus or resetting it on rerender', async () => {
+  const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+  const focus = jest.spyOn(AccessibilityInfo, 'setAccessibilityFocus');
+  const hook = await renderHook(() => useTransientNotice('notice', jest.fn(), 6000, 'Saved'));
+  await hook.rerender();
+  expect(announce).toHaveBeenCalledTimes(1);
+  expect(announce).toHaveBeenCalledWith('Saved');
+  expect(focus).not.toHaveBeenCalled();
+  await hook.unmount();
+  jest.useRealTimers();
+});

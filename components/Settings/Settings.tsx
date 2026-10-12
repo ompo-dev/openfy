@@ -140,7 +140,7 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
   const [diagnosticsText, setDiagnosticsText] = React.useState<string | null>(null);
   const [clearingImages, setClearingImages] = React.useState(false);
   const [notice, setNotice] = React.useState('');
-  useTransientNotice(notice || undefined, () => setNotice(''));
+  useTransientNotice(notice || undefined, () => setNotice(''), 6000, notice);
   const [saving, setSaving] = React.useState(false);
   const capabilities = getAudioCapabilities();
   const qualityOptions = (['high', 'economy'] as const).map((value) => ({ value, label: value === 'economy' ? 'Economia' : AUDIO_QUALITY_LABELS[value] }));
@@ -340,7 +340,7 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
         {notice ? <GlassSurface glass="regular" style={[styles.noticePosition, { bottom: insets.bottom + 16 }]}>
           <LoggedPressable accessibilityRole="button" accessibilityLabel="Dispensar aviso"
             onPress={() => setNotice('')} style={styles.notice}>
-            <Text accessibilityRole="alert" style={styles.noticeText}>{notice}</Text>
+            <Text accessibilityLiveRegion="polite" style={styles.noticeText}>{notice}</Text>
             <AppIcon name="close" size={18} color="#FFFFFF" />
           </LoggedPressable>
         </GlassSurface> : null}
