@@ -6,7 +6,7 @@ export const extrapolateLyricPosition = (positionMs: number, elapsedMs: number, 
   positionMs + Math.max(0, Math.min(750, elapsedMs)) * rate;
 
 export const useLyricClock = (positionMs: number, active: boolean, playing: boolean, rate: number,
-  words?: LyricSegment['words'], trackId?: string) => {
+  words?: LyricSegment['words'], trackId?: string, surface?: 'expanded' | 'preview') => {
   const [clock, setClock] = React.useState(positionMs);
   React.useEffect(() => {
     setClock(positionMs);
@@ -16,8 +16,8 @@ export const useLyricClock = (positionMs: number, active: boolean, playing: bool
     return () => clearInterval(timer);
   }, [positionMs, active, playing, rate, words]);
   React.useEffect(() => {
-    if (active && words?.length) log.player('lyrics word renderer active', { trackId, words: words.length,
+    if (active && words?.length) log.player('lyrics word renderer active', { trackId, surface, renderer: 'react-native', words: words.length,
       syllables: words.reduce((count, word) => count + (word.syllables?.length || 1), 0) });
-  }, [active, words, trackId]);
+  }, [active, words, trackId, surface]);
   return active && playing && words?.length ? clock : positionMs;
 };

@@ -47,3 +47,14 @@ Verificacao automatizada cobre as dependencias entre jobs, ausencia de export
 web/reinstalacao na publicacao, artefato do mesmo run, cache de transformacoes,
 health/updateId e preservacao do keepalive/cleanup. Export local nao verifica
 assinatura ou execucao dos binarios iOS/Android.
+
+## Resultado no CI
+
+[Run 92](https://github.com/ompo-dev/openfy/actions/runs/38198263388), commit
+adf14d0ab87eb5ffda3bf0d434a8d2005515eb26, concluiu os sete jobs com sucesso,
+incluindo OTA, IPA, APK e verificacoes de audio nativo. A etapa de abrir a
+janela iniciou em 137 segundos (2:17 desde a criacao), contra 338 segundos
+(5:38) no run 91: 201 segundos a menos antes da janela. Export nativo demorou
+76 segundos, contra 189 segundos do export anterior com web. A janela
+continua aberta durante dez minutos. Esse run confirma a otimizacao do CI,
+mas nao confirma a correcao visual da letra expandida relatada depois dele.

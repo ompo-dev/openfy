@@ -261,3 +261,26 @@ assets foram verificados pelo servidor real, runtime 1.0.2 (34 assets iOS e
 38 Android, alem dos bundles). Scripts bash do workflow passaram na checagem
 de sintaxe. A disponibilidade da janela e os builds assinados continuam sendo
 criterios do CI, e render/blur/rede/escuta reais exigem hardware iOS/Android.
+
+## Follow-up: letra expandida no iPhone
+
+O usuario confirmou que a previa RN funcionava, mas ainda encontrou duplicacao,
+palavras sem destaque e linha ativa borrada na tela expandida. A primeira
+correcao por chave do Text nao foi suficiente. O caminho de palavras SwiftUI
+foi retirado: a tela expandida agora usa os mesmos word runs React Native da
+previa, em um componente compartilhado entre plataformas. No iOS, SwiftUI
+recebe somente strings simples de linhas inativas que precisam de blur;
+nunca recebe palavras/gradientes, e a arvore com blur sai ao ativar a linha.
+A linha ativa ignora blur mesmo se uma prop atrasada o solicitar.
+
+Vocais de apoio usam o mesmo renderer e respeitam a desativacao do destaque.
+O objeto de backing vocals permanece estavel entre status de audio, evitando
+atualizacoes do bridge em todas as linhas inativas a cada tick. Novos testes
+comparam a arvore de palavras da previa e da tela expandida em fronteiras,
+seek e ciclos de foco. Logs de foco distinguem `surface: preview/expanded` e
+`renderer: react-native`, sem eventos por frame nem corpo de letras.
+A verificacao visual em hardware ainda e necessaria.
+
+Follow-up verificado com 830 testes Jest aprovados (117 suites, 24 ignoradas),
+TypeScript e lint sem erros e export iOS/Android/web concluido. O CI verde do
+run 92 corresponde ao commit anterior; esta correcao recebe um novo run.

@@ -1634,11 +1634,11 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                       >
                         {item.kind === 'lyric' ? (
                           <SyncedLyricText active={isActive} words={lyricsWordHighlight ? item.words : undefined}
-                            fontSize={lyricsFontSize}
+                            fontSize={lyricsFontSize} wordHighlight={lyricsWordHighlight}
                             positionMs={isActive ? playerState.positionMs - lyricsOffsetMs : 0}
                             playing={visible && showLyricsFull && playerState.isPlaying && !playerState.isBuffering}
                             playbackSpeed={playbackSpeed} trackId={currentTrack.spotifyId}
-                            background={item.background ? { ...item.background, words: lyricsWordHighlight ? item.background.words : undefined } : undefined}
+                            background={item.background}
                             blurred={blurInactiveLyrics && !isActive && !isLyricsUserScrolling}>
                             {item.text}
                           </SyncedLyricText>

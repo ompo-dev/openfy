@@ -10,7 +10,7 @@ type Props = Pick<SyncedLyricTextProps, 'children' | 'active' | 'words' | 'posit
 
 export const TimedLyricPreview = React.memo(function TimedLyricPreview({ children, active, words,
   positionMs = 0, playing = false, playbackSpeed = 1, trackId, ...textProps }: Props) {
-  const clock = useLyricClock(positionMs, active, playing, playbackSpeed, words, trackId);
+  const clock = useLyricClock(positionMs, active, playing, playbackSpeed, words, trackId, 'preview');
   const runs = active ? getLyricWordRuns(children, words, clock) : [];
   return <Text {...textProps} ellipsizeMode="tail">{runs.length ? renderLyricWordRuns(runs) : children}</Text>;
 });

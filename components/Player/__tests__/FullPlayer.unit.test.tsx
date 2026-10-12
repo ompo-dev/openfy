@@ -724,7 +724,7 @@ describe('FullPlayer artist row and YouTube source', () => {
       const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
       await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
       const blurRadii = () => ['Current line', 'Next line'].map((text) =>
-        screen.getByText(text).props.modifiers.find((modifier: { $type: string }) => modifier.$type === 'blur').radius
+        screen.getByText(text).props.modifiers?.find((modifier: { $type: string }) => modifier.$type === 'blur')?.radius ?? 0
       );
       expect(blurRadii()).toEqual([0, 3]);
       await fireEvent(screen.getByTestId('player-synced-lyrics'), 'scrollBeginDrag');
