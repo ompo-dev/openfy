@@ -6,10 +6,10 @@ import Animated, {
   Easing,
   runOnJS,
   useAnimatedStyle,
-  useReducedMotion,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
+import { useMotionPreferences as useReducedMotion } from '../../hooks/useMotionPreferences';
 
 export type ArtworkFrame = { x: number; y: number; width: number; height: number };
 type Frame = ArtworkFrame;

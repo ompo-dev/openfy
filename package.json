@@ -79,7 +79,8 @@
     "jest-expo": "~57.0.2",
     "patch-package": "^8.0.1",
     "test-renderer": "^1.2.0",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "yaml": "2.9.0"
   },
   "private": true
 }

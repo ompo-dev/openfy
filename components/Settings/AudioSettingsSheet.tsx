@@ -71,6 +71,8 @@ export const AudioSettingsSheet = ({ visible, onClose }: { visible: boolean; onC
         change('equalizerToneX', 0); change('equalizerToneY', 0); change('audioBalance', 0); }} />}>
     <NumericSlider label="Velocidade" value={settings.playbackSpeed} min={0.5} max={2} step={0.05} suffix="x"
       disabled={!capabilities.speed} onChange={(value) => change('playbackSpeed', value)} />
+    <NumericSlider label="Alcance do pre-carregamento" value={settings.preloadRadius} min={1} max={3} step={1}
+      disabled={!settings.preloadNextTrack} onChange={(value) => change('preloadRadius', value)} />
     <View style={styles.row}><Text style={styles.label}>Equalizador</Text>
       <Switch accessibilityLabel="Equalizador" disabled={unavailable} value={settings.equalizerEnabled}
         trackColor={{ true: '#1DB954', false: '#45454A' }} onValueChange={(value) => change('equalizerEnabled', value)} /></View>

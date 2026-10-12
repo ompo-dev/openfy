@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { LoggedPressable } from './Logged';
 import { GlassSurface } from './GlassSurface';
 import { AppIcon } from './AppIcon';
+import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 import {
   IOS_NATIVE_ENABLED,
   SwiftButton,
@@ -15,9 +16,9 @@ import {
   swiftTint,
 } from './nativeUI';
 
-export function glassCircleModifiers(size: number, tint?: string) {
+export function glassCircleModifiers(size: number, tint?: string, reduceBlur = false) {
   return [
-    swiftButtonStyle?.('glass'),
+    swiftButtonStyle?.(reduceBlur ? 'bordered' : 'glass'),
     swiftButtonBorderShape?.('circle'),
     swiftControlSize?.(size >= 44 ? 'extraLarge' : 'large'),
     swiftLabelStyle?.('iconOnly'),
@@ -41,6 +42,7 @@ export function NativeIconButton({
   size?: number;
   onPress: () => void;
 }) {
+  const reduceBlur = useAppSettingsStore((state) => state.settings.reduceDynamicBlur);
   const box = { width: size, height: size };
 
   if (IOS_NATIVE_ENABLED && systemImage) {
@@ -51,7 +53,7 @@ export function NativeIconButton({
             label={label}
             systemImage={systemImage}
             onPress={onPress}
-            modifiers={glassCircleModifiers(size, tint)}
+            modifiers={glassCircleModifiers(size, tint, reduceBlur)}
           />
         </SwiftHost>
       </View>

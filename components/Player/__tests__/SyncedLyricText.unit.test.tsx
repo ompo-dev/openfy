@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Hoisted Jest factories model the native renderer. */
 import * as React from 'react';
 import { act, render, renderHook } from '@testing-library/react-native';
 import { SyncedLyricText } from '../SyncedLyricText.ios';
@@ -5,7 +6,31 @@ import { useLyricClock } from '../useLyricClock';
 
 jest.mock('@expo/ui/swift-ui', () => {
   const { View, Text } = require('react-native');
-  return { Host: View, VStack: View, Text };
+  const React = require('react');
+  // Model Expo's retained native `text` field when a mounted node gains children.
+  const NativeText = (props: any) => {
+    const previousText = React.useRef('');
+    const previousChildren = React.useRef(null);
+    if (typeof props.children === 'string') previousText.current = props.children;
+    else previousChildren.current = props.children;
+    return React.createElement(Text, props, previousText.current, previousChildren.current);
+  };
+  return { Host: View, VStack: View, Text: NativeText };
+});
+
+it('never appends stale native text during plain/word/plain switches and restores blur', async () => {
+  const words = [{ text: 'Hello', startTimeMs: 1000, endTimeMs: 2000 },
+    { text: 'world', startTimeMs: 2000, endTimeMs: 3000 }];
+  const screen = await render(<SyncedLyricText active={false} blurred words={words}>Hello world</SyncedLyricText>);
+  for (let index = 0; index < 4; index++) {
+    await screen.rerender(<SyncedLyricText active blurred={false} words={words} positionMs={1500}>Hello world</SyncedLyricText>);
+    expect(screen.getAllByText('Hello world')).toHaveLength(1);
+    await screen.rerender(<SyncedLyricText active={false} blurred words={words}>Hello world</SyncedLyricText>);
+    expect(screen.getAllByText('Hello world')).toHaveLength(1);
+    expect(screen.getByText('Hello world').props.modifiers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ $type: 'blur', radius: 3 }),
+    ]));
+  }
 });
 
 it('sweeps across supplied word durations in the native renderer without changing spacing', async () => {
@@ -17,6 +42,22 @@ it('sweeps across supplied word durations in the native renderer without changin
   expect(screen.getByText('world').props.modifiers).toEqual([expect.objectContaining({ $type: 'foregroundStyle', color: 'rgba(255,255,255,0.48)' })]);
   await screen.rerender(<SyncedLyricText active blurred={false} words={words} positionMs={3000}>Hello world</SyncedLyricText>);
   expect(screen.getByText('world').props.modifiers).toEqual([expect.objectContaining({ $type: 'foregroundStyle', color: '#FFFFFF' })]);
+});
+
+it('remounts when corrected provider words replace a plain fallback and scales backing vocals', async () => {
+  const screen = await render(<SyncedLyricText active blurred={false} words={[
+    { text: 'Unmatched', startTimeMs: 1000, endTimeMs: 2000 },
+  ]}>Hello world</SyncedLyricText>);
+  await screen.rerender(<SyncedLyricText active blurred={false} fontSize={34} words={[
+    { text: 'Hello', startTimeMs: 1000, endTimeMs: 2000 },
+    { text: 'world', startTimeMs: 2000, endTimeMs: 3000 },
+  ]} background={{ text: 'Harmony', words: [{ text: 'Harmony', startTimeMs: 1000, endTimeMs: 3000 }] }}>
+    Hello world
+  </SyncedLyricText>);
+  expect(screen.getAllByText('Hello world')).toHaveLength(1);
+  expect(screen.getByText('Harmony').parent?.props.modifiers).toEqual(expect.arrayContaining([
+    expect.objectContaining({ $type: 'font', size: 34 * 19 / 26 }),
+  ]));
 });
 
 it('interpolates only the active line, stops on pause and resynchronizes on seek and rate changes', async () => {

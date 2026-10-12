@@ -4,9 +4,11 @@ import { isLiquidGlassAvailable } from 'expo-glass-effect';
 import { StyleSheet, View } from 'react-native';
 import { GlassSurfaceFallback } from '../native/GlassSurfaceFallback';
 import type { MiniPlayerSurfaceProps } from './MiniPlayerSurface';
+import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 
 export const MiniPlayerSurface = ({ children, style, ...rest }: MiniPlayerSurfaceProps) => {
-  if (!isLiquidGlassAvailable()) {
+  const reduceBlur = useAppSettingsStore((state) => state.settings.reduceDynamicBlur);
+  if (reduceBlur || !isLiquidGlassAvailable()) {
     return <GlassSurfaceFallback glass="regular" style={style} {...rest}>{children}</GlassSurfaceFallback>;
   }
 

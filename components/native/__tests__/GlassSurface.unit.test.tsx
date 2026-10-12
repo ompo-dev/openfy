@@ -8,6 +8,7 @@ import { isLiquidGlassAvailable } from 'expo-glass-effect';
 import { GlassBackdrop, GlassBackdropProvider, GlassBackdropScope, WithoutGlassBackdrop } from '../GlassBackdrop';
 import { GlassScreenBackdrop } from '../GlassScreenBackdrop';
 import { GLASS_MATERIALS, glassTint, supportsAndroidGlassBlur } from '../glassMaterial';
+import { useAppSettingsStore } from '../../../stores/useAppSettingsStore';
 
 jest.mock('expo-blur', () => {
   const React = require('react');
@@ -36,9 +37,24 @@ function platform(os: string, version: number = 35) {
 }
 afterEach(() => {
   platform(originalOS, originalVersion as number);
+  useAppSettingsStore.setState((state) => ({ settings: { ...state.settings, reduceDynamicBlur: false } }));
 });
 
 describe('portable glass material', () => {
+  it.each(['web', 'android', 'ios'])('removes blur and capture in %s only when explicitly requested', async (os) => {
+    platform(os);
+    const screen = await render(<GlassBackdropScope><GlassBackdrop><Text>Artwork</Text></GlassBackdrop>
+      <AppleGlassSurface testID="material" style={{ borderRadius: 22, padding: 12 }}><Text>Control</Text></AppleGlassSurface>
+    </GlassBackdropScope>);
+    await act(() => useAppSettingsStore.setState((state) => ({ settings: { ...state.settings, reduceDynamicBlur: true } })));
+    expect(screen.queryByTestId('capture')).toBeNull();
+    expect(screen.queryByTestId('glass-live-blur', hidden)).toBeNull();
+    const surface = screen.getByTestId('material');
+    expect(surface.props.glassEffectStyle).toBeUndefined();
+    expect(surface.props.intensity).toBeUndefined();
+    expect(StyleSheet.flatten(surface.props.style)).toMatchObject({ backgroundColor: '#303034', borderRadius: 22, padding: 12 });
+    expect(screen.getByText('Control')).toBeTruthy();
+  });
   it('uses light blur for controls and stronger diffusion for sheets', () => {
     expect(GLASS_MATERIALS.clear.blur).toBeLessThan(GLASS_MATERIALS.regular.blur);
     expect(GLASS_MATERIALS.regular.blur).toBeLessThan(GLASS_MATERIALS.thick.blur);

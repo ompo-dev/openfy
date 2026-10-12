@@ -182,3 +182,82 @@ preexistentes). Export dos bundles Hermes iOS/Android e web (19 rotas) concluido
 O export nao substitui o build nativo. O aviso appleTeamId e esperado no ambiente
 local sem credenciais; o CI/CD configura a assinatura pelo fluxo existente.
 Rede iOS e animacao em hardware continuam a exigir dispositivo.
+
+## Correcao do renderer e segunda auditoria do desktop
+
+O log de Hotel Caro continha uma letra lrc.red valida, com 54 linhas e 408
+palavras. A duplicacao das capturas nao era outra busca ou texto repetido do
+provedor: o Text do ExpoUI mantinha sua propriedade nativa `text` ao trocar
+uma string por filhos Text. O renderer agora remonta somente quando muda a
+representacao plain/timed, inclusive nos vocais de apoio. O blur continua
+nativo; nenhum timing foi inventado para letras simples.
+
+A previa abaixo da capa usa os mesmos runs e relogio de palavras, respeitando
+pausa, seek, velocidade e offset. O seletor consulta fontes habilitadas em ate
+tres tarefas concorrentes e mostra somente respostas validas para a faixa.
+Fechar/trocar faixa cancela a descoberta, que nao altera a escolha salva. As
+falhas permanecem nos logs, nao como opcoes sem letra. A localizacao do cliente
+YouTube Music agora preserva getLyrics; o wrapper anterior descartava o metodo.
+Bini pode repetir uma busca sem a embalagem opcional do album, mas conserva
+matching de titulo/artista/duracao e ISRC quando fornecido.
+
+Catalogo, busca por video e importacao compartilham uma sessao leve do YouTube
+e metadados por video (ate 128 entradas, uma hora). Essa sessao nao busca player
+JS e nao armazena URLs de audio como metadados. Autorizacao/decipher de audio
+conserva seu cliente independente. Como na referencia, o resolver nao visita
+perfis, letras ou related/next antes de liberar audio. A sondagem JS caiu de
+dois blocos de 1 MiB para duas amostras de 16 KiB, ainda verificando a fronteira
+de autorizacao de 1 MiB. Arquivos comprovadamente menores nao recebem um Range
+alem do fim. Recusas 403 continuam sendo recusas, nao fontes reproduziveis.
+O streaming iOS existente responde progressivamente em blocos de 128 KiB e
+reutiliza o prefixo preparado; esta entrega nao troca isso por download completo.
+
+Revisado novamente DesktopApp.kt, DesktopAppearanceSettings.kt e os fluxos
+Innertube/StreamResolver/PlayerClient da copia local, sem copiar implementacao.
+A matriz abaixo impede confundir equivalencia de preferencias com paridade
+de motores ou com controles especificos de uma janela desktop.
+
+| Preferencia do desktop | Estado real no Openfy |
+| --- | --- |
+| Equalizador de sete bandas, presets, tonalidade/foco e balanco | Implementado nos tres motores; requer binario nativo com patch |
+| Mono/estereo, velocidade | Implementado; validacao de capacidade e rollback |
+| Qualidade de streaming e download | Alta/economia com efeito no resolver; YouTube nao e lossless |
+| Letras/fontes/sincronizacao/offset | Implementado; provedores disponiveis por gravacao |
+| Destaque palavra a palavra | Novo controle; aplica no modal e na previa |
+| Blur de letras inativas | Implementado no renderer de cada plataforma |
+| Tamanho da letra e acompanhamento automatico | Novos controles; fonte 18-34 e scroll opcional |
+| Reducao de animacoes | Novo controle; combinado com preferencia do sistema em listas, modal e transicoes de capa |
+| Reducao de blur dinamico | Novo controle; materiais portaveis/Apple, botoes SwiftUI, mini player, chrome do player e captura Android |
+| Fundo com cores da capa | Novo controle; desliga inclusive o fallback da capa na folha |
+| Alcance do aquecimento | Novo controle de 1-3 vizinhos por direcao; apenas a proxima faixa aquece letras |
+| Shuffle e repeat | Controles existentes da fila; ainda sem sub-tela/persistencia equivalente ao desktop |
+| Autoplay relacionado e evitar repeticoes de sugestoes na sessao | Pendente; exige coordenar expansao da fila, contexto e cancelamento |
+| Sleep timer | Pendente; prazo deve ser cumprido em segundo plano pelo motor nativo |
+| Crossfade, Automix e orcamento de analise | Pendente; dois decoders e analise de transicao, nao simples fade |
+| Skip silence e normalizacao medida | Pendente; analise/PCM e coordenacao de seek |
+| Stereo widening e Atmos | Pendente; nao rotular fontes AAC/Opus comuns como Atmos |
+| Limite de cache de audio em disco | Pendente; downloads permanentes sao diferentes de cache evictavel |
+| Gerenciar armazenamento/limpar imagens | Gerenciador existente e nova limpeza Expo Image iOS/Android; nao apaga arquivos da biblioteca nem simula limpeza do browser |
+| Pasta local/todas as pastas/filtro de nao-musica | Pendente; permissoes e adaptadores de arquivos por plataforma |
+| Idioma do app/traducao das letras | Pendente; cobertura transversal e provedor de traducao |
+| Capa full-bleed/Canvas | Pendente; altera geometria/transicoes ou exige fonte de video |
+| Dispositivo de saida/precisao PCM | Pendente; capacidades e formato negociado, nunca apenas preferencia visual |
+| Fontes de audio adicionais e ordem | YouTube continua a fonte de audio; adaptadores externos pendentes |
+| Estatisticas de codec/bitrate/sample rate no player | Diagnosticos existentes; overlay e metadados completos de formato pendentes |
+| Titulo da janela, Mica/Acrylic, tray e fechar para tray | Especificos do desktop; sem equivalencia no iPhone |
+| Contas, scrobbling, Discord, rede e salas | Fora do escopo confirmado |
+
+As sete preferencias novas sao persistidas, normalizadas e registradas pelo
+sistema de logs. As funcionalidades marcadas pendentes nao foram expostas como
+switches sem efeito. A melhoria de latencia precisa ser medida em rede e hardware
+de destino; reduzir trabalho/bytes nao garante um prazo fixo para todo video.
+
+Verificacao desta entrega (2026-10-11/12): 828 testes Jest aprovados em 117
+suites, 24 testes/suites ignorados pelo projeto; 16 testes Node do OTA;
+TypeScript sem erros e lint sem erros (42 avisos existentes). Export Hermes
+iOS/Android e web com 19 rotas concluido. O export nativo separado foi
+compactado/restaurado como o artefato do CI: manifests e hashes de todos os
+assets foram verificados pelo servidor real, runtime 1.0.2 (34 assets iOS e
+38 Android, alem dos bundles). Scripts bash do workflow passaram na checagem
+de sintaxe. A disponibilidade da janela e os builds assinados continuam sendo
+criterios do CI, e render/blur/rede/escuta reais exigem hardware iOS/Android.

@@ -43,6 +43,7 @@ import {
 import { formatStorageSize, StorageManagerModal } from './StorageManagerModal';
 import { AudioSettingsSheet } from './AudioSettingsSheet';
 import { LyricsSettingsSheet } from './LyricsSettingsSheet';
+import { clearImageCache } from '../../services/images/imagePrefetch';
 
 type LibrarySummary = {
   downloads: number;
@@ -61,7 +62,7 @@ const SettingRow = ({
   onValueChange,
   value,
 }: {
-  description: string;
+  description?: string;
   icon: React.ComponentProps<typeof AppIcon>['name'];
   label: string;
   onValueChange: (value: boolean) => void;
@@ -73,7 +74,7 @@ const SettingRow = ({
     </View>
     <View style={styles.settingCopy}>
       <Text style={styles.settingLabel}>{label}</Text>
-      <Text style={styles.settingDescription}>{description}</Text>
+      {description ? <Text style={styles.settingDescription}>{description}</Text> : null}
     </View>
     <Switch
       accessibilityLabel={label}
@@ -87,12 +88,14 @@ const SettingRow = ({
 
 const ActionRow = ({
   detail,
+  disabled = false,
   destructive = false,
   icon,
   label,
   onPress,
 }: {
   detail?: string;
+  disabled?: boolean;
   destructive?: boolean;
   icon: React.ComponentProps<typeof AppIcon>['name'];
   label: string;
@@ -101,6 +104,8 @@ const ActionRow = ({
   <LoggedPressable
     accessibilityLabel={label}
     accessibilityRole="button"
+    accessibilityState={{ disabled }}
+    disabled={disabled}
     onPress={onPress}
     style={({ pressed }) => [styles.actionRow, pressed && styles.rowPressed]}
   >
@@ -140,6 +145,7 @@ export const Settings = () => {
   const developerVisible = settings.developerTools;
   const [qualityPicker, setQualityPicker] = React.useState<'streamingQuality' | 'downloadQuality' | null>(null);
   const [diagnosticsText, setDiagnosticsText] = React.useState<string | null>(null);
+  const [clearingImages, setClearingImages] = React.useState(false);
   const [notice, setNotice] = React.useState('');
   const [saving, setSaving] = React.useState(false);
   const capabilities = getAudioCapabilities();
@@ -197,6 +203,15 @@ export const Settings = () => {
         ? 'Não foi possível processar esta fonte em mono. Permita o áudio no navegador; fontes externas precisam de CORS. A preferência anterior foi mantida.'
         : String(error));
     } finally { setSaving(false); }
+  };
+
+  const clearArtworkCache = async () => {
+    if (clearingImages) return;
+    setClearingImages(true);
+    setNotice('');
+    try { await clearImageCache(); setNotice('Cache de imagens limpo.'); }
+    catch (error) { setNotice(String(error)); }
+    finally { setClearingImages(false); }
   };
 
   const showAudioDiagnostics = () => {
@@ -391,6 +406,15 @@ export const Settings = () => {
         </Section>
 
         <Section title="APARÊNCIA">
+          <SettingRow icon="options" label="Reduzir animacoes"
+            value={settings.reduceAnimations} onValueChange={change('reduceAnimations')} />
+          <View style={styles.separator} />
+          <SettingRow icon="eye" label="Reduzir blur dinamico"
+            value={settings.reduceDynamicBlur} onValueChange={change('reduceDynamicBlur')} />
+          <View style={styles.separator} />
+          <SettingRow icon="palette" label="Fundo com a capa no player"
+            value={settings.artworkBackdrop} onValueChange={change('artworkBackdrop')} />
+          <View style={styles.separator} />
           <ActionRow icon="chatbubble-ellipses-outline" label="Letras e provedores" onPress={() => setLyricsVisible(true)} />
           <View style={styles.separator} />
           <SettingRow icon="eye" label="Blur nas letras inativas"
@@ -427,13 +451,18 @@ export const Settings = () => {
           <Text selectable numberOfLines={2} style={styles.storagePath}>
             {storage.directory || 'Armazenamento interno do app'}
           </Text>
+          {Platform.OS !== 'web' ? <>
+            <View style={styles.separator} />
+            <ActionRow icon="trash" label="Limpar cache de imagens" disabled={clearingImages}
+              detail={clearingImages ? 'Aguarde' : undefined} onPress={() => void clearArtworkCache()} />
+          </> : null}
         </Section>
 
         <Section title="ATUALIZAÇÕES">
           <SettingRow
             description="Detecta a janela temporária publicada pelo CI e avisa quando for preciso reabrir o app."
             icon="download"
-            label="Verificar ao voltar ao app"
+            label="Avisos de atualizacao do CI"
             onValueChange={change('automaticUpdates')}
             value={settings.automaticUpdates}
           />

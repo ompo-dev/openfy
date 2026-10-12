@@ -325,6 +325,23 @@ describe('queue preload window', () => {
     );
   });
 
+  it('limits source preparation to the configured radius without reloading playback', async () => {
+    await updateAppSettings({ preloadRadius: 1 });
+    await usePlayerStore.getState().playWithQueue(tracks, 2, 'library:radius');
+    await flushAsync();
+    expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Atual.m4a', 8);
+    expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Mais uma.m4a', 8);
+    expect(preloadAudio).not.toHaveBeenCalledWith('https://media.test/Anterior.m4a', expect.anything());
+    expect(preloadAudio).not.toHaveBeenCalledWith('https://media.test/Última.m4a', expect.anything());
+    jest.mocked(loadAndPlay).mockClear();
+    await updateAppSettings({ preloadRadius: 3 });
+    await flushAsync();
+    expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Anterior.m4a', 8);
+    expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Última.m4a', 8);
+    expect(loadAndPlay).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().currentTrack).toBe(tracks[2]);
+  });
+
   it('keeps the current audio and position while queuing the rest of its album', async () => {
     const current = tracks[2];
     const state = { ...DEFAULT_STATE, isLoaded: true, isPlaying: true, positionMs: 67000 };

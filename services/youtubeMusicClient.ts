@@ -1,4 +1,4 @@
-import { createYouTubeMusicClient } from './youtubeMusicRuntime';
+import { getYouTubeDiscoveryClient } from './youtubeDiscoveryClient';
 import { localizeYouTubeMusicClient } from './youtubeMusicLocalization';
 
 export type YouTubeMusicArtistRef = {
@@ -203,13 +203,7 @@ let clientPromise: Promise<YouTubeMusicClient> | null = null;
 export const getYouTubeMusicClient = (): Promise<YouTubeMusicClient> => {
   if (!clientPromise) {
     // Keep discovery's heavier client out of eager module and player initialization.
-    clientPromise = createYouTubeMusicClient({
-      lang: 'pt',
-      location: 'BR',
-      generate_session_locally: false,
-      retrieve_innertube_config: true,
-      retrieve_player: false,
-    }).then((client) => localizeYouTubeMusicClient(client, getYouTubeMusicText)).catch((error) => {
+    clientPromise = getYouTubeDiscoveryClient().then((client) => localizeYouTubeMusicClient(client, getYouTubeMusicText)).catch((error) => {
       clientPromise = null;
       throw error;
     });

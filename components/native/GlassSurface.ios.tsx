@@ -1,6 +1,7 @@
 import { GlassView, type GlassStyle, isLiquidGlassAvailable } from 'expo-glass-effect';
 
 import { GlassSurfaceFallback, type GlassSurfaceProps } from './GlassSurfaceFallback';
+import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 
 /**
  * iOS surface. On iOS 26+ it renders the real system Liquid Glass.
@@ -16,7 +17,8 @@ export function GlassSurface({
   children,
   ...rest
 }: GlassSurfaceProps) {
-  if (!isLiquidGlassAvailable()) {
+  const reduceBlur = useAppSettingsStore((state) => state.settings.reduceDynamicBlur);
+  if (reduceBlur || !isLiquidGlassAvailable()) {
     return (
       <GlassSurfaceFallback
         glass={glass}

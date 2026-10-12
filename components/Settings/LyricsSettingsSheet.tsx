@@ -32,6 +32,14 @@ export const LyricsSettingsSheet = ({ visible, onClose }: { visible: boolean; on
       value={settings.lyricsEnabled} onValueChange={(value) => change('lyricsEnabled', value)} /></View>
     <View style={styles.row}><Text style={styles.label}>Preferir sincronizadas</Text><Switch accessibilityLabel="Preferir letras sincronizadas"
       value={settings.lyricsPreferSynced} onValueChange={(value) => change('lyricsPreferSynced', value)} /></View>
+    <View style={styles.row}><Text style={styles.label}>Destaque por palavra</Text><Switch accessibilityLabel="Destaque por palavra"
+      value={settings.lyricsWordHighlight} onValueChange={(value) => change('lyricsWordHighlight', value)} /></View>
+    <View style={styles.row}><Text style={styles.label}>Rolagem automatica</Text><Switch accessibilityLabel="Rolagem automatica da letra"
+      value={settings.lyricsAutoScroll} onValueChange={(value) => change('lyricsAutoScroll', value)} /></View>
+    <View style={styles.row}><Text style={styles.label}>Tamanho da letra</Text><Text style={styles.value}>{settings.lyricsFontSize}</Text></View>
+    <Slider accessibilityLabel="Tamanho da letra" minimumValue={18} maximumValue={34} step={1}
+      value={settings.lyricsFontSize} onSlidingComplete={(value) => change('lyricsFontSize', value)}
+      minimumTrackTintColor="#1DB954" maximumTrackTintColor="#55555B" thumbTintColor="#FFFFFF" style={styles.slider} />
     <View style={styles.row}><Text style={styles.label}>Atraso da letra</Text><Text style={styles.value}>{offset} ms</Text>
       <NativeIconButton label="Zerar atraso" iconName="refresh" systemImage="arrow.counterclockwise"
         onPress={() => change('lyricsOffsetMs', 0)} /></View>

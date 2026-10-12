@@ -136,7 +136,7 @@ describe('resolveDirectYouTubeAudio', () => {
     }));
     expect(global.fetch).toHaveBeenCalledWith(
       'https://media.youtube.test/working.m4a',
-      expect.objectContaining({ headers: expect.objectContaining({ Range: 'bytes=0-1048575' }) })
+      expect.objectContaining({ headers: expect.objectContaining({ Range: 'bytes=0-16383' }) })
     );
   });
 
@@ -384,14 +384,14 @@ describe('resolveDirectYouTubeAudio', () => {
     });
     mockCreate.mockResolvedValue({ getStreamingData });
     (global.fetch as jest.Mock)
-      // first probe (bytes 0–1 MiB) → passes
+      // First 16 KiB sample passes.
       .mockResolvedValueOnce({
         ok: true,
         status: 206,
         headers: { get: () => 'audio/mp4' },
-        arrayBuffer: async () => new ArrayBuffer(1_048_576),
+        arrayBuffer: async () => new ArrayBuffer(16_384),
       })
-      // second probe (bytes 1 MiB–2 MiB) → GVS 403
+      // Sample after the 1 MiB authorization boundary returns GVS 403.
       .mockResolvedValueOnce({
         ok: false,
         status: 403,

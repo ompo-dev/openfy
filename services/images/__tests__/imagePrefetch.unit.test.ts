@@ -1,6 +1,6 @@
-jest.mock('expo-image', () => ({ Image: { prefetch: jest.fn() } }));
+jest.mock('expo-image', () => ({ Image: { prefetch: jest.fn(), clearMemoryCache: jest.fn(), clearDiskCache: jest.fn() } }));
 import { Image } from 'expo-image';
-import { _clearImagePrefetchForTests, prefetchImage, prefetchImages } from '../imagePrefetch';
+import { _clearImagePrefetchForTests, clearImageCache, prefetchImage, prefetchImages } from '../imagePrefetch';
 
 const flush = async () => {
   for (let index = 0; index < 8; index += 1) await Promise.resolve();
@@ -10,6 +10,8 @@ describe('image bytes prefetch', () => {
   beforeEach(() => {
     _clearImagePrefetchForTests();
     jest.mocked(Image.prefetch).mockReset().mockResolvedValue(true);
+    jest.mocked(Image.clearMemoryCache).mockReset().mockResolvedValue(true);
+    jest.mocked(Image.clearDiskCache).mockReset().mockResolvedValue(true);
   });
 
   it('coalesces repeated artwork and uses the same cache policy as the UI', async () => {
@@ -17,6 +19,22 @@ describe('image bytes prefetch', () => {
     await prefetchImage('https://img.test/album.jpg');
     expect(Image.prefetch).toHaveBeenCalledTimes(1);
     expect(Image.prefetch).toHaveBeenCalledWith('https://img.test/album.jpg', { cachePolicy: 'memory-disk' });
+  });
+
+  it('clears both disposable caches and invalidates prefetch records, not local library paths', async () => {
+    await prefetchImage('https://img.test/cover.jpg');
+    await clearImageCache();
+    expect(Image.clearMemoryCache).toHaveBeenCalledTimes(1);
+    expect(Image.clearDiskCache).toHaveBeenCalledTimes(1);
+    await prefetchImage('https://img.test/cover.jpg');
+    expect(Image.prefetch).toHaveBeenCalledTimes(2);
+    await prefetchImage('file:///library/cover.jpg');
+    expect(Image.prefetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not report success when the platform cannot clear its cache', async () => {
+    jest.mocked(Image.clearDiskCache).mockResolvedValue(false);
+    await expect(clearImageCache()).rejects.toThrow('Nao foi possivel limpar');
   });
 
   it('does not fetch local files or empty images', async () => {

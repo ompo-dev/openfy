@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Animated, Easing, FlatList, Platform, type FlatListProps, type ListRenderItem } from 'react-native';
-import { useReducedMotion } from 'react-native-reanimated';
+import { useMotionPreferences as useReducedMotion } from '../../hooks/useMotionPreferences';
 
 const REVEAL_INTERVAL = 45;
 

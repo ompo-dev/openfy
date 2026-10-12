@@ -1,6 +1,7 @@
 import React from 'react';
 import { Animated, KeyboardAvoidingView, Modal, PanResponder, Platform, Pressable, StyleSheet, View, useWindowDimensions, type ModalProps } from 'react-native';
-import Motion, { cancelAnimation, useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, type SharedValue } from 'react-native-reanimated';
+import Motion, { cancelAnimation, useAnimatedStyle, useSharedValue, withSpring, type SharedValue } from 'react-native-reanimated';
+import { useMotionPreferences as useReducedMotion } from '../../hooks/useMotionPreferences';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WithoutGlassBackdrop } from './GlassBackdrop';
 

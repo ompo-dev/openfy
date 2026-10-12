@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Platform, StyleSheet, useColorScheme, View, type ViewProps, type ViewStyle } from 'react-native';
 import { useGlassBackdrop } from './GlassBackdrop';
 import { GLASS_MATERIALS, glassTint, supportsAndroidGlassBlur, type GlassKind } from './glassMaterial';
+import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 
 /** The Liquid Glass styles mirrored here so non-iOS files never import expo-glass-effect. */
 export type { GlassKind } from './glassMaterial';
@@ -28,6 +29,8 @@ export const GlassSurfaceFallback = React.memo(function GlassSurfaceFallback({
 }: GlassSurfaceProps) {
   const dark = useColorScheme() === 'dark';
   const target = useGlassBackdrop();
+  const reduceBlur = useAppSettingsStore((state) => state.settings.reduceDynamicBlur);
+  if (reduceBlur) return <View {...rest} style={[styles.base, style, styles.solid]}>{children}</View>;
   // Preserve pre-iOS-26 native UIBlurEffect as well as the iOS-26 GlassView path.
   if (Platform.OS === 'ios') {
     return <BlurView intensity={glass === 'clear' ? 20 : glass === 'thick' ? 60 : 40}
@@ -72,6 +75,7 @@ export const GlassSurfaceFallback = React.memo(function GlassSurfaceFallback({
 });
 
 const styles = StyleSheet.create({
+  solid: { backgroundColor: '#303034' },
   base: {
     overflow: 'hidden',
   },

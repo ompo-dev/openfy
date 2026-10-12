@@ -1,9 +1,4 @@
-/**
- * FullPlayer Component — Apple Music & Liquid Glass Design System
- * Matches the official iOS Apple Music player and synced lyrics experience.
- * Includes Dolby Atmos spatial audio badge, glass action pills,
- * glowing karaoke synced lyrics, and native haptic feedback.
- */
+/** Full player, shared artwork transitions and synchronized lyrics. */
 
 import * as React from 'react';
 import {
@@ -66,6 +61,7 @@ import { PlayerDetailCard } from './PlayerDetailCard';
 import { TrackPlaylistPickerModal } from '../LocalPlaylist/TrackPlaylistPickerModal';
 import { LyricsProviderSheet } from './LyricsProviderSheet';
 import { SyncedLyricText } from './SyncedLyricText';
+import { TimedLyricPreview } from './TimedLyricPreview';
 import { MarqueeText } from '../common/MarqueeText';
 import { useLyricScrubGesture } from '../common/useLyricScrubGesture';
 import { SwipeableArtwork } from './SwipeableArtwork';
@@ -104,6 +100,7 @@ const LyricsViewport = ({ children }: React.PropsWithChildren) => {
 };
 
 const PlayerChromeFade = React.memo(function PlayerChromeFade({ edge }: { edge: 'header' | 'controls' }) {
+  const reduceBlur = useAppSettingsStore((state) => state.settings.reduceDynamicBlur);
   const isHeader = edge === 'header';
   const style = isHeader ? styles.headerBackdrop : styles.controlsBackdrop;
   const mask = isHeader
@@ -117,8 +114,9 @@ const PlayerChromeFade = React.memo(function PlayerChromeFade({ edge }: { edge: 
         testID={`player-${edge}-backdrop`}
         pointerEvents="none"
         style={[style, {
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
+          backdropFilter: reduceBlur ? 'none' : 'blur(16px)',
+          WebkitBackdropFilter: reduceBlur ? 'none' : 'blur(16px)',
+          backgroundColor: reduceBlur ? '#101116' : undefined,
           maskImage: mask,
           WebkitMaskImage: mask,
         } as any]}
@@ -148,7 +146,8 @@ const PlayerChromeFade = React.memo(function PlayerChromeFade({ edge }: { edge: 
         </View>
       }
     >
-      <BlurView intensity={70} tint="systemUltraThinMaterialDark" style={StyleSheet.absoluteFill} />
+      {reduceBlur ? <View style={[StyleSheet.absoluteFill, { backgroundColor: '#101116' }]} /> :
+        <BlurView intensity={70} tint="systemUltraThinMaterialDark" style={StyleSheet.absoluteFill} />}
     </MaskedView>
   );
 });
@@ -305,6 +304,10 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   const blurInactiveLyrics = useAppSettingsStore((state) => state.settings.blurInactiveLyrics);
   const lyricsOffsetMs = useAppSettingsStore((state) => state.settings.lyricsOffsetMs);
   const playbackSpeed = useAppSettingsStore((state) => state.settings.playbackSpeed);
+  const lyricsWordHighlight = useAppSettingsStore((state) => state.settings.lyricsWordHighlight);
+  const lyricsAutoScroll = useAppSettingsStore((state) => state.settings.lyricsAutoScroll);
+  const lyricsFontSize = useAppSettingsStore((state) => state.settings.lyricsFontSize);
+  const artworkBackdrop = useAppSettingsStore((state) => state.settings.artworkBackdrop);
   const insets = useSafeAreaInsets();
   const artworkProgress = useSharedValue(0);
   const isOffline = useConnectivityStore((state) => state.status === 'offline');
@@ -953,6 +956,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
           const line = lyricTimeline[timelineIndex];
           return {
             text: line.text,
+            words: line.kind === 'lyric' ? line.words : undefined,
             active: !beforeFirstLyric && (
               timelineIndex === activeLineIndex || timelineIndex === scrubbedLyricTimelineIndex
             ),
@@ -968,6 +972,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       .slice(0, 2)
       .map((text, index) => ({
         text,
+        words: undefined,
         active: playerState.positionMs > 0 && index === 0,
         timelineIndex: null,
         startTimeMs: null,
@@ -992,7 +997,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   const scrollLyricsToActive = React.useCallback(
     (animated: boolean) => {
       if (
-        !showLyricsFull ||
+        !showLyricsFull || !lyricsAutoScroll ||
         Date.now() < manualLyricsFollowUntilRef.current ||
         activeLineIndex < 0 ||
         !lyricsListRef.current ||
@@ -1007,7 +1012,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
         viewPosition: 0.35,
       });
     },
-    [activeLineIndex, lyricTimeline.length, showLyricsFull]
+    [activeLineIndex, lyricTimeline.length, showLyricsFull, lyricsAutoScroll]
   );
 
   const scrollLyricsToActiveRef = React.useRef(scrollLyricsToActive);
@@ -1447,10 +1452,10 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
         <View ref={artworkTransition.containerRef} collapsable={false}
           onLayout={artworkTransition.captureFrames} style={styles.container}>
           <GlassBackdrop pointerEvents="none" style={StyleSheet.absoluteFill}>
-          <PlayerSheetBackground artworkURL={artworkUrl}>
-          <ArtworkBackground current={artworkUrl}
+          <PlayerSheetBackground artworkURL={artworkUrl} artworkEnabled={artworkBackdrop}>
+          {artworkBackdrop ? <ArtworkBackground current={artworkUrl}
             previous={getTrackArtworkUri(previousTrack)}
-            next={getTrackArtworkUri(nextTrack)} progress={artworkProgress} />
+            next={getTrackArtworkUri(nextTrack)} progress={artworkProgress} /> : null}
           </PlayerSheetBackground>
           </GlassBackdrop>
           {/* Grab Handle Header */}
@@ -1563,7 +1568,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   removeClippedSubviews={false}
                   ref={lyricsListRef}
                   data={lyricTimeline}
-                  extraData={`${activeLineIndex}:${isLyricsUserScrolling}:${playerState.positionMs}:${lyricsOffsetMs}:${playerState.isPlaying}:${playerState.isBuffering}:${playbackSpeed}:${visible}:${showLyricsFull}:${blurInactiveLyrics}`}
+                  extraData={`${activeLineIndex}:${isLyricsUserScrolling}:${playerState.positionMs}:${lyricsOffsetMs}:${playerState.isPlaying}:${playerState.isBuffering}:${playbackSpeed}:${visible}:${showLyricsFull}:${blurInactiveLyrics}:${lyricsWordHighlight}:${lyricsFontSize}`}
                   keyExtractor={(item) =>
                     item.kind === 'gap'
                       ? item.id
@@ -1628,10 +1633,12 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                         ]}
                       >
                         {item.kind === 'lyric' ? (
-                          <SyncedLyricText active={isActive} words={item.words}
+                          <SyncedLyricText active={isActive} words={lyricsWordHighlight ? item.words : undefined}
+                            fontSize={lyricsFontSize}
                             positionMs={isActive ? playerState.positionMs - lyricsOffsetMs : 0}
                             playing={visible && showLyricsFull && playerState.isPlaying && !playerState.isBuffering}
-                            playbackSpeed={playbackSpeed} trackId={currentTrack.spotifyId} background={item.background}
+                            playbackSpeed={playbackSpeed} trackId={currentTrack.spotifyId}
+                            background={item.background ? { ...item.background, words: lyricsWordHighlight ? item.background.words : undefined } : undefined}
                             blurred={blurInactiveLyrics && !isActive && !isLyricsUserScrolling}>
                             {item.text}
                           </SyncedLyricText>
@@ -1756,13 +1763,16 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                     </Animated.View>
                   ) : lyricPreview.length ? (
                     <>
-                      <Text
+                      <TimedLyricPreview
                         testID="player-lyric-preview-current"
                         numberOfLines={lyricPreview[0].active ? 2 : 1}
-                        ellipsizeMode="tail"
+                        active={lyricPreview[0].active} words={lyricsWordHighlight ? lyricPreview[0].words : undefined}
+                        positionMs={playerState.positionMs - lyricsOffsetMs}
+                        playing={visible && !showLyricsFull && !isPreviewScrubbing && playerState.isPlaying && !playerState.isBuffering}
+                        playbackSpeed={playbackSpeed} trackId={currentTrack.spotifyId}
                         onTextLayout={(event) => setPreviewCurrentLineCount(event.nativeEvent.lines.length)}
                         style={[styles.lyricPreviewText, lyricPreview[0].active && styles.lyricPreviewActive]}
-                      >{lyricPreview[0].text}</Text>
+                      >{lyricPreview[0].text}</TimedLyricPreview>
                       {lyricPreview[1] && (
                         !lyricPreview[0].active || previewCurrentLineCount === 1
                       ) ? (

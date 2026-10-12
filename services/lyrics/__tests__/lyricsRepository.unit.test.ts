@@ -182,4 +182,25 @@ describe('lyric provider orchestration', () => {
     expect(onAttempt).toHaveBeenCalledWith('lyrics-plus', 'timeout');
     expect(jest.getTimerCount()).toBe(0);
   });
+  it('discovers only successful sources without changing the saved choice', async () => {
+    mockSettings.lyricsSourceOrder = ['better', 'lrclib'];
+    jest.mocked(fetch).mockResolvedValue({ ok: false, status: 401 } as Response);
+    const found = jest.fn();
+    await repository.probeLyricsProviders(query, found);
+    expect(found).toHaveBeenCalledTimes(1);
+    expect(found).toHaveBeenCalledWith('lrclib', synced);
+    expect(repository.getCachedTrackLyricsProvider(query.trackId)).toBe('auto');
+  });
+  it('retries Bini without optional album packaging but keeps canonical identity checks', async () => {
+    jest.mocked(fetch).mockResolvedValueOnce({ ok: true, status: 200, text: async () => '{"results":[]}' } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ results: [
+        { track_name: 'Song', artist_name: 'Someone else', lyricsUrl: 'https://lrc.red/s/wrong.ttml' },
+        { track_name: 'Song', artist_name: 'Artist', duration: 3, lyricsUrl: 'https://lrc.red/s/BRABC2600001.ttml' },
+      ] }) } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => '<tt><p begin="1s" end="3s">Hello</p></tt>' } as Response);
+    await expect(repository.fetchProviderLyrics({ ...query, provider: 'bini', albumName: 'Video packaging' }))
+      .resolves.toMatchObject({ source: 'bini', isSynced: true });
+    expect(new URL(jest.mocked(fetch).mock.calls[1][0] as string).searchParams.has('album')).toBe(false);
+    expect(fetch).toHaveBeenNthCalledWith(3, 'https://lrc.red/s/BRABC2600001.ttml', expect.anything());
+  });
 });

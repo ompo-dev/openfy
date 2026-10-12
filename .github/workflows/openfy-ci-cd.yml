@@ -80,17 +80,15 @@ jobs:
         run: npm test -- --runInBand --silent
 
       - name: Validar servidor OTA temporario
-        run: node --test scripts/__tests__/temporary-expo-update-server.test.mjs scripts/__tests__/wait-for-ota-health.test.mjs
+        run: node --test scripts/__tests__/temporary-expo-update-server.test.mjs scripts/__tests__/wait-for-ota-health.test.mjs scripts/__tests__/temporary-ota-pointer.test.mjs scripts/__tests__/ota-workflow.test.mjs
 
-  publicar-ota:
-    needs:
-      - validar
-      - testar
+  preparar-ota:
+    name: Preparar bundle OTA
     if: github.event_name == 'push' || inputs.publish_ota
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Baixar projeto
         uses: actions/checkout@v6
@@ -104,15 +102,80 @@ jobs:
       - name: Instalar dependencias
         run: npm ci --legacy-peer-deps
 
-      - name: Exportar bundle Expo para OTA
+      - name: Localizar cache do Metro
+        id: metro-cache
+        shell: bash
+        run: echo "directory=$(node -p "require('node:path').join(require('node:os').tmpdir(), 'metro-cache')")" >> "$GITHUB_OUTPUT"
+
+      - name: Restaurar cache de transformacoes do Metro
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.metro-cache.outputs.directory }}
+          key: ${{ runner.os }}-${{ runner.arch }}-ota-metro-v1-${{ hashFiles('package-lock.json', 'app.config.js', 'babel.config.*', 'metro.config.*', 'patches/**') }}-${{ vars.EXPO_PUBLIC_SPOTIFY_CLIENT_ID }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-ota-metro-v1-${{ hashFiles('package-lock.json', 'app.config.js', 'babel.config.*', 'metro.config.*', 'patches/**') }}-${{ vars.EXPO_PUBLIC_SPOTIFY_CLIENT_ID }}-
+
+      - name: Exportar somente os bundles nativos para OTA
         shell: bash
         run: |
           set -euo pipefail
+          EXPORT_STARTED_AT=$(date +%s)
           npx expo config --type public --json > "$RUNNER_TEMP/expo-config.json"
-          npx expo export --platform all --output-dir dist/ota
+          npx expo export --platform ios --platform android --output-dir dist/ota
           RUNTIME_VERSION="$(node -e "const c=require('./app.config.js').expo; console.log(typeof c.runtimeVersion === 'string' ? c.runtimeVersion : c.version)")"
           test -s dist/ota/metadata.json
-          echo "RUNTIME_VERSION=$RUNTIME_VERSION" >> "$GITHUB_ENV"
+          cp "$RUNNER_TEMP/expo-config.json" dist/ota/expo-config.json
+          printf '%s' "$RUNTIME_VERSION" > dist/ota/runtime-version.txt
+          tar -czf "$RUNNER_TEMP/openfy-ota-export.tar.gz" -C dist/ota .
+          EXPORT_SECONDS=$(( $(date +%s) - EXPORT_STARTED_AT ))
+          echo "Native OTA export prepared in ${EXPORT_SECONDS}s; publication still requires validation and tests."
+          echo "### Bundle OTA preparado" >> "$GITHUB_STEP_SUMMARY"
+          echo "Exportacao iOS/Android: ${EXPORT_SECONDS}s. Preparacao executada em paralelo as validacoes; ainda nao publicada." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enviar bundle preparado deste run
+        uses: actions/upload-artifact@v4
+        with:
+          name: Openfy-OTA-export-${{ github.run_id }}
+          path: ${{ runner.temp }}/openfy-ota-export.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+  publicar-ota:
+    needs:
+      - validar
+      - testar
+      - preparar-ota
+    if: github.event_name == 'push' || inputs.publish_ota
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v6
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Baixar bundle preparado deste run
+        uses: actions/download-artifact@v4
+        with:
+          name: Openfy-OTA-export-${{ github.run_id }}
+          path: ${{ runner.temp }}/openfy-ota-export
+
+      - name: Preparar bundle validado sem reinstalar dependencias
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/ota
+          tar -xzf "$RUNNER_TEMP/openfy-ota-export/openfy-ota-export.tar.gz" -C dist/ota
+          test -s dist/ota/metadata.json
+          test -s dist/ota/expo-config.json
+          test -s dist/ota/runtime-version.txt
+          echo "RUNTIME_VERSION=$(cat dist/ota/runtime-version.txt)" >> "$GITHUB_ENV"
 
       - name: Abrir janela OTA por 10 minutos
         env:
@@ -160,7 +223,7 @@ jobs:
           node scripts/temporary-expo-update-server.mjs \
             --directory dist/ota \
             --runtime-version "$RUNTIME_VERSION" \
-            --expo-config "$RUNNER_TEMP/expo-config.json" \
+            --expo-config dist/ota/expo-config.json \
             --port 8787 > "$OTA_DIR/server.log" 2>&1 &
           SERVER_PID=$!
           HEALTH_JSON="$(node scripts/wait-for-ota-health.mjs \
@@ -216,6 +279,8 @@ jobs:
           fi
 
           echo "Temporary OTA endpoint active for commit $GITHUB_SHA until the CI window closes."
+          echo "### OTA disponivel" >> "$GITHUB_STEP_SUMMARY"
+          echo "Publicado em $(date -u +%Y-%m-%dT%H:%M:%SZ), apos validacao e testes. A janela de download agora permanece ativa por 10 minutos." >> "$GITHUB_STEP_SUMMARY"
           for second in $(seq 1 600); do
             if ! kill -0 "$TUNNEL_PID" 2>/dev/null || ! kill -0 "$SERVER_PID" 2>/dev/null; then
               echo "The temporary OTA server or tunnel stopped before the window ended."

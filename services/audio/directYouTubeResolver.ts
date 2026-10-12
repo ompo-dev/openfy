@@ -32,6 +32,8 @@ import {
   _resetCatalogMappingCacheForTests,
 } from './catalogMappingCache';
 import { getAppSettings, type AudioQuality } from '../settings/appSettings';
+import { getYouTubeVideoMetadata } from '../youtubeDiscoveryClient';
+import { log } from '../../utils/appLogger';
 
 // ---------------------------------------------------------------------------
 // Re-exported public types (unchanged for callers)
@@ -163,25 +165,7 @@ export const resolveDirectYouTubeTrack = async (
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
 
   try {
-    // getBasicInfo from Innertube (lazy-loaded)
-    const { Innertube } = require('youtubei.js') as {
-      Innertube: {
-        create(opts: object): Promise<{
-          getBasicInfo(id: string): Promise<{
-            basic_info: {
-              title?: string; author?: string; duration?: number;
-              thumbnail?: { url: string }[];
-            };
-          }>;
-        }>;
-      };
-    };
-    const client = await Innertube.create({
-      generate_session_locally: false,
-      retrieve_innertube_config: true,
-      retrieve_player: true,
-    });
-    const info = await client.getBasicInfo(videoId);
+    const info = await getYouTubeVideoMetadata(videoId);
     const title = info.basic_info.title?.trim();
     if (!title) return null;
 
@@ -196,9 +180,7 @@ export const resolveDirectYouTubeTrack = async (
       durationMs: Math.max(0, info.basic_info.duration ?? 0) * 1000,
     };
   } catch (error) {
-    console.warn(
-      `[DirectYouTube] metadata failed for ${videoId}: ${error instanceof Error ? error.message : String(error)}`
-    );
+    log.error('direct youtube metadata failed', { videoId, error });
     return null;
   }
 };

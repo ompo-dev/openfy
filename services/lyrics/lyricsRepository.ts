@@ -170,8 +170,13 @@ const fetchSource = async (source: LyricsProviderId, query: Query, signal: Abort
     payload = await request(`https://lrc.red/s/${isrc!.toUpperCase()}.ttml`);
   } else if (source === 'bini') {
     const isrc = normalizeTrackIsrc(query.isrc);
-    const result = await json(url('https://lyrics-api.binimum.org/', isrc ? { isrc } :
+    let result = await json(url('https://lyrics-api.binimum.org/', isrc ? { isrc } :
       { track: query.trackName, artist: query.artistName, duration: seconds, album: query.albumName }));
+    if (!isrc && query.albumName && !result?.results?.length) {
+      log.player('lyrics album constraint fallback', { provider: source, trackId: query.trackId });
+      result = await json(url('https://lyrics-api.binimum.org/',
+        { track: query.trackName, artist: query.artistName, duration: seconds }));
+    }
     const hit = (Array.isArray(result?.results) ? result.results : []).find((item: any) =>
       isrc ? normalizeTrackIsrc(item.isrc) === isrc : candidateMatches(item, query));
     log.player('lyrics recording match', { provider: source, trackId: query.trackId,
@@ -230,7 +235,7 @@ const lookupProviderLyrics = async (query: Query): Promise<LyricsData | null> =>
   const lookup = { ...query, trackName: search.title, artistName: search.artist };
   log.player('lyrics query prepared', { trackId, platform: Platform.OS, originalTitle: query.trackName,
     originalArtists: query.artistName, searchTitle: search.title, searchArtist: search.artist,
-    durationMs: query.durationMs, isrc: query.isrc, selection, sources: sequence });
+    durationMs: query.durationMs, album: query.albumName, isrc: query.isrc, selection, sources: sequence });
   const generation = ++requestGeneration;
   cacheGenerations.delete(key); cacheGenerations.set(key, generation);
   while (cacheGenerations.size > MAX_CACHE * 2) cacheGenerations.delete(cacheGenerations.keys().next().value!);
@@ -308,4 +313,26 @@ export const fetchProviderLyrics = async (query: Query): Promise<LyricsData | nu
     finish({ ok: true, trackId: query.trackId, ...summary(result), found: Boolean(result), cancelled: Boolean(query.signal?.aborted) });
     return result;
   } catch (error) { finish({ ok: false, trackId: query.trackId, error: String(error) }); throw error; }
+};
+
+/** Availability discovery never changes the selected provider or the playing track. */
+export const probeLyricsProviders = async (query: Query,
+  onFound: (provider: LyricsProviderId, lyrics: LyricsData) => void) => {
+  const settings = getCachedAppSettings();
+  if (!settings.lyricsEnabled || query.signal?.aborted) return;
+  const sources = settings.lyricsSourceOrder.filter((source) => !settings.lyricsDisabledSources.includes(source));
+  const finish = log.time('player', 'lyrics provider availability', { trackId: query.trackId, sources });
+  let cursor = 0, found = 0;
+  const worker = async () => {
+    while (cursor < sources.length && !query.signal?.aborted) {
+      const provider = sources[cursor++];
+      const lyrics = await fetchProviderLyrics({ ...query, provider, onAttempt: undefined }).catch((error) => {
+        if (!query.signal?.aborted) log.error('lyrics availability probe failed', { provider, error });
+        return null;
+      });
+      if (lyrics && !query.signal?.aborted) { found += 1; onFound(provider, lyrics); }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, sources.length) }, worker));
+  finish({ ok: true, found, cancelled: Boolean(query.signal?.aborted) });
 };

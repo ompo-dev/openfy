@@ -33,6 +33,7 @@ import {
   glassCircleModifiers,
 } from '../native';
 import { WithoutGlassBackdrop } from '../native/GlassBackdrop';
+import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 
 type LibrarySort = 'recent' | 'title';
 type LibraryView = 'songs' | 'playlists' | 'albums' | 'artists';
@@ -73,6 +74,7 @@ const labelFor = <T extends string>(options: readonly Option<T>[], value: T) =>
 
 /** SwiftUI controls on iOS, with an anchored, keyboard-accessible web fallback. */
 export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
+  const reduceBlur = useAppSettingsStore((state) => state.settings.reduceDynamicBlur);
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const { width, height } = useWindowDimensions();
   const triggerRef = React.useRef<View>(null);
@@ -168,7 +170,7 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
                 swiftTint?.('#B8B8B8'),
                 swiftFrame?.({ width: 40, height: 40 }),
               ].filter(Boolean)
-            : glassCircleModifiers(40, '#B8B8B8')}
+            : glassCircleModifiers(40, '#B8B8B8', reduceBlur)}
         >
           <SwiftButton
             label={searchLabel}

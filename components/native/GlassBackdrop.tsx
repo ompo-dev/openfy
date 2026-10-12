@@ -2,6 +2,7 @@ import React, { createContext, useContext, useRef, useState, type RefObject } fr
 import { BlurTargetView } from 'expo-blur';
 import { Platform, View, type ViewProps } from 'react-native';
 import { supportsAndroidGlassBlur } from './glassMaterial';
+import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 
 type Target = RefObject<View | null>;
 const TargetContext = createContext<Target | null>(null);
@@ -28,9 +29,10 @@ export function GlassBackdropScope({ children }: React.PropsWithChildren) {
 }
 
 export function GlassBackdrop({ children, targetRef, ...props }: ViewProps & { targetRef?: Target }) {
+  const reduceBlur = useAppSettingsStore((state) => state.settings.reduceDynamicBlur);
   const inheritedTarget = useGlassBackdrop();
   const target = targetRef ?? inheritedTarget;
-  if (!canCapture() || !target) return <View {...props}>{children}</View>;
+  if (reduceBlur || !canCapture() || !target) return <View {...props}>{children}</View>;
   return (
     <BlurTargetView {...props} ref={target} collapsable={false}>
       {/* A BlurTarget cannot contain a BlurView sampling that same target. */}

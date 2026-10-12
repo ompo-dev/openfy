@@ -18,6 +18,13 @@ export type AppSettings = {
   verboseLogs: boolean;
   developerTools: boolean;
   lyricsEnabled: boolean;
+  lyricsWordHighlight: boolean;
+  lyricsAutoScroll: boolean;
+  lyricsFontSize: number;
+  reduceAnimations: boolean;
+  reduceDynamicBlur: boolean;
+  artworkBackdrop: boolean;
+  preloadRadius: number;
   lyricsPreferSynced: boolean;
   lyricsOffsetMs: number;
   lyricsSourceOrder: LyricsProviderId[];
@@ -46,6 +53,13 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   verboseLogs: false,
   developerTools: true,
   lyricsEnabled: true,
+  lyricsWordHighlight: true,
+  lyricsAutoScroll: true,
+  lyricsFontSize: 26,
+  reduceAnimations: false,
+  reduceDynamicBlur: false,
+  artworkBackdrop: true,
+  preloadRadius: 2,
   lyricsPreferSynced: true,
   lyricsOffsetMs: 0,
   lyricsSourceOrder: DEFAULT_LYRICS_ORDER,
@@ -92,6 +106,8 @@ export const normalizeAppSettings = (value: unknown): AppSettings => {
     lyricsDisabledSources: Array.isArray(stored.lyricsDisabledSources)
       ? [...new Set(stored.lyricsDisabledSources.filter(isLyricsProvider))] : [],
     lyricsOffsetMs: numeric(stored.lyricsOffsetMs, 0, -10_000, 10_000),
+    lyricsFontSize: numeric(stored.lyricsFontSize, 26, 18, 34),
+    preloadRadius: Math.round(numeric(stored.preloadRadius, 2, 1, 3)),
     playbackSpeed: numeric(stored.playbackSpeed, 1, 0.5, 2),
     equalizerBands: DEFAULT_APP_SETTINGS.equalizerBands.map((_, index) =>
       numeric(Array.isArray(stored.equalizerBands) ? stored.equalizerBands[index] : undefined, 0, -12, 12)),

@@ -593,12 +593,16 @@ const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
   if (usePlayerStore.getState().playerState.isBuffering) return;
   if (Platform.OS !== 'web' && !isAppActiveForPreload()) return;
   const currentTrack = queue[queueIndex];
-  const neighbors = [
-    { track: queue[queueIndex + 1], ratio: 0.5, direction: 'next' },
-    { track: queue[queueIndex - 1], ratio: 0.25, direction: 'previous' },
-    { track: queue[queueIndex + 2], ratio: 0.25, direction: 'next-two' },
-    { track: queue[queueIndex - 2], ratio: 0.125, direction: 'previous-two' },
-  ].filter((neighbor): neighbor is {
+  const radius = getCachedAppSettings().preloadRadius;
+  const neighbors = Array.from({ length: radius }, (_, index) => {
+    const distance = index + 1;
+    return [
+      { track: queue[queueIndex + distance], ratio: 0.5 / 2 ** index,
+        direction: distance === 1 ? 'next' : distance === 2 ? 'next-two' : `next-${distance}` },
+      { track: queue[queueIndex - distance], ratio: 0.25 / 2 ** index,
+        direction: distance === 1 ? 'previous' : distance === 2 ? 'previous-two' : `previous-${distance}` },
+    ];
+  }).flat().filter((neighbor): neighbor is {
     track: PlayerTrack;
     ratio: number;
     direction: string;
@@ -635,7 +639,7 @@ const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
           .split(/\s*(?:,|&| feat\.?)\s*/i)
           .filter(Boolean)
           .map((name) => ({ name })));
-    // Multi-provider lyrics should not compete with four neighboring streams.
+    // Multi-provider lyrics should not compete with neighboring streams.
     if (direction === 'next') warmTrackLyrics(track, direction);
     warmTrackAudio(
       track,
@@ -1572,6 +1576,7 @@ setRemotePlaybackHandlers({
 
 let previousStreamingQuality = getCachedAppSettings().streamingQuality;
 let previousPreloading = getCachedAppSettings().preloadNextTrack;
+let previousPreloadRadius = getCachedAppSettings().preloadRadius;
 let previousLyricsPolicy = lyricsPolicyKey();
 subscribeAppSettings((settings) => {
   const policy = lyricsPolicyKey();
@@ -1581,9 +1586,10 @@ subscribeAppSettings((settings) => {
     void usePlayerStore.getState().refreshLyrics();
   }
   const changed = settings.streamingQuality !== previousStreamingQuality ||
-    settings.preloadNextTrack !== previousPreloading;
+    settings.preloadNextTrack !== previousPreloading || settings.preloadRadius !== previousPreloadRadius;
   previousStreamingQuality = settings.streamingQuality;
   previousPreloading = settings.preloadNextTrack;
+  previousPreloadRadius = settings.preloadRadius;
   if (!changed) return;
   queuePreloadKeys.clear();
   warmedAudioSources.forEach(({ source }) => releasePreloadedAudio(source));

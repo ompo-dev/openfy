@@ -9,6 +9,7 @@ import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
 import { isTransientNetworkError, retryNetworkOperation } from './networkRetry';
 import { getAppSettings, type AudioQuality } from '../settings/appSettings';
 import { audioQualityCacheKey, streamSelectionQuality } from './audioPreferences';
+import { log } from '../../utils/appLogger';
 
 /**
  * YouTubeStreamResolver — videoId → StreamResolveResult
@@ -20,7 +21,7 @@ import { audioQualityCacheKey, streamSelectionQuality } from './audioPreferences
  * Key behaviours:
  *   - ANDROID_MUSIC, MWEB, IOS, ANDROID_VR, WEB_EMBEDDED, TV client profiles
  *   - Client identity and media headers stay consistent across requests
- *   - Two-point GVS probe (bytes 0-1 MiB + 1-2 MiB) before marking a URL usable
+ *   - Small GVS samples at the beginning and after 1 MiB before marking a URL usable
  *   - Real HTTP AbortController cancellation on timeout
  *   - Global resolution budget (14s) so resolution never hangs indefinitely
  *   - Never re-activates clients in cooldown when all are blocked
@@ -100,7 +101,7 @@ type InnertubeClient = {
       quality: 'best' | 'bestefficiency';
       type: 'audio';
     }
-    ): Promise<{ url?: string; mime_type?: string; bitrate?: number }>;
+    ): Promise<{ url?: string; mime_type?: string; bitrate?: number; content_length?: number }>;
   getBasicInfo(videoId: string): Promise<{
     basic_info: {
       title?: string;
@@ -112,7 +113,7 @@ type InnertubeClient = {
 };
 
 type StreamProbeResult =
-  | { ok: true;  stage: 'first' | 'second'; status: number; byteLength: number; contentType: string }
+  | { ok: true;  stage: 'first' | 'second'; status: number; byteLength: number; contentType: string; totalBytes?: number }
   | { ok: false; stage: 'first' | 'second'; reason: 'http_status' | 'invalid_content_type' | 'invalid_range' | 'empty_body' | 'timeout' | 'network_error'; status?: number; contentType?: string; error?: string };
 
 type VerdictCacheEntry = {
@@ -127,9 +128,9 @@ type VerdictCacheEntry = {
 const RESOLUTION_BUDGET_MS       = 14_000;
 const CLIENT_REQUEST_TIMEOUT_MS  = 5_000;
 const PROBE_TIMEOUT_MS           = 4_000;
-const PROBE_FIRST_BYTES          = 1024 * 1024;
+const PROBE_FIRST_BYTES          = 16 * 1024;
 const PROBE_SECOND_OFFSET        = 1024 * 1024;
-const PROBE_SECOND_BYTES         = 1024 * 1024;
+const PROBE_SECOND_BYTES         = 16 * 1024;
 const STREAM_CACHE_TTL_MS        = 10 * 60_000;
 
 const ATTESTATION_VERDICT_TTL_MS = 2 * 60_000;   // 2 min
@@ -404,7 +405,9 @@ const fetchRange = async (
       return { ok: false, stage, reason: 'invalid_range', status: response.status, contentType };
     if (buf.byteLength === 0)
       return { ok: false, stage, reason: 'empty_body', status: response.status, contentType };
-    return { ok: true, stage, status: response.status, byteLength: buf.byteLength, contentType };
+    const total = Number(response.headers.get('content-range')?.match(/^bytes \d+-\d+\/(\d+)$/i)?.[1]);
+    return { ok: true, stage, status: response.status, byteLength: buf.byteLength, contentType,
+      totalBytes: Number.isSafeInteger(total) && total > 0 ? total : undefined };
   } catch (err) {
     const isTimeout = timedOut || (err instanceof Error && err.message.toLowerCase().includes('timed out'));
     return { ok: false, stage, reason: isTimeout ? 'timeout' : 'network_error', error: errorMsg(err) };
@@ -416,14 +419,23 @@ const fetchRange = async (
 
 /**
  * Two-point GVS probe.
- * First  (0–1 MiB): catches missing URL / total auth failures.
- * Second (1–2 MiB): catches GVS PO Token enforcement on subsequent ranges.
+ * Read 16 KiB at the beginning and 16 KiB beyond the 1 MiB auth boundary.
+ * Do not transfer two full MiB merely to decide whether playback can start.
  * A 403 on second while first passes is the GVS enforcement fingerprint.
  */
-const probeStream = async (url: string): Promise<StreamProbeResult> => {
-  const first = await fetchRange(url, 0, PROBE_FIRST_BYTES - 1, 'first');
-  if (!first.ok) return first;
-  return fetchRange(url, PROBE_SECOND_OFFSET, PROBE_SECOND_OFFSET + PROBE_SECOND_BYTES - 1, 'second');
+const probeStream = async (url: string, videoId: string, reportedLength?: number): Promise<StreamProbeResult> => {
+  const finish = log.time('player', 'youtube stream sample validation', { videoId });
+  const length = Number(reportedLength || new URL(url).searchParams.get('clen'));
+  const knownLength = Number.isSafeInteger(length) && length > 0 ? length : undefined;
+  const first = await fetchRange(url, 0, Math.min(PROBE_FIRST_BYTES, knownLength || Infinity) - 1, 'first');
+  const totalBytes = first.ok ? first.totalBytes || knownLength : undefined;
+  const result = !first.ok || (totalBytes !== undefined && totalBytes <= PROBE_SECOND_OFFSET) ? first :
+    await fetchRange(url, PROBE_SECOND_OFFSET,
+      Math.min(PROBE_SECOND_OFFSET + PROBE_SECOND_BYTES, totalBytes || Infinity) - 1, 'second');
+  finish({ ok: result.ok, stage: result.stage, status: result.status,
+    bytes: result.ok ? result.byteLength + (result.stage === 'second' && first.ok ? first.byteLength : 0) : undefined,
+    reason: result.ok ? undefined : result.reason });
+  return result;
 };
 
 // ---------------------------------------------------------------------------
@@ -521,7 +533,7 @@ const doResolve = async (
         continue;
       }
 
-      const probe = await probeStream(stream.url);
+      const probe = await probeStream(stream.url, videoId, stream.content_length);
       const isGvsEnforcement = !probe.ok && probe.stage === 'second' && probe.status === 403;
 
       if (!probe.ok) {
