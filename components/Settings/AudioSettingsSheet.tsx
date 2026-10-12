@@ -1,12 +1,13 @@
 import * as React from 'react';
-import { PanResponder, StyleSheet, Switch, Text, View } from 'react-native';
+import { PanResponder, StyleSheet, Text, View } from 'react-native';
 import Slider from '@react-native-community/slider';
-import { SheetFrame, LoggedPressable, NativeIconButton } from '../native';
+import { SheetFrame, NativeIconButton } from '../native';
 import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 import { getAudioCapabilities } from '../../services/audio/playerService';
 import { EQUALIZER_FREQUENCIES, EQUALIZER_PRESETS, equalizerFilters, equalizerHeadroomDb } from '../../services/audio/equalizer';
 import type { AppSettings } from '../../services/settings/appSettings';
 import { log } from '../../utils/appLogger';
+import { NativeSegmented, Section, SettingsRow, Toggle, ValueTrailing, OptionMenu } from '../gym';
 
 const NumericSlider = ({ label, value, min, max, step, disabled, onChange, suffix = '' }: {
   label: string; value: number; min: number; max: number; step: number; suffix?: string;
@@ -65,7 +66,15 @@ export const AudioSettingsSheet = ({ visible, onClose }: { visible: boolean; onC
   };
   const unavailable = !capabilities.equalizer;
   const inactive = unavailable || !settings.equalizerEnabled;
-  return <SheetFrame visible={visible} title="Audio e equalizador" onClose={onClose}
+  return <SheetFrame visible={visible} size="full" title="Audio e equalizador" onClose={onClose}
+    overlay={<OptionMenu visible={presets} anchor={null} selectedValue={Object.entries(EQUALIZER_PRESETS).find(([, bands]) =>
+      bands.every((gain, i) => gain === settings.equalizerBands[i]))?.[0] || ''}
+      options={Object.keys(EQUALIZER_PRESETS).map((name) => ({ label: name, value: name }))}
+      onClose={() => setPresets(false)} onSelect={(name) => {
+        const bands = EQUALIZER_PRESETS[name as keyof typeof EQUALIZER_PRESETS];
+        if (bands) { log.ui('equalizer preset selected', { preset: name }); change('equalizerBands', bands); }
+        setPresets(false);
+      }} />}
     headerTrailing={<NativeIconButton label="Zerar equalizador" systemImage="arrow.counterclockwise" iconName="refresh"
       onPress={() => { change('equalizerBands', [0, 0, 0, 0, 0, 0, 0]);
         change('equalizerToneX', 0); change('equalizerToneY', 0); change('audioBalance', 0); }} />}>
@@ -73,25 +82,23 @@ export const AudioSettingsSheet = ({ visible, onClose }: { visible: boolean; onC
       disabled={!capabilities.speed} onChange={(value) => change('playbackSpeed', value)} />
     <NumericSlider label="Alcance do pre-carregamento" value={settings.preloadRadius} min={1} max={3} step={1}
       disabled={!settings.preloadNextTrack} onChange={(value) => change('preloadRadius', value)} />
-    <View style={styles.row}><Text style={styles.label}>Equalizador</Text>
-      <Switch accessibilityLabel="Equalizador" disabled={unavailable} value={settings.equalizerEnabled}
-        trackColor={{ true: '#1DB954', false: '#45454A' }} onValueChange={(value) => change('equalizerEnabled', value)} /></View>
+    <Section label="Equalizador">
+    <SettingsRow title="Equalizador" trailing={<View pointerEvents={unavailable ? 'none' : 'auto'} style={unavailable ? styles.disabled : undefined}>
+      <Toggle label="Equalizador" disabled={unavailable} value={settings.equalizerEnabled} onValueChange={(value) => change('equalizerEnabled', value)} /></View>} />
+    </Section>
     {unavailable ? <Text style={styles.error}>Instale o novo build nativo para usar equalizador e balanceamento.</Text> : null}
-    <View style={styles.modes} accessibilityRole="radiogroup">
-      {(['manual', 'tone'] as const).map((mode) => <LoggedPressable key={mode} accessibilityRole="radio"
-        accessibilityLabel={mode === 'manual' ? 'Manual' : 'Tonal'} disabled={inactive}
-        accessibilityState={{ checked: settings.equalizerMode === mode, disabled: inactive }}
-        onPress={() => change('equalizerMode', mode)} style={[styles.mode, settings.equalizerMode === mode && styles.selected]}>
-        <Text style={styles.label}>{mode === 'manual' ? 'Manual' : 'Tonal'}</Text></LoggedPressable>)}
+    <View pointerEvents={inactive ? 'none' : 'auto'} style={inactive ? styles.disabled : undefined}>
+      <NativeSegmented accessibilityLabel="Modo do equalizador" disabled={inactive} value={settings.equalizerMode}
+        options={[{ value: 'manual', label: 'Manual' }, { value: 'tone', label: 'Tonal' }]}
+        onChange={(mode) => change('equalizerMode', mode)} />
     </View>
     {settings.equalizerMode === 'manual' ? <>
-      <LoggedPressable accessibilityRole="button" accessibilityLabel="Preset do equalizador" disabled={inactive}
-        onPress={() => { log.ui('equalizer presets toggled', { visible: !presets }); setPresets(!presets); }} style={styles.row}><Text style={styles.label}>Preset</Text>
-        <Text style={styles.value}>{Object.entries(EQUALIZER_PRESETS).find(([, bands]) =>
-          bands.every((gain, i) => gain === settings.equalizerBands[i]))?.[0] || 'Personalizado'}</Text></LoggedPressable>
-      {presets ? Object.entries(EQUALIZER_PRESETS).map(([name, bands]) => <LoggedPressable key={name}
-        accessibilityRole="radio" accessibilityLabel={name} disabled={inactive} style={styles.row}
-        onPress={() => { log.ui('equalizer preset selected', { preset: name }); change('equalizerBands', bands); setPresets(false); }}><Text style={styles.label}>{name}</Text></LoggedPressable>) : null}
+      <Section label="Preset">
+      <SettingsRow title="Preset do equalizador" disabled={inactive}
+        onPress={() => { log.ui('equalizer presets toggled', { visible: !presets }); setPresets(!presets); }}
+        trailing={<ValueTrailing label={Object.entries(EQUALIZER_PRESETS).find(([, bands]) =>
+          bands.every((gain, i) => gain === settings.equalizerBands[i]))?.[0] || 'Personalizado'} />} />
+      </Section>
       {EQUALIZER_FREQUENCIES.map((frequency, index) => <NumericSlider key={frequency}
         label={frequency >= 1000 ? `${frequency / 1000} kHz` : `${frequency} Hz`}
         value={settings.equalizerBands[index]} min={-12} max={12} step={0.5} suffix=" dB" disabled={inactive}
@@ -106,9 +113,10 @@ export const AudioSettingsSheet = ({ visible, onClose }: { visible: boolean; onC
         onChange={(value) => change('equalizerToneX', value)} />
       <NumericSlider label="Medios" value={settings.equalizerToneY} min={-5} max={5} step={1} disabled={inactive}
         onChange={(value) => change('equalizerToneY', value)} />
-      <View style={styles.row}><Text style={styles.label}>Foco nos medios</Text>
-        <Switch accessibilityLabel="Foco nos medios" disabled={inactive} value={settings.equalizerFocused}
-          onValueChange={(value) => change('equalizerFocused', value)} /></View>
+      <Section label="Tonalidade"><SettingsRow title="Foco nos medios"
+        trailing={<View pointerEvents={inactive ? 'none' : 'auto'} style={inactive ? styles.disabled : undefined}>
+          <Toggle label="Foco nos medios" disabled={inactive} value={settings.equalizerFocused}
+            onValueChange={(value) => change('equalizerFocused', value)} /></View>} /></Section>
     </>}
     <View style={styles.row}><Text style={styles.label}>Compensacao de ganho</Text>
       <Text style={styles.value}>{equalizerHeadroomDb(equalizerFilters(settings)).toFixed(1)} dB</Text></View>

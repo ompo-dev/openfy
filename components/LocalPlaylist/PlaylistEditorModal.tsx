@@ -5,12 +5,14 @@ import { AppIcon, SheetFrame } from '../native';
 import { TrackRow } from '../common/TrackRow';
 import { ProgressiveFlatList } from '../common/ProgressiveList';
 import { PlaylistForm, PlaylistSheetAction } from './PlaylistForm';
+import { HeaderIconButton } from '../gym';
 
 type PlaylistEditorModalProps = {
   onAddTracks: () => void; onClose: () => void; onSaved: () => void | Promise<void>;
   playlist: LocalPlaylist; tracks: LibraryTrack[]; visible: boolean;
+  nested?: React.ReactNode;
 };
-export const PlaylistEditorModal = ({ onAddTracks, onClose, onSaved, playlist, tracks, visible }: PlaylistEditorModalProps) => {
+export const PlaylistEditorModal = ({ onAddTracks, onClose, onSaved, playlist, tracks, visible, nested }: PlaylistEditorModalProps) => {
   const [title, setTitle] = React.useState(playlist.title);
   const [description, setDescription] = React.useState(playlist.description || '');
   const [removedTrackIds, setRemovedTrackIds] = React.useState<Set<string>>(new Set());
@@ -39,15 +41,17 @@ export const PlaylistEditorModal = ({ onAddTracks, onClose, onSaved, playlist, t
         trackIds: playlist.trackIds.filter((id) => !removedTrackIds.has(id)) });
       if (!saved) throw new Error('Playlist removida');
       await onSaved();
-      onClose();
       if (addTracks) onAddTracks();
+      else onClose();
     } catch {
       Alert.alert('Playlist', 'Não foi possível salvar as alterações. Tente novamente.');
     } finally { pending.current = false; setIsSaving(false); }
   };
   return <SheetFrame visible={visible} title="Editar playlist" onClose={onClose}
+    nested={nested}
+    hideDefaultClose headerLeading={<HeaderIconButton icon="x" onPress={onClose} />}
     artworkURL={tracks[0]?.localImagePath || tracks[0]?.imageURL || playlist.coverImageURLs?.[0]}
-    scroll={false} contentHeight={252 + Math.max(1, tracks.length) * 64}
+    scroll={false} contentHeight={300 + Math.max(1, tracks.length) * 64}
     headerTrailing={<PlaylistSheetAction label="Salvar playlist" onPress={() => void save()}
       disabled={!title.trim()} busy={isSaving} />}>
     <ProgressiveFlatList data={tracks} listKey={playlist.id} keyExtractor={(track) => track.spotifyId}

@@ -3,6 +3,15 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
+      "@/components/atoms/AppText": ["./components/gym/AppText.tsx"],
+      "@/components/atoms/GlassSurface": ["./components/native/GlassSurface"],
+      "@/constants/theme": ["./components/gym/theme.ts"],
+      "@/hooks/use-colors": ["./components/gym/useColors.ts"],
+      "@/core/log": ["./utils/appLogger.ts"],
+      "@/core/appModals": ["./components/gym/appModals.ts"],
+      "@/i18n": ["./components/gym/i18n.ts"],
+      "@/global.css": ["./components/gym/theme.css"],
+      "@/*": ["./vendor/gym-notes/src/*"],
       "@assets/*": ["./assets/*"],
       "@api": ["./api/index.ts"],
       "@components": ["./components/index.ts"],

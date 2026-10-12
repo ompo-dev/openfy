@@ -1,7 +1,6 @@
 import * as React from 'react';
-import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
-import { GlassSurface, LoggedPressable } from '../native';
-import { AppIcon } from '../native/AppIcon';
+import { StyleSheet, TextInput, View } from 'react-native';
+import { HeaderIconButton, Section, TextField } from '../gym';
 
 export function PlaylistForm({ title, description, onTitleChange, onDescriptionChange, autoFocus = false, disabled = false }: {
   title: string; description: string; onTitleChange: (title: string) => void;
@@ -9,34 +8,22 @@ export function PlaylistForm({ title, description, onTitleChange, onDescriptionC
 }) {
   const descriptionRef = React.useRef<TextInput>(null);
   return <View style={styles.form}>
-    <View style={styles.field}>
-      <Text style={styles.label}>Nome</Text>
-      <GlassSurface glass="clear" style={styles.inputSurface}>
-        <TextInput accessibilityLabel="Nome da playlist" autoFocus={autoFocus} editable={!disabled} maxLength={80}
+    <Section label="Playlist">
+        <TextField label="Nome" accessibilityLabel="Nome da playlist" autoFocus={autoFocus} editable={!disabled} maxLength={80}
           placeholder="Minha playlist" placeholderTextColor="#8E8E93" returnKeyType="next"
           onSubmitEditing={() => descriptionRef.current?.focus()} onChangeText={onTitleChange} value={title} style={styles.input} />
-      </GlassSurface>
-    </View>
-    <View style={styles.field}>
-      <Text style={styles.label}>Descrição</Text>
-      <GlassSurface glass="clear" style={styles.inputSurface}>
-        <TextInput ref={descriptionRef} accessibilityLabel="Descrição da playlist" editable={!disabled} maxLength={240}
+        <TextField label="Descrição" inputRef={descriptionRef} accessibilityLabel="Descrição da playlist" editable={!disabled} maxLength={240}
           placeholder="Opcional" placeholderTextColor="#8E8E93" multiline
           onChangeText={onDescriptionChange} value={description} style={[styles.input, styles.description]} />
-      </GlassSurface>
-    </View>
+    </Section>
   </View>;
 }
 
 export function PlaylistSheetAction({ label, onPress, disabled = false, busy = false, icon = 'checkmark' }: {
   label: string; onPress: () => void; disabled?: boolean; busy?: boolean; icon?: 'checkmark' | 'add';
 }) {
-  return <LoggedPressable accessibilityRole="button" accessibilityLabel={label}
-    accessibilityState={{ disabled, busy }} disabled={disabled || busy} onPress={onPress}>
-    <GlassSurface glass="regular" isInteractive style={[styles.action, (disabled || busy) && styles.disabled]}>
-      {busy ? <ActivityIndicator size="small" color="#FFFFFF" /> : <AppIcon name={icon} size={22} color="#1ED760" />}
-    </GlassSurface>
-  </LoggedPressable>;
+  return <HeaderIconButton label={label} icon={icon === 'add' ? 'plus' : 'check'}
+    filled disabled={disabled} busy={busy} onPress={onPress} />;
 }
 
 const styles = StyleSheet.create({
@@ -44,7 +31,7 @@ const styles = StyleSheet.create({
   field: { gap: 7 },
   label: { color: 'rgba(255,255,255,0.68)', fontFamily: 'SF-Semibold', fontSize: 12 },
   inputSurface: { borderRadius: 8, overflow: 'hidden' },
-  input: { minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, color: '#FFFFFF', fontFamily: 'SF-Regular', fontSize: 15 },
+  input: { paddingVertical: 10, fontFamily: 'SF-Regular' },
   description: { minHeight: 80, textAlignVertical: 'top' },
   action: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   disabled: { opacity: 0.4 },

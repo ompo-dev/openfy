@@ -85,6 +85,7 @@ jest.mock('expo-file-system', () => ({
 }));
 
 jest.mock('react-native-safe-area-context', () => ({
+  SafeAreaView: require('react-native').View,
   SafeAreaProvider: ({ children }) => children,
   useSafeAreaInsets: () => ({ bottom: 0, left: 0, right: 0, top: 0 }),
 }));

@@ -1,202 +1,40 @@
 import React, { type ReactNode } from 'react';
-import {
-  ScrollView,
-  FlatList,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { FlatList, ScrollView, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
-import { LoggedPressable } from './Logged';
-import { AppIcon } from './AppIcon';
-import { GlassSurface } from './GlassSurface';
-import { PlayerModal } from './PlayerModal';
-import { GlassBackdrop, GlassBackdropScope } from './GlassBackdrop';
-import { PlayerSheetBackground } from '../Player/PlayerSheetBackground';
+import { SheetFrame as GymSheetFrame } from '../../vendor/gym-notes/src/components/organisms/SheetFrame';
 import { ProgressiveFlatList } from '../common/ProgressiveList';
+import { log } from '../../utils/appLogger';
 
-interface SheetFrameProps {
-  visible: boolean;
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-  headerLeading?: ReactNode;
-  headerTrailing?: ReactNode;
-  hideDefaultClose?: boolean;
-  scroll?: boolean;
+type SheetFrameProps = React.ComponentProps<typeof GymSheetFrame> & {
   artworkURL?: string;
   closeLabel?: string;
-  /** Preferred space for virtualized lists/editors, capped by the modal viewport. */
   contentHeight?: number;
-  size?: 'sheet' | 'full';
-  nested?: ReactNode;
-  onDismiss?: () => void;
-}
+  children: ReactNode;
+};
 
-export function SheetFrame({
-  visible,
-  title,
-  onClose,
-  children,
-  headerLeading,
-  headerTrailing,
-  hideDefaultClose = false,
-  scroll = true,
-  artworkURL,
-  closeLabel = 'Fechar',
-  contentHeight,
-  size = 'sheet',
-  nested,
-  onDismiss,
-}: SheetFrameProps) {
+/** Gym owns presentation and layout; this bridge only bounds Openfy's virtualized content. */
+export function SheetFrame({ children, contentHeight, artworkURL: _artworkURL, closeLabel: _closeLabel,
+  centerTitle = true, keyboardAwareScroll = true, size = 'sheet', scroll = true, ...props }: SheetFrameProps) {
+  const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const scrollOffset = React.useRef(0);
-  const hasDirectScroll = React.Children.toArray(children).some((child) =>
-    React.isValidElement(child) && (child.type === ScrollView || child.type === FlatList || child.type === ProgressiveFlatList));
-  React.useEffect(() => { scrollOffset.current = scroll || hasDirectScroll ? 0 : Infinity; }, [visible, scroll, hasDirectScroll]);
-  const bottomPadding = size === 'full' ? Math.max(16, insets.bottom) : 16;
-  const reportScroll = (event: any) => { scrollOffset.current = event.nativeEvent.contentOffset.y; };
-  // Self-scrolling lists must shrink as well as report their position for drag dismissal.
-  const fittedChildren = React.Children.map(children, (child) => {
-    if (!React.isValidElement<any>(child) || (child.type !== ScrollView && child.type !== FlatList && child.type !== ProgressiveFlatList)) return child;
+  const boundedHeight = contentHeight === undefined ? undefined : Math.min(contentHeight,
+    Math.max(120, height * 0.88 - insets.top - insets.bottom - 120));
+  React.useEffect(() => {
+    if (!props.visible) return;
+    log.ui('modal opened', { title: props.title, size, source: 'gym-notes' });
+    return () => log.ui('modal closed', { title: props.title, size, source: 'gym-notes' });
+  }, [props.visible, props.title, size]);
+  const content = React.Children.map(children, (child) => {
+    if (!React.isValidElement<any>(child) || ![ScrollView, FlatList, ProgressiveFlatList].includes(child.type as any)) return child;
     const element = child as React.ReactElement<any>;
-    return React.cloneElement(element, {
-      style: [element.props.style, { flexGrow: contentHeight === undefined ? 0 : 1,
-        flexShrink: 1, flexBasis: 'auto', minHeight: 0 }],
-      onScroll: (event: any) => { reportScroll(event); element.props.onScroll?.(event); },
-      scrollEventThrottle: 16,
-    });
+    return React.cloneElement(element, { style: [element.props.style,
+      { flexGrow: contentHeight === undefined ? 0 : 1, flexShrink: 1, minHeight: 0 }],
+      keyboardDismissMode: element.props.keyboardDismissMode ?? 'interactive' });
   });
-
-  const handle = <View style={styles.handle} />;
-  const closeWithFeedback = () => {
-    Haptics.selectionAsync().catch(() => {});
-    onClose();
-  };
-
-  const closeButton = (
-    <LoggedPressable
-      onPress={closeWithFeedback}
-      hitSlop={10}
-      accessibilityRole="button"
-      accessibilityLabel={closeLabel}
-    >
-      <GlassSurface glass="regular" isInteractive style={styles.iconButton}>
-        <AppIcon name="close" color="#FFFFFF" size={24} />
-      </GlassSurface>
-    </LoggedPressable>
-  );
-
-  const header = (
-    <View style={styles.header}>
-      <View style={styles.headerLeading}>{headerLeading || (hideDefaultClose ? null : closeButton)}</View>
-      <View style={styles.headerTitleWrap}>
-        <Text numberOfLines={1} style={styles.titleText}>{title}</Text>
-      </View>
-      <View style={styles.actions}>
-        {headerTrailing}
-        {headerLeading && !hideDefaultClose ? closeButton : null}
-      </View>
-    </View>
-  );
-
-  const content = scroll ? (
-    <ScrollView
-      style={styles.sheetScroll}
-      contentContainerStyle={[styles.content, { paddingBottom: bottomPadding }]}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="interactive"
-      onScroll={reportScroll}
-      scrollEventThrottle={16}
-    >
-      {fittedChildren}
-    </ScrollView>
-  ) : (
-    <View testID="sheet-frame-content" style={[styles.content, styles.fixedContent,
-      { paddingBottom: bottomPadding }, contentHeight !== undefined && { height: contentHeight }]}>{fittedChildren}</View>
-  );
-
-  return (
-    <PlayerModal
-      visible={visible}
-      onRequestClose={onClose}
-      onDismiss={onDismiss}
-      fullScreen={size === 'full'}
-      scrollOffset={scrollOffset}
-    >
-      <GlassBackdropScope>
-        <GlassBackdrop pointerEvents="none" style={StyleSheet.absoluteFill}>
-          <PlayerSheetBackground artworkURL={artworkURL} />
-        </GlassBackdrop>
-        <View testID="sheet-frame-body" style={[styles.sheet, size === 'full' && { flex: 1 }]}>
-          {handle}
-          {header}
-          {content}
-        </View>
-        {nested}
-      </GlassBackdropScope>
-    </PlayerModal>
-  );
+  return <GymSheetFrame {...props} centerTitle={centerTitle} keyboardAwareScroll={keyboardAwareScroll} size={size} scroll={scroll}>
+    {scroll ? content : <View testID="sheet-frame-content" style={[
+      { minHeight: 0, flexShrink: 1 }, size === 'full' && { flex: 1 },
+      boundedHeight !== undefined && { height: boundedHeight },
+    ]}>{content}</View>}
+  </GymSheetFrame>;
 }
-
-const styles = StyleSheet.create({
-  artwork: { opacity: 0.64, transform: [{ scale: 1.1 }] },
-  sheetScroll: {
-    flexGrow: 0,
-    flexShrink: 1,
-  },
-  sheet: {
-    flexShrink: 1,
-    minHeight: 0,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-  handle: {
-    flexShrink: 0,
-    alignSelf: 'center',
-    width: 36,
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
-    marginBottom: 18,
-  },
-  header: {
-    flexShrink: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  headerLeading: {
-    width: 40,
-  },
-  headerTitleWrap: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  titleText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  actions: {
-    minWidth: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  content: {
-    paddingTop: 8,
-    gap: 16,
-  },
-  fixedContent: { flexShrink: 1, minHeight: 0 },
-});

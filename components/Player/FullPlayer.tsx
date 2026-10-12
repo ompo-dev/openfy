@@ -2005,7 +2005,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   grabBar: {
-    width: 36,
+    width: 48,
     height: 5,
     borderRadius: 3,
     backgroundColor: 'rgba(255,255,255,0.3)',
@@ -2024,9 +2024,9 @@ const styles = StyleSheet.create({
   chromeMaskTop: { height: CHROME_OVERLAP },
   chromeMaskBottom: { height: CHROME_OVERLAP },
   headerIconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2043,8 +2043,9 @@ const styles = StyleSheet.create({
   },
   headerContext: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 22,
+    fontWeight: '700',
+    letterSpacing: 0,
     marginTop: 0,
   },
   scrolledMiniPlayer: {

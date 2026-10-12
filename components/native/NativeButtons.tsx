@@ -4,6 +4,8 @@ import { LoggedPressable } from './Logged';
 import { GlassSurface } from './GlassSurface';
 import { AppIcon } from './AppIcon';
 import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
+import { NativeIconButton as GymNativeIconButton, glassCircleModifiers as gymGlassCircleModifiers } from '../../vendor/gym-notes/src/components/molecules/NativeMenuButton';
+import { log } from '../../utils/appLogger';
 import {
   IOS_NATIVE_ENABLED,
   SwiftButton,
@@ -17,6 +19,7 @@ import {
 } from './nativeUI';
 
 export function glassCircleModifiers(size: number, tint?: string, reduceBlur = false) {
+  if (!reduceBlur) return gymGlassCircleModifiers(size, tint);
   return [
     swiftButtonStyle?.(reduceBlur ? 'bordered' : 'glass'),
     swiftButtonBorderShape?.('circle'),
@@ -46,6 +49,8 @@ export function NativeIconButton({
   const box = { width: size, height: size };
 
   if (IOS_NATIVE_ENABLED && systemImage) {
+    if (!reduceBlur) return <GymNativeIconButton systemImage={systemImage} label={label}
+      tint={tint} size={size} onPress={() => { log.ui(label); onPress(); }} />;
     return (
       <View style={[styles.host, box]}>
         <SwiftHost style={[styles.frame, box]}>

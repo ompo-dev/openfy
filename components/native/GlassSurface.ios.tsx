@@ -1,4 +1,5 @@
-import { GlassView, type GlassStyle, isLiquidGlassAvailable } from 'expo-glass-effect';
+import { isLiquidGlassAvailable } from 'expo-glass-effect';
+import { GlassSurface as GymGlassSurface } from '../../vendor/gym-notes/src/components/atoms/GlassSurface.ios';
 
 import { GlassSurfaceFallback, type GlassSurfaceProps } from './GlassSurfaceFallback';
 import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
@@ -34,15 +35,15 @@ export function GlassSurface({
   }
 
   return (
-    <GlassView
-      glassEffectStyle={glass as GlassStyle}
+    <GymGlassSurface
+      glass={glass === 'thick' ? 'regular' : glass}
       tintColor={tintColor}
       isInteractive={isInteractive}
       style={style}
       {...rest}
     >
       {children}
-    </GlassView>
+    </GymGlassSurface>
   );
 }
 

@@ -135,7 +135,7 @@ jest.mock('../../native', () => {
 });
 jest.mock('@expo/ui/swift-ui', () => {
   const { View, Text } = require('react-native');
-  return { Host: View, VStack: View, Text };
+  return { Host: View, VStack: View, RNHostView: View, Text };
 });
 jest.mock('@react-native-masked-view/masked-view', () => {
   const React = require('react');
@@ -670,7 +670,7 @@ describe('FullPlayer artist row and YouTube source', () => {
       await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
       await act(async () => { jest.advanceTimersByTime(120); });
       expect(scroll).toHaveBeenLastCalledWith({ index: 2, animated: false, viewPosition: 0.35 });
-      expect(screen.getByText('First line').props.modifiers.find((modifier: { $type: string }) => modifier.$type === 'blur').radius).toBe(3);
+      expect(screen.getAllByTestId('lyric-blur-layer')[0].props.modifiers.find((modifier: { $type: string }) => modifier.$type === 'blur').radius).toBe(3);
       await fireEvent.press(screen.getByLabelText('Selecionar provedor da letra'));
       expect(screen.getByTestId('lyrics-provider-sheet')).toBeTruthy();
       expect(screen.getByTestId('player-artist-details')).toBeTruthy();
@@ -723,8 +723,8 @@ describe('FullPlayer artist row and YouTube source', () => {
       } as any);
       const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
       await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
-      const blurRadii = () => ['Current line', 'Next line'].map((text) =>
-        screen.getByText(text).props.modifiers?.find((modifier: { $type: string }) => modifier.$type === 'blur')?.radius ?? 0
+      const blurRadii = () => screen.getAllByTestId('lyric-blur-layer').map((layer) =>
+        layer.props.modifiers.find((modifier: { $type: string }) => modifier.$type === 'blur').radius
       );
       expect(blurRadii()).toEqual([0, 3]);
       await fireEvent(screen.getByTestId('player-synced-lyrics'), 'scrollBeginDrag');

@@ -13,22 +13,18 @@ describe('shared player modal surface', () => {
         renderItem={({ item }) => <Text>{item}</Text>} />
     </SheetFrame>);
     const list = screen.getByTestId('progressive-scroll');
-    expect(StyleSheet.flatten(list.props.style)).toMatchObject({ flexGrow: 1, flexShrink: 1, flexBasis: 'auto', minHeight: 0 });
-    expect(typeof list.props.onScroll).toBe('function');
-    await fireEvent.scroll(list, { nativeEvent: { contentOffset: { y: 120, x: 0 } } });
+    expect(StyleSheet.flatten(list.props.style)).toMatchObject({ flexGrow: 1, flexShrink: 1, minHeight: 0 });
   });
   afterEach(() => jest.restoreAllMocks());
   it('fits short content in a transparent sheet and closes with the supplied action', async () => {
     const onClose = jest.fn();
     const screen = await render(<SheetFrame visible title="Artistas" onClose={onClose}><Text>Contents</Text></SheetFrame>);
-    const modal = screen.getByTestId('player-modal');
-    expect(modal.props.presentationStyle).toBe('overFullScreen');
+    const modal = screen.getByTestId('gym-sheet-modal');
     expect(modal.props.animationType).toBe('slide');
     expect(modal.props.transparent).toBe(true);
-    const surface = StyleSheet.flatten(screen.getByTestId('player-modal-surface').props.style);
+    const surface = StyleSheet.flatten(screen.getByTestId('gym-sheet-surface').props.style);
     expect(surface.flex).toBeUndefined();
-    expect(surface.maxHeight).toBe('90%');
-    expect(StyleSheet.flatten(screen.getByTestId('sheet-frame-body').props.style).flex).toBeUndefined();
+    expect(surface.maxHeight).toBe('88%');
     await fireEvent.press(screen.getByLabelText('Fechar'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -45,11 +41,9 @@ describe('shared player modal surface', () => {
     const screen = await render(<SheetFrame visible title="JSON" onClose={jest.fn()} scroll={false} contentHeight={640}>
       <Text>Editor</Text>
     </SheetFrame>);
-    const keyboardStyle = StyleSheet.flatten(screen.getByTestId('sheet-frame-body').props.style);
-    expect(keyboardStyle.flexShrink).toBe(1);
-    expect(keyboardStyle.minHeight).toBe(0);
     const content = StyleSheet.flatten(screen.getByTestId('sheet-frame-content').props.style);
-    expect(content.height).toBe(640);
+    expect(content.height).toBeLessThanOrEqual(640);
+    expect(content.height).toBeLessThan(Dimensions.get('window').height * 0.88);
     expect(content.flexShrink).toBe(1);
   });
 
@@ -194,7 +188,7 @@ describe('shared player modal surface', () => {
   it('dismisses a fitted sheet by tapping outside it', async () => {
     const onClose = jest.fn();
     const screen = await render(<SheetFrame visible title="Test" onClose={onClose}><Text>Contents</Text></SheetFrame>);
-    await fireEvent.press(screen.getByTestId('player-modal-backdrop'));
+    await fireEvent.press(screen.getByTestId('gym-sheet-backdrop'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

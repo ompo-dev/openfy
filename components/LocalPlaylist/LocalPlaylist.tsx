@@ -174,10 +174,8 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
         loadingError={error}
       />
       <PlaylistEditorModal
-        onAddTracks={() => {
-          setTimeout(() => setIsPickerVisible(true), 220);
-        }}
-        onClose={() => setIsEditorVisible(false)}
+        onAddTracks={() => setIsPickerVisible(true)}
+        onClose={() => { setIsEditorVisible(false); setIsPickerVisible(false); }}
         onSaved={async () => {
           await loadPlaylist();
           refreshLibrary();
@@ -185,13 +183,16 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
         playlist={playlist}
         tracks={tracks}
         visible={isEditorVisible}
+        nested={<PlaylistTrackPickerModal existingTrackIds={playlist.trackIds}
+          onClose={() => setIsPickerVisible(false)} onConfirm={(trackIds) => void addTracks(trackIds)}
+          tracks={libraryTracks} visible={isEditorVisible && isPickerVisible} />}
       />
       <PlaylistTrackPickerModal
         existingTrackIds={playlist.trackIds}
         onClose={() => setIsPickerVisible(false)}
         onConfirm={(trackIds) => void addTracks(trackIds)}
         tracks={libraryTracks}
-        visible={isPickerVisible}
+        visible={isPickerVisible && !isEditorVisible}
       />
     </>
   );

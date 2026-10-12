@@ -19,7 +19,7 @@ jest.mock('@expo/ui/swift-ui', () => {
     else previousChildren.current = props.children;
     return React.createElement(Text, props, previousText.current, previousChildren.current);
   };
-  return { Host: View, VStack: View, Text: NativeText };
+  return { Host: View, VStack: View, RNHostView: View, Text: NativeText };
 });
 
 beforeEach(() => mockNativeTextProps.mockClear());
@@ -33,13 +33,13 @@ it('never appends stale native text during plain/word/plain switches and restore
     expect(screen.getAllByText('Hello world')).toHaveLength(1);
     await screen.rerender(<SyncedLyricText active={false} blurred words={words}>Hello world</SyncedLyricText>);
     expect(screen.getAllByText('Hello world')).toHaveLength(1);
-    expect(screen.getByText('Hello world').props.modifiers).toEqual(expect.arrayContaining([
+    expect(screen.getByTestId('lyric-blur-layer').props.modifiers).toEqual(expect.arrayContaining([
       expect.objectContaining({ $type: 'blur', radius: 3 }),
     ]));
   }
 });
 
-it('uses the preview word renderer in the expanded active line, without SwiftUI or blur', async () => {
+it('uses the preview word renderer in the expanded active line, without SwiftUI Text or blur', async () => {
   const words = [{ text: 'Hello ', startTimeMs: 1000, endTimeMs: 2000 },
     { text: 'world', startTimeMs: 2000, endTimeMs: 3000 }];
   const screen = await render(<SyncedLyricText active blurred={false} words={words} positionMs={1500}>Hello world</SyncedLyricText>);
@@ -109,22 +109,21 @@ it('interpolates only the active line, stops on pause and resynchronizes on seek
   } finally { intervals.mockRestore(); clearIntervals.mockRestore(); jest.useRealTimers(); }
 });
 
-it('keeps SwiftUI blur only on inactive plain strings and removes that tree on focus', async () => {
+it('keeps one mounted RN text and only updates its enclosing native blur on focus', async () => {
   const screen = await render(<SyncedLyricText active={false} blurred>Next lyric</SyncedLyricText>);
-  const modifiers = () => screen.getByText('Next lyric').props.modifiers;
+  const modifiers = () => screen.getByTestId('lyric-blur-layer').props.modifiers;
   expect(modifiers()).toEqual(expect.arrayContaining([
     expect.objectContaining({ $type: 'blur', radius: 3 }),
-    expect.objectContaining({ $type: 'multilineTextAlignment', alignment: 'leading' }),
-    expect.objectContaining({ $type: 'font', size: 26, weight: 'bold' }),
   ]));
-  const nativeCalls = mockNativeTextProps.mock.calls.length;
+  const text = screen.getByTestId('lyric-text-content');
   await screen.rerender(<SyncedLyricText active={false} blurred={false}>Next lyric</SyncedLyricText>);
   expect(screen.getByTestId('lyric-text-content')).toBeTruthy();
   await screen.rerender(<SyncedLyricText active blurred>Next lyric</SyncedLyricText>);
+  expect(screen.getByTestId('lyric-text-content')).toBe(text);
+  expect(modifiers()).toEqual(expect.arrayContaining([expect.objectContaining({ $type: 'blur', radius: 0 })]));
   expect(StyleSheet.flatten(screen.getByTestId('lyric-text-content').props.style)).toMatchObject({
     fontSize: 26, fontWeight: '700', color: '#FFFFFF' });
-  expect(mockNativeTextProps).toHaveBeenCalledTimes(nativeCalls);
-  expect(mockNativeTextProps.mock.calls.every(([props]) => typeof props.children === 'string')).toBe(true);
+  expect(mockNativeTextProps).not.toHaveBeenCalled();
 });
 
 it('disables timed backing vocals as well as foreground words', async () => {
@@ -135,4 +134,21 @@ it('disables timed backing vocals as well as foreground words', async () => {
   </SyncedLyricText>);
   expect(screen.getByTestId('lyric-text-content').children).toEqual(['Hello']);
   expect(screen.getByTestId('lyric-background-content').children).toEqual(['Harmony']);
+});
+
+it('uses the new audio clock on the very first active-line or seek render', async () => {
+  const words = [{ text: 'Line', startTimeMs: 0, endTimeMs: 10000 }];
+  const paints: number[] = [];
+  function Probe({ position, active }: { position: number; active: boolean }) {
+    paints.push(useLyricClock(position, active, true, 1, words));
+    return null;
+  }
+  const screen = await render(<Probe position={0} active={false} />);
+  paints.length = 0;
+  await screen.rerender(<Probe position={5200} active />);
+  expect(paints[0]).toBe(5200);
+  paints.length = 0;
+  await screen.rerender(<Probe position={1200} active />);
+  expect(paints[0]).toBe(1200);
+  await screen.unmount();
 });

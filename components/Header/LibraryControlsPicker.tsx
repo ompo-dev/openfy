@@ -1,13 +1,10 @@
 import * as React from 'react';
 import {
-  Modal,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   View,
   useColorScheme,
-  useWindowDimensions,
 } from 'react-native';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 
@@ -23,6 +20,7 @@ import {
   SwiftText,
   GlassSurface,
   LoggedPressable,
+  SheetFrame,
   swiftFont,
   swiftFrame,
   swiftForegroundStyle,
@@ -32,7 +30,6 @@ import {
   swiftTint,
   glassCircleModifiers,
 } from '../native';
-import { WithoutGlassBackdrop } from '../native/GlassBackdrop';
 import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 
 type LibrarySort = 'recent' | 'title';
@@ -76,13 +73,10 @@ const labelFor = <T extends string>(options: readonly Option<T>[], value: T) =>
 export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
   const reduceBlur = useAppSettingsStore((state) => state.settings.reduceDynamicBlur);
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const { width, height } = useWindowDimensions();
   const triggerRef = React.useRef<View>(null);
   const menuRef = React.useRef<View>(null);
   const pendingAction = React.useRef<(() => void) | null>(null);
   const [menuVisible, setMenuVisible] = React.useState(false);
-  const [anchor, setAnchor] = React.useState({ x: 12, y: 8, height: 44 });
-  const [menuHeight, setMenuHeight] = React.useState(252);
   const isFilter = props.kind === 'filter';
   const embedded = isFilter && Boolean(props.embedded);
   const label = isFilter ? 'Filtrar biblioteca' : labelFor(VIEW_OPTIONS, props.view);
@@ -96,18 +90,9 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
   const downloadsLabel = downloadStatus
     ? `Ver downloads, ${downloadStatus}`
     : 'Ver downloads';
-  const menuWidth = Math.min(260, width - 24);
-  const menuLeft = Math.max(12, Math.min(anchor.x, width - menuWidth - 12));
-  const menuTop = Math.max(
-    8,
-    Math.min(anchor.y + anchor.height + 6, height - menuHeight - 8)
-  );
 
   const closeMenu = () => setMenuVisible(false);
   const openMenu = () => {
-    triggerRef.current?.measureInWindow((x, y, _width, measuredHeight) => {
-      setAnchor({ x, y, height: measuredHeight });
-    });
     setMenuVisible(true);
   };
   const selectAction = (action: () => void) => {
@@ -240,11 +225,10 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
         )}
       </View>
 
-      <Modal
+      <SheetFrame
         visible={menuVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeMenu}
+        title={label}
+        onClose={closeMenu}
         onShow={() => {
           if (Platform.OS === 'web') menuItems()?.[0]?.focus();
         }}
@@ -254,31 +238,15 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
           action?.();
         }}
       >
-        <WithoutGlassBackdrop>
-        <View style={styles.menuOverlay}>
-          <LoggedPressable
-            accessibilityLabel="Fechar seleção"
-            accessibilityRole="button"
-            onPress={closeMenu}
-            style={StyleSheet.absoluteFill}
-          />
           <View
             ref={menuRef}
             accessibilityRole="menu"
             accessibilityLabel={label}
             accessibilityViewIsModal
             onAccessibilityEscape={closeMenu}
-            onLayout={(event) => setMenuHeight(event.nativeEvent.layout.height)}
             {...(Platform.OS === 'web' ? { onKeyDown: handleMenuKeyDown } : {})}
-            style={[styles.optionMenu, {
-              top: menuTop,
-              left: menuLeft,
-              width: menuWidth,
-              maxHeight: height - 16,
-            }]}
+            style={{ width: '100%' }}
           >
-            <GlassSurface glass="thick" tintColor="#252525" style={styles.menuSurface}>
-              <ScrollView keyboardShouldPersistTaps="handled">
                 {props.kind === 'filter' ? (
                   <>
                     <MenuAction
@@ -316,12 +284,8 @@ export const LibraryControlsPicker = (props: LibraryControlsPickerProps) => {
                     </LoggedPressable>
                   );
                 })}
-              </ScrollView>
-            </GlassSurface>
           </View>
-        </View>
-        </WithoutGlassBackdrop>
-      </Modal>
+      </SheetFrame>
     </>
   );
 };
