@@ -5,12 +5,18 @@ import { SheetFrame, NativeIconButton } from '../native';
 import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 import { LYRICS_PROVIDERS, type LyricsProviderId } from '../../services/lyrics/lyricsSources';
 import type { AppSettings } from '../../services/settings/appSettings';
+import { log } from '../../utils/appLogger';
 
 export const LyricsSettingsSheet = ({ visible, onClose }: { visible: boolean; onClose: () => void }) => {
   const { settings, setSetting } = useAppSettingsStore();
   const [offset, setOffset] = React.useState(settings.lyricsOffsetMs);
   const [error, setError] = React.useState('');
   React.useEffect(() => setOffset(settings.lyricsOffsetMs), [settings.lyricsOffsetMs]);
+  React.useEffect(() => {
+    if (!visible) return;
+    log.ui('lyrics settings sheet opened');
+    return () => log.ui('lyrics settings sheet closed');
+  }, [visible]);
   const change = <K extends keyof AppSettings>(key: K, value: AppSettings[K] | ((current: AppSettings[K]) => AppSettings[K])) => {
     setError(''); void setSetting(key, value).catch(() => setError('Nao foi possivel salvar o ajuste.'));
   };

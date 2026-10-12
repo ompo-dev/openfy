@@ -134,4 +134,52 @@ describe('lyric provider orchestration', () => {
     await repository.setTrackLyricsProvider(query.trackId, 'lrclib');
     expect(repository.getCachedTrackLyricsProvider(query.trackId)).toBe('lrclib');
   });
+  it('uses normalized credits and whole seconds for the BetterLyrics public cache', async () => {
+    jest.mocked(fetch).mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({
+      ttml: '<tt><body><p begin="26.136" end="27.441"><span begin="26.136" end="26.780">Hello</span> '
+        + '<span begin="26.780" end="27.441">world</span></p></body></tt>' }) } as Response);
+    const result = await repository.fetchProviderLyrics({ trackId: 'baco', trackName: '20 Ligacoes [Official Audio]',
+      artistName: 'Baco Exu do Blues, Guest', durationMs: 193600, provider: 'better' });
+    const address = new URL(jest.mocked(fetch).mock.calls[0][0] as string);
+    expect(address.searchParams.get('d')).toBe('193');
+    expect(address.searchParams.get('a')).toBe('Baco Exu do Blues');
+    expect(address.searchParams.get('s')).toBe('20 Ligacoes');
+    expect(result).toMatchObject({ artistName: 'Baco Exu do Blues, Guest', isSynced: true,
+      segments: [{ startTimeMs: 26136, words: [{ text: 'Hello', endTimeMs: 26780 }, { text: 'world', startTimeMs: 26780 }] }] });
+  });
+  it('does not let a fast missing mirror defeat a successful word-timed mirror or reparse it as plain text', async () => {
+    const signals: AbortSignal[] = [];
+    jest.mocked(fetch).mockImplementation(async (input, options) => {
+      signals.push(options!.signal!);
+      if (!String(input).startsWith('https://lyricsplus.binimum.org/')) return { ok: false, status: 404 } as Response;
+      await Promise.resolve();
+      return { ok: true, status: 200, text: async () => JSON.stringify({ lyrics: [{ time: 1000, duration: 2000,
+        text: 'Hello world', syllabus: [{ text: 'Hel', time: 1000, duration: 250 },
+          { text: 'lo ', time: 1250, duration: 250 }, { text: 'world', time: 1500, duration: 1500 }] }] }) } as Response;
+    });
+    await expect(repository.fetchProviderLyrics({ ...query, provider: 'lyrics-plus' })).resolves.toMatchObject({
+      source: 'lyrics-plus', isSynced: true, segments: [{ text: 'Hello world', words: [
+        { text: 'Hello', startTimeMs: 1000, endTimeMs: 1500, syllables: [{ text: 'Hel' }, { text: 'lo' }] },
+        { text: 'world', startTimeMs: 1500, endTimeMs: 3000 }] }] });
+    expect(signals).toHaveLength(6);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+  it('reports restricted access separately from missing lyrics and still falls back automatically', async () => {
+    mockSettings.lyricsSourceOrder = ['better', 'lrclib'];
+    jest.mocked(fetch).mockResolvedValue({ ok: false, status: 401 } as Response);
+    const onAttempt = jest.fn();
+    await expect(repository.fetchProviderLyrics({ ...query, onAttempt })).resolves.toEqual(synced);
+    expect(onAttempt).toHaveBeenCalledWith('better', 'restricted');
+  });
+  it('reports provider deadlines rather than saying a stalled source has no lyrics', async () => {
+    jest.useFakeTimers();
+    jest.mocked(fetch).mockImplementation(() => new Promise(() => {}));
+    const onAttempt = jest.fn();
+    const result = repository.fetchProviderLyrics({ ...query, provider: 'lyrics-plus', onAttempt });
+    await flush();
+    jest.advanceTimersByTime(8001);
+    await expect(result).resolves.toBeNull();
+    expect(onAttempt).toHaveBeenCalledWith('lyrics-plus', 'timeout');
+    expect(jest.getTimerCount()).toBe(0);
+  });
 });

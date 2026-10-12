@@ -304,6 +304,7 @@ function PlayerGlassButton({
 export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps) => {
   const blurInactiveLyrics = useAppSettingsStore((state) => state.settings.blurInactiveLyrics);
   const lyricsOffsetMs = useAppSettingsStore((state) => state.settings.lyricsOffsetMs);
+  const playbackSpeed = useAppSettingsStore((state) => state.settings.playbackSpeed);
   const insets = useSafeAreaInsets();
   const artworkProgress = useSharedValue(0);
   const isOffline = useConnectivityStore((state) => state.status === 'offline');
@@ -1562,7 +1563,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   removeClippedSubviews={false}
                   ref={lyricsListRef}
                   data={lyricTimeline}
-                  extraData={`${activeLineIndex}:${isLyricsUserScrolling}:${playerState.positionMs}:${lyricsOffsetMs}`}
+                  extraData={`${activeLineIndex}:${isLyricsUserScrolling}:${playerState.positionMs}:${lyricsOffsetMs}:${playerState.isPlaying}:${playerState.isBuffering}:${playbackSpeed}:${visible}:${showLyricsFull}:${blurInactiveLyrics}`}
                   keyExtractor={(item) =>
                     item.kind === 'gap'
                       ? item.id
@@ -1629,6 +1630,8 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                         {item.kind === 'lyric' ? (
                           <SyncedLyricText active={isActive} words={item.words}
                             positionMs={isActive ? playerState.positionMs - lyricsOffsetMs : 0}
+                            playing={visible && showLyricsFull && playerState.isPlaying && !playerState.isBuffering}
+                            playbackSpeed={playbackSpeed} trackId={currentTrack.spotifyId} background={item.background}
                             blurred={blurInactiveLyrics && !isActive && !isLyricsUserScrolling}>
                             {item.text}
                           </SyncedLyricText>

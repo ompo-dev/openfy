@@ -12,7 +12,7 @@ export const LYRICS_PROVIDERS = [
 
 export type LyricsProviderId = typeof LYRICS_PROVIDERS[number]['id'];
 export type LyricsProviderSelection = LyricsProviderId | 'auto';
-export type LyricsProviderStatus = 'loading' | 'found' | 'missing' | 'error' | 'cancelled';
+export type LyricsProviderStatus = 'loading' | 'found' | 'missing' | 'error' | 'cancelled' | 'timeout' | 'restricted';
 export const DEFAULT_LYRICS_ORDER = LYRICS_PROVIDERS.map((provider) => provider.id);
 export const isLyricsProvider = (value: unknown): value is LyricsProviderId =>
   LYRICS_PROVIDERS.some((provider) => provider.id === value);

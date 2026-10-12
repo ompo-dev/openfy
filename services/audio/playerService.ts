@@ -213,10 +213,12 @@ const applyPlayerEqualizer = async (player: AudioPlayer, packet: number[]) => {
 export const applyAudioPreferences = async (settings: AppSettings) => {
   const packet = equalizerPacket(settings);
   const capabilities = getAudioCapabilities();
-  if (needsEqualizerProcessing(packet) && !capabilities.equalizer) throw new Error('O equalizador requer o novo build nativo.');
-  if (settings.playbackSpeed !== 1 && !capabilities.speed) throw new Error('A velocidade requer o novo build nativo.');
-  unlockBrowserAudioOutput();
+  const finish = log.time('player', 'audio preferences apply', { platform: Platform.OS, nativeYouTubeActive,
+    capabilities, channel: settings.audioChannelMode, speed: settings.playbackSpeed, equalizer: packet });
   try {
+    if (needsEqualizerProcessing(packet) && !capabilities.equalizer) throw new Error('O equalizador requer o novo build nativo.');
+    if (settings.playbackSpeed !== 1 && !capabilities.speed) throw new Error('A velocidade requer o novo build nativo.');
+    unlockBrowserAudioOutput();
     await setAudioChannelMode(settings.audioChannelMode);
     if (nativeYouTubeActive) {
       await setNativeYouTubeEqualizer(packet);
@@ -229,7 +231,8 @@ export const applyAudioPreferences = async (settings: AppSettings) => {
     appliedEqualizer = packet; appliedPlaybackSpeed = settings.playbackSpeed;
     outputError = null;
     recordAudioDiagnostic('audio-processing-changed');
-  } catch (error) { outputError = String(error); throw error; }
+    finish({ ok: true });
+  } catch (error) { outputError = String(error); finish({ ok: false, error: String(error) }); throw error; }
 };
 
 const applyPlayerChannels = async (player: AudioPlayer, mode: AudioChannelMode) => {

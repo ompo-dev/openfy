@@ -6,6 +6,7 @@ import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 import { getAudioCapabilities } from '../../services/audio/playerService';
 import { EQUALIZER_FREQUENCIES, EQUALIZER_PRESETS, equalizerFilters, equalizerHeadroomDb } from '../../services/audio/equalizer';
 import type { AppSettings } from '../../services/settings/appSettings';
+import { log } from '../../utils/appLogger';
 
 const NumericSlider = ({ label, value, min, max, step, disabled, onChange, suffix = '' }: {
   label: string; value: number; min: number; max: number; step: number; suffix?: string;
@@ -54,6 +55,11 @@ export const AudioSettingsSheet = ({ visible, onClose }: { visible: boolean; onC
   const capabilities = getAudioCapabilities();
   const [error, setError] = React.useState('');
   const [presets, setPresets] = React.useState(false);
+  React.useEffect(() => {
+    if (!visible) return;
+    log.ui('audio settings sheet opened', { capabilities: getAudioCapabilities() });
+    return () => log.ui('audio settings sheet closed');
+  }, [visible]);
   const change = <K extends keyof AppSettings>(key: K, value: AppSettings[K] | ((current: AppSettings[K]) => AppSettings[K])) => {
     setError(''); void setSetting(key, value).catch((reason) => setError(String(reason)));
   };
@@ -78,12 +84,12 @@ export const AudioSettingsSheet = ({ visible, onClose }: { visible: boolean; onC
     </View>
     {settings.equalizerMode === 'manual' ? <>
       <LoggedPressable accessibilityRole="button" accessibilityLabel="Preset do equalizador" disabled={inactive}
-        onPress={() => setPresets(!presets)} style={styles.row}><Text style={styles.label}>Preset</Text>
+        onPress={() => { log.ui('equalizer presets toggled', { visible: !presets }); setPresets(!presets); }} style={styles.row}><Text style={styles.label}>Preset</Text>
         <Text style={styles.value}>{Object.entries(EQUALIZER_PRESETS).find(([, bands]) =>
           bands.every((gain, i) => gain === settings.equalizerBands[i]))?.[0] || 'Personalizado'}</Text></LoggedPressable>
       {presets ? Object.entries(EQUALIZER_PRESETS).map(([name, bands]) => <LoggedPressable key={name}
         accessibilityRole="radio" accessibilityLabel={name} disabled={inactive} style={styles.row}
-        onPress={() => { change('equalizerBands', bands); setPresets(false); }}><Text style={styles.label}>{name}</Text></LoggedPressable>) : null}
+        onPress={() => { log.ui('equalizer preset selected', { preset: name }); change('equalizerBands', bands); setPresets(false); }}><Text style={styles.label}>{name}</Text></LoggedPressable>) : null}
       {EQUALIZER_FREQUENCIES.map((frequency, index) => <NumericSlider key={frequency}
         label={frequency >= 1000 ? `${frequency / 1000} kHz` : `${frequency} Hz`}
         value={settings.equalizerBands[index]} min={-12} max={12} step={0.5} suffix=" dB" disabled={inactive}

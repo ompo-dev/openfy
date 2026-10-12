@@ -1,17 +1,19 @@
 import type { LyricSegment } from './lyricsService';
+import { lyricWordProgress } from './lyricsTiming';
 
 export const getLyricWordRuns = (text: string, words: LyricSegment['words'], positionMs: number) => {
-  const runs: { text: string; highlighted: boolean }[] = [];
+  const runs: { text: string; highlighted: boolean; progress: number }[] = [];
   let cursor = 0;
   words?.forEach((word) => {
     const value = word.text.trim();
     const start = text.indexOf(value, cursor);
     if (!value || start < cursor) return;
-    if (start > cursor) runs.push({ text: text.slice(cursor, start), highlighted: true });
-    runs.push({ text: value, highlighted: positionMs >= word.startTimeMs });
+    if (start > cursor) runs.push({ text: text.slice(cursor, start), highlighted: true, progress: 1 });
+    const progress = lyricWordProgress(word, positionMs);
+    runs.push({ text: value, highlighted: progress >= 1, progress });
     cursor = start + value.length;
   });
-  if (runs.length && cursor < text.length) runs.push({ text: text.slice(cursor), highlighted: true });
+  if (runs.length && cursor < text.length) runs.push({ text: text.slice(cursor), highlighted: true, progress: 1 });
   return runs;
 };
 

@@ -158,7 +158,7 @@ let activeLyricsController: AbortController | null = null;
 
 // Existing entries were created by native fallback providers. Start new caches
 // on canonical backend so iPhone cannot reuse a different song or expired URL.
-const LYRICS_CACHE_VERSION = 'v10-providers';
+const LYRICS_CACHE_VERSION = 'v11-word-clock';
 const AUDIO_SOURCE_TTL_MS = 10 * 60_000;
 const MAX_RECENT_AUDIO_SOURCES = 24;
 const MIN_PRELOADED_SOURCE_LIFETIME_MS = 5_000;
@@ -1515,6 +1515,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const { currentTrack, activeRequestId } = get();
     if (!currentTrack) return;
     const generation = ++lyricsLoadGeneration;
+    const finish = log.time('player', 'active lyrics refresh', { trackId: currentTrack.spotifyId, generation, force });
     activeLyricsController?.abort();
     const controller = new AbortController();
     activeLyricsController = controller;
@@ -1522,7 +1523,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     set({ isLoadingLyrics: true, lyricsProviderAttempts: {} });
     try {
       const provider = await getTrackLyricsProvider(currentTrack.spotifyId);
-      if (!current()) return;
+      if (!current()) { finish({ ok: true, outcome: 'stale' }); return; }
       set({ lyricsProvider: provider });
       const lyrics = await fetchLyrics(currentTrack.title, currentTrack.artistName,
         currentTrack.duration_ms / 1000, currentTrack.albumName, currentTrack.releaseDate,
@@ -1533,18 +1534,22 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           onAttempt: (source, status) => {
             if (current()) set({ lyricsProviderAttempts: { ...get().lyricsProviderAttempts, [source]: status } });
           } });
-      if (!current()) return;
+      if (!current()) { finish({ ok: true, outcome: 'stale' }); return; }
       if (lyrics) lyricsCache.set(getLyricsCacheKey(currentTrack), lyrics);
       set({ lyricsData: lyrics, isLoadingLyrics: false });
+      finish({ ok: true, found: Boolean(lyrics), provider: lyrics?.source, lines: lyrics?.segments.length || 0,
+        words: lyrics?.segments.reduce((count, line) => count + (line.words?.length || 0), 0) || 0 });
     } catch (error) {
+      finish({ ok: controller.signal.aborted, outcome: controller.signal.aborted ? 'cancelled' : 'error', error: String(error) });
       if (current()) set({ isLoadingLyrics: false });
-      log.error('lyrics provider lookup failed', error);
+      if (!controller.signal.aborted) log.error('lyrics provider lookup failed', error);
     }
   },
 
   selectLyricsProvider: async (provider) => {
     const { currentTrack, activeRequestId } = get();
     if (!currentTrack) return;
+    log.player('active lyrics provider changed', { trackId: currentTrack.spotifyId, provider });
     const generation = ++lyricsLoadGeneration;
     activeLyricsController?.abort();
     set({ lyricsProvider: provider, lyricsData: null, lyricsProviderAttempts: {}, isLoadingLyrics: true });

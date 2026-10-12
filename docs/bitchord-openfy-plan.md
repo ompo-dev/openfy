@@ -132,3 +132,53 @@ Pendencias de produto continuam na secao de recursos com motor proprio acima:
 Automix, crossfade real, normalizacao medida, silencio, DAC/PCM, Canvas, arquivos
 publicos locais, tema claro/sistema e traducao. TTML com frames/ticks e duetos
 simultaneos tambem exige ampliacao do modelo/render; nao anunciar paridade total.
+
+## Correcao de provedores, timing e diagnosticos
+
+- A busca conserva metadados/creditos na interface, mas consulta pelo artista
+  principal e remove apenas embalagem/featuring do titulo. Versoes como remix,
+  live e acoustic continuam na identidade. BetterLyrics/Portato e LyricsPlus
+  recebem segundos inteiros, como o contrato usado pelo cliente de referencia.
+- TTML aceita segundos decimais, clocks e unidades explicitas; spans internos
+  preservam os tempos reais de palavras/silabas. Texto escapado, envelopes JSON,
+  QRC/YRC e vocais x-bg sao interpretados sem incluir traducoes no texto cantado.
+- Destaque continuo por duracao/silaba no renderer SwiftUI e Android/web; apenas
+  a linha ativa atualiza o relogio, com pausa, seek, velocidade e limite de
+  extrapolacao quando os status de audio param. Letras por linha nao recebem
+  tempos por palavra inventados. Duetos independentes e TTML frames/ticks seguem
+  pendentes; vocais de apoio associados a uma linha nao equivalem a duetos.
+- LyricsPlus consulta seus seis hosts e cancela os demais apos uma resposta
+  valida; uma resposta 404 rapida nao vence uma letra valida de outro host.
+  O resultado estruturado nao e convertido novamente em texto sem timing.
+- Cache de resultados ganhou versao nova para nao reutilizar parsing antigo;
+  escolhas de provedores e dados offline existentes continuam preservados.
+- Logs do sistema cobrem HTTP/plataforma/status, consultas, matching, parsing,
+  cache, prioridades, cancelamento, timeout, render ativo, seletor de fontes,
+  ajustes/rollback, processamento de audio e metadados/creditos Spotify. Nao
+  registram corpo da letra ou credenciais e nao geram eventos por frame.
+- O seletor distingue letra ausente de timeout e acesso restrito HTTP 401/403.
+  BetterLyrics permite consultas em seu cache publico, mas respondeu que
+  consultas nao armazenadas exigem X-API-Key. Nao foi inserida chave de terceiros
+  ou contornado o controle de acesso; o modo automatico usa outras fontes.
+
+Verificacao ao vivo em Windows em 2026-10-11, com o parser real do Openfy e
+transporte Node (nao rede nem renderer de um iPhone):
+
+| Gravacao / fonte | Linhas | Palavras | Inicio em ms |
+| --- | --- | --- | --- |
+| Foi assim / lrc.red, BCGSB2500020 | 54 | 0 | 40 |
+| Hotel Caro / lrc.red, BX2DO2200013 | 54 | 408 | 13938 |
+| 20 Ligacoes / lrc.red, BX2DO2200004 | 38 | 277 | 26136 |
+| 20 Ligacoes / BetterLyrics, d=194 | 38 | 277 | 26136 |
+| 20 Ligacoes / LyricsPlus binimum, duration=194 | 38 | 282 | 26136 |
+
+As duracoes na tabela de endpoints sao parametros efetivamente consultados, nao
+estimativas inseridas nas letras. BetterLyrics com titulo/duracao diferentes
+pode exigir chave. O primeiro host LyricsPlus expirou; binimum respondeu.
+
+Verificacao automatizada: 805 testes aprovados em 112 suites, 24 testes/suites
+ignorados pelo projeto, TypeScript sem erros e lint sem erros (43 avisos
+preexistentes). Export dos bundles Hermes iOS/Android e web (19 rotas) concluido.
+O export nao substitui o build nativo. O aviso appleTeamId e esperado no ambiente
+local sem credenciais; o CI/CD configura a assinatura pelo fluxo existente.
+Rede iOS e animacao em hardware continuam a exigir dispositivo.

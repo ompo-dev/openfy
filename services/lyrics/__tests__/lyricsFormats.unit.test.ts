@@ -31,10 +31,44 @@ describe('lyric provider formats', () => {
         words: [{ startTimeMs: 1000, endTimeMs: 1500 }, { startTimeMs: 1500, endTimeMs: 3000 }] }] });
   });
   it('accepts clocks and explicit time units but not invalid timing', () => {
+    expect(lyricTimeMs(' 27.395 ')).toBe(27395);
     expect(lyricTimeMs('01:02.345')).toBe(62345);
     expect(lyricTimeMs('1:01:02.345')).toBe(3662345);
     expect(lyricTimeMs('500ms')).toBe(500);
     expect(lyricTimeMs(NaN)).toBeNull();
     expect(lyricTimeMs('oops')).toBeNull();
+  });
+  it('reads decimal TTML and innermost syllables with separate backing vocals', () => {
+    const result = parseTtml('<tt><body><p begin="26.136" end="29.000">'
+      + '<span begin="26.136" end="28.000"><span begin="26.136" end="26.780">Ho</span>'
+      + '<span begin="26.780" end="27.441">tel</span></span> '
+      + '<span begin="27.441" end="28.000">caro</span>'
+      + '<span ttm:role="x-bg"><span begin="28.000" end="29.000">eco</span></span>'
+      + '<span ttm:role="x-translation">translation</span></p></body></tt>');
+    expect(result).toEqual([{ index: 0, text: 'Hotel caro', startTimeMs: 26136, endTimeMs: 29000,
+      words: [{ text: 'Hotel', startTimeMs: 26136, endTimeMs: 27441, syllables: [
+        { text: 'Ho', startTimeMs: 26136, endTimeMs: 26780 }, { text: 'tel', startTimeMs: 26780, endTimeMs: 27441 }] },
+      { text: 'caro', startTimeMs: 27441, endTimeMs: 28000 }],
+      background: { text: 'eco', startTimeMs: 28000, endTimeMs: 29000,
+        words: [{ text: 'eco', startTimeMs: 28000, endTimeMs: 29000 }] } }]);
+  });
+  it('accepts escaped and JSON-quoted TTML returned by provider envelopes', () => {
+    const text = '<tt><body><p begin="13.938" end="16.163"><span begin="13.938" end="16.163">Hello</span></p></body></tt>';
+    const expected = parseLyricsPayload(text);
+    expect(parseLyricsPayload({ ttml: text })).toEqual(expected);
+    expect(parseLyricsPayload(JSON.stringify(text))).toEqual(expected);
+    expect(parseLyricsPayload('```xml\n' + text + '\n```')).toEqual(expected);
+    expect(parseLyricsPayload(text.replace(/</g, '&lt;').replace(/>/g, '&gt;'))).toEqual(expected);
+  });
+  it.each(['[1000,2000]Hel(1000,500)lo (1500,500)world(2000,1000)',
+    '[1000,2000](1000,500,0)Hel(1500,500,0)lo (2000,1000,0)world'])
+    ('groups QRC/YRC syllables without inventing word times: %s', (text) => {
+      expect(parseLyricsPayload(text)).toMatchObject({ segments: [{ text: 'Hello world',
+        startTimeMs: 1000, endTimeMs: 3000, words: [{ text: 'Hello', startTimeMs: 1000,
+          endTimeMs: 2000, syllables: [{ text: 'Hel' }, { text: 'lo' }] }, { text: 'world', startTimeMs: 2000 }] }] });
+    });
+  it('does not turn invalid TTML begin values into a line starting at zero', () => {
+    expect(parseLyricsPayload('<tt><body><p begin="invalid">Hello</p></body></tt>'))
+      .toEqual({ plainLyrics: 'Hello', segments: [] });
   });
 });

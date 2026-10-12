@@ -69,12 +69,17 @@ export const useAppSettingsStore = create<AppSettingsState>((set, get) => ({
           const previous = await getAppSettings();
           const updated = typeof value === 'function' ? value(previous[key]) : value;
           const next = normalizeAppSettings({ ...previous, [key]: updated });
+          const finish = log.time('ui', 'setting change', { key, previous: previous[key], next: next[key],
+            audioProcessing: AUDIO_KEYS.has(key) });
           try {
             if (AUDIO_KEYS.has(key)) await applyAudioPreferences(next);
             const settings = await updateAppSettings({ [key]: updated });
             set({ settings, isReady: true });
+            finish({ ok: true, key, value: settings[key] });
           } catch (error) {
-            if (AUDIO_KEYS.has(key)) await applyAudioPreferences(previous).catch(() => {});
+            if (AUDIO_KEYS.has(key)) await applyAudioPreferences(previous).catch((reason) =>
+              log.error('audio settings rollback failed', { key, error: reason }));
+            finish({ ok: false, key, error: String(error) });
             throw error;
           }
         });
@@ -91,11 +96,16 @@ export const useAppSettingsStore = create<AppSettingsState>((set, get) => ({
       execute: async () => {
         const mutation = mutations.then(async () => {
           const previous = await getAppSettings();
+          const finish = log.time('ui', 'settings reset and audio apply');
           try {
             await applyAudioPreferences(DEFAULT_APP_SETTINGS);
             const settings = await resetAppSettings();
             set({ settings, isReady: true });
-          } catch (error) { await applyAudioPreferences(previous).catch(() => {}); throw error; }
+            finish({ ok: true });
+          } catch (error) {
+            await applyAudioPreferences(previous).catch((reason) => log.error('audio settings reset rollback failed', reason));
+            finish({ ok: false, error: String(error) }); throw error;
+          }
         });
         mutations = mutation.catch(() => {});
         await mutation;

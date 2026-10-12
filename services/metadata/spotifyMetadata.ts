@@ -1,4 +1,5 @@
 import { normalizeTrackIsrc, type TrackAlbumRef } from '../../models/Track/TrackModel';
+import { log } from '../../utils/appLogger';
 
 export type SpotifyArtist = { id: string; name: string };
 
@@ -112,8 +113,9 @@ const parsePage = (html: string, type: EntityType, id: string): Page | null => {
         candidate = JSON.parse(json).entities?.items?.[`spotify:${type}:${id}`];
       }
       if (candidate && spotifyIdFrom(candidate.uri || candidate.id, type) === id) entity = candidate;
-    } catch {
+    } catch (error) {
       // A broken state payload must not discard valid public meta tags.
+      log.error('Spotify metadata state decode failed', { type, id, scriptId, error });
     }
   }
   return entity || identities.length ? { entity, meta } : null;
@@ -122,7 +124,10 @@ const parsePage = (html: string, type: EntityType, id: string): Page | null => {
 const requestPage = async (type: EntityType, id: string, embed = false): Promise<Page | null> => {
   const url = `https://open.spotify.com/${embed ? 'embed/' : ''}${type}/${id}`;
   const cached = pageCache.get(url);
-  if (cached && cached.expiresAt > Date.now()) return cached.promise;
+  if (cached && cached.expiresAt > Date.now()) {
+    log.network('Spotify metadata cache hit', { type, id, embed }); return cached.promise;
+  }
+  const finish = log.time('network', 'Spotify metadata request', { type, id, embed });
   const controller = typeof AbortController === 'undefined' ? undefined : new AbortController();
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<null>((resolve) => {
@@ -137,14 +142,22 @@ const requestPage = async (type: EntityType, id: string, embed = false): Promise
         headers: { 'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'en' },
         signal: controller?.signal,
       });
-      if (!response.ok || (response.url && spotifyIdFrom(response.url, type) !== id)) return null;
-      return parsePage(await response.text(), type, id);
-    } catch {
+      if (!response.ok || (response.url && spotifyIdFrom(response.url, type) !== id)) {
+        finish({ ok: false, type, id, status: response.status, outcome: 'rejected' }); return null;
+      }
+      const page = parsePage(await response.text(), type, id);
+      finish({ ok: Boolean(page), type, id, status: response.status, hasEntity: Boolean(page?.entity), metaTags: page?.meta.length || 0 });
+      return page;
+    } catch (error) {
+      finish({ ok: false, type, id, error: String(error) });
       return null;
     }
   })();
   // Bound the response body too, even on runtimes where abort does not settle fetch.
-  const promise = Promise.race([request, timeout]).finally(() => clearTimeout(timer));
+  const promise = Promise.race([request, timeout]).finally(() => {
+    clearTimeout(timer);
+    finish({ ok: false, type, id, outcome: 'timeout' });
+  });
   for (const [key, entry] of pageCache) {
     if (entry.expiresAt <= Date.now()) pageCache.delete(key);
   }
@@ -189,7 +202,9 @@ export const fetchSpotifyTrackCredits = async (spotifyId: string): Promise<Spoti
   const id = spotifyIdFrom(spotifyId, 'track');
   if (!id) return [];
   const [embed, page] = await Promise.all([requestPage('track', id, true), requestPage('track', id)]);
-  return trackCreditsFrom(embed, page);
+  const credits = trackCreditsFrom(embed, page);
+  log.artist('Spotify track credits resolved', { trackId: id, artists: credits.map((artist) => artist.name), count: credits.length });
+  return credits;
 };
 
 const imageSources = (entity?: Entity | null): ImageSource[] => [
@@ -250,6 +265,8 @@ export const fetchSpotifyTrackMetadata = async (spotifyId: string): Promise<Spot
   const trackNumber = positiveNumber(state?.trackNumber) || positiveNumber(track?.trackNumber) || positiveNumber(metaValue(page, 'music:album:track')) || position.trackNumber;
   const discNumber = positiveNumber(state?.discNumber) || positiveNumber(track?.discNumber) || positiveNumber(metaValue(page, 'music:album:disc')) || position.discNumber;
   const isrc = normalizeTrackIsrc(state?.external_ids?.isrc || state?.isrc || track?.external_ids?.isrc || track?.isrc);
+  log.network('Spotify track metadata resolved', { trackId: id, title, isrc, artists: artists.length,
+    albumId, artwork: Boolean(largestImage(imageSources(track)) || metaValue(page, 'og:image')) });
   return {
     ...(isrc ? { isrc } : {}),
     spotifyId: id,

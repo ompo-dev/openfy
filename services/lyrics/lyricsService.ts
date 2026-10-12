@@ -7,18 +7,25 @@
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { log } from '../../utils/appLogger';
+import { requestLyricsJson, requestLyricsText } from './lyricsHttp';
 import {
   hasCanonicalArtistMatch,
   hasConflictingNumberedTitleInLyrics,
   hasCanonicalTitleMatch,
 } from '../canonical/canonicalMatcher';
 
+export type LyricSyllable = { text: string; startTimeMs: number; endTimeMs: number };
+export type LyricWord = LyricSyllable & { syllables?: LyricSyllable[] };
+export type LyricVocal = { text: string; startTimeMs: number; endTimeMs: number; words?: LyricWord[] };
+
 export type LyricSegment = {
   index: number;
   startTimeMs: number;
   endTimeMs: number;
   text: string;
-  words?: { text: string; startTimeMs: number; endTimeMs: number }[];
+  words?: LyricWord[];
+  background?: LyricVocal;
 };
 
 export type LyricsData = {
@@ -150,7 +157,7 @@ export const ensureLyricsDirectory = async (): Promise<void> => {
     if (!info.exists) {
       await FileSystem.makeDirectoryAsync(LYRICS_DIR, { intermediates: true });
     }
-  } catch {}
+  } catch (error) { log.error('lyrics directory creation failed', error); }
 };
 
 /**
@@ -232,18 +239,15 @@ export const fetchLyricsFromLetras = async (
     for (const query of queries) {
       const searchUrl = `https://solr.sscdn.co/letras/m1/?q=${encodeURIComponent(query)}`;
 
-      const res = await fetch(searchUrl, {
-        signal,
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-      });
-      if (!res.ok) continue;
-
-      const raw = await res.text();
+      const raw = await requestLyricsText(searchUrl, { provider: 'letras', signal,
+        headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (!raw) continue;
       const match = raw.match(/LetrasSug\(([\s\S]*)\)/);
       if (!match) continue;
 
       const data = JSON.parse(match[1]);
       const docs = data.response?.docs || [];
+      log.player('lyrics search candidates', { provider: 'letras', candidates: docs.length });
       if (docs.length === 0) continue;
 
       for (const doc of docs.slice(0, 3)) {
@@ -264,13 +268,9 @@ export const fetchLyricsFromLetras = async (
         }
 
         const pageUrl = `https://www.letras.mus.br/${doc.dns}/${doc.url}/`;
-        const pageRes = await fetch(pageUrl, {
-          signal,
-          headers: { 'User-Agent': 'Mozilla/5.0' },
-        });
-        if (!pageRes.ok) continue;
-
-        const html = await pageRes.text();
+        const html = await requestLyricsText(pageUrl, { provider: 'letras', signal,
+          headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (!html) continue;
         const m =
           html.match(/<div class="lyric-original"[^>]*>([\s\S]*?)<\/div>/i) ||
           html.match(/<div class="cnt-letra"[^>]*>([\s\S]*?)<\/div>/i);
@@ -296,8 +296,9 @@ export const fetchLyricsFromLetras = async (
         }
       }
     }
-  } catch (err) {
-    console.warn('[LyricsService] Letras.mus.br lookup failed:', err);
+  } catch (error) {
+    if (!signal?.aborted) log.error('lyrics Letras lookup failed', { trackName, artistName, error });
+    throw error;
   }
   return null;
 };
@@ -320,7 +321,7 @@ export const fetchLyricsFromLrclib = async (
 
   const primaryArtist = isUnknown
     ? ''
-    : artistName.split(',')[0].split('&')[0].trim();
+    : artistName.split(',')[0].trim();
   const durationMs = durationSeconds ? Math.round(durationSeconds * 1000) : 0;
 
   let exactLyrics: LyricsData | null = null;
@@ -339,13 +340,9 @@ export const fetchLyricsFromLrclib = async (
     }
 
     const url = `https://lrclib.net/api/get?${params.toString()}`;
-    const res = await fetch(url, {
-      signal,
-      headers: { 'User-Agent': 'Openfy-App/1.0 (https://github.com/openfy)' },
-    });
-
-    if (res.ok) {
-      const data = (await res.json()) as {
+    const result = await requestLyricsJson(url, { provider: 'lrclib', signal });
+    if (result) {
+      const data = result as {
         id?: number;
         trackName: string;
         artistName: string;
@@ -404,7 +401,8 @@ export const fetchLyricsFromLrclib = async (
       }
     }
   } catch (error) {
-    console.warn('[LyricsService] Exact lookup error:', error);
+    if (signal?.aborted) throw error;
+    log.error('lyrics LRCLIB exact lookup failed', { trackName, artistName, error });
   }
 
   // 3. TERTIARY: Search query fallback on LRCLIB
@@ -414,13 +412,7 @@ export const fetchLyricsFromLrclib = async (
         ? `${primaryArtist} ${lookupTitle}`
         : lookupTitle;
       const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(query)}`;
-      const sRes = await fetch(searchUrl, {
-        signal,
-        headers: { 'User-Agent': 'Openfy-App/1.0 (https://github.com/openfy)' },
-      });
-
-      if (!sRes.ok) continue;
-      const sData = (await sRes.json()) as {
+      const sData = (await requestLyricsJson(searchUrl, { provider: 'lrclib', signal })) as {
         id?: number;
         trackName: string;
         artistName: string;
@@ -446,6 +438,8 @@ export const fetchLyricsFromLrclib = async (
         const matchedSynced = matchedCandidates.find(
           (item) => item.syncedLyrics && item.syncedLyrics.trim().length > 0
         );
+        log.player('lyrics search candidates', { provider: 'lrclib', candidates: sData.length,
+          matches: matchedCandidates.length, synced: Boolean(matchedSynced) });
         if (matchedSynced?.syncedLyrics) {
           const segments = parseLrcToSegments(
             matchedSynced.syncedLyrics,
@@ -482,7 +476,8 @@ export const fetchLyricsFromLrclib = async (
       }
     }
   } catch (error) {
-    console.warn('[LyricsService] Search fallback error:', error);
+    if (signal?.aborted || !exactLyrics) throw error;
+    log.error('lyrics LRCLIB search fallback failed', { trackName, artistName, error });
   }
 
   if (exactLyrics) return exactLyrics;
@@ -529,7 +524,8 @@ export const saveLyricsOffline = async (
     await FileSystem.writeAsStringAsync(filePath, JSON.stringify(lyrics));
     await AsyncStorage.setItem(key, JSON.stringify(lyrics));
     return filePath;
-  } catch {
+  } catch (error) {
+    log.error('lyrics offline save failed', { trackId, error });
     return null;
   }
 };
@@ -557,7 +553,8 @@ export const getOfflineLyrics = async (
     }
 
     return null;
-  } catch {
+  } catch (error) {
+    log.error('lyrics offline read failed', { trackId, error });
     return null;
   }
 };
