@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 
 import { LoggedPressable } from '../native';
@@ -37,9 +37,17 @@ export const TrackRow = React.memo(function TrackRow({
   accessibilityLabel, disabled = false, track, repairUnavailableOnPress = true,
 }: TrackRowProps) {
   const { playTrack } = usePlayer((state) => ({ playTrack: state.playTrack }));
+  // Native swipe cancellation can arrive after RN's press release; movement is never a tap.
+  const touch = React.useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const trackMovement = (event?: GestureResponderEvent) => {
+    const point = event?.nativeEvent;
+    if (point && touch.current && Math.hypot(point.pageX - touch.current.x, point.pageY - touch.current.y) > 8) touch.current.moved = true;
+  };
   const unavailable = useTrackAvailabilityStore((state) => track ? isTrackUnavailable(track, state.failures, false) : false);
   React.useEffect(() => { void hydrateTrackAvailability(); }, []);
-  const handlePress = () => {
+  const handlePress = (event?: GestureResponderEvent) => {
+    trackMovement(event);
+    if (touch.current?.moved) return;
     if (!unavailable || !track || !repairUnavailableOnPress) { onPress(); return; }
     void playTrack({ ...track,
       spotifyId: track.spotifyId || track.id || '', title, artistName: track.artistName || subtitle,
@@ -50,6 +58,9 @@ export const TrackRow = React.memo(function TrackRow({
     <LoggedPressable
       accessibilityLabel={accessibilityLabel || (unavailable ? `Corrigir áudio de ${title}` : `Tocar ${title}`)}
       disabled={disabled}
+      onTouchStart={({ nativeEvent }) => { touch.current = { x: nativeEvent.pageX, y: nativeEvent.pageY, moved: false }; }}
+      onTouchMove={trackMovement}
+      onTouchCancel={() => { if (touch.current) touch.current.moved = true; }}
       onPress={handlePress}
       style={[styles.row, active && playing && styles.rowActive, disabled && styles.rowDisabled]}
     >

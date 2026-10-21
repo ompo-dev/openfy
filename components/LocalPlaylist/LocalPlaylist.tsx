@@ -7,6 +7,7 @@ import {
   deleteLocalPlaylist,
   getLibraryTracks,
   getLocalPlaylist,
+  removeTracksFromLocalPlaylist,
   type LibraryTrack,
   type LocalPlaylist as LocalPlaylistModel,
 } from '@services';
@@ -127,6 +128,17 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
     );
   }, [playlist, refreshLibrary, router]);
 
+  const removeTrack = React.useCallback(async (trackId: string) => {
+    try {
+      const saved = await removeTracksFromLocalPlaylist(playlistId, [trackId]);
+      if (!saved) throw new Error('Playlist removida');
+      await loadPlaylist();
+      refreshLibrary();
+    } catch {
+      Alert.alert('Playlist', 'Não foi possível remover a música. Tente novamente.');
+    }
+  }, [playlistId, loadPlaylist, refreshLibrary]);
+
   if (!playlist) return <PendingCollectionDetail kind="playlist" collectionId={playlistId} error={error}
     onRetry={() => void loadPlaylist()} />;
 
@@ -167,6 +179,7 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
         onAddTracksPress={() => setIsPickerVisible(true)}
         onDeletePress={confirmDelete}
         onEditPress={() => setIsEditorVisible(true)}
+        onRemoveTrack={removeTrack}
         disableTrackArtistLinks
         trackCount={loadingTracks ? playlist.trackIds.length : tracks.length}
         tracks={collectionTracks}

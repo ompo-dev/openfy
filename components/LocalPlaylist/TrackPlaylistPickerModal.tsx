@@ -147,28 +147,21 @@ export function TrackPlaylistPickerModal({
       title="Adicionar à playlist"
       visible={visible}
     >
-      <Text numberOfLines={1} style={styles.trackTitle}>
-        {track.title}
-      </Text>
-      <View testID="playlist-create-shortcut" style={styles.createRow}>
-        <SettingsRow title="Nova playlist" disabled={isSaving} onPress={() => setIsCreateVisible(true)}
-          leading={<SettingIcon name="add" />} trailing={<Chevron />} />
-      </View>
-      {isLoading ? (
-        <View style={styles.loading}>
-          <ActivityIndicator color="#FFFFFF" />
-        </View>
-      ) : (
-        <ProgressiveFlatList
-          testID="playlist-picker-list"
-          listKey={track.spotifyId}
-          data={playlists}
-          keyExtractor={(playlist) => playlist.id}
-          ListEmptyComponent={
-            <Text style={styles.emptyText}>
-              Nenhuma playlist.
-            </Text>
-          }
+      <ProgressiveFlatList
+        testID="playlist-picker-list"
+        listKey={track.spotifyId}
+        data={isLoading ? [] : playlists}
+        keyExtractor={(playlist) => playlist.id}
+        ListHeaderComponentStyle={{ paddingBottom: 12 }}
+        ListHeaderComponent={<>
+          <Text numberOfLines={1} style={styles.trackTitle}>{track.title}</Text>
+          <View testID="playlist-create-shortcut" style={styles.createRow}>
+            <SettingsRow title="Nova playlist" disabled={isSaving} onPress={() => setIsCreateVisible(true)}
+              leading={<SettingIcon name="add" />} trailing={<Chevron />} />
+          </View>
+        </>}
+        ListEmptyComponent={isLoading ? <View style={styles.loading}><ActivityIndicator color="#FFFFFF" /></View>
+          : <Text style={styles.emptyText}>Nenhuma playlist.</Text>}
           renderItem={({ item }) => {
             const alreadyAdded = item.trackIds.includes(track.spotifyId);
             const selected = selectedIds.has(item.id);
@@ -208,7 +201,6 @@ export function TrackPlaylistPickerModal({
           showsVerticalScrollIndicator={false}
           style={styles.list}
         />
-      )}
     </SheetFrame>
   );
 }
@@ -254,7 +246,7 @@ const styles = StyleSheet.create({
     height: 64,
     justifyContent: 'center',
   },
-  list: { flex: 1, minHeight: 0, marginTop: 12 },
+  list: { flex: 1, minHeight: 0 },
   playlistRow: { backgroundColor: '#303030', borderRadius: 8, marginBottom: 8, overflow: 'hidden' },
   createRow: { marginTop: 12, borderRadius: 8, backgroundColor: '#303030', overflow: 'hidden' },
   row: {

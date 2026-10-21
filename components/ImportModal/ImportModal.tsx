@@ -184,6 +184,7 @@ export const ImportModal = ({
       scroll={false} artworkURL={tracks[0]?.imageURL}
       contentHeight={headerHeight + tracks.length * 64}>
       <ProgressiveFlatList
+        testID="import-track-list"
         listKey={inputKey}
         data={tracks}
         keyExtractor={(track) => track.spotifyId}

@@ -6,6 +6,12 @@ import { SheetFrame } from '../SheetFrame';
 import { PlayerModal, shouldDismissSheet } from '../PlayerModal';
 import { ProgressiveFlatList } from '../../common/ProgressiveList';
 
+let mockBottomInset = 0;
+jest.mock('react-native-safe-area-context', () => ({
+  SafeAreaView: jest.requireActual('react-native').View,
+  useSafeAreaInsets: () => ({ top: 0, bottom: mockBottomInset, left: 0, right: 0 }),
+}));
+
 describe('shared player modal surface', () => {
   it('fits progressive lists and forwards their scroll position to drag dismissal', async () => {
     const screen = await render(<SheetFrame visible title="Músicas" onClose={jest.fn()} scroll={false} contentHeight={200}>
@@ -13,9 +19,9 @@ describe('shared player modal surface', () => {
         renderItem={({ item }) => <Text>{item}</Text>} />
     </SheetFrame>);
     const list = screen.getByTestId('progressive-scroll');
-    expect(StyleSheet.flatten(list.props.style)).toMatchObject({ flexGrow: 1, flexShrink: 1, minHeight: 0 });
+    expect(StyleSheet.flatten(list.props.style)).toMatchObject({ flex: 1, minHeight: 0 });
   });
-  afterEach(() => jest.restoreAllMocks());
+  afterEach(() => { jest.restoreAllMocks(); mockBottomInset = 0; });
   it('fits short content in a transparent sheet and closes with the supplied action', async () => {
     const onClose = jest.fn();
     const screen = await render(<SheetFrame visible size="sheet" title="Artistas" onClose={onClose}><Text>Contents</Text></SheetFrame>);
@@ -65,10 +71,33 @@ describe('shared player modal surface', () => {
       <ProgressiveFlatList testID="full-playlist" data={['Song']} keyExtractor={(item) => item}
         renderItem={({ item }) => <Text>{item}</Text>} />
     </SheetFrame>);
-    const content = StyleSheet.flatten(screen.getByTestId('sheet-frame-content').props.style);
-    expect(content).toMatchObject({ flex: 1, minHeight: 0, width: '100%' });
-    expect(content.height).toBeUndefined();
-    expect(StyleSheet.flatten(screen.getByTestId('full-playlist').props.style)).toMatchObject({ flexGrow: 1, flexShrink: 1 });
+    expect(screen.queryByTestId('sheet-frame-content')).toBeNull();
+    expect(screen.queryByTestId('gym-sheet-custom-content')).toBeNull();
+    const style = StyleSheet.flatten(screen.getByTestId('full-playlist').props.style);
+    expect(style).toMatchObject({ flex: 1, minHeight: 0 });
+    expect(style.height).toBeUndefined();
+    expect(style.paddingBottom).toBeUndefined();
+  });
+
+  it('scrolls lists beneath the same glass header and keeps safe-area space in the content, not the viewport', async () => {
+    mockBottomInset = 34;
+    const onScroll = jest.fn();
+    const screen = await render(<SheetFrame visible title="Editar playlist" onClose={jest.fn()} scroll={false}>
+      <ProgressiveFlatList testID="edge-list" onScroll={onScroll} data={['Song']} keyExtractor={(item) => item}
+        renderItem={({ item }) => <Text>{item}</Text>} />
+    </SheetFrame>);
+    expect(screen.getByTestId('gym-sheet-gesture-root')).toBeTruthy();
+    await fireEvent(screen.getByTestId('gym-sheet-header'), 'layout', { nativeEvent: { layout: { height: 84, width: 393, x: 0, y: 0 } } });
+    const list = screen.getByTestId('edge-list');
+    expect(StyleSheet.flatten(list.props.contentContainerStyle)).toMatchObject({ paddingTop: 100, paddingBottom: 50, paddingHorizontal: 16 });
+    expect(list.props.contentInsetAdjustmentBehavior).toBe('never');
+    expect(list.props.automaticallyAdjustContentInsets).toBe(false);
+    expect(screen.queryByTestId('gym-sheet-header-glass')).toBeNull();
+    await fireEvent.scroll(list, { nativeEvent: { contentOffset: { y: 45, x: 0 } } });
+    expect(onScroll).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('gym-sheet-header-glass')).toBeTruthy();
+    await fireEvent.scroll(list, { nativeEvent: { contentOffset: { y: 0, x: 0 } } });
+    expect(screen.queryByTestId('gym-sheet-header-glass')).toBeNull();
   });
 
   it('uses the shared Gym modal for the player with header-only dismissal', async () => {

@@ -26,6 +26,7 @@ import { GlassBackdrop, GlassBackdropScope } from '../native/GlassBackdrop';
 import { DownloadActionIcon } from '../native/DownloadActionIcon';
 import { PlaylistMosaic } from '../PlaylistMosaic';
 import { TrackRow } from '../common/TrackRow';
+import { LibrarySwipeRow } from '../OfflineLibrary/LibrarySwipeRow';
 import { ProgressiveFlatList, ProgressiveList } from '../common/ProgressiveList';
 import { MarqueeText } from '../common/MarqueeText';
 import { SkeletonImage } from '../common/SkeletonImage';
@@ -74,6 +75,7 @@ export type CollectionDetailProps = {
   onArtistPress?: (artistId: string, artistName: string) => void | Promise<void>;
   onDeletePress?: () => void | Promise<void>;
   onEditPress?: () => void | Promise<void>;
+  onRemoveTrack?: (trackId: string) => void | Promise<void>;
   onEndReached?: () => void;
   resolveTracksForPlayback?: () => Promise<CollectionTrack[]>;
   sectionTitle?: string;
@@ -204,6 +206,7 @@ export const CollectionDetail = ({
   onArtistPress,
   onDeletePress,
   onEditPress,
+  onRemoveTrack,
   onEndReached,
   resolveTracksForPlayback,
   sectionTitle,
@@ -274,6 +277,9 @@ export const CollectionDetail = ({
   const insets = useSafeAreaInsets();
   const [sortAscending, setSortAscending] = React.useState(false);
   const [isSearchOpen, setIsSearchOpen] = React.useState(false);
+  const openSwipeRow = React.useRef<(() => void) | null>(null);
+  const closeSwipeRow = React.useCallback(() => { openSwipeRow.current?.(); openSwipeRow.current = null; }, []);
+  React.useEffect(() => { closeSwipeRow(); }, [collectionId, closeSwipeRow]);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [artistTrackLimit, setArtistTrackLimit] = React.useState(ARTIST_TRACKS_PAGE_SIZE);
   const [artistSectionLimits, setArtistSectionLimits] = React.useState<Record<string, number>>({});
@@ -641,7 +647,7 @@ export const CollectionDetail = ({
       const shouldLinkArtists = Boolean(
         rowArtists.length && onArtistPress && !disableTrackArtistLinks
       );
-      return (
+      const row = (
         <TrackRow
           track={item}
           title={item.title}
@@ -660,6 +666,9 @@ export const CollectionDetail = ({
           } : undefined}
         />
       );
+      return kind === 'playlist' && onRemoveTrack ? <LibrarySwipeRow label={`Remover ${item.title} da playlist`}
+        onWillOpen={(close) => { if (openSwipeRow.current !== close) openSwipeRow.current?.(); openSwipeRow.current = close; }}
+        onRemove={() => void onRemoveTrack(item.id)}>{row}</LibrarySwipeRow> : row;
     },
     [
       currentTrack,
@@ -668,6 +677,7 @@ export const CollectionDetail = ({
       downloadsById,
       handleDownloadTrack,
       onArtistPress,
+      onRemoveTrack,
       playTrackList,
       isPlaying,
     ]
@@ -692,6 +702,7 @@ export const CollectionDetail = ({
         renderItem={renderTrack}
         removeClippedSubviews={Platform.OS !== 'web'}
         onEndReached={onEndReached}
+        onScrollBeginDrag={closeSwipeRow}
         onEndReachedThreshold={0.6}
         contentContainerStyle={{ paddingBottom: BOTTOM_NAVIGATION_HEIGHT + 112 }}
         showsVerticalScrollIndicator={false}

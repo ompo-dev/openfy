@@ -57,6 +57,7 @@ jest.mock('../../native', () => {
   } = jest.requireActual<typeof import('react-native')>('react-native');
   return {
     SheetFrame: jest.requireActual('../../native/SheetFrame').SheetFrame,
+    AppIcon: () => null,
     GlassSurface: ({ children, ...props }: any) =>
       React.createElement(View, props, children),
     LoggedPressable: Pressable,
@@ -68,6 +69,15 @@ jest.mock('../../native', () => {
         React.createElement(Text, null, `${label}:${tint}`)
       ),
   };
+});
+
+jest.mock('react-native-gesture-handler/ReanimatedSwipeable', () => {
+  const React = jest.requireActual<typeof import('react')>('react');
+  const { View } = jest.requireActual<typeof import('react-native')>('react-native');
+  return React.forwardRef(function MockSwipeable(props: any, ref) {
+    React.useImperativeHandle(ref, () => ({ close: jest.fn() }));
+    return <View>{props.children}{props.renderRightActions({ value: 1 }, { value: -80 })}</View>;
+  });
 });
 
 jest.mock('../../PlaylistMosaic', () => ({ PlaylistMosaic: () => null }));
@@ -132,6 +142,23 @@ const renderCollection = (props = {}) =>
   );
 
 describe('CollectionDetail', () => {
+  it('exposes swipe removal inside editable playlists without playing or deleting a download', async () => {
+    const remove = jest.fn();
+    const screen = await renderCollection({ kind: 'playlist', onRemoveTrack: remove });
+    await fireEvent.press(await screen.findByLabelText(`Remover ${tracks[1].title} da playlist`));
+    expect(remove).toHaveBeenCalledWith(tracks[1].id);
+    expect(playWithQueue).not.toHaveBeenCalled();
+    expect(jest.mocked(useDownloads).mock.results[0].value.enqueueDownloads).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByLabelText(`Tocar ${tracks[0].title}`));
+    expect(playWithQueue).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ spotifyId: tracks[0].id }), expect.objectContaining({ spotifyId: tracks[1].id }),
+    ]), 0, 'playlist:album-test', { shuffle: false });
+  });
+
+  it('does not offer destructive track actions for remote playlists or albums', async () => {
+    const screen = await renderCollection({ kind: 'playlist' });
+    expect(screen.queryByLabelText(`Remover ${tracks[0].title} da playlist`)).toBeNull();
+  });
   it('follows and unfollows from the profile instead of sharing', async () => {
     const screen = await renderCollection({ kind: 'artist', collectionId: 'ytartist_UCfollow-test~Follow%20Test', title: 'Follow Test' });
     const follow = await screen.findByLabelText('Seguir artista');

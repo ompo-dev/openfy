@@ -73,7 +73,10 @@ describe('music import sheet', () => {
     expect(within(row).getByLabelText('Colar link')).toBeTruthy();
     expect(within(row).getByLabelText('Link da música, álbum ou playlist')).toBeTruthy();
     expect(StyleSheet.flatten(row.props.style)).toMatchObject({ flexDirection: 'row', alignItems: 'center' });
-    expect(StyleSheet.flatten(screen.getByTestId('gym-sheet-custom-content').props.style).paddingHorizontal).toBe(16);
+    const list = screen.getByTestId('import-track-list');
+    expect(StyleSheet.flatten(list.props.contentContainerStyle).paddingHorizontal).toBe(16);
+    expect(StyleSheet.flatten(list.props.style).paddingBottom).toBeUndefined();
+    expect(screen.queryByTestId('gym-sheet-custom-content')).toBeNull();
   });
 
   it('imports album membership and opens the saved album, not another edition of the recording', async () => {

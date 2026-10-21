@@ -76,21 +76,17 @@ export const PlaylistTrackPickerModal = ({
   return (
     <SheetFrame visible={visible} title="Adicionar músicas" onClose={onClose} scroll={false}
       headerTrailing={<PlaylistSheetAction label={confirmLabel} disabled={!selectedCount} onPress={confirm} />}>
-      <View style={styles.searchField}>
-      <Section><TextField label="Buscar" accessibilityLabel="Buscar na biblioteca"
-        autoCapitalize="none"
-        autoCorrect={false}
-        onChangeText={setQuery}
-        placeholder="Buscar na biblioteca"
-        placeholderTextColor="#858585"
-        value={query}
-      /></Section>
-      </View>
       <ProgressiveFlatList
+        testID="playlist-track-picker-list"
         listKey={query}
         data={visibleTracks}
         keyExtractor={(track) => track.spotifyId}
         keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={<View style={styles.searchField}>
+          <Section><TextField label="Buscar" accessibilityLabel="Buscar na biblioteca"
+            autoCapitalize="none" autoCorrect={false} onChangeText={setQuery}
+            placeholder="Buscar na biblioteca" placeholderTextColor="#858585" value={query} /></Section>
+        </View>}
         ListEmptyComponent={
           <Text style={styles.empty}>Nenhuma música encontrada na biblioteca.</Text>
         }

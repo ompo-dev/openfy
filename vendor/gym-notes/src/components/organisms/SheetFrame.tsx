@@ -1,8 +1,9 @@
 import type { ComponentProps, ReactNode, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Animated, Keyboard, KeyboardAvoidingView, Modal, PanResponder, Platform, ScrollView, StyleSheet, type KeyboardEvent, type LayoutChangeEvent, type GestureResponderHandlers, type ModalProps, View } from "react-native";
+  Animated, Keyboard, KeyboardAvoidingView, Modal, PanResponder, Platform, ScrollView, StyleSheet, type KeyboardEvent, type LayoutChangeEvent, type GestureResponderHandlers, type ModalProps, type ScrollViewProps, View } from "react-native";
 import Motion from 'react-native-reanimated';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LoggedPressable } from "@/components/atoms/Logged";
@@ -52,6 +53,8 @@ interface SheetFrameProps {
    */
   nested?: ReactNode;
   scroll?: boolean;
+  /** Virtualized lists own scrolling, but share the page's insets and glass header. */
+  renderScrollContent?: (props: ScrollViewProps) => ReactNode;
   keyboardAwareScroll?: boolean;
   contentBottomInset?: number;
   /** 'sheet' = glass bottom card (default), 'full' = native iOS page sheet. */
@@ -75,6 +78,7 @@ export function SheetFrame({
   overlay,
   nested,
   scroll = true,
+  renderScrollContent,
   keyboardAwareScroll = false,
   contentBottomInset = 0,
   size = "sheet",
@@ -92,7 +96,7 @@ export function SheetFrame({
   const scrollY = useRef(0);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
-  useEffect(() => { if (visible) { dragY.setValue(0); scrollY.current = 0; } }, [visible, dragY]);
+  useEffect(() => { if (visible) { dragY.setValue(0); scrollY.current = 0; setScrolled(false); } }, [visible, dragY]);
   const drag = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_, gesture) => !isFull &&
       gesture.y0 < sheetTop.current + 100 &&
@@ -184,31 +188,31 @@ export function SheetFrame({
 
   // Native iOS page sheet with a glass header that frosts content scrolling under it.
   if (isFull) {
+    const pageScrollProps: ScrollViewProps = {
+      style: styles.fill,
+      contentContainerStyle: [styles.contentFull, {
+        paddingTop: headerHeight + Spacing.four,
+        paddingBottom: Spacing.four + insets.bottom + scrollBottomInset,
+      }],
+      keyboardShouldPersistTaps: 'handled',
+      keyboardDismissMode: 'interactive',
+      automaticallyAdjustKeyboardInsets: false,
+      contentInsetAdjustmentBehavior: 'never',
+      automaticallyAdjustContentInsets: false,
+      scrollEventThrottle: 16,
+      onScroll: ({ nativeEvent }) => setScrolled(nativeEvent.contentOffset.y > 4),
+    };
     const page = (
         // Not a bottom-inset SafeAreaView: that left a fixed background band
         // under the scroll. The scroll fills edge to edge and the safe area is
         // folded into the content padding, so the last card clears the home
         // indicator without a dead bar below it.
         <View style={[styles.fill, { backgroundColor: colors.background }]}>
-          {scroll ? (
+          {renderScrollContent ? renderScrollContent(pageScrollProps) : scroll ? (
             <ScrollView
+              {...pageScrollProps}
               testID="gym-sheet-scroll"
-              style={styles.fill}
-              contentContainerStyle={[
-                styles.contentFull,
-                {
-                  paddingTop: headerHeight + Spacing.four,
-                  paddingBottom: Spacing.four + insets.bottom + scrollBottomInset,
-                },
-              ]}
               showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="interactive"
-              automaticallyAdjustKeyboardInsets={false}
-              scrollEventThrottle={16}
-              onScroll={({ nativeEvent }) => {
-                setScrolled(nativeEvent.contentOffset.y > 4);
-              }}
             >
               {children}
             </ScrollView>
@@ -223,7 +227,7 @@ export function SheetFrame({
             }]}>{children}</View>
           )}
 
-          {chrome ? <View
+          {chrome ? <View testID="gym-sheet-header"
             style={styles.headerBar}
             onLayout={({ nativeEvent }) =>
               setHeaderHeight(nativeEvent.layout.height)
@@ -232,6 +236,7 @@ export function SheetFrame({
             {/* Glass only once content is behind it; keep the header tintless. */}
             {scrolled ? (
               <GlassSurface
+                testID="gym-sheet-header-glass"
                 glass="regular"
                 style={[StyleSheet.absoluteFill, styles.headerGlass]}
               />
@@ -256,6 +261,7 @@ export function SheetFrame({
         onDismiss={onDismiss}
         onShow={onShow}
       >
+        <GestureHandlerRootView testID="gym-sheet-gesture-root" style={styles.fill}>
         {transition ? <View style={[styles.fill, { paddingTop: insets.top + 8 }]}>
           <Motion.View pointerEvents="none" testID="player-modal-backdrop"
             style={[StyleSheet.absoluteFill, transition.backdropStyle]} />
@@ -269,6 +275,7 @@ export function SheetFrame({
           {overlay}
           {nested}
         </View> : <View testID={chrome ? undefined : 'player-modal-surface'} style={styles.fill}>{page}</View>}
+        </GestureHandlerRootView>
       </Modal>
     );
   }
@@ -303,6 +310,7 @@ export function SheetFrame({
       onShow={onShow}
       testID={testID}
     >
+      <GestureHandlerRootView testID="gym-sheet-gesture-root" style={styles.fill}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={[styles.modal, { backgroundColor: colors.overlay }]}>
         <LoggedPressable
@@ -326,6 +334,7 @@ export function SheetFrame({
         </AnimatedSafeAreaView>
         {nested}
       </KeyboardAvoidingView>
+      </GestureHandlerRootView>
     </Modal>
   );
 }

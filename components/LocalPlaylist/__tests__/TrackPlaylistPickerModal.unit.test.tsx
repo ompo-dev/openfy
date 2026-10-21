@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, waitFor, within } from '@testing-library/react-native';
 
 import {
   addTracksToLocalPlaylist,
@@ -17,17 +17,12 @@ jest.mock('@services', () => ({
 }));
 
 jest.mock('../../native', () => {
-  // Jest evaluates this isolated factory before module imports are available.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mockReact = require('react');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Pressable: MockPressable, View: MockView } = require('react-native');
+  const { Pressable: MockPressable, View: MockView } = jest.requireActual<typeof import('react-native')>('react-native');
 
   return {
     LoggedPressable: MockPressable,
     GlassSurface: MockView,
-    SheetFrame: ({ children, headerTrailing, nested, visible }: any) => visible
-      ? mockReact.createElement(MockView, null, headerTrailing, children, nested) : null,
+    SheetFrame: jest.requireActual('../../native/SheetFrame').SheetFrame,
   };
 });
 
@@ -94,13 +89,15 @@ describe('TrackPlaylistPickerModal', () => {
     );
   });
 
-  it('places the create action before the scrolling playlist list', async () => {
+  it('keeps creation above the playlist cells while sharing the edge-to-edge scroll and glass header', async () => {
     const screen = await render(<TrackPlaylistPickerModal onClose={jest.fn()} track={track} visible />);
     await screen.findByText('Favoritas');
-    const create = screen.getByTestId('playlist-create-shortcut');
     const list = screen.getByTestId('playlist-picker-list');
-    expect(create.parent).toBe(list.parent);
-    expect(create.parent!.children.indexOf(create)).toBeLessThan(create.parent!.children.indexOf(list));
+    expect(within(list).getByTestId('playlist-create-shortcut')).toBeTruthy();
+    expect(within(list).getAllByText(/^(Nova playlist|Favoritas)$/).map((node) => node.props.children)).toEqual(['Nova playlist', 'Favoritas']);
+    expect(screen.queryByTestId('gym-sheet-custom-content')).toBeNull();
+    await fireEvent.scroll(list, { nativeEvent: { contentOffset: { y: 40, x: 0 } } });
+    expect(screen.getByTestId('gym-sheet-header-glass')).toBeTruthy();
   });
 
   it('shows playlist artwork from its saved tracks', async () => {

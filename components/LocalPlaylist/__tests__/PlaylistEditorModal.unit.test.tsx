@@ -34,9 +34,13 @@ it('fills the page with normal track rows and removes the redundant form heading
   const view = await render(<PlaylistEditorModal visible playlist={playlist} tracks={tracks} onAddTracks={jest.fn()} onClose={jest.fn()} onSaved={jest.fn()} />);
   expect(view.queryByText('Playlist')).toBeNull();
   expect(view.queryByText('Áudio indisponível')).toBeNull();
-  const content = StyleSheet.flatten(view.getByTestId('sheet-frame-content').props.style);
+  const content = StyleSheet.flatten(view.getByTestId('playlist-editor-tracks').props.style);
   expect(content.flex).toBe(1);
   expect(content.height).toBeUndefined();
+  expect(content.paddingBottom).toBeUndefined();
+  expect(view.queryByTestId('gym-sheet-custom-content')).toBeNull();
+  await fireEvent.scroll(view.getByTestId('playlist-editor-tracks'), { nativeEvent: { contentOffset: { y: 40, x: 0 } } });
+  expect(view.getByTestId('gym-sheet-header-glass')).toBeTruthy();
   await fireEvent.press(view.getByLabelText('Tocar Track 0'));
   expect(mockPlay).toHaveBeenCalledWith(tracks, 0, 'playlist:playlist');
   expect(mockRepair).not.toHaveBeenCalled();

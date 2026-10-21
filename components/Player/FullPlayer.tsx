@@ -1887,13 +1887,13 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
 
           <SheetFrame visible={isQueueVisible} title="Fila de reprodução" artworkURL={artworkUrl}
             onClose={() => setIsQueueVisible(false)} scroll={false} contentHeight={56 + Math.max(64, queue.length * 64)}>
-            <View style={styles.queueSummary}>
+            <ProgressiveFlatList data={queue} listKey={queueSourceId || 'queue'}
+              ListHeaderComponent={<View style={styles.queueSummary}>
               <SettingIcon name="list" />
               <Text numberOfLines={1} style={styles.queueTitle}>{playbackOrigin?.kind === 'album' ? currentTrack.albumName || 'Album'
                 : playbackOrigin?.kind === 'artist' ? currentTrack.artistName : playbackOrigin?.kind === 'playlist' ? 'Playlist' : 'Fila atual'}</Text>
               <Text style={styles.queueCount}>{queue.length}</Text>
-            </View>
-            <ProgressiveFlatList data={queue} listKey={queueSourceId || 'queue'}
+            </View>}
               style={styles.queueList}
               keyExtractor={(track, index) => `${track.spotifyId}:${index}`}
               renderItem={({ item, index }) => {
@@ -1975,7 +1975,7 @@ const styles = StyleSheet.create({
   queueSummary: { flexDirection: 'row', alignItems: 'center', minHeight: 56, gap: 12, paddingHorizontal: 16 },
   queueTitle: { flex: 1, minWidth: 0, color: '#F2F2F2', fontSize: 16, fontFamily: 'SF-Regular' },
   queueCount: { color: '#9E9E9E', fontSize: 13, fontVariant: ['tabular-nums'] },
-  queueList: { backgroundColor: '#303030', borderRadius: 22, paddingHorizontal: 8 },
+  queueList: { minHeight: 0 },
   albumDetailsSection: { marginBottom: 22 },
   gestureRoot: {
     flex: 1,

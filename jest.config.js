@@ -1,7 +1,7 @@
 module.exports = {
   preset: 'jest-expo',
   testEnvironment: 'jsdom',
-  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
+  setupFilesAfterEnv: ['react-native-gesture-handler/jestSetup', '<rootDir>/jest.setup.js'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   testPathIgnorePatterns: ['/node_modules/', '/android/', '/ios/'],
   testMatch: ['**/__tests__/**/*.unit.test.ts?(x)'],
