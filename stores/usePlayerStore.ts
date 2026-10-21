@@ -158,7 +158,7 @@ let activeLyricsController: AbortController | null = null;
 
 // Existing entries were created by native fallback providers. Start new caches
 // on canonical backend so iPhone cannot reuse a different song or expired URL.
-const LYRICS_CACHE_VERSION = 'v11-word-clock';
+const LYRICS_CACHE_VERSION = 'v12-timed-arrays';
 const AUDIO_SOURCE_TTL_MS = 10 * 60_000;
 const MAX_RECENT_AUDIO_SOURCES = 24;
 const MIN_PRELOADED_SOURCE_LIFETIME_MS = 5_000;

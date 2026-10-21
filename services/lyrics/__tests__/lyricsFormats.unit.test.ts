@@ -30,6 +30,23 @@ describe('lyric provider formats', () => {
       .toMatchObject({ segments: [{ text: 'Hello world', startTimeMs: 1000, endTimeMs: 3000,
         words: [{ startTimeMs: 1000, endTimeMs: 1500 }, { startTimeMs: 1500, endTimeMs: 3000 }] }] });
   });
+  it.each(['None', undefined])('does not jump to the last verse for an untimed LyricsPlus array (%s)', (type) => {
+    expect(parseLyricsPayload({ type, lyrics: [
+      { time: 0, duration: 0, text: 'First verse' },
+      { time: 0, duration: 0, text: 'Second verse' },
+      { time: 0, duration: 0, text: 'Last verse' },
+    ] }, 158000)).toEqual({ segments: [], plainLyrics: 'First verse\nSecond verse\nLast verse' });
+  });
+  it('preserves actual line synchronization including a verse at time zero', () => {
+    expect(parseLyricsPayload({ type: 'Line', lyrics: [
+      { time: 0, text: 'First verse' }, { time: 5000, text: 'Second verse' },
+      { time: 10000, duration: 3000, text: 'Last verse' },
+    ] }, 158000)).toEqual({ plainLyrics: 'First verse\nSecond verse\nLast verse', segments: [
+      { index: 0, text: 'First verse', startTimeMs: 0, endTimeMs: 5000 },
+      { index: 1, text: 'Second verse', startTimeMs: 5000, endTimeMs: 10000 },
+      { index: 2, text: 'Last verse', startTimeMs: 10000, endTimeMs: 13000 },
+    ] });
+  });
   it('accepts clocks and explicit time units but not invalid timing', () => {
     expect(lyricTimeMs(' 27.395 ')).toBe(27395);
     expect(lyricTimeMs('01:02.345')).toBe(62345);

@@ -71,7 +71,7 @@ export const LyricsSettingsSheet = ({ visible, onClose }: { visible: boolean; on
   };
   return <SheetFrame visible={visible} size="full" title="Letras" onClose={onClose} scroll={false}>
     <GestureHandlerRootView style={styles.fill}>
-    <ScrollViewContainer contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollViewContainer style={styles.fill} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
     <Section label="Letras">
     <SettingsRow title="Letras" leading={<SettingIcon name="chatbubble-ellipses-outline" />} trailing={<Toggle label="Letras"
       value={settings.lyricsEnabled} onValueChange={(value) => change('lyricsEnabled', value)} />} />
@@ -110,7 +110,7 @@ export const LyricsSettingsSheet = ({ visible, onClose }: { visible: boolean; on
   </SheetFrame>;
 };
 const styles = StyleSheet.create({
-  fill: { flex: 1 }, content: { gap: 16, paddingVertical: 16, paddingBottom: 36 },
+  fill: { flex: 1, minWidth: 0 }, content: { gap: 16, paddingVertical: 16, paddingBottom: 36 },
   providerRow: { flexDirection: 'row', alignItems: 'center' },
   providerCopy: { flex: 1, minWidth: 0 }, dragHandle: { width: 44, minHeight: 56, alignItems: 'center', justifyContent: 'center' },
   row: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 8,

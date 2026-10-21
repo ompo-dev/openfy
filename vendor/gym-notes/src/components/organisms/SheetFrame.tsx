@@ -216,7 +216,7 @@ export function SheetFrame({
             // Native content (a SwiftUI Form) scrolls itself and needs bounded
             // height, so fill instead of nesting it in a ScrollView. It clears
             // the floating glass header via paddingTop.
-            <View testID="gym-sheet-custom-content" style={[styles.fill, chrome && {
+            <View testID="gym-sheet-custom-content" style={[styles.fill, chrome && styles.contentBounds, chrome && {
               paddingTop: headerHeight + Spacing.four,
               paddingHorizontal: Spacing.four,
               paddingBottom: Spacing.four + insets.bottom + scrollBottomInset,
@@ -430,8 +430,10 @@ const styles = StyleSheet.create({
     gap: Spacing.four,
   },
   contentFull: {
+    minWidth: 0,
     paddingHorizontal: Spacing.four,
     paddingBottom: Spacing.four,
     gap: Spacing.four,
   },
+  contentBounds: { minWidth: 0, overflow: 'hidden', alignItems: 'stretch' },
 });

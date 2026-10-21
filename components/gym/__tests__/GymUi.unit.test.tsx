@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { StyleSheet, Text } from 'react-native';
-import { Section, SettingsRow, Toggle, NativeSegmented, useAppModalStore } from '../index';
+import { Section, SettingsRow, TextField, Toggle, NativeSegmented, useAppModalStore } from '../index';
 import { SheetFrame } from '../../native/SheetFrame';
 import { useSettingsModal } from '../useSettingsModal';
 
@@ -61,4 +61,14 @@ it('retains native switches, functional segmented selections and Gym row dimensi
   expect(StyleSheet.flatten(screen.getByText('Pre-carregar').props.style)).toMatchObject({ fontSize: 16, letterSpacing: 0 });
   expect(screen.getByText('Pre-carregar').props.numberOfLines).toBe(1);
   expect(screen.getByText('Pre-carregar').props.adjustsFontSizeToFit).not.toBe(true);
+});
+
+it('centers the paste action beside the input rather than beside its label', async () => {
+  const screen = await render(<TextField label="Link" trailing={<Text>Paste</Text>} />);
+  const row = screen.getByTestId('gym-text-field-input-row');
+  const trailing = screen.getByTestId('gym-text-field-trailing');
+  expect(trailing.parent).toBe(row);
+  expect(screen.getByText('Link').parent).not.toBe(row);
+  expect(StyleSheet.flatten(row.props.style)).toMatchObject({ alignItems: 'center', minWidth: 0 });
+  expect(StyleSheet.flatten(trailing.props.style)).toMatchObject({ alignSelf: 'center', flexShrink: 0 });
 });

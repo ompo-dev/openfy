@@ -18,6 +18,7 @@ import { getHomeRailCardSize, type HomeCardSize } from './homeCardSizing';
 import { rememberDetailPreview } from '../../services/navigation/detailPreview';
 import { isTrackUnavailable } from '../../stores/useTrackAvailabilityStore';
 import { interleaveHomeSections, spreadHomeReleases } from '../../services/home/homeVariation';
+import { log } from '../../utils/appLogger';
 
 export const homeTrackToPlayer = (track: PersonalizedHomeTrack) => ({ ...track, imageURL: track.localImagePath || track.imageURL });
 const releaseLabel = (release: HomeRelease) => ({ album: 'Álbum', single: 'Single', ep: 'EP', compilation: 'Coletânea', release: 'Lançamento' })[release.releaseType];
@@ -233,9 +234,12 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
     </LoggedPressable>)}</Rail>
   </Section>] : [];
   const recommendations = interleaveHomeSections([
-    { kind: 'releases', items: releaseSections }, { kind: 'radio', items: radioSections },
-    { kind: 'discoveries', items: discoverySections }, { kind: 'spotlight', items: spotlightSections },
-    { kind: 'most-played', items: mostPlayedSections }, { kind: 'artists', items: artistSections },
+    { kind: 'releases', layout: 'large-rail', items: releaseSections },
+    { kind: 'spotlight', layout: 'spotlight', items: spotlightSections },
+    { kind: 'radio', layout: 'large-rail', items: radioSections },
+    { kind: 'most-played', layout: 'track-list', items: mostPlayedSections },
+    { kind: 'discoveries', layout: 'compact-rail', items: discoverySections },
+    { kind: 'artists', layout: 'artist-rail', items: artistSections },
   ], (kind, items) => {
     if (kind === 'spotlight') return <Section key="spotlight-more" title="Lançamentos em destaque">
       <Rail>{releaseTiles(spotlights.filter((release) => items.some((node) => node.key === `spotlight-${release.artistId}`)))}</Rail>
@@ -245,15 +249,20 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
       return React.Children.toArray(rail.props.children).map((tile, index) => React.isValidElement(tile)
         ? React.cloneElement(tile, { key: `${node.key}:${index}` }) : tile);
     });
-    return React.cloneElement(items[0], kind === 'radio' ? { title: 'Rádios para você' } : {}, <Rail>{tiles}</Rail>);
+    return React.cloneElement(items[0], kind === 'radio' ? { title: 'Rádios para você' } :
+      kind === 'mixed' ? { title: 'Mais para você', icon: <AppIcon name="sparkles" size={22} color="#1ED760" /> } : {}, <Rail>{tiles}</Rail>);
   });
+  const layoutOrder = recommendations.map((section) => section.key).join('|');
+  React.useEffect(() => {
+    log.home('home layout composed', { policy: 'mixed-formats-v3', order: layoutOrder });
+  }, [layoutOrder]);
 
   if (loading && !recent.length && !home.quickPicks.length) return <View testID="home-skeleton" style={styles.section}>
     <View style={styles.skeletonHeading} />
     <Rail>{[0, 1, 2].map((index) => <View key={index} style={[styles.skeletonTile, { width: largeTileSize, height: largeTileSize }]} />)}</Rail>
   </View>;
 
-  return <ProgressiveList>
+  return <ProgressiveList preserveOrder>
     {pinnedTracks.length || pinnedArtists.length ? <Section key="pinned" title="Pinados" icon={<AppIcon name="pin" size={22} color="#1ED760" />}>
       <Rail>
         {trackTiles(pinnedTracks.slice(0, 2), 'home:pinned', 'compact')}

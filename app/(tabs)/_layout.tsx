@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router';
 import { BottomTabBar } from '@navigators';
 import { GlassScreenBackdrop } from '../../components/native/GlassScreenBackdrop';
+import { FEED_ENABLED } from '../../config/features';
 
 export default function Layout() {
   return (
@@ -21,7 +22,7 @@ export default function Layout() {
       tabBar={(props: any) => <BottomTabBar {...props} />}
     >
       <Tabs.Screen name="home" options={{ headerShown: false }} />
-      <Tabs.Screen name="feed" options={{ headerShown: false }} />
+      {FEED_ENABLED ? <Tabs.Screen name="feed" options={{ headerShown: false }} /> : []}
       <Tabs.Screen name="library" options={{ headerShown: false }} />
     </Tabs>
   );

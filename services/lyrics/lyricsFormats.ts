@@ -182,8 +182,14 @@ export const parseLyricsPayload = (payload: unknown, durationMs = 0, depth = 0):
       return typeof text === 'string' && text.trim() ? [{ index, text, startTimeMs: row.time,
         endTimeMs: row.time + (Number(row.duration) || 0), ...(words.length ? { words } : {}) }] : [];
     });
-    if (segments.length) return { segments: finalizeSegments(segments, durationMs),
-      plainLyrics: segments.map((line) => line.text).join('\n') };
+    if (segments.length) {
+      // LyricsPlus also serves type=None arrays with a zero clock on every row.
+      // They are plain lyrics, not simultaneous verses starting at playback zero.
+      const untimed = String(data.type).toLowerCase() === 'none' || !segments.some((line) =>
+        line.startTimeMs > 0 || line.endTimeMs > line.startTimeMs || line.words?.length);
+      return { segments: untimed ? [] : finalizeSegments(segments, durationMs),
+        plainLyrics: segments.map((line) => line.text).join('\n') };
+    }
   }
   for (const key of ['ttml', 'ttmlContent', 'syncedLyrics', 'lrc', 'lyrics', 'lyric', 'content', 'text', 'line', 'lines', 'data', 'result', 'response', 'plainLyrics']) {
     if (data[key] === payload) continue;

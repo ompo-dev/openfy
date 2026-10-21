@@ -56,6 +56,8 @@ describe('shared player modal surface', () => {
     expect(content.height).toBeLessThanOrEqual(640);
     expect(content.height).toBeLessThan(Dimensions.get('window').height * 0.88);
     expect(content.flexShrink).toBe(1);
+    expect(content.flex).toBeUndefined();
+    expect(content.width).toBe('100%');
   });
 
   it('uses the shared Gym modal for the player with header-only dismissal', async () => {
@@ -84,6 +86,8 @@ describe('shared player modal surface', () => {
     expect(style.paddingTop).toBeGreaterThanOrEqual(16);
     expect(style.paddingBottom).toBeGreaterThanOrEqual(16);
     expect(style.flex).toBe(1);
+    expect(style.overflow).toBe('hidden');
+    expect(style.minWidth).toBe(0);
   });
 
   it('lets the shared artwork flight own player presentation and dismissal without another slide', async () => {

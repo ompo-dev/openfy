@@ -11,7 +11,6 @@ import {
 import { Image } from 'expo-image';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 import { useFocusEffect } from 'expo-router';
-import { Swipeable } from 'react-native-gesture-handler';
 import { getArtistCatalogImage, getYouTubeMusicArtistProfile } from '@api';
 
 import {
@@ -38,6 +37,7 @@ import { rememberDetailPreview } from '../../services/navigation/detailPreview';
 import { groupLibraryArtists } from '../../services/library/localCollections';
 import { useFollowedArtistsStore } from '../../stores/useFollowedArtistsStore';
 import { ArtistSearchRow } from '../Home/ArtistSearchRow';
+import { LibrarySwipeRow } from './LibrarySwipeRow';
 
 const toPlayerTrack = (track: LibraryTrack) => ({
   ...track,
@@ -66,6 +66,8 @@ export const OfflineLibrary = () => {
   const isMountedRef = React.useRef(true);
   const libraryLoadRef = React.useRef<Promise<void> | null>(null);
   const metadataRepairRef = React.useRef(false);
+  const openSwipeRow = React.useRef<(() => void) | null>(null);
+  const closeSwipeRow = React.useCallback(() => { openSwipeRow.current?.(); openSwipeRow.current = null; }, []);
   const { playWithQueue, currentTrack, isPlaying: playerIsPlaying } = usePlayer((state) => ({
     playWithQueue: state.playWithQueue,
     currentTrack: state.currentTrack,
@@ -89,6 +91,7 @@ export const OfflineLibrary = () => {
     libraryView,
     refreshLibrary,
   } = useLibrarySelectedCategory();
+  React.useEffect(() => { closeSwipeRow(); }, [libraryView, librarySearchQuery, librarySort, closeSwipeRow]);
 
   const loadLibrary = React.useCallback(async () => {
     if (libraryLoadRef.current) return libraryLoadRef.current;
@@ -331,29 +334,13 @@ export const OfflineLibrary = () => {
     );
 
     return (
-      <Swipeable
-        overshootRight={false}
-        rightThreshold={40}
-        renderRightActions={() => (
-          <LoggedPressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              item.isDownloaded
-                ? `Remover download de ${item.title}`
-                : `Remover ${item.title} da biblioteca`
-            }
-            onPress={() => void handleDelete(item)}
-            style={styles.deleteAction}
-          >
-            <Ionicons name="trash-outline" size={22} color="#FFFFFF" />
-            <Text style={styles.deleteActionLabel}>
-              {item.isDownloaded ? 'Remover download' : 'Remover da biblioteca'}
-            </Text>
-          </LoggedPressable>
-        )}
-      >
+      <LibrarySwipeRow label={item.isDownloaded ? `Remover download de ${item.title}` : `Remover ${item.title} da biblioteca`}
+        onWillOpen={(close) => {
+          if (openSwipeRow.current !== close) openSwipeRow.current?.();
+          openSwipeRow.current = close;
+        }} onRemove={() => { log.ui('library swipe remove', { trackId: item.spotifyId, downloaded: item.isDownloaded }); void handleDelete(item); }}>
         {row}
-      </Swipeable>
+      </LibrarySwipeRow>
     );
   };
 
@@ -492,6 +479,7 @@ export const OfflineLibrary = () => {
           ]}
           ListEmptyComponent={noResults}
           showsVerticalScrollIndicator={false}
+          onScrollBeginDrag={closeSwipeRow}
           refreshControl={refreshControl}
         />
       ) : libraryView === 'playlists' ? (
@@ -560,19 +548,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#282828',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  deleteAction: {
-    width: 112,
-    marginBottom: StyleSheet.hairlineWidth,
-    backgroundColor: '#E5484D',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-  },
-  deleteActionLabel: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontFamily: 'SF-Semibold',
   },
   playlistItem: {
     minHeight: 82,

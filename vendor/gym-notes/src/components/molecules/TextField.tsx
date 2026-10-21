@@ -32,7 +32,7 @@ export function TextField({ label, hint, inputRef, trailing, style, ...props }: 
           style,
         ]}
       />
-      {trailing}
+      {trailing ? <View testID="gym-text-field-trailing" style={styles.trailing}>{trailing}</View> : null}
       </View>
     </View>
   );
@@ -41,7 +41,10 @@ export function TextField({ label, hint, inputRef, trailing, style, ...props }: 
 const styles = StyleSheet.create({
   label: { fontSize: 16, lineHeight: 22 },
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, minWidth: 0 },
+  trailing: { flexShrink: 0, alignSelf: 'center', justifyContent: 'center' },
   apiKeyField: {
+    minWidth: 0,
+    alignSelf: 'stretch',
     gap: Spacing.two,
     paddingHorizontal: Spacing.four,
     paddingVertical: Spacing.three,

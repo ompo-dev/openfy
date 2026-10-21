@@ -33,7 +33,8 @@ export function SheetFrame({ children, contentHeight, artworkURL: _artworkURL, c
   });
   return <GymSheetFrame {...props} centerTitle={centerTitle} keyboardAwareScroll={keyboardAwareScroll} size={size} scroll={scroll}>
     {scroll ? content : <View testID="sheet-frame-content" style={[
-      { minHeight: 0, flexShrink: 1 }, size === 'full' && { flex: 1 },
+      { minHeight: 0, minWidth: 0, width: '100%', flexShrink: 1 },
+      size === 'full' && boundedHeight === undefined && { flex: 1 },
       boundedHeight !== undefined && { height: boundedHeight },
     ]}>{content}</View>}
   </GymSheetFrame>;

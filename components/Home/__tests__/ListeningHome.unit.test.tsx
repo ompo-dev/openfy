@@ -85,7 +85,8 @@ describe('ListeningHome', () => {
     const view = await render(<ListeningHome home={expanded} loading={false} />);
     expect(await view.findByText('Parecido com Ebony')).toBeTruthy();
     expect(await view.findByText('Parecido com Sotam')).toBeTruthy();
-    await waitFor(() => expect(view.getAllByText('Mais descobertas para você')).toHaveLength(2));
+    await waitFor(() => expect(view.getAllByText('Mais descobertas para você')).toHaveLength(1));
+    expect(await view.findByLabelText('Tocar Descoberta 16, Ebony')).toBeTruthy();
     await fireEvent.press(await view.findByLabelText('Tocar Outra, Sotam'));
     expect(mockPlay).toHaveBeenCalledWith([song, second], 1, expect.stringMatching(/^playlist:home_mix_radio_/));
   });
@@ -108,6 +109,20 @@ describe('ListeningHome', () => {
       return title;
     });
     families.slice(1).forEach((family, index) => expect(family).not.toBe(families[index]));
+    const layouts = families.slice(3).map((family) => ['releases', 'radio'].includes(family) ? 'large-rail' : family);
+    layouts.slice(1).forEach((layout, index) => expect(layout).not.toBe(layouts[index]));
+  });
+
+  it('consolidates visually identical fallback rails without losing their actions or playback source', async () => {
+    const second = { ...song, spotifyId: 'radio-last', title: 'Radio final' };
+    const view = await render(<ListeningHome home={{ ...EMPTY_PERSONALIZED_HOME,
+      releases: Array.from({ length: 17 }, (_, i) => ({ ...home.releases[0], id: `release-${i}` })),
+      radios: [{ seed: { name: 'Ebony', score: 1 }, tracks: [song, second] }],
+    }} loading={false} />);
+    expect(await view.findByText('Mais para você')).toBeTruthy();
+    await waitFor(() => expect(view.getAllByLabelText('Abrir Álbum KM2')).toHaveLength(17), { timeout: 5000 });
+    await fireEvent.press(await view.findByLabelText('Tocar Radio final, Ebony'));
+    expect(mockPlay).toHaveBeenCalledWith([song, second], 1, expect.stringMatching(/^playlist:home_mix_radio_/));
   });
 
   it('opens dynamic listening collections as playlist pages, not modals', async () => {

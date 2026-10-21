@@ -31,6 +31,7 @@ env:
   CI: "1"
   EXPO_NO_TELEMETRY: "1"
   EXPO_PUBLIC_LOCAL_AUDIO_ONLY: "true"
+  EXPO_PUBLIC_ENABLE_FEED: "false"
   EXPO_PUBLIC_SPOTIFY_CLIENT_ID: ${{ vars.EXPO_PUBLIC_SPOTIFY_CLIENT_ID }}
   IOS_APPLE_TEAM_ID: ${{ vars.IOS_APPLE_TEAM_ID }}
   YOUTUBE_DL_SKIP_DOWNLOAD: "true"
@@ -78,6 +79,9 @@ jobs:
 
       - name: Rodar testes
         run: npm test -- --runInBand --silent
+
+      - name: Validar exclusao do Feed no build
+        run: node --test scripts/__tests__/metro-features.test.cjs
 
       - name: Validar servidor OTA temporario
         run: node --test scripts/__tests__/temporary-expo-update-server.test.mjs scripts/__tests__/wait-for-ota-health.test.mjs scripts/__tests__/temporary-ota-pointer.test.mjs scripts/__tests__/ota-workflow.test.mjs

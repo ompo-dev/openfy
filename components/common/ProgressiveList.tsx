@@ -38,7 +38,9 @@ function ListItemEntrance({ children, animate = true, onReveal }: {
 }
 
 /** Defer mounting images and rows in non-virtualized rails and short sections. */
-export function ProgressiveList({ children, listKey = '' }: { children: React.ReactNode; listKey?: string }) {
+export function ProgressiveList({ children, listKey = '', preserveOrder = false }: {
+  children: React.ReactNode; listKey?: string; preserveOrder?: boolean;
+}) {
   const items = React.Children.toArray(children).map((child, index) => ({
     child, key: String(React.isValidElement(child) ? child.key : index),
   }));
@@ -48,8 +50,10 @@ export function ProgressiveList({ children, listKey = '' }: { children: React.Re
   const [reveal, setReveal] = React.useState({ key: listKey, keys: new Set(itemKeys.slice(0, 1)) });
   const visibleKeys = React.useMemo(() => {
     const retained = reveal.key === listKey ? itemKeys.filter((key) => reveal.keys.has(key)) : [];
+    // Incoming Home snapshots may insert separators before already mounted sections.
+    if (preserveOrder && retained.length) return new Set(itemKeys.slice(0, itemKeys.indexOf(retained.at(-1)!) + 1));
     return new Set(retained.length ? retained : itemKeys.slice(0, 1));
-  }, [itemKeys, listKey, reveal]);
+  }, [itemKeys, listKey, preserveOrder, reveal]);
 
   React.useEffect(() => {
     const pending = itemKeys.filter((key) => !visibleKeys.has(key));

@@ -35,8 +35,6 @@ import {
   searchHistoryKey, subscribeSearchHistory, type SearchHistoryEntry, type SearchSelection,
 } from '../../services/search/searchHistory';
 
-export { FriendActivityStatus } from './FriendActivityStatus';
-export { CompactMusicCarousel } from './CompactMusicCarousel';
 
 const toPlayerTrackFromSearch = (track: TrackModel): PlayerTrack => ({
   spotifyId: track.id,

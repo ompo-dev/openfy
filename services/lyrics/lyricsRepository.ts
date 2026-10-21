@@ -20,7 +20,7 @@ let requestGeneration = 0;
 const MAX_CACHE = 100;
 let choiceWrites: Promise<unknown> = Promise.resolve();
 let cacheWrites: Promise<unknown> = Promise.resolve();
-const FORMAT_VERSION = 'v2-word-clock';
+const FORMAT_VERSION = 'v3-timed-arrays';
 const LYRICS_PLUS_HOSTS = ['https://lyricsplus.prjktla.my.id', 'https://lyricsplus.atomix.one',
   'https://lyricsplus.binimum.org', 'https://lyricsplus.prjktla.workers.dev',
   'https://lyricsplus-seven.vercel.app', 'https://lyrics-plus-backend.vercel.app'];
@@ -31,6 +31,8 @@ const summary = (lyrics: Pick<LyricsData, 'segments' | 'isSynced' | 'source'> | 
   syllables: lyrics?.segments.reduce((count, line) => count + (line.words || [])
     .reduce((size, word) => size + (word.syllables?.length || 1), 0), 0) || 0,
   synced: lyrics?.isSynced || false,
+  firstTimeMs: lyrics?.segments[0]?.startTimeMs,
+  lastTimeMs: lyrics?.segments.at(-1)?.endTimeMs,
 });
 export const getCachedTrackLyricsProvider = (trackId: string) => choices.get(trackId) || 'auto';
 
@@ -119,7 +121,8 @@ const fetchLyricsPlus = async (query: Query, signal: AbortSignal) => {
       if ('error' in result && result.error) lastError = result.error;
       else answered = true;
       log.player('lyrics mirror result', { provider: 'lyrics-plus', host: hosts[result.index],
-        found: Boolean(result.parsed), lines: result.parsed?.segments.length || 0 });
+        found: Boolean(result.parsed), lines: result.parsed?.segments.length || 0,
+        timing: result.parsed ? result.parsed.segments.length ? 'synced' : 'plain' : 'missing' });
       if (result.parsed) {
         lastLyricsPlusHost = hosts[result.index];
         log.player('lyrics mirror selected', { provider: 'lyrics-plus', host: lastLyricsPlusHost });

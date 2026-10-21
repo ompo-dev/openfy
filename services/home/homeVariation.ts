@@ -20,22 +20,25 @@ export function spreadHomeReleases<T extends { artistId: string }>(items: T[], v
   return result;
 }
 
-/** Separate section families; combine a remaining tail instead of repeating identical headings. */
-export function interleaveHomeSections<T>(groups: { kind: string; items: T[] }[], merge: (kind: string, items: T[]) => T): T[] {
-  const pending = groups.map((group) => ({ ...group, items: [...group.items] }));
+/** Balance visual formats as well as families; keep a homogeneous tail in one rail. */
+export function interleaveHomeSections<T>(groups: { kind: string; layout?: string; items: T[] }[], merge: (kind: string, items: T[]) => T): T[] {
+  const pending = groups.map((group) => ({ ...group, layout: group.layout || group.kind, items: [...group.items], lastUsed: -1 }));
   const result: T[] = [];
-  let previous = '';
+  let previous: typeof pending[number] | undefined;
   while (pending.some((group) => group.items.length)) {
-    const available = pending.filter((group) => group.items.length && group.kind !== previous);
-    if (!available.length) {
-      const tail = pending.find((group) => group.items.length)!;
+    const remaining = pending.filter((group) => group.items.length);
+    if (previous && remaining.every((group) => group.layout === previous?.layout)) {
+      const kinds = new Set([previous.kind, ...remaining.map((group) => group.kind)]);
       const last = result.pop()!;
-      result.push(merge(tail.kind, [last, ...tail.items]));
+      result.push(merge(kinds.size === 1 ? previous.kind : 'mixed', [last, ...remaining.flatMap((group) => group.items)]));
       break;
     }
-    const next = result.length === 0 ? available[0] : available.sort((a, b) => b.items.length - a.items.length)[0];
+    const differentLayout = remaining.filter((group) => group.layout !== previous?.layout);
+    const available = differentLayout.length ? differentLayout : remaining;
+    const next = available.sort((a, b) => a.lastUsed - b.lastUsed)[0];
     result.push(next.items.shift()!);
-    previous = next.kind;
+    next.lastUsed = result.length;
+    previous = next;
   }
   return result;
 }
