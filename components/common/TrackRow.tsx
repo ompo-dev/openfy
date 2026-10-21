@@ -37,7 +37,7 @@ export const TrackRow = React.memo(function TrackRow({
   accessibilityLabel, disabled = false, track, repairUnavailableOnPress = true,
 }: TrackRowProps) {
   const { playTrack } = usePlayer((state) => ({ playTrack: state.playTrack }));
-  const unavailable = useTrackAvailabilityStore((state) => track ? isTrackUnavailable(track, state.failures) : false);
+  const unavailable = useTrackAvailabilityStore((state) => track ? isTrackUnavailable(track, state.failures, false) : false);
   React.useEffect(() => { void hydrateTrackAvailability(); }, []);
   const handlePress = () => {
     if (!unavailable || !track || !repairUnavailableOnPress) { onPress(); return; }

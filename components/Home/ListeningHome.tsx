@@ -134,7 +134,7 @@ export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapsho
   }, [portraitsKey]);
 
   const play = (tracks: PersonalizedHomeTrack[], index: number, source: string) => {
-    if (isTrackUnavailable(tracks[index])) { void playTrack(homeTrackToPlayer(tracks[index])); return; }
+    if (isTrackUnavailable(tracks[index], undefined, false)) { void playTrack(homeTrackToPlayer(tracks[index])); return; }
     if (currentTrack?.spotifyId === tracks[index].spotifyId) { void togglePlayPause(); return; }
     void playWithQueue(tracks.map(homeTrackToPlayer), index, source);
   };

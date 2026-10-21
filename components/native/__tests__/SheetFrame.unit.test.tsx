@@ -49,7 +49,7 @@ describe('shared player modal surface', () => {
   });
 
   it('lets editors request space but shrink to the available keyboard-safe height', async () => {
-    const screen = await render(<SheetFrame visible title="JSON" onClose={jest.fn()} scroll={false} contentHeight={640}>
+    const screen = await render(<SheetFrame visible size="sheet" title="JSON" onClose={jest.fn()} scroll={false} contentHeight={640}>
       <Text>Editor</Text>
     </SheetFrame>);
     const content = StyleSheet.flatten(screen.getByTestId('sheet-frame-content').props.style);
@@ -58,6 +58,17 @@ describe('shared player modal surface', () => {
     expect(content.flexShrink).toBe(1);
     expect(content.flex).toBeUndefined();
     expect(content.width).toBe('100%');
+  });
+
+  it('fills a full-page modal even when a caller supplies an estimated list height', async () => {
+    const screen = await render(<SheetFrame visible size="full" title="Editar playlist" onClose={jest.fn()} scroll={false} contentHeight={200}>
+      <ProgressiveFlatList testID="full-playlist" data={['Song']} keyExtractor={(item) => item}
+        renderItem={({ item }) => <Text>{item}</Text>} />
+    </SheetFrame>);
+    const content = StyleSheet.flatten(screen.getByTestId('sheet-frame-content').props.style);
+    expect(content).toMatchObject({ flex: 1, minHeight: 0, width: '100%' });
+    expect(content.height).toBeUndefined();
+    expect(StyleSheet.flatten(screen.getByTestId('full-playlist').props.style)).toMatchObject({ flexGrow: 1, flexShrink: 1 });
   });
 
   it('uses the shared Gym modal for the player with header-only dismissal', async () => {

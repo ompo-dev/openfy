@@ -6,14 +6,27 @@ import { LibrarySwipeRow } from '../LibrarySwipeRow';
 const mockClose = jest.fn();
 let mockSwipeProps: any;
 const mockTranslation = { value: -80 };
+beforeEach(() => { jest.clearAllMocks(); mockTranslation.value = -80; });
 jest.mock('react-native-gesture-handler/ReanimatedSwipeable', () => {
   const React = jest.requireActual<typeof import('react')>('react');
   const { View } = jest.requireActual<typeof import('react-native')>('react-native');
-  return React.forwardRef((props: any, ref) => {
+  return React.forwardRef(function MockSwipeable(props: any, ref) {
     mockSwipeProps = props;
     React.useImperativeHandle(ref, () => ({ close: mockClose }));
     return <View>{props.children}{props.renderRightActions({ value: 1 }, mockTranslation)}</View>;
   });
+});
+
+it('supports playlist removal and undo with modal colors and disabled saving gestures', async () => {
+  const remove = jest.fn();
+  const view = await render(<LibrarySwipeRow label="Manter faixa" onRemove={remove} onWillOpen={jest.fn()} undo disabled backgroundColor="#232323">
+    <Text>Track</Text>
+  </LibrarySwipeRow>);
+  expect(mockSwipeProps.enabled).toBe(false);
+  expect(StyleSheet.flatten(mockSwipeProps.childrenContainerStyle).backgroundColor).toBe('#232323');
+  expect(StyleSheet.flatten(view.getByTestId('library-remove-action').props.style).backgroundColor).toBe('#228B55');
+  await fireEvent.press(view.getByLabelText('Manter faixa'));
+  expect(remove).not.toHaveBeenCalled();
 });
 jest.mock('../../native', () => {
   const { Pressable } = jest.requireActual<typeof import('react-native')>('react-native');

@@ -57,19 +57,19 @@ export function Section({
   label,
   children,
 }: {
-  label: string;
+  label?: string;
   children: ReactNode;
 }) {
   const colors = useColors();
   return (
     <View style={settingsStyles.section}>
-      <AppText
+      {label ? <AppText
         variant="caption"
         color={colors.textTertiary}
         style={settingsStyles.sectionLabel}
       >
         {label}
-      </AppText>
+      </AppText> : null}
       <View
         style={[
           settingsStyles.card,

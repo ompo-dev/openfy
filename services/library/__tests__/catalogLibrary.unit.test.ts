@@ -56,6 +56,16 @@ describe('catalogLibrary', () => {
     expect(toDownloadTrackInput(saved).isrc).toBe(saved.isrc);
   });
 
+  it.each(['spotify-recording', 'yt_abcdefghijk'])('keeps a corrected link and its video ID consistent through later metadata updates: %s', async (spotifyId) => {
+    const track = { spotifyId, title: 'Song', artistName: 'Artist', albumName: '', imageURL: '', duration_ms: 180000 };
+    await upsertCatalogTracks([{ ...track, youtubeVideoId: 'abcdefghijk' }]);
+    await upsertCatalogTracks([{ ...track, youtubeUrl: 'https://youtu.be/zyxwvutsrqp' }]);
+    await upsertCatalogTracks([track]);
+    const saved = (await getCatalogTracks())[0];
+    expect(saved).toMatchObject({ youtubeVideoId: 'zyxwvutsrqp', youtubeUrl: 'https://www.youtube.com/watch?v=zyxwvutsrqp' });
+    expect(toDownloadTrackInput(saved).youtubeVideoId).toBe('zyxwvutsrqp');
+  });
+
   it('persists complete ordered credits with both Spotify provenance and a native channel', async () => {
     const artists = [{ id: 'primary', name: 'Primary' },
       { id: 'ytartist_UCchannel~Guest', name: 'Guest', spotifyId: 'c'.repeat(22) }];

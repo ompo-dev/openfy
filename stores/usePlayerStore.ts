@@ -65,6 +65,7 @@ import {
 import { prefetchTrackAlbumData } from '../services/library/playerAlbum';
 import { isSameRecording } from '../services/library/trackIdentity';
 import { hydrateTrackAvailability, isTrackUnavailable, markTrackUnavailable, clearTrackUnavailable } from './useTrackAvailabilityStore';
+import { getTrackYouTubeVideoId } from '../services/spotify/linkParser';
 import { getCatalogMapping, isCurrentCatalogMapping } from '../services/audio/catalogMappingCache';
 import { resolveTrackCredits } from '../services/search/trackCredits';
 
@@ -122,7 +123,7 @@ export interface PlayerStoreState {
   // Actions
   playTrack: (
     track: PlayerTrack,
-    options?: { showPlayer?: boolean; setQueue?: boolean; skipUnavailable?: boolean }
+    options?: { showPlayer?: boolean; setQueue?: boolean; skipUnavailable?: boolean; retryTransient?: boolean }
   ) => Promise<void>;
   playWithQueue: (
     tracks: PlayerTrack[],
@@ -198,10 +199,10 @@ const findTrackIndex = (tracks: PlayerTrack[], target?: PlayerTrack) => {
   );
 };
 
-const getResolverTrackId = (track: PlayerTrack): string =>
-  track.youtubeVideoId && /^[A-Za-z0-9_-]{11}$/.test(track.youtubeVideoId)
-    ? `yt_${track.youtubeVideoId}`
-    : track.spotifyId;
+const getResolverTrackId = (track: PlayerTrack): string => {
+  const videoId = getTrackYouTubeVideoId(track);
+  return videoId ? `yt_${videoId}` : track.spotifyId;
+};
 
 const resolveNativeYouTubeSource = async (
   track: PlayerTrack
@@ -213,10 +214,12 @@ const resolveNativeYouTubeSource = async (
   ) return null;
 
   const manualMapping = await getCatalogMapping(track.spotifyId);
-  if (manualMapping && isCurrentCatalogMapping(manualMapping)) return toNativeYouTubePlaybackUri(manualMapping.videoId);
+  const exactVideoId = getTrackYouTubeVideoId(track);
+  if (manualMapping && isCurrentCatalogMapping(manualMapping) &&
+      (manualMapping.source === 'user_direct' || !exactVideoId || manualMapping.videoId === exactVideoId)) {
+    return toNativeYouTubePlaybackUri(manualMapping.videoId);
+  }
 
-  const exactVideoId = track.youtubeVideoId ||
-    track.spotifyId.match(/^yt_([A-Za-z0-9_-]{11})$/)?.[1];
   if (exactVideoId && /^[A-Za-z0-9_-]{11}$/.test(exactVideoId)) {
     const source = await resolveCatalogYouTubeVideoId({
       videoId: exactVideoId, title: track.title,
@@ -322,7 +325,7 @@ const getWarmedAudioSource = (track: PlayerTrack, quality: AudioQuality): AudioS
       (typeof hasNativeYouTubePlayback !== 'function' || !hasNativeYouTubePlayback())) return null;
   return warmed &&
     warmed.trackId === track.spotifyId &&
-    warmed.videoId === track.youtubeVideoId &&
+    warmed.videoId === getTrackYouTubeVideoId(track) &&
     warmed.expiresAt > now + MIN_PRELOADED_SOURCE_LIFETIME_MS
     ? warmed.source
     : null;
@@ -355,7 +358,7 @@ const cacheAudioSource = (track: PlayerTrack, source: AudioSourceInput, quality:
     source,
     expiresAt: Date.now() + AUDIO_SOURCE_TTL_MS,
     trackId: track.spotifyId,
-    videoId: track.youtubeVideoId,
+    videoId: getTrackYouTubeVideoId(track),
   });
   while (warmedAudioSources.size > MAX_RECENT_AUDIO_SOURCES) {
     const oldest = warmedAudioSources.keys().next().value;
@@ -686,7 +689,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     activeLyricsController?.abort();
     const { showPlayer = true, setQueue = true } = options;
     let offlinePlaybackBlocked = false;
-    if (isTrackUnavailable(track)) {
+    if (isTrackUnavailable(track, undefined, Boolean(options.skipUnavailable && !options.retryTransient))) {
       if (options.skipUnavailable) { await get().playNext(); return; }
       const requestId = get().activeRequestId + 1;
       beginTrackChange();
@@ -763,7 +766,11 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     let playbackQuality = getCachedAppSettings().streamingQuality;
     const resolveAudioPromise = (async (): Promise<AudioSourceInput | null> => {
       await hydrateTrackAvailability();
-      if (isTrackUnavailable(track)) return null;
+      if (isTrackUnavailable(track, undefined, Boolean(options.skipUnavailable && !options.retryTransient))) return null;
+      if ((!options.skipUnavailable || options.retryTransient) && isTrackUnavailable(track)) {
+        log.player('retrying transient audio failure', { trackId: track.spotifyId });
+        clearTrackUnavailable(track);
+      }
       await getAppSettings();
       const quality = getCachedAppSettings().streamingQuality;
       playbackQuality = quality;
@@ -931,7 +938,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       playbackFailureHandled = true;
       startLyricsLoading();
       if (useConnectivityStore.getState().status !== 'offline') markTrackUnavailable(track, 'playback-failed');
-      set({ isLoadingAudio: false, playerState: { ...DEFAULT_STATE, error: 'Áudio indisponível. Edite o link do YouTube.' } });
+      set({ isLoadingAudio: false, playerState: { ...DEFAULT_STATE, error: 'Não foi possível reproduzir agora. Tente novamente.' } });
       await unload();
       if (get().activeRequestId === requestId && options.skipUnavailable &&
           useConnectivityStore.getState().status !== 'offline') await get().playNext();
@@ -1245,6 +1252,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   ) => {
     if (!tracks || tracks.length === 0) return;
     const selectedTrack = tracks[Math.max(0, Math.min(startIndex, tracks.length - 1))];
+    if (isTrackUnavailable(selectedTrack) && !isTrackUnavailable(selectedTrack, undefined, false)) {
+      log.player('retrying selected queue track', { trackId: selectedTrack.spotifyId });
+      clearTrackUnavailable(selectedTrack);
+    }
     tracks = tracks.filter((track) => !isTrackUnavailable(track));
     if (!tracks.length) return;
     startIndex = Math.max(0, tracks.indexOf(selectedTrack));
@@ -1275,7 +1286,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       queueSourceId: sourceId ?? null,
       isShuffle: shouldShuffle,
     });
-    await get().playTrack(playbackQueue[playbackIndex], { setQueue: false, skipUnavailable: true });
+    await get().playTrack(playbackQueue[playbackIndex], { setQueue: false, skipUnavailable: true, retryTransient: true });
   },
 
   playDownloadedTrack: async (downloaded: DownloadedTrack) => {
@@ -1343,7 +1354,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     if (!Number.isInteger(index) || index < 0 || index >= queue.length) return;
 
     set({ queueIndex: index });
-    await playTrack(queue[index], { setQueue: false, skipUnavailable: true });
+    await playTrack(queue[index], { setQueue: false, skipUnavailable: true, retryTransient: true });
   },
 
   playNext: async () => {

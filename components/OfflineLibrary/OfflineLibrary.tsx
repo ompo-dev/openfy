@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import {
+  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -15,6 +16,7 @@ import { getArtistCatalogImage, getYouTubeMusicArtistProfile } from '@api';
 
 import {
   deleteDownloadedTrack,
+  deleteLocalPlaylist,
   getCachedArtistImage,
   getLibraryTracks,
   repairDownloadedTrackMetadata,
@@ -145,6 +147,21 @@ export const OfflineLibrary = () => {
     },
     [enqueueDownloads]
   );
+
+  const confirmDeletePlaylist = (playlist: LocalPlaylist) => Alert.alert('Excluir playlist?',
+    `"${playlist.title}" será removida. As músicas baixadas continuarão na biblioteca.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Excluir', style: 'destructive', onPress: () => {
+        void deleteLocalPlaylist(playlist.id).then(async () => {
+          log.playlist('library playlist removed', { playlistId: playlist.id });
+          refreshLibrary();
+          await loadLibrary();
+        }).catch((error) => {
+          log.error('library playlist removal failed', { playlistId: playlist.id, error });
+          Alert.alert('Não foi possível excluir', 'Tente novamente.');
+        });
+      } },
+    ]);
 
   const handleRefresh = React.useCallback(async () => {
     const startedAt = Date.now();
@@ -354,6 +371,9 @@ export const OfflineLibrary = () => {
     ].filter((url): url is string => Boolean(url)))];
 
     return (
+      <LibrarySwipeRow label={`Excluir playlist ${item.title}`}
+        onWillOpen={(close) => { if (openSwipeRow.current !== close) openSwipeRow.current?.(); openSwipeRow.current = close; }}
+        onRemove={() => confirmDeletePlaylist(item)}>
       <LoggedPressable
         accessibilityRole="button"
         accessibilityLabel={`Abrir playlist ${item.title}`}
@@ -376,6 +396,7 @@ export const OfflineLibrary = () => {
         </View>
         <Ionicons name="chevron-forward" size={20} color="#8B8B8B" />
       </LoggedPressable>
+      </LibrarySwipeRow>
     );
   };
 
@@ -486,6 +507,7 @@ export const OfflineLibrary = () => {
         <ProgressiveFlatList
           listKey={`playlists:${librarySearchQuery}:${librarySort}`}
           data={visiblePlaylists}
+          onScrollBeginDrag={closeSwipeRow}
           renderItem={renderPlaylist}
           keyExtractor={(item) => item.id}
           contentContainerStyle={[

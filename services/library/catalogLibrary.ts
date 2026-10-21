@@ -7,6 +7,7 @@ import {
 } from '../download/downloadManager';
 import { removeTrackFromLocalPlaylists } from './localPlaylistManager';
 import { albumAssociationsForTrack, mergeAlbumAssociations, normalizeTrackIsrc, type TrackAlbumRef } from '../../models/Track/TrackModel';
+import { getTrackYouTubeVideoId } from '../spotify/linkParser';
 
 export type CatalogSourcePlatform = 'spotify' | 'youtube';
 
@@ -104,6 +105,8 @@ const normalizeInput = (
   current?: CatalogTrack
 ): CatalogTrack => {
   const now = new Date().toISOString();
+  const youtubeVideoId = getTrackYouTubeVideoId({ youtubeVideoId: input.youtubeVideoId, youtubeUrl: input.youtubeUrl })
+    || (current && getTrackYouTubeVideoId(current)) || getTrackYouTubeVideoId(input);
   const albumAssociations = normalizeAlbumAssociations([
     ...(current ? albumAssociationsForTrack(current) || [] : []),
     ...(input.albumAssociations || []),
@@ -143,12 +146,8 @@ const normalizeInput = (
     ...(input.discNumber || current?.discNumber
       ? { discNumber: input.discNumber || current?.discNumber }
       : {}),
-    ...(input.youtubeVideoId || current?.youtubeVideoId
-      ? { youtubeVideoId: input.youtubeVideoId || current?.youtubeVideoId }
-      : {}),
-    ...(input.youtubeUrl || current?.youtubeUrl
-      ? { youtubeUrl: input.youtubeUrl || current?.youtubeUrl }
-      : {}),
+    ...(youtubeVideoId ? { youtubeVideoId, youtubeUrl: `https://www.youtube.com/watch?v=${youtubeVideoId}` }
+      : input.youtubeUrl || current?.youtubeUrl ? { youtubeUrl: input.youtubeUrl || current?.youtubeUrl } : {}),
   };
 };
 

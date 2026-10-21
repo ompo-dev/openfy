@@ -1,4 +1,24 @@
-import { findMediaLinkInText, parseSpotifyLink } from '../linkParser';
+import { findMediaLinkInText, getTrackYouTubeVideoId, parseSpotifyLink } from '../linkParser';
+
+describe('getTrackYouTubeVideoId', () => {
+  it.each([
+    { youtubeVideoId: 'abcdefghijk' }, { videoId: 'abcdefghijk' }, { spotifyId: 'yt_abcdefghijk' },
+    { youtubeUrl: 'https://youtu.be/abcdefghijk?t=12' },
+    { youtubeUrl: 'https://music.youtube.com/watch?list=RDtest&v=abcdefghijk' },
+    { youtubeUrl: 'https://m.youtube.com/watch?v=abcdefghijk' },
+    { youtubeUrl: 'https://youtube.com/shorts/abcdefghijk' },
+    { youtubeVideoId: 'invalid', youtubeUrl: 'https://www.youtube.com/embed/abcdefghijk' },
+  ])('uses the recording reference without losing its video ID: %o', (track) => {
+    expect(getTrackYouTubeVideoId(track)).toBe('abcdefghijk');
+  });
+  it.each([
+    { spotifyId: 'abcdefghijklmnopqrstuv' }, { id: 'abcdefghijk' },
+    { youtubeUrl: 'https://youtube.com/playlist?list=abcdefghijk' },
+    { youtubeUrl: 'https://evil.test/watch?v=abcdefghijk' },
+  ])('does not turn a different resource into a video: %o', (track) => {
+    expect(getTrackYouTubeVideoId(track)).toBeUndefined();
+  });
+});
 
 describe('parseSpotifyLink', () => {
   it('accepts a regional Spotify track URL', () => {
@@ -42,7 +62,7 @@ describe('findMediaLinkInText', () => {
   it('continues past unsupported links in copied text', () => {
     expect(
       findMediaLinkInText(
-        'https://youtube.com/shorts/abcdefghijk and https://open.spotify.com/track/2faP6QUfGN94HI1FTSrpsm'
+        'https://youtube.com/@artist and https://open.spotify.com/track/2faP6QUfGN94HI1FTSrpsm'
       )
     ).toContain('open.spotify.com/track/2faP6QUfGN94HI1FTSrpsm');
   });

@@ -18,6 +18,7 @@ import {
   resolveDirectYouTubeAudio,
 } from '../audio/directYouTubeResolver';
 import { resolveCatalogYouTubeVideoId, resolveSpotifyTrackVideoId } from '../audio/catalogResolver';
+import { getTrackYouTubeVideoId } from '../spotify/linkParser';
 import { getCatalogMapping, isCurrentCatalogMapping } from '../audio/catalogMappingCache';
 import { repairLocalAudioFile } from '../audio/localAudioRepair';
 import { retryNetworkOperation } from '../audio/networkRetry';
@@ -1206,17 +1207,9 @@ const downloadTrackInternal = async (
     const suppliedAudioUrl = audioUrl || track.audioUrl;
     // Signed URLs can expire while the OS waits. Prefer resolving and saving
     // the matched video in the native session before requesting a JS URL.
-    let youtubeVideoId =
-      track.youtubeVideoId || youtubeVideoIdFromTrackId(track.spotifyId);
+    let youtubeVideoId = getTrackYouTubeVideoId(track);
     const manualMapping = await getCatalogMapping(track.spotifyId);
     if (manualMapping?.source === 'user_direct') youtubeVideoId = manualMapping.videoId;
-    if (youtubeVideoId && /^[A-Za-z0-9]{22}$/.test(track.spotifyId)) {
-      const mapping = await getCatalogMapping(track.spotifyId);
-      if (!mapping || !isCurrentCatalogMapping(mapping)) {
-        youtubeVideoId = undefined;
-        effectiveTrack = { ...effectiveTrack, youtubeVideoId: undefined, youtubeUrl: undefined };
-      }
-    }
     let sourceChanged = false;
     if (youtubeVideoId && manualMapping?.source !== 'user_direct') {
       const source = await resolveCatalogYouTubeVideoId({

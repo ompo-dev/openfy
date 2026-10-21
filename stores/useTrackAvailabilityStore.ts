@@ -1,10 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
+import { getTrackYouTubeVideoId, type YouTubeTrackReference } from '../services/spotify/linkParser';
 
-export type AvailabilityTrack = { spotifyId?: string; id?: string; title: string; youtubeVideoId?: string;
+export type AvailabilityTrack = YouTubeTrackReference & { title: string;
   localAudioPath?: string; isDownloaded?: boolean };
 type Failure = { reason: string; videoId?: string; at: number };
-const STORAGE_KEY = 'openfy_track_availability_v1';
+// Old flags did not identify URL/alternate-ID sources and can contain permanent false negatives.
+const STORAGE_KEY = 'openfy_track_availability_v2';
 const TRANSIENT_FAILURE_TTL_MS = 5 * 60_000;
 const keyFor = (track: AvailabilityTrack) => JSON.stringify([track.spotifyId || track.id,
   track.title.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase()]);
@@ -27,15 +29,16 @@ export const hydrateTrackAvailability = () => hydration ||= AsyncStorage.getItem
     useTrackAvailabilityStore.setState((state) => ({ failures: { ...failures, ...state.failures } }));
   }
 }).catch(() => {});
-export const isTrackUnavailable = (track: AvailabilityTrack, failures = useTrackAvailabilityStore.getState().failures) => {
+/** Queue cooldowns include transport failures; repair UI only uses confirmed missing recordings. */
+export const isTrackUnavailable = (track: AvailabilityTrack, failures = useTrackAvailabilityStore.getState().failures, includeTransient = true) => {
   if (track.isDownloaded || track.localAudioPath?.startsWith('file:')) return false;
   const failure = failures[keyFor(track)];
-  return Boolean(failure && failure.videoId === track.youtubeVideoId &&
-    (failure.reason === 'no-canonical-match' || Date.now() - failure.at < TRANSIENT_FAILURE_TTL_MS));
+  return Boolean(failure && failure.videoId === getTrackYouTubeVideoId(track) &&
+    (failure.reason === 'no-canonical-match' || includeTransient && Date.now() - failure.at < TRANSIENT_FAILURE_TTL_MS));
 };
 export const markTrackUnavailable = (track: AvailabilityTrack, reason: string) => {
   useTrackAvailabilityStore.setState((state) => ({ failures: { ...state.failures,
-    [keyFor(track)]: { reason, videoId: track.youtubeVideoId, at: Date.now() } } }));
+    [keyFor(track)]: { reason, videoId: getTrackYouTubeVideoId(track), at: Date.now() } } }));
   persist();
 };
 export const clearTrackUnavailable = (track: AvailabilityTrack) => {

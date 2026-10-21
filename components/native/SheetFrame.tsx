@@ -17,7 +17,8 @@ export function SheetFrame({ children, contentHeight, artworkURL: _artworkURL, c
   centerTitle = true, keyboardAwareScroll = true, size = 'full', scroll = true, ...props }: SheetFrameProps) {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const boundedHeight = contentHeight === undefined ? undefined : Math.min(contentHeight,
+  // A page's viewport is its parent; estimates only size fitted bottom sheets.
+  const boundedHeight = size === 'full' || contentHeight === undefined ? undefined : Math.min(contentHeight,
     Math.max(120, height * 0.88 - insets.top - insets.bottom - 120));
   React.useEffect(() => {
     if (!props.visible) return;
@@ -28,7 +29,7 @@ export function SheetFrame({ children, contentHeight, artworkURL: _artworkURL, c
     if (!React.isValidElement<any>(child) || ![ScrollView, FlatList, ProgressiveFlatList].includes(child.type as any)) return child;
     const element = child as React.ReactElement<any>;
     return React.cloneElement(element, { style: [element.props.style,
-      { flexGrow: contentHeight === undefined ? 0 : 1, flexShrink: 1, minHeight: 0 }],
+      { flexGrow: size === 'full' || contentHeight !== undefined ? 1 : 0, flexShrink: 1, minHeight: 0 }],
       keyboardDismissMode: element.props.keyboardDismissMode ?? 'interactive' });
   });
   return <GymSheetFrame {...props} centerTitle={centerTitle} keyboardAwareScroll={keyboardAwareScroll} size={size} scroll={scroll}>

@@ -8,7 +8,7 @@ export function PlaylistForm({ title, description, onTitleChange, onDescriptionC
 }) {
   const descriptionRef = React.useRef<TextInput>(null);
   return <View style={styles.form}>
-    <Section label="Playlist">
+    <Section>
         <TextField label="Nome" accessibilityLabel="Nome da playlist" autoFocus={autoFocus} editable={!disabled} maxLength={80}
           placeholder="Minha playlist" placeholderTextColor="#8E8E93" returnKeyType="next"
           onSubmitEditing={() => descriptionRef.current?.focus()} onChangeText={onTitleChange} value={title} style={styles.input} />

@@ -50,6 +50,8 @@ describe('PlaylistTrackPickerModal', () => {
     );
 
     expect(screen.getByText('Já está na playlist')).toBeTruthy();
+    expect(screen.queryByText('Biblioteca')).toBeNull();
+    expect(screen.getByText('Buscar')).toBeTruthy();
     await fireEvent.press(await screen.findByLabelText('Selecionar Segunda música'));
     await fireEvent.press(screen.getByLabelText('Adicionar 1 música'));
 

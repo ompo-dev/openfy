@@ -29,7 +29,6 @@ export const PlaylistTrackPickerModal = ({
   visible,
 }: PlaylistTrackPickerModalProps) => {
   const [query, setQuery] = React.useState('');
-  const [headerHeight, setHeaderHeight] = React.useState(132);
   const [selectedTrackIds, setSelectedTrackIds] = React.useState<Set<string>>(
     new Set()
   );
@@ -76,10 +75,9 @@ export const PlaylistTrackPickerModal = ({
 
   return (
     <SheetFrame visible={visible} title="Adicionar músicas" onClose={onClose} scroll={false}
-      headerTrailing={<PlaylistSheetAction label={confirmLabel} disabled={!selectedCount} onPress={confirm} />}
-      contentHeight={headerHeight + Math.max(1, visibleTracks.length) * 64}>
-      <View style={styles.searchField} onLayout={({ nativeEvent }) => setHeaderHeight(nativeEvent.layout.height)}>
-      <Section label="Biblioteca"><TextField label="Buscar" accessibilityLabel="Buscar na biblioteca"
+      headerTrailing={<PlaylistSheetAction label={confirmLabel} disabled={!selectedCount} onPress={confirm} />}>
+      <View style={styles.searchField}>
+      <Section><TextField label="Buscar" accessibilityLabel="Buscar na biblioteca"
         autoCapitalize="none"
         autoCorrect={false}
         onChangeText={setQuery}
@@ -133,8 +131,6 @@ const styles = StyleSheet.create({
   trackList: {
     flex: 1,
     minHeight: 0,
-    borderRadius: 22,
-    backgroundColor: '#303030',
   },
   searchField: { paddingBottom: 16 },
   empty: {

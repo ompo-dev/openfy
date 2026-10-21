@@ -745,7 +745,7 @@ describe('queue preload window', () => {
 
       expect(usePlayerStore.getState().queueIndex).toBe(2);
       expect(usePlayerStore.getState().queueSourceId).toBe('playlist:daily');
-      expect(playTrack).toHaveBeenCalledWith(tracks[2], { setQueue: false, skipUnavailable: true });
+      expect(playTrack).toHaveBeenCalledWith(tracks[2], { setQueue: false, skipUnavailable: true, retryTransient: true });
     });
   });
 

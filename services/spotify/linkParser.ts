@@ -60,9 +60,10 @@ export const parseSpotifyLink = (
 
   // 3. YouTube / YouTube Music. Read query parameters in either order, since
   // share links often put tracking parameters before the video ID.
-  const youtubeHost = /^(?:https?:\/\/)?(?:www\.)?(?:music\.)?youtube\.com\//i;
+  const youtubeHost = /^(?:https?:\/\/)?(?:www\.)?(?:(?:music|m)\.)?youtube\.com\//i;
   if (youtubeHost.test(trimmed)) {
-    const videoId = trimmed.match(/[?&]v=([A-Za-z0-9_-]{11})(?:[&#]|$)/)?.[1];
+    const videoId = trimmed.match(/[?&]v=([A-Za-z0-9_-]{11})(?:[&#]|$)/)?.[1]
+      || trimmed.match(/\/(?:shorts|embed|live)\/([A-Za-z0-9_-]{11})(?:[/?&#]|$)/)?.[1];
     if (videoId) {
       return { platform: 'youtube', type: 'track', id: videoId };
     }
@@ -85,6 +86,22 @@ export const parseSpotifyLink = (
 
 export const isValidSpotifyLink = (input: string): boolean => {
   return parseSpotifyLink(input) !== null;
+};
+
+export type YouTubeTrackReference = {
+  youtubeVideoId?: string; videoId?: string; youtubeUrl?: string; spotifyId?: string; id?: string;
+};
+
+/** Resolve the same recording reference for availability, playback and downloads. */
+export const getTrackYouTubeVideoId = (track: YouTubeTrackReference): string | undefined => {
+  for (const value of [track.youtubeVideoId, track.videoId, track.youtubeUrl]) {
+    if (!value) continue;
+    const candidate = value.trim();
+    if (/^[A-Za-z0-9_-]{11}$/.test(candidate)) return candidate;
+    const link = parseSpotifyLink(candidate);
+    if (link?.platform === 'youtube' && link.type === 'track') return link.id;
+  }
+  return [track.spotifyId, track.id].map((id) => id?.match(/^yt_([A-Za-z0-9_-]{11})$/)?.[1]).find(Boolean);
 };
 
 export const findMediaLinkInText = (input: string): string | null => {
