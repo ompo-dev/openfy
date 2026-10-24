@@ -9,6 +9,8 @@ module.exports = {
     'node_modules/(?!((?:\\.pnpm/[^/]+/node_modules/)?(?:jest-)?@react-native|(?:\\.pnpm/[^/]+/node_modules/)?(?:jest-)?react-native|(?:\\.pnpm/[^/]+/node_modules/)?@expo|(?:\\.pnpm/[^/]+/node_modules/)?@expo-module|(?:\\.pnpm/[^/]+/node_modules/)?expo|(?:\\.pnpm/[^/]+/node_modules/)?@react-navigation|(?:\\.pnpm/[^/]+/node_modules/)?@unimodules|(?:\\.pnpm/[^/]+/node_modules/)?expo-modules-core|(?:\\.pnpm/[^/]+/node_modules/)?@testing-library|(?:\\.pnpm/[^/]+/node_modules/)?@shopify/react-native-skia))',
   ],
   moduleNameMapper: {
+    '^lucide-react-native/icons/(.+)$': '<rootDir>/node_modules/lucide-react-native/dist/cjs/icons/$1.js',
+    '^lucide-react-native$': '<rootDir>/node_modules/lucide-react-native/dist/cjs/lucide-react-native.js',
     '^@/components/atoms/AppText$': '<rootDir>/components/gym/AppText.tsx',
     '^@/components/atoms/GlassSurface$': '<rootDir>/components/native/GlassSurface',
     '^@/constants/theme$': '<rootDir>/components/gym/theme.ts',
