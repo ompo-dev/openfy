@@ -34,6 +34,7 @@ type DownloadState = {
   downloads: DownloadJob[];
   activeDownloadsCount: number;
   enqueueDownloads: (tracks: DownloadTrackInput[]) => void;
+  ensureDownloads: (tracks: DownloadTrackInput[]) => Promise<void>;
   cancelDownload: (spotifyId: string) => Promise<void>;
   clearCompletedDownloads: () => void;
   retryDownload: (spotifyId: string) => Promise<void>;
@@ -46,6 +47,7 @@ const cancelledIds = new Set<string>();
 let refreshRequest: Promise<void> | null = null;
 let initialization: Promise<void> | null = null;
 let initialized = false;
+let resuming: Promise<void> | null = null;
 
 const toQueuedJob = (track: DownloadTrackInput): DownloadJob => ({
   ...track,
@@ -146,6 +148,21 @@ const runDownload = (
 export const useDownloadStore = create<DownloadState>((set, get) => ({
   downloads: [],
   activeDownloadsCount: 0,
+  ensureDownloads: async (tracks) => {
+    const unique = [...new Map(tracks.map((track) => [track.spotifyId, track])).values()];
+    if (!unique.length) return;
+    // Mix sources remain queued even when created without a connection.
+    await queueDownloads(unique);
+    set((state) => {
+      const ids = new Set(unique.map((track) => track.spotifyId));
+      const downloads = mergeJobs(state.downloads.filter((job) => !ids.has(job.spotifyId) || activeRuns.has(job.spotifyId)), unique);
+      return { downloads, activeDownloadsCount: downloads.filter(isActive).length };
+    });
+    if (useConnectivityStore.getState().status === 'offline') return;
+    for (let index = 0; index < unique.length; index += 3) {
+      await Promise.all(unique.slice(index, index + 3).map((track) => runDownload(track, track.audioUrl, track.audioFormat || 'mp3')));
+    }
+  },
   refreshDownloads: () => {
     if (refreshRequest) return refreshRequest;
     const finish = log.time('download', 'pending download state refresh');
@@ -293,6 +310,30 @@ export const useDownloadStore = create<DownloadState>((set, get) => ({
   },
 }));
 
+const resumePendingDownloadJobs = () => {
+  if (resuming) return resuming;
+  resuming = (async () => {
+    if (Platform.OS === 'web' || useConnectivityStore.getState().status === 'offline') return;
+    const resumable = await getPendingDownloads();
+    useDownloadStore.setState((state) => {
+      const downloads = mergeJobs(state.downloads, resumable.map(({ track }) => track));
+      return { downloads, activeDownloadsCount: downloads.filter(isActive).length };
+    });
+    for (let index = 0; index < resumable.length; index += 3) {
+      if (useConnectivityStore.getState().status === 'offline') break;
+      await Promise.all(resumable.slice(index, index + 3).map(({ track, audioUrl, audioFormat }) =>
+        runDownload(track, audioUrl, audioFormat)));
+    }
+  })().finally(() => { resuming = null; });
+  return resuming;
+};
+
+useConnectivityStore.subscribe((state, previous) => {
+  if (initialized && state.status === 'online' && previous.status !== 'online') {
+    void resumePendingDownloadJobs().catch((error) => log.error('downloads reconnect resume failed', { error }));
+  }
+});
+
 export const initializeDownloadStore = () => {
   if (initialized) return Promise.resolve();
   if (initialization) return initialization;
@@ -307,21 +348,7 @@ export const initializeDownloadStore = () => {
       })
       .finally(refreshLibrary);
 
-    if (Platform.OS !== 'web') {
-      const pending = await getPendingDownloads();
-      const resumable = pending.slice(0, 3);
-      if (resumable.length) {
-        useDownloadStore.setState((state) => {
-          const downloads = mergeJobs(state.downloads, resumable.map(({ track }) => track));
-          return { downloads, activeDownloadsCount: downloads.filter(isActive).length };
-        });
-        void Promise.all(resumable.map(({ track, audioUrl, audioFormat }) =>
-          runDownload(track, audioUrl, audioFormat)
-        )).catch((error: unknown) => {
-          log.error('pending download resume failed', { error: String(error) });
-        });
-      }
-    }
+    void resumePendingDownloadJobs().catch((error: unknown) => log.error('pending download resume failed', { error: String(error) }));
     initialized = true;
   })().finally(() => {
     initialization = null;
@@ -335,5 +362,6 @@ export const _resetDownloadStoreForTests = () => {
   refreshRequest = null;
   initialization = null;
   initialized = false;
+  resuming = null;
   useDownloadStore.setState({ downloads: [], activeDownloadsCount: 0 });
 };

@@ -341,6 +341,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   const [seeking, setSeeking] = React.useState(false);
   const [seekValue, setSeekValue] = React.useState(0);
   const [showLyricsFull, setShowLyricsFull] = React.useState(false);
+  React.useEffect(() => { if (currentTrack?.localOnly) setShowLyricsFull(false); }, [currentTrack?.localOnly]);
   const [isQueueVisible, setIsQueueVisible] = React.useState(false);
   const afterCloseRef = React.useRef<(() => void) | null>(null);
   const playbackOrigin = getPlaybackOrigin(queueSourceId);
@@ -408,7 +409,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     [currentTrack?.spotifyId, downloads]
   );
   const currentTrackInput = React.useMemo(
-    () => (currentTrack ? toDownloadTrackInput(currentTrack) : null),
+    () => (currentTrack && !currentTrack.localOnly ? toDownloadTrackInput(currentTrack) : null),
     [currentTrack]
   );
   const isCurrentTrackDownloading =
@@ -592,7 +593,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   const canGoPrevious = !!previousTrack;
   const canGoNext = !!nextTrack;
   const artistLinks = React.useMemo(() => {
-    if (!currentTrack) return [];
+    if (!currentTrack || currentTrack.localOnly) return [];
     if (currentTrack.artists?.length) return currentTrack.artists;
     return currentTrack.artistName
       .split(/\s*(?:,|&| feat\.?)\s*/i)
@@ -600,7 +601,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       .map((name) => ({ id: '', name: name.trim() }));
   }, [currentTrack]);
   const primaryArtist = artistLinks[0];
-  const albumRouteId = getTrackAlbumRouteId(currentTrack);
+  const albumRouteId = currentTrack?.localOnly ? '' : getTrackAlbumRouteId(currentTrack);
 
   React.useEffect(() => {
     setPlayerAlbum(null);
@@ -744,8 +745,8 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       <Motion.View style={[styles.lyricsTrackPillCopy, artworkTransition.copyStyle]}>
         <MarqueeText
           testID="player-artists"
-          text={artistLinks.map((artist) => artist.name).join(' · ')}
-          interactiveContent={artistLinks.map((artist, index) => (
+          text={currentTrack?.localOnly ? currentTrack.artistName : artistLinks.map((artist) => artist.name).join(' · ')}
+          interactiveContent={currentTrack?.localOnly ? undefined : artistLinks.map((artist, index) => (
             <React.Fragment key={`${artist.id}-${artist.name}-${index}`}>
               {index > 0 ? (
                 <Text style={styles.lyricsTrackPillText} accessible={false}> · </Text>
@@ -804,7 +805,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   // Reset first so an old link can never open while next track resolves.
   React.useEffect(() => {
     youtubeLinkRef.current = { trackKey: currentTrackKey, url: '' };
-    if (!currentTrack) {
+    if (!currentTrack || currentTrack.localOnly) {
       return;
     }
 
@@ -1306,7 +1307,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       : seekValue;
 
   const handleDownloadAction = () => {
-    if (!currentTrack || isCurrentTrackDownloading || isDownloadMutationPending)
+    if (!currentTrack || currentTrack.localOnly || isCurrentTrackDownloading || isDownloadMutationPending)
       return;
 
     if (!isCurrentTrackDownloaded && currentTrackInput) {
@@ -1361,7 +1362,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     await seekToPosition(startTimeMs + lyricsOffsetMs);
   };
 
-  const renderArtistDetails = () => (
+  const renderArtistDetails = () => currentTrack.localOnly ? null : (
     <View testID="player-artist-details" style={styles.artistDetailsSection}>
       {albumRouteId && (playerAlbum?.name || currentTrack.albumName) ? (
         <View testID="player-album-details" style={styles.albumDetailsSection}>
@@ -1813,6 +1814,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                     importantForAccessibility={showLyricsFull ? 'no-hide-descendants' : 'auto'}>
                   <PlayerGlassButton
                     accessibilityLabel="Abrir letras sincronizadas"
+                    disabled={currentTrack.localOnly}
                     onPress={toggleLyricsView}
                     style={styles.circleActionBtn}
                     testID="player-lyrics-toggle"
@@ -1821,8 +1823,9 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   </PlayerGlassButton>
                   </Motion.View>
                   {renderArtistPill(showLyricsFull)}
-                  <PlayerGlassButton accessibilityLabel="Opções do YouTube" onPress={handleOpenYoutubeMenu} style={[styles.circleActionBtn, { marginLeft: 12 }]}>
-                    <Ionicons name="logo-youtube" size={20} color="rgba(255,255,255,0.85)" />
+                  <PlayerGlassButton accessibilityLabel={currentTrack.localOnly ? 'Abrir mix' : 'Opções do YouTube'}
+                    onPress={currentTrack.localOnly ? () => { onClose(); if (playbackOrigin) openDetail('playlist', playbackOrigin.id); } : handleOpenYoutubeMenu} style={[styles.circleActionBtn, { marginLeft: 12 }]}>
+                    <Ionicons name={currentTrack.localOnly ? 'pulse' : 'logo-youtube'} size={20} color="rgba(255,255,255,0.85)" />
                   </PlayerGlassButton>
                 </View>
                 <View style={styles.progressContainer}>
@@ -1858,12 +1861,12 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                 style={styles.controlsRow}
               >
                 <PlayerGlassButton
-                  accessibilityLabel={isCurrentTrackDownloading ? `Baixando ${currentDownloadProgress}%` : isCurrentTrackDownloaded ? 'Excluir download' : isOffline ? 'Offline: download indisponível' : 'Baixar música'}
-                  disabled={isCurrentTrackDownloading || isDownloadMutationPending}
+                  accessibilityLabel={currentTrack.localOnly ? 'Mix disponível offline' : isCurrentTrackDownloading ? `Baixando ${currentDownloadProgress}%` : isCurrentTrackDownloaded ? 'Excluir download' : isOffline ? 'Offline: download indisponível' : 'Baixar música'}
+                  disabled={currentTrack.localOnly || isCurrentTrackDownloading || isDownloadMutationPending}
                   onPress={handleDownloadAction}
                   style={styles.sideControlBtn}
                 >
-                  {isCurrentTrackDownloading ? <Text style={styles.downloadProgressText}>{currentDownloadProgress}%</Text> : isDownloadMutationPending ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons name={isCurrentTrackDownloaded ? 'trash-outline' : isOffline ? 'cloud-offline-outline' : 'download-outline'} size={23} color="rgba(255,255,255,0.82)" />}
+                  {currentTrack.localOnly ? <Ionicons name="checkmark-circle" size={23} color="#1ED760" /> : isCurrentTrackDownloading ? <Text style={styles.downloadProgressText}>{currentDownloadProgress}%</Text> : isDownloadMutationPending ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons name={isCurrentTrackDownloaded ? 'trash-outline' : isOffline ? 'cloud-offline-outline' : 'download-outline'} size={23} color="rgba(255,255,255,0.82)" />}
                 </PlayerGlassButton>
                 <PlayerGlassButton accessibilityLabel="Faixa anterior" disabled={!canGoPrevious} onPress={handlePlayPrevious} style={styles.seekControlBtn}>
                   <Ionicons name="play-back" size={32} color={canGoPrevious ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} />
@@ -1874,7 +1877,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                 <PlayerGlassButton accessibilityLabel="Próxima faixa" disabled={!canGoNext} onPress={handlePlayNext} style={styles.seekControlBtn}>
                   <Ionicons name="play-forward" size={32} color={canGoNext ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} />
                 </PlayerGlassButton>
-                <PlayerGlassButton accessibilityLabel="Adicionar música a playlists" onPress={() => setIsPlaylistPickerVisible(true)} style={styles.sideControlBtn}>
+                <PlayerGlassButton accessibilityLabel="Adicionar música a playlists" disabled={currentTrack.localOnly} onPress={() => setIsPlaylistPickerVisible(true)} style={styles.sideControlBtn}>
                   <MaterialCommunityIcons name="playlist-plus" size={24} color="rgba(255,255,255,0.82)" />
                 </PlayerGlassButton>
               </View>
@@ -1902,13 +1905,14 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   active={queueIndex === index} playing={playerState.isPlaying}
                   downloadState={status === 'completed' ? 'completed' :
                     ['queued', 'resolving', 'downloading'].includes(status || '') ? 'active' : 'idle'}
-                  onDownload={() => enqueueDownloads([toDownloadTrackInput(item)])}
+                  trailingAction={item.localOnly ? <Ionicons name="checkmark-circle" size={22} color="#1ED760" /> : undefined}
+                  onDownload={() => { if (!item.localOnly) enqueueDownloads([toDownloadTrackInput(item)]); }}
                   onPress={() => { void playQueueIndex(index); setIsQueueVisible(false); }} />;
               }}
               showsVerticalScrollIndicator={false} />
           </SheetFrame>
 
-          <TrackPlaylistPickerModal
+          {currentTrackInput ? <TrackPlaylistPickerModal
             onAdded={() => {
               refreshLibrary();
               void Haptics.notificationAsync(
@@ -1918,7 +1922,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
             onClose={() => setIsPlaylistPickerVisible(false)}
             track={currentTrackInput!}
             visible={isPlaylistPickerVisible}
-          />
+          /> : null}
           <LyricsProviderSheet visible={isProviderVisible} onClose={() => setIsProviderVisible(false)} />
 
           <SheetFrame

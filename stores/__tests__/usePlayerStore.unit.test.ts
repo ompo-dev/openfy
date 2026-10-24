@@ -51,6 +51,13 @@ describe('player lyric request ownership', () => {
     jest.mocked(fetchLyrics).mockReset();
   });
 
+  it('does not fetch song lyrics for a composed local mix', async () => {
+    usePlayerStore.setState({ currentTrack: { ...track, localOnly: true }, isLoadingLyrics: true });
+    await usePlayerStore.getState().refreshLyrics();
+    expect(fetchLyrics).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState()).toMatchObject({ lyricsData: null, isLoadingLyrics: false });
+  });
+
   it('keeps the new track when an old lyric response completes last', async () => {
     let finishOld!: (value: typeof lyrics) => void;
     jest.mocked(fetchLyrics).mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }))

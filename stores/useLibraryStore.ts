@@ -3,11 +3,12 @@ import type { SetStateAction } from 'react';
 
 import { Categories } from '../config';
 
-export type LibraryView = 'songs' | 'playlists' | 'albums' | 'artists';
+export type LibraryView = 'songs' | 'playlists' | 'mixes' | 'albums' | 'artists';
 
 const nextLibraryView: Record<LibraryView, LibraryView> = {
   songs: 'playlists',
-  playlists: 'albums',
+  playlists: 'mixes',
+  mixes: 'albums',
   albums: 'artists',
   artists: 'songs',
 };

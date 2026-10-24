@@ -40,6 +40,8 @@ import { groupLibraryArtists } from '../../services/library/localCollections';
 import { useFollowedArtistsStore } from '../../stores/useFollowedArtistsStore';
 import { ArtistSearchRow } from '../Home/ArtistSearchRow';
 import { LibrarySwipeRow } from './LibrarySwipeRow';
+import { getMixProjects, deleteMixProject } from '../../services/mix/mixRepository';
+import { formatMixTime, mixDuration, type MixProject } from '../../services/mix/mixTimeline';
 
 const toPlayerTrack = (track: LibraryTrack) => ({
   ...track,
@@ -58,6 +60,7 @@ export const OfflineLibrary = () => {
   const { openDetail } = useDetailNavigation();
   const [tracks, setTracks] = React.useState<LibraryTrack[]>([]);
   const [playlists, setPlaylists] = React.useState<LocalPlaylist[]>([]);
+  const [mixes, setMixes] = React.useState<MixProject[]>([]);
   const [artistImageURLs, setArtistImageURLs] = React.useState<Record<string, string>>({});
   const [artistTrackCounts, setArtistTrackCounts] = React.useState<Record<string, number>>({});
   const [artistImageLoadLimit, setArtistImageLoadLimit] = React.useState(12);
@@ -109,6 +112,8 @@ export const OfflineLibrary = () => {
           )
         );
       }),
+      getMixProjects().then((items) => { if (isMountedRef.current) setMixes(items); })
+        .catch((error) => { log.error('mix library load failed', { error }); Alert.alert('Mix', 'Não foi possível carregar os mixes.'); }),
     ])
       .then(() => undefined)
       .finally(() => {
@@ -452,6 +457,24 @@ export const OfflineLibrary = () => {
     );
   };
 
+  const visibleMixes = mixes.filter((mix) => !normalizedQuery || mix.title.toLocaleLowerCase().includes(normalizedQuery))
+    .sort((a, b) => librarySort === 'title' ? a.title.localeCompare(b.title) : b.updatedAt.localeCompare(a.updatedAt));
+  const renderMix = ({ item }: { item: MixProject }) => <LibrarySwipeRow label={`Excluir mix ${item.title}`}
+    onWillOpen={(close) => { openSwipeRow.current?.(); openSwipeRow.current = close; }}
+    onRemove={() => Alert.alert('Excluir mix?', `Excluir "${item.title}"? As músicas baixadas continuam na biblioteca.`, [
+      { text: 'Cancelar', style: 'cancel' }, { text: 'Excluir', style: 'destructive', onPress: () => {
+        void deleteMixProject(item.id).then(() => { refreshLibrary(); void loadLibrary(); })
+          .catch(() => Alert.alert('Mix', 'Não foi possível excluir o mix.'));
+      } },
+    ])}>
+    <LoggedPressable accessibilityRole="button" accessibilityLabel={`Abrir mix ${item.title}`} onPress={() => openDetail('playlist', item.id, 'library')} style={styles.playlistItem}>
+      <PlaylistMosaic imageURLs={item.tracks.map((track) => tracksById.get(track.spotifyId)?.localImagePath || track.imageURL).filter(Boolean).slice(0, 4)} size={62} />
+      <View style={styles.playlistInfo}><Text numberOfLines={1} style={styles.playlistTitle}>{item.title}</Text>
+        <Text style={styles.playlistMeta}>Mix · {item.clips.length} clipes · {formatMixTime(mixDuration(item.clips))}</Text></View>
+      <Ionicons name="chevron-forward" size={20} color="#8B8B8B" />
+    </LoggedPressable>
+  </LibrarySwipeRow>;
+
   const noResults = (
     <View style={styles.searchEmpty}>
       <Text style={styles.searchEmptyText}>
@@ -459,6 +482,7 @@ export const OfflineLibrary = () => {
           ? 'Nenhuma música encontrada'
           : libraryView === 'playlists'
             ? 'Nenhuma playlist encontrada'
+            : libraryView === 'mixes' ? 'Nenhum mix encontrado'
             : libraryView === 'albums'
               ? 'Nenhum álbum encontrado'
               : 'Nenhum artista encontrado'}
@@ -518,6 +542,11 @@ export const OfflineLibrary = () => {
           showsVerticalScrollIndicator={false}
           refreshControl={refreshControl}
         />
+      ) : libraryView === 'mixes' ? (
+        <ProgressiveFlatList listKey={`mixes:${librarySearchQuery}:${librarySort}`} data={visibleMixes}
+          renderItem={renderMix} keyExtractor={(item) => item.id} onScrollBeginDrag={closeSwipeRow}
+          contentContainerStyle={[styles.list, !visibleMixes.length && styles.listEmpty]} ListEmptyComponent={noResults}
+          showsVerticalScrollIndicator={false} refreshControl={refreshControl} />
       ) : (
         <ProgressiveFlatList
           listKey={`${libraryView}:${librarySearchQuery}:${librarySort}`}

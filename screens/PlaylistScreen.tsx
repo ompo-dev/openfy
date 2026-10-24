@@ -12,13 +12,14 @@ import { formatCollectionMeta } from '@utils';
 import { TemporaryPlaylistScreen } from './TemporaryPlaylistScreen';
 import { HOME_PLAYLIST_PREFIX } from '../services/home/temporaryPlaylists';
 import { PendingCollectionDetail } from '../components/CollectionDetail/PendingCollectionDetail';
+import { MixDetail } from '../components/Mix/MixDetail';
 
 export type PlaylistScreenPropsType = {
   playlistId: string;
 };
 
 export const PlaylistScreen = ({ playlistId }: PlaylistScreenPropsType) =>
-  playlistId.startsWith(HOME_PLAYLIST_PREFIX) ? (
+  playlistId.startsWith('local_mix_') ? <MixDetail key={playlistId} mixId={playlistId} /> : playlistId.startsWith(HOME_PLAYLIST_PREFIX) ? (
     <TemporaryPlaylistScreen playlistId={playlistId} />
   ) : playlistId.startsWith('local_') ? (
     <LocalPlaylist key={playlistId} playlistId={playlistId} />

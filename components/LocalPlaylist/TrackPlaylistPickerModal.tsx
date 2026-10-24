@@ -19,12 +19,17 @@ import {
   type LocalPlaylist,
 } from '@services';
 import { SheetFrame } from '../native';
-import { SettingsRow, Chevron } from '../gym';
+import { SettingsRow, Chevron, NativeSegmented } from '../gym';
 import { SettingIcon } from '../gym/SettingIcon';
 import { ProgressiveFlatList } from '../common/ProgressiveList';
 import { PlaylistCreateModal } from './PlaylistCreateModal';
 import { PlaylistSheetAction } from './PlaylistForm';
 import { log } from '../../utils/appLogger';
+import { addTracksToMix, getMixProjects } from '../../services/mix/mixRepository';
+import { downloadMixSources } from '../../services/mix/mixAudio';
+import type { MixProject } from '../../services/mix/mixTimeline';
+import { MixCreateModal } from '../Mix/MixCreateModal';
+import { useLibraryStore } from '../../stores/useLibraryStore';
 
 type TrackPlaylistPickerModalProps = {
   onAdded?: (playlistCount: number) => void | Promise<void>;
@@ -40,6 +45,8 @@ export function TrackPlaylistPickerModal({
   visible,
 }: TrackPlaylistPickerModalProps) {
   const [playlists, setPlaylists] = React.useState<LocalPlaylist[]>([]);
+  const [mixes, setMixes] = React.useState<MixProject[]>([]);
+  const [tab, setTab] = React.useState<'playlists' | 'mixes'>('playlists');
   const [libraryTracks, setLibraryTracks] = React.useState<LibraryTrack[]>([]);
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = React.useState(false);
@@ -51,19 +58,22 @@ export function TrackPlaylistPickerModal({
     if (!visible) return;
     let active = true;
     setSelectedIds(new Set());
+    setTab('playlists');
     setIsLoading(true);
     log.playlist('track picker opened', { trackId: track.spotifyId });
-    void Promise.all([getLocalPlaylists(), getLibraryTracks()])
-      .then(([items, tracks]) => {
+    void Promise.all([getLocalPlaylists(), getLibraryTracks(), getMixProjects()])
+      .then(([items, tracks, projects]) => {
         if (!active) return;
         setPlaylists(items);
         setLibraryTracks(tracks);
+        setMixes(projects);
       })
       .catch((error: unknown) => {
         log.error('playlist picker load failed', { trackId: track.spotifyId, error });
         if (active) {
           setPlaylists([]);
           setLibraryTracks([]);
+          setMixes([]);
         }
       })
       .finally(() => {
@@ -78,6 +88,12 @@ export function TrackPlaylistPickerModal({
     () => new Map(libraryTracks.map((item) => [item.spotifyId, item])),
     [libraryTracks]
   );
+
+  const destinations = React.useMemo(() => tab === 'playlists' ? playlists : mixes.map((mix): LocalPlaylist => ({
+    id: mix.id, title: mix.title, description: mix.description, sourceId: mix.id, sourcePlatform: 'local',
+    trackIds: [...new Set(mix.clips.map((clip) => clip.trackId))], createdAt: mix.createdAt, updatedAt: mix.updatedAt,
+    coverImageURLs: mix.tracks.map((item) => item.imageURL).filter(Boolean).slice(0, 4),
+  })), [tab, playlists, mixes]);
 
   const toggle = React.useCallback(
     (playlist: LocalPlaylist) => {
@@ -105,12 +121,16 @@ export function TrackPlaylistPickerModal({
       // Persist its metadata first so playlist rows never become orphan IDs.
       await upsertCatalogTracks([track]);
       await Promise.all(
-        [...selectedIds].map((playlistId) =>
-          addTracksToLocalPlaylist(playlistId, [track.spotifyId]).then((saved) => {
+        [...selectedIds].map((playlistId) => playlistId.startsWith('local_mix_')
+          ? addTracksToMix(playlistId, [track]).then((saved) => {
+            void downloadMixSources(saved).catch((error) => log.error('mix downloads failed', { mixId: saved.id, error }));
+          })
+          : addTracksToLocalPlaylist(playlistId, [track.spotifyId]).then((saved) => {
             if (saved === null) throw new Error('Playlist removida');
           })
         )
       );
+      useLibraryStore.getState().refreshLibrary();
       await onAdded?.(selectedIds.size);
       log.playlist('add track completed', {
         trackId: track.spotifyId,
@@ -135,33 +155,37 @@ export function TrackPlaylistPickerModal({
     <SheetFrame
       onClose={onClose}
       scroll={false}
-      contentHeight={100 + (isLoading ? 64 : Math.max(64, playlists.length * 72))}
+      contentHeight={100 + (isLoading ? 64 : Math.max(64, destinations.length * 72))}
       artworkURL={track.imageURL}
-      headerTrailing={<PlaylistSheetAction label={`Adicionar em ${selectedCount} playlist${selectedCount === 1 ? '' : 's'}`}
+      headerTrailing={<PlaylistSheetAction label={`Adicionar em ${selectedCount} destino${selectedCount === 1 ? '' : 's'}`}
         disabled={!selectedCount} busy={isSaving} onPress={() => void confirm()} />}
-      nested={<PlaylistCreateModal visible={isCreateVisible} onClose={() => setIsCreateVisible(false)}
+      nested={<><PlaylistCreateModal visible={isCreateVisible && tab === 'playlists'} onClose={() => setIsCreateVisible(false)}
         onCreated={(playlist) => {
           setPlaylists((current) => [...current.filter((item) => item.id !== playlist.id), playlist]);
           setSelectedIds((current) => new Set([...current, playlist.id]));
-        }} />}
-      title="Adicionar à playlist"
+        }} /><MixCreateModal visible={isCreateVisible && tab === 'mixes'} onClose={() => setIsCreateVisible(false)}
+          onCreated={(mix) => { setMixes((current) => [...current, mix]); setSelectedIds((current) => new Set([...current, mix.id])); }} /></>}
+      title="Adicionar a"
       visible={visible}
     >
       <ProgressiveFlatList
         testID="playlist-picker-list"
-        listKey={track.spotifyId}
-        data={isLoading ? [] : playlists}
+        listKey={`${track.spotifyId}:${tab}`}
+        data={isLoading ? [] : destinations}
         keyExtractor={(playlist) => playlist.id}
         ListHeaderComponentStyle={{ paddingBottom: 12 }}
         ListHeaderComponent={<>
           <Text numberOfLines={1} style={styles.trackTitle}>{track.title}</Text>
+          <View style={{ marginTop: 16 }}><NativeSegmented accessibilityLabel="Tipo de coleção" options={[
+            { value: 'playlists', label: 'Playlists' }, { value: 'mixes', label: 'Mix' },
+          ]} value={tab} onChange={(value) => { setTab(value); setIsCreateVisible(false); }} disabled={isSaving} /></View>
           <View testID="playlist-create-shortcut" style={styles.createRow}>
-            <SettingsRow title="Nova playlist" disabled={isSaving} onPress={() => setIsCreateVisible(true)}
+            <SettingsRow title={tab === 'mixes' ? 'Novo mix' : 'Nova playlist'} disabled={isSaving} onPress={() => setIsCreateVisible(true)}
               leading={<SettingIcon name="add" />} trailing={<Chevron />} />
           </View>
         </>}
         ListEmptyComponent={isLoading ? <View style={styles.loading}><ActivityIndicator color="#FFFFFF" /></View>
-          : <Text style={styles.emptyText}>Nenhuma playlist.</Text>}
+          : <Text style={styles.emptyText}>{tab === 'mixes' ? 'Nenhum mix.' : 'Nenhuma playlist.'}</Text>}
           renderItem={({ item }) => {
             const alreadyAdded = item.trackIds.includes(track.spotifyId);
             const selected = selectedIds.has(item.id);

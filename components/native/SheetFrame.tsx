@@ -14,7 +14,7 @@ type SheetFrameProps = React.ComponentProps<typeof GymSheetFrame> & {
 
 /** Gym owns presentation, insets and glass for both scroll views and virtualized lists. */
 export function SheetFrame({ children, contentHeight, artworkURL: _artworkURL, closeLabel: _closeLabel,
-  centerTitle = true, keyboardAwareScroll = true, size = 'full', scroll = true, ...props }: SheetFrameProps) {
+  centerTitle = true, keyboardAwareScroll = true, size = 'full', scroll = true, renderScrollContent: customScrollContent, ...props }: SheetFrameProps) {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   // A page's viewport is its parent; estimates only size fitted bottom sheets.
@@ -38,7 +38,7 @@ export function SheetFrame({ children, contentHeight, artworkURL: _artworkURL, c
       pageProps.onScroll?.(event);
       list.props.onScroll?.(event);
     },
-  }) : undefined;
+  }) : customScrollContent;
   const content = React.Children.map(children, (child) => {
     if (!React.isValidElement<any>(child) || ![ScrollView, FlatList, ProgressiveFlatList].includes(child.type as any)) return child;
     const element = child as React.ReactElement<any>;

@@ -33,7 +33,7 @@ import {
 import { useAppSettingsStore } from '../../stores/useAppSettingsStore';
 
 type LibrarySort = 'recent' | 'title';
-type LibraryView = 'songs' | 'playlists' | 'albums' | 'artists';
+type LibraryView = 'songs' | 'playlists' | 'mixes' | 'albums' | 'artists';
 type Option<T extends string> = { label: string; value: T };
 
 type LibraryControlsPickerProps =
@@ -62,6 +62,7 @@ const SORT_OPTIONS: readonly Option<LibrarySort>[] = [
 const VIEW_OPTIONS: readonly Option<LibraryView>[] = [
   { label: 'Músicas', value: 'songs' },
   { label: 'Playlists', value: 'playlists' },
+  { label: 'Mix', value: 'mixes' },
   { label: 'Álbuns', value: 'albums' },
   { label: 'Artistas', value: 'artists' },
 ];

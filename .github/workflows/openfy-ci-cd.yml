@@ -341,7 +341,17 @@ jobs:
             -target arm64-apple-ios16.4 \
             -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
             modules/openfy-local-audio/ios/MP4Container.swift \
-            modules/openfy-local-audio/ios/LocalAudioNormalizer.swift
+            modules/openfy-local-audio/ios/LocalAudioNormalizer.swift \
+            modules/openfy-local-audio/ios/MixAudioRenderer.swift
+
+      - name: Validar cortes, juncao e volume dos mixes
+        run: |
+          xcrun swiftc -parse-as-library \
+            modules/openfy-local-audio/ios/MP4Container.swift \
+            modules/openfy-local-audio/ios/LocalAudioNormalizer.swift \
+            modules/openfy-local-audio/ios/MixAudioRenderer.swift \
+            scripts/check-mix-audio.swift -o "$RUNNER_TEMP/check-mix-audio"
+          "$RUNNER_TEMP/check-mix-audio"
 
       - name: Conferir duracao, audio e idempotencia
         run: |

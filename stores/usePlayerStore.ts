@@ -70,6 +70,7 @@ import { getCatalogMapping, isCurrentCatalogMapping } from '../services/audio/ca
 import { resolveTrackCredits } from '../services/search/trackCredits';
 
 export type PlayerTrack = TrackCatalogMetadata & {
+  localOnly?: boolean;
   spotifyId: string;
   title: string;
   artistName: string;
@@ -765,6 +766,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     // 2. CONCURRENT AUDIO STREAM RESOLUTION & PERSISTENT CACHE
     let playbackQuality = getCachedAppSettings().streamingQuality;
     const resolveAudioPromise = (async (): Promise<AudioSourceInput | null> => {
+      if (track.localOnly) {
+        const local = await getExistingLocalAudioPath(track.localAudioPath);
+        return local?.startsWith('file:') ? local : null;
+      }
       await hydrateTrackAvailability();
       if (isTrackUnavailable(track, undefined, Boolean(options.skipUnavailable && !options.retryTransient))) return null;
       if ((!options.skipUnavailable || options.retryTransient) && isTrackUnavailable(track)) {
@@ -856,6 +861,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const startLyricsLoading = () => {
       if (lyricsStarted || get().activeRequestId !== requestId) return;
       lyricsStarted = true;
+      if (track.localOnly) { set({ isLoadingLyrics: false, lyricsData: null }); return; }
       void get().refreshLyrics();
     };
 
@@ -944,6 +950,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           useConnectivityStore.getState().status !== 'offline') await get().playNext();
     };
     const resolveFreshAudio = async (quality: ReturnType<typeof getCachedAppSettings>['streamingQuality']) => {
+      if (track.localOnly) return null;
       try {
         const mapping = await getCatalogMapping(track.spotifyId);
         const manual = mapping?.source === 'user_direct';
@@ -1008,8 +1015,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         log.player('audio playback started', { trackId: track.spotifyId,
           durationMs: Date.now() - requestedAt, mediaDurationMs: currentDuration });
         warmQueueNeighbors(get().queue, get().queueIndex);
-        prefetchTrackArtistData(track);
-        prefetchTrackAlbumData(track);
+        if (!track.localOnly) { prefetchTrackArtistData(track); prefetchTrackAlbumData(track); }
       }
 
       // Reset consecutive recovery counter once stream has played stably past resume position
@@ -1186,7 +1192,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     if (success) {
       clearTrackUnavailable(track);
-      void resolveTrackCredits(track).then(({ artists, artistCreditsVersion }) => {
+      if (!track.localOnly) void resolveTrackCredits(track).then(({ artists, artistCreditsVersion }) => {
         if (!artists.length || get().activeRequestId !== requestId) return;
         const current = get().currentTrack;
         if (!current) return;
@@ -1195,8 +1201,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         set({ currentTrack: enriched });
         get().replaceQueueTrack(current, enriched);
       }).catch(() => {});
-      void ensurePlaybackDiagnostics(track).catch(() => {});
-      recordInteraction(track, 'play').catch(() => {});
+      if (!track.localOnly) {
+        void ensurePlaybackDiagnostics(track).catch(() => {});
+        recordInteraction(track, 'play').catch(() => {});
+      }
       set((state) => ({
         isLoadingAudio: false,
         history: [track, ...state.history.slice(0, 49)],
@@ -1531,6 +1539,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   refreshLyrics: async (force = false) => {
     const { currentTrack, activeRequestId } = get();
     if (!currentTrack) return;
+    if (currentTrack.localOnly) { set({ lyricsData: null, isLoadingLyrics: false }); return; }
     const generation = ++lyricsLoadGeneration;
     const finish = log.time('player', 'active lyrics refresh', { trackId: currentTrack.spotifyId, generation, force });
     activeLyricsController?.abort();

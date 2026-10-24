@@ -2,17 +2,17 @@ import * as React from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
 import { HeaderIconButton, Section, TextField } from '../gym';
 
-export function PlaylistForm({ title, description, onTitleChange, onDescriptionChange, autoFocus = false, disabled = false }: {
+export function PlaylistForm({ title, description, onTitleChange, onDescriptionChange, autoFocus = false, disabled = false, kind = 'playlist' }: {
   title: string; description: string; onTitleChange: (title: string) => void;
-  onDescriptionChange: (description: string) => void; autoFocus?: boolean; disabled?: boolean;
+  onDescriptionChange: (description: string) => void; autoFocus?: boolean; disabled?: boolean; kind?: 'playlist' | 'mix';
 }) {
   const descriptionRef = React.useRef<TextInput>(null);
   return <View style={styles.form}>
     <Section>
-        <TextField label="Nome" accessibilityLabel="Nome da playlist" autoFocus={autoFocus} editable={!disabled} maxLength={80}
-          placeholder="Minha playlist" placeholderTextColor="#8E8E93" returnKeyType="next"
+        <TextField label="Nome" accessibilityLabel={`Nome ${kind === 'mix' ? 'do mix' : 'da playlist'}`} autoFocus={autoFocus} editable={!disabled} maxLength={80}
+          placeholder={kind === 'mix' ? 'Meu mix' : 'Minha playlist'} placeholderTextColor="#8E8E93" returnKeyType="next"
           onSubmitEditing={() => descriptionRef.current?.focus()} onChangeText={onTitleChange} value={title} style={styles.input} />
-        <TextField label="Descrição" inputRef={descriptionRef} accessibilityLabel="Descrição da playlist" editable={!disabled} maxLength={240}
+        <TextField label="Descrição" inputRef={descriptionRef} accessibilityLabel={`Descrição ${kind === 'mix' ? 'do mix' : 'da playlist'}`} editable={!disabled} maxLength={240}
           placeholder="Opcional" placeholderTextColor="#8E8E93" multiline
           onChangeText={onDescriptionChange} value={description} style={[styles.input, styles.description]} />
     </Section>

@@ -8,6 +8,16 @@ import {
   upsertCatalogTracks,
 } from '@services';
 import { TrackPlaylistPickerModal } from '../TrackPlaylistPickerModal';
+import { addTracksToMix, getMixProjects } from '../../../services/mix/mixRepository';
+import { downloadMixSources } from '../../../services/mix/mixAudio';
+jest.mock('../../../services/mix/mixRepository', () => ({ getMixProjects: jest.fn().mockResolvedValue([]), addTracksToMix: jest.fn() }));
+jest.mock('../../../services/mix/mixAudio', () => ({ downloadMixSources: jest.fn().mockResolvedValue(undefined) }));
+jest.mock('../../gym', () => {
+  const actual = jest.requireActual('../../gym');
+  const { Pressable, Text, View } = jest.requireActual('react-native');
+  return { ...actual, NativeSegmented: ({ options, onChange }: any) => <View>{options.map((option: any) =>
+    <Pressable key={option.value} accessibilityLabel={option.label} onPress={() => onChange(option.value)}><Text>{option.label}</Text></Pressable>)}</View> };
+});
 
 jest.mock('@services', () => ({
   addTracksToLocalPlaylist: jest.fn(),
@@ -73,9 +83,9 @@ describe('TrackPlaylistPickerModal', () => {
     await waitFor(() => expect(screen.getByText('Favoritas')).toBeTruthy());
     await fireEvent.press(screen.getByLabelText('Adicionar em Favoritas'));
     await waitFor(() =>
-      expect(screen.getByLabelText('Adicionar em 1 playlist')).toBeTruthy()
+      expect(screen.getByLabelText('Adicionar em 1 destino')).toBeTruthy()
     );
-    await fireEvent.press(screen.getByLabelText('Adicionar em 1 playlist'));
+    await fireEvent.press(screen.getByLabelText('Adicionar em 1 destino'));
 
     await waitFor(() => {
       expect(mockUpsertCatalogTracks).toHaveBeenCalledWith([track]);
@@ -125,5 +135,19 @@ describe('TrackPlaylistPickerModal', () => {
       expect(screen.getByLabelText('Capa da playlist Favoritas')).toBeTruthy();
       expect(screen.getByTestId('playlist-cover-image')).toBeTruthy();
     });
+  });
+
+  it('adds to Mix and queues local sources while keeping playlist and mix selections across tabs', async () => {
+    const mix = { id: 'local_mix_test', title: 'Treino', clips: [], tracks: [], createdAt: '', updatedAt: '' };
+    jest.mocked(getMixProjects).mockResolvedValue([mix as never]);
+    jest.mocked(addTracksToMix).mockResolvedValue(mix as never);
+    const view = await render(<TrackPlaylistPickerModal track={track} visible onClose={jest.fn()} />);
+    await fireEvent.press(await view.findByLabelText('Adicionar em Favoritas'));
+    await fireEvent.press(view.getByLabelText('Mix'));
+    await fireEvent.press(await view.findByLabelText('Adicionar em Treino'));
+    await fireEvent.press(view.getByLabelText('Adicionar em 2 destinos'));
+    await waitFor(() => expect(addTracksToMix).toHaveBeenCalledWith('local_mix_test', [track]));
+    expect(addTracksToLocalPlaylist).toHaveBeenCalledWith('playlist-1', [track.spotifyId]);
+    expect(downloadMixSources).toHaveBeenCalledWith(mix);
   });
 });

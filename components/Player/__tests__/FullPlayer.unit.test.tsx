@@ -232,6 +232,19 @@ const getLastArtworkProps = () =>
   mockSwipeableArtwork.mock.calls.at(-1)?.[0] as Record<string, any>;
 
 describe('FullPlayer artist row and YouTube source', () => {
+  it('treats a composed mix as local audio rather than searching or downloading a YouTube replacement', async () => {
+    const player = { ...makePlayer({ localOnly: true, spotifyId: 'local_mix_test_render_2' }), queueSourceId: 'playlist:local_mix_test:revision:2' };
+    jest.mocked(usePlayer).mockReturnValue(player as any);
+    const view = await render(<FullPlayer visible onClose={jest.fn()} />);
+    expect(view.getByLabelText('Mix disponível offline').props.accessibilityState.disabled).toBe(true);
+    expect(view.queryByLabelText('Opções do YouTube')).toBeNull();
+    expect(view.queryByTestId('player-artist-details')).toBeNull();
+    expect(resolveSpotifyTrackVideoId).not.toHaveBeenCalled();
+    expect(getCatalogMapping).not.toHaveBeenCalled();
+    expect(mockTrackPlaylistPicker).not.toHaveBeenCalled();
+    await fireEvent.press(view.getByLabelText('Abrir mix'));
+    expect(mockNavigate).toHaveBeenCalledWith('/(tabs)/library/playlist/local_mix_test', { dangerouslySingular: true });
+  });
   it('keeps the play surface untinted so the white glyph remains visible', async () => {
     const screen = await mountPlayer();
     const surface = screen.getByTestId('player-play-surface');

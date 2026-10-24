@@ -76,6 +76,9 @@ export type CollectionDetailProps = {
   onDeletePress?: () => void | Promise<void>;
   onEditPress?: () => void | Promise<void>;
   onRemoveTrack?: (trackId: string) => void | Promise<void>;
+  onPlayMix?: (trackId?: string) => Promise<void>;
+  onOpenMixEditor?: () => void;
+  playbackSourceId?: string;
   onEndReached?: () => void;
   resolveTracksForPlayback?: () => Promise<CollectionTrack[]>;
   sectionTitle?: string;
@@ -207,6 +210,9 @@ export const CollectionDetail = ({
   onDeletePress,
   onEditPress,
   onRemoveTrack,
+  onPlayMix,
+  onOpenMixEditor,
+  playbackSourceId,
   onEndReached,
   resolveTracksForPlayback,
   sectionTitle,
@@ -322,7 +328,7 @@ export const CollectionDetail = ({
     () => new Map(downloads.map((download) => [download.spotifyId, download])),
     [downloads]
   );
-  const collectionPlaybackId = `${kind}:${collectionId}`;
+  const collectionPlaybackId = playbackSourceId || `${kind}:${collectionId}`;
   const isCollectionPlayback = Boolean(
     queueSourceId === collectionPlaybackId ||
       queueSourceId?.startsWith(`${collectionPlaybackId}:`)
@@ -500,6 +506,7 @@ export const CollectionDetail = ({
       sourceId = collectionPlaybackId,
       shuffled = false
     ) => {
+      if (onPlayMix) { await onPlayMix(sourceTracks[startIndex]?.id); return; }
       const playerTracks = sourceTracks.map((track) => toPlayerTrack(track, title));
       if (playerTracks.length === 0) return;
       await playWithQueue(playerTracks, startIndex, sourceId, {
@@ -510,6 +517,7 @@ export const CollectionDetail = ({
       collectionPlaybackId,
       playWithQueue,
       title,
+      onPlayMix,
     ]
   );
 
@@ -850,18 +858,18 @@ export const CollectionDetail = ({
             </View>
             <View style={[styles.actionRow, kind !== 'artist' && styles.collectionActionRow]}>
               <NativeIconButton
-                systemImage="shuffle"
-                iconName="shuffle"
-                label={isCollectionShuffleActive ? 'Desativar aleatório' : 'Tocar aleatório'}
+                systemImage={onOpenMixEditor ? 'waveform' : 'shuffle'}
+                iconName={onOpenMixEditor ? 'pulse' : 'shuffle'}
+                label={onOpenMixEditor ? 'Abrir editor de áudio' : isCollectionShuffleActive ? 'Desativar aleatório' : 'Tocar aleatório'}
                 size={44}
                 tint={isCollectionShuffleActive ? '#1ED760' : '#FFFFFF'}
-                onPress={() => void handleShufflePlay()}
+                onPress={() => onOpenMixEditor ? onOpenMixEditor() : void handleShufflePlay()}
               />
               <GlassSurface glass="regular" isInteractive style={styles.actionPill}>
                 {kind === 'playlist' && onAddTracksPress ? (
                   <>
                     <LoggedPressable
-                      accessibilityLabel="Adicionar músicas à playlist"
+                      accessibilityLabel={onPlayMix ? 'Adicionar músicas ao mix' : 'Adicionar músicas à playlist'}
                       onPress={() => void handleAdd()}
                       style={styles.pillAction}
                     ><Ionicons name="add" size={22} color="#FFFFFF" /></LoggedPressable>
@@ -895,7 +903,7 @@ export const CollectionDetail = ({
                 <View style={styles.pillDivider} />
                 <LoggedPressable
                   accessibilityRole="button"
-                  accessibilityLabel={kind === 'artist' ? (following ? 'Deixar de seguir artista' : 'Seguir artista') : onEditPress ? 'Editar playlist' :
+                  accessibilityLabel={kind === 'artist' ? (following ? 'Deixar de seguir artista' : 'Seguir artista') : onEditPress ? (onPlayMix ? 'Editar mix' : 'Editar playlist') :
                     collectionSaved ? (kind === 'album' ? 'Álbum salvo' : 'Playlist salva') : (kind === 'album' ? 'Salvar álbum' : 'Salvar playlist')}
                   accessibilityState={{ selected: kind === 'artist' ? following : collectionSaved, busy: savingFollow || savingCollection }}
                   disabled={kind === 'artist' ? (savingFollow || !followsReady || !artistIdentityKey(collectionId).startsWith('youtube:'))
@@ -914,7 +922,7 @@ export const CollectionDetail = ({
                 </LoggedPressable>
                 {onDeletePress ? <>
                   <View style={styles.pillDivider} />
-                  <LoggedPressable accessibilityLabel="Excluir playlist" onPress={() => void onDeletePress()} style={styles.pillAction}>
+                  <LoggedPressable accessibilityLabel={onPlayMix ? 'Excluir mix' : 'Excluir playlist'} onPress={() => void onDeletePress()} style={styles.pillAction}>
                     <Ionicons name="trash-outline" size={21} color="#FFFFFF" />
                   </LoggedPressable>
                 </> : null}

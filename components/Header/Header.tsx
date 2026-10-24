@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ImportModal } from '../ImportModal';
 import { DownloadsModal } from '../DownloadsModal';
 import { PlaylistCreateModal } from '../LocalPlaylist';
+import { MixCreateModal } from '../Mix/MixCreateModal';
 import {
   AppIcon,
   GlassSurface,
@@ -24,6 +25,7 @@ import { openSettingsModal } from '../gym/useSettingsModal';
 const libraryCopy = {
   songs: 'músicas',
   playlists: 'playlists',
+  mixes: 'mixes',
   albums: 'álbuns',
   artists: 'artistas',
 } as const;
@@ -103,10 +105,10 @@ export const Header = () => {
           />
         </View>
         <View style={styles.trailingControls}>
-          {libraryView === 'playlists' ? (
+          {libraryView === 'playlists' || libraryView === 'mixes' ? (
             <GlassSurface glass="regular" isInteractive style={styles.actionGroup}>
               <LoggedPressable
-                accessibilityLabel="Criar playlist"
+                accessibilityLabel={libraryView === 'mixes' ? 'Criar mix' : 'Criar playlist'}
                 accessibilityRole="button"
                 onPress={() => setCreatePlaylistVisible(true)}
                 style={({ pressed }) => [styles.groupButton, pressed && styles.groupPressed]}
@@ -160,13 +162,15 @@ export const Header = () => {
         onClose={() => setDownloadsModalVisible(false)}
       />
       <PlaylistCreateModal
-        visible={createPlaylistVisible}
+        visible={createPlaylistVisible && libraryView !== 'mixes'}
         onClose={() => setCreatePlaylistVisible(false)}
         onCreated={async (playlist) => {
           refreshLibrary();
           openDetail('playlist', playlist.id, 'library');
         }}
       />
+      <MixCreateModal visible={createPlaylistVisible && libraryView === 'mixes'} onClose={() => setCreatePlaylistVisible(false)}
+        onCreated={(mix) => { refreshLibrary(); openDetail('playlist', mix.id, 'library'); }} />
     </View>
   );
 };
