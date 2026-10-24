@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { createAudioPlayer } from 'expo-audio';
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
+import { AppState } from 'react-native';
 import type { AudioPlayer } from 'expo-audio/build/AudioModule.types';
 import { renderMixAudio } from '../../services/mix/mixAudio';
 import type { MixProject } from '../../services/mix/mixTimeline';
@@ -21,6 +22,10 @@ export function useMixPreview() {
     setPlaying(false); setBusy(false);
   }, []);
   React.useEffect(() => () => { generation.current++; cleanup.current?.(); player.current?.remove(); }, []);
+  React.useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => { if (state !== 'active') stop(); });
+    return () => subscription.remove();
+  }, [stop]);
   const play = async (project: MixProject, startMs: number) => {
     stop(); setError(''); setBusy(true);
     const request = generation.current;
@@ -29,6 +34,7 @@ export function useMixPreview() {
       if (request !== generation.current) return;
       const main = usePlayerStore.getState();
       if (main.playerState.isPlaying) await main.togglePlayPause('mix-preview');
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldPlayInBackground: true, interruptionMode: 'doNotMix' });
       if (request !== generation.current) return;
       const audio = createAudioPlayer({ uri: output.uri }, { updateInterval: 50 });
       player.current = audio;
