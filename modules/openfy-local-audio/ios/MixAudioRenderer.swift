@@ -32,7 +32,8 @@ enum MixAudioRenderer {
       let range = CMTimeRange(start: start, end: end)
       guard range.duration.seconds >= 0.1 else { throw failure("Trecho fora do áudio.") }
       try destination.insertTimeRange(range, of: source, at: cursor)
-      gain.setVolume(Float(volume), at: cursor)
+      gain.setVolumeRamp(fromStartVolume: Float(volume), toEndVolume: Float(volume),
+        timeRange: CMTimeRange(start: cursor, duration: range.duration))
       cursor = CMTimeAdd(cursor, range.duration)
     }
     audioMix.inputParameters = [gain]
