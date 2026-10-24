@@ -59,10 +59,13 @@ struct CheckMixAudio {
     try file.read(into: pcm)
     let firstTone = measure(pcm.floatChannelData![0], offset: Int(rate * 0.3), count: Int(rate * 0.2), rate: rate)
     let secondTone = measure(pcm.floatChannelData![0], offset: Int(rate * 1.2), count: Int(rate * 0.2), rate: rate)
+    let secondEarly = measure(pcm.floatChannelData![0], offset: Int(rate * 1.1), count: Int(rate * 0.1), rate: rate)
+    let secondLate = measure(pcm.floatChannelData![0], offset: Int(rate * 1.3), count: Int(rate * 0.1), rate: rate)
     print("Mix measurements: first RMS=\(firstTone.rms), second RMS=\(secondTone.rms), ratio=\(secondTone.rms / firstTone.rms), frequencies=\(firstTone.hz)/\(secondTone.hz)")
     try check(abs(firstTone.hz - 440) < 30 && abs(secondTone.hz - 880) < 40, "Clip order or source trim is incorrect")
     try check(firstTone.rms > 0.1 && abs(secondTone.rms / firstTone.rms - 0.25) < 0.08,
       "Clip gain was not applied: first=\(firstTone.rms), second=\(secondTone.rms), ratio=\(secondTone.rms / firstTone.rms)")
+    try check(abs(secondEarly.rms - secondLate.rms) < 0.01, "A constant clip gain must not fade between cuts")
     do {
       _ = try await MixAudioRenderer.render(clips: [["uri": "https://example.com/audio", "startMs": 0.0, "endMs": 1000.0, "volume": 1.0]],
         outputURI: cache.appendingPathComponent("rejected-\(UUID().uuidString).m4a").absoluteString)

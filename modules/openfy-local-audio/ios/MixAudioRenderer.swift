@@ -10,12 +10,10 @@ enum MixAudioRenderer {
       !FileManager.default.fileExists(atPath: output.path) else { throw failure("Destino do mix inválido.") }
     let composition = AVMutableComposition()
     let audioMix = AVMutableAudioMix()
-    guard let destination = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
-      throw failure("Não foi possível preparar a faixa do mix.")
-    }
-    let gain = AVMutableAudioMixInputParameters(track: destination)
+    var tracksByVolume: [Double: AVMutableCompositionTrack] = [:]
+    var parameters: [AVMutableAudioMixInputParameters] = []
     var cursor = CMTime.zero
-    // A sequential composition uses one decoder track, with gain changes at each cut.
+    // Constant-gain lanes avoid AVFoundation interpolating gains across adjacent edits.
     for clip in clips {
       guard let uri = clip["uri"] as? String, let startMs = clip["startMs"] as? Double,
         let endMs = clip["endMs"] as? Double, let volume = clip["volume"] as? Double,
@@ -23,6 +21,19 @@ enum MixAudioRenderer {
         endMs - startMs >= 100, volume >= 0, volume <= 1 else { throw failure("Trecho inválido.") }
       let url = try LocalAudioNormalizer.fileURL(uri)
       let _ = try LocalAudioNormalizer.FileIdentity(url)
+      let destination: AVMutableCompositionTrack
+      if let existing = tracksByVolume[volume] {
+        destination = existing
+      } else {
+        guard let created = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+          throw failure("Não foi possível preparar a faixa do mix.")
+        }
+        destination = created
+        tracksByVolume[volume] = created
+        let gain = AVMutableAudioMixInputParameters(track: created)
+        gain.setVolume(Float(volume), at: .zero)
+        parameters.append(gain)
+      }
       let asset = AVURLAsset(url: url)
       let duration = try await asset.load(.duration)
       guard let source = try await asset.loadTracks(withMediaType: .audio).first,
@@ -32,11 +43,9 @@ enum MixAudioRenderer {
       let range = CMTimeRange(start: start, end: end)
       guard range.duration.seconds >= 0.1 else { throw failure("Trecho fora do áudio.") }
       try destination.insertTimeRange(range, of: source, at: cursor)
-      gain.setVolumeRamp(fromStartVolume: Float(volume), toEndVolume: Float(volume),
-        timeRange: CMTimeRange(start: cursor, duration: range.duration))
       cursor = CMTimeAdd(cursor, range.duration)
     }
-    audioMix.inputParameters = [gain]
+    audioMix.inputParameters = parameters
     guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
       throw failure("Não foi possível preparar o áudio.")
     }
