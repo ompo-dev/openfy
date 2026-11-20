@@ -16,6 +16,7 @@ describe('track availability', () => {
       '["song","music"]': { reason: 'no-canonical-match', at: 1 }, invalid: null,
     }));
     await hydrateTrackAvailability();
+    expect(AsyncStorage.getItem).toHaveBeenCalledWith('openfy_track_availability_v2');
     expect(isTrackUnavailable(track)).toBe(true);
     expect(useTrackAvailabilityStore.getState().failures.invalid).toBeUndefined();
   });
@@ -33,7 +34,20 @@ describe('track availability', () => {
     const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
     markTrackUnavailable(track, 'source-unavailable');
     expect(isTrackUnavailable(track)).toBe(true);
+    expect(isTrackUnavailable(track, undefined, false)).toBe(false);
     clock.mockReturnValue(1000 + 5 * 60_000);
     expect(isTrackUnavailable(track)).toBe(false);
+  });
+
+  it('recognizes a saved URL or alternate ID instead of retaining an old unresolved flag', () => {
+    markTrackUnavailable(track, 'no-canonical-match');
+    for (const reference of [{ youtubeUrl: 'https://music.youtube.com/watch?v=abcdefghijk' },
+      { videoId: 'abcdefghijk' }, { spotifyId: 'yt_abcdefghijk' }]) {
+      expect(isTrackUnavailable({ ...track, ...reference })).toBe(false);
+    }
+    const linked = { ...track, youtubeUrl: 'https://youtu.be/abcdefghijk' };
+    markTrackUnavailable(linked, 'no-canonical-match');
+    expect(isTrackUnavailable({ ...track, youtubeVideoId: 'abcdefghijk' })).toBe(true);
+    expect(isTrackUnavailable({ ...track, youtubeUrl: 'https://youtu.be/zyxwvutsrqp' })).toBe(false);
   });
 });

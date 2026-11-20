@@ -1,0 +1,17 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.openfylocalaudio'
+version = '1.0.0'
+
+android {
+  namespace 'expo.modules.openfylocalaudio'
+  defaultConfig { versionCode 1; versionName '1.0.0' }
+}
+
+dependencies {
+  // Keep aligned with expo-audio's Media3 version.
+  implementation 'androidx.media3:media3-transformer:1.9.0'
+}

@@ -55,7 +55,7 @@ export function PlayerMediaSuggestionsSync() {
 
   React.useEffect(() => {
     if (!bridge?.setSuggestedMediaAsync) return;
-    if (!currentTrack) {
+    if (!currentTrack || currentTrack.localOnly) {
       void bridge.setSuggestedMediaAsync([]).catch(() => {});
       return;
     }
@@ -67,7 +67,7 @@ export function PlayerMediaSuggestionsSync() {
         void bridge.donatePlayedMediaAsync?.(toSuggestedMediaEntry(currentTrack)).catch(() => {});
       }
     }
-    const neighbors = [...queue.slice(queueIndex + 1), ...queue.slice(0, queueIndex)];
+    const neighbors = [...queue.slice(queueIndex + 1), ...queue.slice(0, queueIndex)].filter((track) => !track.localOnly);
     const publish = (candidates: typeof neighbors) => {
       if (active) void bridge.setSuggestedMediaAsync?.(buildMediaSuggestions(currentTrack, candidates).map(toSuggestedMediaEntry)).catch(() => {});
     };

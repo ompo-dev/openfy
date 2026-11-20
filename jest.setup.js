@@ -49,6 +49,8 @@ jest.mock('expo-audio', () => ({
     currentStatus: { isLoaded: false, playing: false, currentTime: 0, duration: 0 },
     pause: jest.fn(),
     play: jest.fn(),
+    setEqualizer: jest.fn().mockResolvedValue(undefined),
+    setPlaybackRate: jest.fn(),
     remove: jest.fn(),
     seekTo: jest.fn(),
     setActiveForLockScreen: jest.fn(),
@@ -83,6 +85,7 @@ jest.mock('expo-file-system', () => ({
 }));
 
 jest.mock('react-native-safe-area-context', () => ({
+  SafeAreaView: require('react-native').View,
   SafeAreaProvider: ({ children }) => children,
   useSafeAreaInsets: () => ({ bottom: 0, left: 0, right: 0, top: 0 }),
 }));

@@ -52,6 +52,17 @@ const library = [
 ];
 
 describe('personalizedHome', () => {
+  it('keeps unseen refresh suggestions visible instead of hiding them in quick picks', () => {
+    const discoveries = Array.from({ length: 20 }, (_, index) => ({ ...library[0],
+      spotifyId: `candidate-${index}`, id: `candidate-${index}`, title: `New ${index}`, artistName: `Artist ${index}`,
+      artists: [{ id: `artist-${index}`, name: `Artist ${index}` }],
+    }));
+    const previousIds = new Set(discoveries.slice(0, 19).map((item) => item.spotifyId));
+    const home = buildPersonalizedHome({ tracks: library, playlists, profile, discoveries, personalized: true,
+      allowExplicitRecommendations: true, refreshRevision: 1, previousRecommendationIds: previousIds });
+    expect(home.discoveries[0].spotifyId).toBe('candidate-19');
+    expect(home.refreshRevision).toBe(1);
+  });
   it('prioritizes explicit follows without inventing listens or keeping an unfollow bonus', () => {
     const followedArtists = [{ id: 'ytartist_new', name: 'Novo artista', imageURL: 'portrait.jpg', followedAt: 1 }];
     const input = { tracks: library, playlists, profile, personalized: true, allowExplicitRecommendations: true };
@@ -62,6 +73,15 @@ describe('personalizedHome', () => {
     const unfollowed = buildPersonalizedHome(input);
     expect(unfollowed.seeds.map((seed) => seed.name)).not.toContain('Novo artista');
     expect(profile.totalListens).toBe(12);
+  });
+  it('reserves discovery seeds for listening affinity when many artists are followed', () => {
+    const followedArtists = Array.from({ length: 5 }, (_, index) => ({
+      id: `ytartist_follow_${index}`, name: `Follow ${index}`, imageURL: '', followedAt: index + 1,
+    }));
+    const home = buildPersonalizedHome({ tracks: library, playlists, profile,
+      personalized: true, allowExplicitRecommendations: true, followedArtists });
+    expect(home.seeds.filter((seed) => seed.followed)).toHaveLength(2);
+    expect(home.seeds.some((seed) => seed.name === 'Sotam')).toBe(true);
   });
   it('ranks pinned songs and artists by actual listens, while recents use playback order', () => {
     const history: UserProfile = { ...profile, recentlyPlayedTracks: library.slice(0, 3).map((item, index) => ({

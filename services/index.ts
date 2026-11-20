@@ -207,7 +207,6 @@ export type {
 } from './audio/playerService';
 
 export {
-  createEstimatedLyricSegments,
   fetchLyrics,
   parseLrcToSegments,
   saveLyricsOffline,

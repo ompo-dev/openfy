@@ -10,6 +10,8 @@ import { parseYouTubeCount, rankYouTubeCandidate, type YouTubeCandidate } from '
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
 import { retryNetworkOperation } from './networkRetry';
 import { markTrackUnavailable } from '../../stores/useTrackAvailabilityStore';
+import { getYouTubeDiscoveryClient, getYouTubeVideoMetadata, resetYouTubeDiscoveryForTests } from '../youtubeDiscoveryClient';
+import { log } from '../../utils/appLogger';
 import {
   getCatalogMapping,
   setCatalogMapping,
@@ -118,16 +120,10 @@ let searchClient: Promise<SearchClient> | null = null;
 
 const getSearchClient = (): Promise<SearchClient> => {
   if (!searchClient) {
-    searchClient = Promise.resolve().then(() => {
-      const { Innertube } = require('youtubei.js') as {
-        Innertube: { create(opts: object): Promise<SearchClient> };
-      };
-      return Innertube.create({
-        lang: 'en',
-        generate_session_locally: false,
-        retrieve_innertube_config: true,
-        retrieve_player: false,
-      });
+    searchClient = getYouTubeDiscoveryClient().then((client) => {
+      const raw = client as unknown as SearchClient;
+      return { search: raw.search.bind(raw), getBasicInfo: getYouTubeVideoMetadata,
+        getChannel: raw.getChannel?.bind(raw) };
     }).catch((error) => {
       searchClient = null;
       throw error;
@@ -401,7 +397,7 @@ const searchSpotifyTrackVideoId = async (
       return result;
     }
   } catch (error) {
-    console.warn(`[CatalogResolver] search failed for "${primaryArtist} - ${title}": ${error instanceof Error ? error.message : String(error)}`);
+    log.error('catalog recording search failed', { primaryArtist, title, error });
     return { status: 'not_found', reason: `search_error: ${error instanceof Error ? error.message : String(error)}` };
   }
 
@@ -412,6 +408,7 @@ const searchSpotifyTrackVideoId = async (
 /** @internal — test helper */
 export const _resetCatalogResolverForTests = (): void => {
   searchClient = null;
+  resetYouTubeDiscoveryForTests();
   channelCounts.clear();
   sourceInfoCache.clear();
   sourceMatchCache.clear();

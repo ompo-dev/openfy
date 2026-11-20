@@ -1,4 +1,5 @@
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
+import { log } from '../../utils/appLogger';
 
 const images = createAsyncResourceCache<boolean>({
   name: 'image bytes', maxEntries: 250,
@@ -32,6 +33,20 @@ export const prefetchImage = (url: string): Promise<boolean> => {
 export const prefetchImages = async (urls: string[]): Promise<void> => {
   const unique = [...new Set(urls.filter(Boolean))];
   await Promise.all(unique.map(prefetchImage));
+};
+
+/** Only Expo's disposable image cache; downloaded library files remain untouched. */
+export const clearImageCache = async (): Promise<void> => {
+  const finish = log.time('network', 'image cache clear');
+  images.clear();
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Image } = require('expo-image') as typeof import('expo-image');
+    const results = await Promise.all([Image.clearMemoryCache(), Image.clearDiskCache()]);
+    if (results.some((result) => !result)) throw new Error('Nao foi possivel limpar o cache de imagens.');
+    finish({ ok: true });
+  } catch (error) { finish({ ok: false, error: String(error) }); throw error; }
+  finally { images.clear(); }
 };
 
 export const _clearImagePrefetchForTests = () => images.clear();

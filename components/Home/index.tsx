@@ -35,8 +35,6 @@ import {
   searchHistoryKey, subscribeSearchHistory, type SearchHistoryEntry, type SearchSelection,
 } from '../../services/search/searchHistory';
 
-export { FriendActivityStatus } from './FriendActivityStatus';
-export { CompactMusicCarousel } from './CompactMusicCarousel';
 
 const toPlayerTrackFromSearch = (track: TrackModel): PlayerTrack => ({
   spotifyId: track.id,
@@ -156,9 +154,10 @@ export const Home = () => {
 
   useFocusEffect(
     React.useCallback(() => () => {
-      resetSearch();
-      log.nav('discover search cleared on blur');
-    }, [resetSearch])
+      dismissSearchKeyboard();
+      setSuggestionsOpen(false);
+      log.nav('discover search preserved on blur');
+    }, [dismissSearchKeyboard])
   );
 
   React.useEffect(() => {

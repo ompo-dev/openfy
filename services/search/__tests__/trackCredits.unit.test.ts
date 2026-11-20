@@ -55,4 +55,9 @@ describe('complete credits and channel links', () => {
     expect((await resolveTrackCredits({ spotifyId: id, artists: [primary, guest, extra] })).artists)
       .toEqual([primary, { ...channel, spotifyId: guest.id }, extra]);
   });
+  it('also preserves declared participants without a Spotify id', async () => {
+    const extra = { id: '', name: 'Independent participant' };
+    expect((await resolveTrackCredits({ spotifyId: id, artists: [primary, guest, extra] })).artists)
+      .toEqual([primary, { ...channel, spotifyId: guest.id }, extra]);
+  });
 });

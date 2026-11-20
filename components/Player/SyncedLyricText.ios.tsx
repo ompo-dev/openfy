@@ -1,22 +1,27 @@
 import * as React from 'react';
-import { Host, Text } from '@expo/ui/swift-ui';
-import { blur, fixedSize, font, foregroundStyle, frame, multilineTextAlignment } from '@expo/ui/swift-ui/modifiers';
+import { View } from 'react-native';
+import { Host, RNHostView, VStack } from '@expo/ui/swift-ui';
+import { blur } from '@expo/ui/swift-ui/modifiers';
 import type { SyncedLyricTextProps } from './SyncedLyricText';
+import { LyricTextContent } from './LyricTextContent';
 
-export const SyncedLyricText = React.memo(function SyncedLyricText({
-  children, active, blurred,
-}: SyncedLyricTextProps) {
-  // RN's blur filter is not supported on iOS; use the existing ExpoUI renderer.
-  return (
+export const SyncedLyricText = React.memo(function SyncedLyricText(props: SyncedLyricTextProps) {
+  const [width, setWidth] = React.useState(0);
+  // One RN layout owner for every state: focus only changes the native blur modifier.
+  // Explicit Yoga width avoids a circular intrinsic-size dependency inside RNHostView.
+  return <View style={{ width: '100%' }} onLayout={({ nativeEvent }) => {
+    const next = nativeEvent.layout.width;
+    if (next > 0) setWidth((previous) => previous === next ? previous : next);
+  }}>
     <Host matchContents={{ vertical: true }} ignoreSafeArea="all" pointerEvents="none" style={{ width: '100%' }}>
-      <Text modifiers={[
-        font({ size: 26, weight: 'bold' }),
-        foregroundStyle(active ? '#FFFFFF' : 'rgba(255,255,255,0.48)'),
-        multilineTextAlignment('leading'),
-        fixedSize({ horizontal: false, vertical: true }),
-        frame({ maxWidth: Infinity, alignment: 'leading' }),
-        blur(blurred ? 3 : 0),
-      ]}>{children}</Text>
+      <VStack alignment="leading" spacing={0} testID="lyric-blur-layer"
+        modifiers={[blur(props.blurred && !props.active ? 3 : 0)]}>
+        <RNHostView matchContents>
+          <View collapsable={false} style={{ width: width || '100%' }}>
+            <LyricTextContent {...props} />
+          </View>
+        </RNHostView>
+      </VStack>
     </Host>
-  );
+  </View>;
 });

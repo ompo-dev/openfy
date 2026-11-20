@@ -57,6 +57,7 @@ jest.mock('../../native', () => {
   } = jest.requireActual<typeof import('react-native')>('react-native');
   return {
     SheetFrame: jest.requireActual('../../native/SheetFrame').SheetFrame,
+    AppIcon: () => null,
     GlassSurface: ({ children, ...props }: any) =>
       React.createElement(View, props, children),
     LoggedPressable: Pressable,
@@ -68,6 +69,15 @@ jest.mock('../../native', () => {
         React.createElement(Text, null, `${label}:${tint}`)
       ),
   };
+});
+
+jest.mock('react-native-gesture-handler/ReanimatedSwipeable', () => {
+  const React = jest.requireActual<typeof import('react')>('react');
+  const { View } = jest.requireActual<typeof import('react-native')>('react-native');
+  return React.forwardRef(function MockSwipeable(props: any, ref) {
+    React.useImperativeHandle(ref, () => ({ close: jest.fn() }));
+    return <View>{props.children}{props.renderRightActions({ value: 1 }, { value: -80 })}</View>;
+  });
 });
 
 jest.mock('../../PlaylistMosaic', () => ({ PlaylistMosaic: () => null }));
@@ -132,6 +142,23 @@ const renderCollection = (props = {}) =>
   );
 
 describe('CollectionDetail', () => {
+  it('exposes swipe removal inside editable playlists without playing or deleting a download', async () => {
+    const remove = jest.fn();
+    const screen = await renderCollection({ kind: 'playlist', onRemoveTrack: remove });
+    await fireEvent.press(await screen.findByLabelText(`Remover ${tracks[1].title} da playlist`));
+    expect(remove).toHaveBeenCalledWith(tracks[1].id);
+    expect(playWithQueue).not.toHaveBeenCalled();
+    expect(jest.mocked(useDownloads).mock.results[0].value.enqueueDownloads).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByLabelText(`Tocar ${tracks[0].title}`));
+    expect(playWithQueue).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ spotifyId: tracks[0].id }), expect.objectContaining({ spotifyId: tracks[1].id }),
+    ]), 0, 'playlist:album-test', { shuffle: false });
+  });
+
+  it('does not offer destructive track actions for remote playlists or albums', async () => {
+    const screen = await renderCollection({ kind: 'playlist' });
+    expect(screen.queryByLabelText(`Remover ${tracks[0].title} da playlist`)).toBeNull();
+  });
   it('follows and unfollows from the profile instead of sharing', async () => {
     const screen = await renderCollection({ kind: 'artist', collectionId: 'ytartist_UCfollow-test~Follow%20Test', title: 'Follow Test' });
     const follow = await screen.findByLabelText('Seguir artista');
@@ -228,6 +255,40 @@ describe('CollectionDetail', () => {
 
     fireEvent.press(screen.getAllByLabelText('Abrir artista Artista sem id')[0]);
     await waitFor(() => expect(onArtistPress).toHaveBeenCalledWith('ytartist_UCfirst~Artista%20sem%20id', 'Artista sem id'));
+  });
+
+  it('starts a remote playlist from its visible page and expands the queue in the background', async () => {
+    let finishLoading!: (tracks: typeof tracks) => void;
+    const resolveTracksForPlayback = jest.fn(() => new Promise<typeof tracks>((resolve) => {
+      finishLoading = resolve;
+    }));
+    const extendQueueFromCollection = jest.fn();
+    jest.mocked(usePlayer).mockReturnValue(playerValue({ extendQueueFromCollection }) as never);
+    const screen = await renderCollection({ kind: 'playlist', trackCount: 50, resolveTracksForPlayback });
+    fireEvent.press(screen.getByLabelText('Tocar'));
+    await waitFor(() => expect(playWithQueue).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ spotifyId: 'track-one' })]),
+      0, 'playlist:album-test', { shuffle: false }
+    ));
+    expect(resolveTracksForPlayback).toHaveBeenCalledTimes(1);
+    finishLoading([...tracks, { ...tracks[1], id: 'track-three', title: 'Terceira música' }]);
+    await waitFor(() => expect(extendQueueFromCollection).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ spotifyId: 'track-three' })]),
+      'playlist:album-test'
+    ));
+  });
+
+  it('downloads the complete remote playlist instead of only its first visible page', async () => {
+    const enqueueDownloads = jest.fn();
+    jest.mocked(useDownloads).mockReturnValue({ downloads: [], enqueueDownloads } as never);
+    const additional = { id: 'next-page', title: 'Outra página', subtitle: 'Artista Novo' };
+    const resolveTracksForPlayback = jest.fn().mockResolvedValue([...tracks, additional]);
+    const screen = await renderCollection({ kind: 'playlist', trackCount: 35, resolveTracksForPlayback });
+    fireEvent.press(screen.getByLabelText('Baixar coleção'));
+    await waitFor(() => expect(enqueueDownloads).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ spotifyId: additional.id }),
+    ])));
+    expect(resolveTracksForPlayback).toHaveBeenCalledTimes(1);
   });
 
   it('shows active shuffle and pause states for the current collection', async () => {
@@ -378,6 +439,8 @@ describe('CollectionDetail', () => {
     ['Tocar', false],
     ['Tocar aleatório', true],
   ] as const)('applies row eligibility to all resolved playlist pages for header %s', async (label, shuffle) => {
+    const extendQueueFromCollection = jest.fn();
+    jest.mocked(usePlayer).mockReturnValue(playerValue({ extendQueueFromCollection }) as never);
     const nextPageTrack = { id: 'track-three', title: 'Next page', subtitle: 'Sotam' };
     const resolveTracksForPlayback = jest.fn().mockResolvedValue([
       { id: 'uncredited-video', title: 'Hidden video', subtitle: '' },
@@ -389,8 +452,12 @@ describe('CollectionDetail', () => {
 
     await fireEvent.press(screen.getByLabelText(label));
     await waitFor(() => expect(playWithQueue).toHaveBeenCalledWith(
-      [...tracks, nextPageTrack].map((track) => expect.objectContaining({ spotifyId: track.id })),
+      tracks.map((track) => expect.objectContaining({ spotifyId: track.id })),
       0, 'playlist:album-test', { shuffle }
+    ));
+    await waitFor(() => expect(extendQueueFromCollection).toHaveBeenCalledWith(
+      [...tracks, nextPageTrack].map((track) => expect.objectContaining({ spotifyId: track.id })),
+      'playlist:album-test'
     ));
     expect(resolveTracksForPlayback).toHaveBeenCalledTimes(1);
   });

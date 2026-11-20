@@ -31,4 +31,14 @@ describe('temporary home playlists', () => {
     expect(getHomePlaylist('home_mix_recent')).toBeDefined();
     expect(getHomePlaylist(homeRadioPlaylistId('Artist 19'))).toBeDefined();
   });
+
+  it('publishes separate playable collections for every recommendation seed', () => {
+    const other = { ...song, spotifyId: 'other' };
+    publishHomePlaylists({ ...EMPTY_PERSONALIZED_HOME, radios: [
+      { seed: { name: 'Ebony', score: 2 }, tracks: [song] },
+      { seed: { name: 'Sotam', score: 1 }, tracks: [other] },
+    ] });
+    expect(getHomePlaylist(homeRadioPlaylistId('Ebony'))?.tracks).toEqual([song]);
+    expect(getHomePlaylist(homeRadioPlaylistId('Sotam'))?.tracks).toEqual([other]);
+  });
 });

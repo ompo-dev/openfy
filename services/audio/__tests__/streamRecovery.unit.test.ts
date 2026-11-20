@@ -74,6 +74,8 @@ const createPlayer = (overrides: Partial<Record<string, jest.Mock>> = {}) => ({
   remove: jest.fn(),
   clearLockScreenControls: jest.fn(),
   seekTo: jest.fn().mockResolvedValue(undefined),
+  setEqualizer: jest.fn().mockResolvedValue(undefined),
+  setPlaybackRate: jest.fn(),
   ...overrides,
 });
 

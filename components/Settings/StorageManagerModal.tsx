@@ -121,7 +121,7 @@ export function StorageManagerModal({
   };
 
   return (
-    <SheetFrame visible={visible} title="Armazenamento" onClose={onClose}>
+    <SheetFrame visible={visible} size="full" title="Armazenamento" onClose={onClose}>
       <View style={styles.summary}>
         <View>
           <Text style={styles.summaryValue}>{formatStorageSize(storage.totalBytes)}</Text>

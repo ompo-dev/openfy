@@ -1,9 +1,4 @@
-/**
- * FullPlayer Component — Apple Music & Liquid Glass Design System
- * Matches the official iOS Apple Music player and synced lyrics experience.
- * Includes Dolby Atmos spatial audio badge, glass action pills,
- * glowing karaoke synced lyrics, and native haptic feedback.
- */
+/** Full player, shared artwork transitions and synchronized lyrics. */
 
 import * as React from 'react';
 import {
@@ -18,7 +13,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
   Dimensions,
 } from 'react-native';
@@ -42,30 +36,23 @@ import {
 import { useDownloads, useLibrarySelectedCategory, usePlayer } from '@context';
 import { useDetailNavigation } from '@hooks';
 import {
-  createEstimatedLyricSegments,
   deleteDownloadedTrack,
   getCatalogMapping,
-  getLyricGapRange,
   getLyricTimelineBlocks,
   isTrackDownloaded,
   LyricGapTarget,
   LyricSegment,
   LyricTimelineBlock,
-  moveLyricGap,
-  moveLyricSegment,
-  normalizeLyricSegments,
   parseSpotifyLink,
   setCatalogMapping,
   resolveSpotifyTrackVideoId,
   getCachedArtistImage,
-  resizeLyricGapEnd,
-  resizeLyricGapStart,
-  resizeLyricSegmentEnd,
-  resizeLyricSegmentStart,
   toDownloadTrackInput,
   upsertCatalogTracks,
 } from '@services';
 import { GlassSurface, LoggedPressable, PlayerModal, SheetFrame } from '../native';
+import { Section as ModalSection, SettingsRow, Divider, TextField, HeaderIconButton } from '../gym';
+import { SettingIcon } from '../gym/SettingIcon';
 import { ArtistSearchRow } from '../Home/ArtistSearchRow';
 import { ProgressiveFlatList, ProgressiveList } from '../common/ProgressiveList';
 import { TrackRow } from '../common/TrackRow';
@@ -73,8 +60,9 @@ import { getPlaybackOrigin } from '../../services/navigation/playbackOrigin';
 import { getPlayerAlbum, getTrackAlbumRouteId, type PlayerAlbum } from '../../services/library/playerAlbum';
 import { PlayerDetailCard } from './PlayerDetailCard';
 import { TrackPlaylistPickerModal } from '../LocalPlaylist/TrackPlaylistPickerModal';
-import { LyricSyncEditor } from './LyricSyncEditor';
+import { LyricsProviderSheet } from './LyricsProviderSheet';
 import { SyncedLyricText } from './SyncedLyricText';
+import { TimedLyricPreview } from './TimedLyricPreview';
 import { MarqueeText } from '../common/MarqueeText';
 import { useLyricScrubGesture } from '../common/useLyricScrubGesture';
 import { SwipeableArtwork } from './SwipeableArtwork';
@@ -113,6 +101,7 @@ const LyricsViewport = ({ children }: React.PropsWithChildren) => {
 };
 
 const PlayerChromeFade = React.memo(function PlayerChromeFade({ edge }: { edge: 'header' | 'controls' }) {
+  const reduceBlur = useAppSettingsStore((state) => state.settings.reduceDynamicBlur);
   const isHeader = edge === 'header';
   const style = isHeader ? styles.headerBackdrop : styles.controlsBackdrop;
   const mask = isHeader
@@ -126,8 +115,9 @@ const PlayerChromeFade = React.memo(function PlayerChromeFade({ edge }: { edge: 
         testID={`player-${edge}-backdrop`}
         pointerEvents="none"
         style={[style, {
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
+          backdropFilter: reduceBlur ? 'none' : 'blur(16px)',
+          WebkitBackdropFilter: reduceBlur ? 'none' : 'blur(16px)',
+          backgroundColor: reduceBlur ? '#101116' : undefined,
           maskImage: mask,
           WebkitMaskImage: mask,
         } as any]}
@@ -157,7 +147,8 @@ const PlayerChromeFade = React.memo(function PlayerChromeFade({ edge }: { edge: 
         </View>
       }
     >
-      <BlurView intensity={70} tint="systemUltraThinMaterialDark" style={StyleSheet.absoluteFill} />
+      {reduceBlur ? <View style={[StyleSheet.absoluteFill, { backgroundColor: '#101116' }]} /> :
+        <BlurView intensity={70} tint="systemUltraThinMaterialDark" style={StyleSheet.absoluteFill} />}
     </MaskedView>
   );
 });
@@ -205,9 +196,6 @@ const getLocalArtworkFallback = (
 ) => track?.localImagePath && track.localImagePath !== track.imageURL
   ? { uri: track.localImagePath }
   : undefined;
-
-type LyricEditorTarget =
-  { kind: 'lyric'; index: number } | { kind: 'gap'; target: LyricGapTarget };
 
 const getGapTarget = (
   timeline: LyricTimelineBlock[],
@@ -303,6 +291,7 @@ function PlayerGlassButton({
     >
       <GlassSurface
         glass={glass}
+        testID={testID ? `${testID}-surface` : undefined}
         tintColor={tintColor}
         isInteractive={!!onPress && !disabled}
         style={[styles.glassButtonSurface, surfaceStyle]}
@@ -315,6 +304,12 @@ function PlayerGlassButton({
 
 export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps) => {
   const blurInactiveLyrics = useAppSettingsStore((state) => state.settings.blurInactiveLyrics);
+  const lyricsOffsetMs = useAppSettingsStore((state) => state.settings.lyricsOffsetMs);
+  const playbackSpeed = useAppSettingsStore((state) => state.settings.playbackSpeed);
+  const lyricsWordHighlight = useAppSettingsStore((state) => state.settings.lyricsWordHighlight);
+  const lyricsAutoScroll = useAppSettingsStore((state) => state.settings.lyricsAutoScroll);
+  const lyricsFontSize = useAppSettingsStore((state) => state.settings.lyricsFontSize);
+  const artworkBackdrop = useAppSettingsStore((state) => state.settings.artworkBackdrop);
   const insets = useSafeAreaInsets();
   const artworkProgress = useSharedValue(0);
   const isOffline = useConnectivityStore((state) => state.status === 'offline');
@@ -338,7 +333,6 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     lyricsData,
     isLoadingLyrics,
     repeatMode,
-    updateLyricsSegments,
     artworkFlight,
     setArtworkFlight,
     replaceQueueTrack,
@@ -347,16 +341,12 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   const [seeking, setSeeking] = React.useState(false);
   const [seekValue, setSeekValue] = React.useState(0);
   const [showLyricsFull, setShowLyricsFull] = React.useState(false);
+  React.useEffect(() => { if (currentTrack?.localOnly) setShowLyricsFull(false); }, [currentTrack?.localOnly]);
   const [isQueueVisible, setIsQueueVisible] = React.useState(false);
   const afterCloseRef = React.useRef<(() => void) | null>(null);
   const playbackOrigin = getPlaybackOrigin(queueSourceId);
   const [hasOpenedLyrics, setHasOpenedLyrics] = React.useState(false);
-  const [isLyricsEditing, setIsLyricsEditing] = React.useState(false);
-  const [draftLyricSegments, setDraftLyricSegments] = React.useState<
-    LyricSegment[]
-  >([]);
-  const [selectedLyricTarget, setSelectedLyricTarget] =
-    React.useState<LyricEditorTarget>({ kind: 'lyric', index: 0 });
+  const [isProviderVisible, setIsProviderVisible] = React.useState(false);
 
   // YouTube action sheet and custom link edit state
   const [isActionModalVisible, setIsActionModalVisible] = React.useState(false);
@@ -413,15 +403,13 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   const lyricsListDraggingRef = React.useRef(false);
   const currentTrackRef = React.useRef(currentTrack);
   const youtubeLinkRef = React.useRef({ trackKey: '', url: '' });
-  const draftLyricSegmentsRef = React.useRef<LyricSegment[]>([]);
-  const resumeAfterLyricEditRef = React.useRef(false);
   const currentTrackKey = getTrackKey(currentTrack);
   const currentDownloadJob = React.useMemo(
     () => downloads.find((job) => job.spotifyId === currentTrack?.spotifyId),
     [currentTrack?.spotifyId, downloads]
   );
   const currentTrackInput = React.useMemo(
-    () => (currentTrack ? toDownloadTrackInput(currentTrack) : null),
+    () => (currentTrack && !currentTrack.localOnly ? toDownloadTrackInput(currentTrack) : null),
     [currentTrack]
   );
   const isCurrentTrackDownloading =
@@ -605,7 +593,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   const canGoPrevious = !!previousTrack;
   const canGoNext = !!nextTrack;
   const artistLinks = React.useMemo(() => {
-    if (!currentTrack) return [];
+    if (!currentTrack || currentTrack.localOnly) return [];
     if (currentTrack.artists?.length) return currentTrack.artists;
     return currentTrack.artistName
       .split(/\s*(?:,|&| feat\.?)\s*/i)
@@ -613,7 +601,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       .map((name) => ({ id: '', name: name.trim() }));
   }, [currentTrack]);
   const primaryArtist = artistLinks[0];
-  const albumRouteId = getTrackAlbumRouteId(currentTrack);
+  const albumRouteId = currentTrack?.localOnly ? '' : getTrackAlbumRouteId(currentTrack);
 
   React.useEffect(() => {
     setPlayerAlbum(null);
@@ -757,8 +745,8 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       <Motion.View style={[styles.lyricsTrackPillCopy, artworkTransition.copyStyle]}>
         <MarqueeText
           testID="player-artists"
-          text={artistLinks.map((artist) => artist.name).join(' · ')}
-          interactiveContent={artistLinks.map((artist, index) => (
+          text={currentTrack?.localOnly ? currentTrack.artistName : artistLinks.map((artist) => artist.name).join(' · ')}
+          interactiveContent={currentTrack?.localOnly ? undefined : artistLinks.map((artist, index) => (
             <React.Fragment key={`${artist.id}-${artist.name}-${index}`}>
               {index > 0 ? (
                 <Text style={styles.lyricsTrackPillText} accessible={false}> · </Text>
@@ -817,7 +805,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   // Reset first so an old link can never open while next track resolves.
   React.useEffect(() => {
     youtubeLinkRef.current = { trackKey: currentTrackKey, url: '' };
-    if (!currentTrack) {
+    if (!currentTrack || currentTrack.localOnly) {
       return;
     }
 
@@ -872,8 +860,8 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       ? playerState.durationMs
       : currentTrack?.duration_ms || 0;
   const displayedLyricSegments = React.useMemo(
-    () => isLyricsEditing ? draftLyricSegments : lyricsData?.segments || [],
-    [draftLyricSegments, isLyricsEditing, lyricsData?.segments]
+    () => lyricsData?.segments || [],
+    [lyricsData?.segments]
   );
   const lyricTimelineDurationMs = Math.max(
     lyricDurationMs,
@@ -894,14 +882,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   lyricTimelineRef.current = lyricTimeline;
   scrubbedLyricTimelineIndexRef.current = scrubbedLyricTimelineIndex;
   React.useEffect(() => {
-    draftLyricSegmentsRef.current = draftLyricSegments;
-  }, [draftLyricSegments]);
-
-  React.useEffect(() => {
-    setIsLyricsEditing(false);
-    setDraftLyricSegments([]);
-    draftLyricSegmentsRef.current = [];
-    setSelectedLyricTarget({ kind: 'lyric', index: 0 });
+    setIsProviderVisible(false);
     setScrubbedLyricTimelineIndex(null);
     previewScrubbingRef.current = false;
     setIsPreviewScrubbing(false);
@@ -932,7 +913,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
   // the previous lyric as their active line.
   const activeLineIndex = React.useMemo(() => {
     if (lyricTimeline.length === 0) return -1;
-    const currentMs = playerState.positionMs;
+    const currentMs = playerState.positionMs - lyricsOffsetMs;
     const activeIndex = lyricTimeline.findIndex(
       (block) => currentMs >= block.startTimeMs && currentMs < block.endTimeMs
     );
@@ -940,14 +921,14 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
 
     const lastIndex = lyricTimeline.length - 1;
     return currentMs >= lyricTimeline[lastIndex].startTimeMs ? lastIndex : 0;
-  }, [lyricTimeline, playerState.positionMs]);
+  }, [lyricTimeline, playerState.positionMs, lyricsOffsetMs]);
 
   const lyricTimelineIndices = React.useMemo(
     () => lyricTimeline.flatMap((block, index) => block.kind === 'lyric' ? [index] : []),
     [lyricTimeline]
   );
   const activePreviewPosition = React.useMemo(() => {
-    const currentMs = playerState.positionMs;
+    const currentMs = playerState.positionMs - lyricsOffsetMs;
     const activePosition = lyricTimelineIndices.findIndex((index) => {
       const line = lyricTimeline[index];
       return currentMs >= line.startTimeMs && currentMs < line.endTimeMs;
@@ -957,7 +938,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       (index) => lyricTimeline[index].endTimeMs > currentMs
     );
     return upcomingPosition >= 0 ? upcomingPosition : Math.max(0, lyricTimelineIndices.length - 1);
-  }, [lyricTimeline, lyricTimelineIndices, playerState.positionMs]);
+  }, [lyricTimeline, lyricTimelineIndices, playerState.positionMs, lyricsOffsetMs]);
   previewLineIndicesRef.current = lyricTimelineIndices;
   activePreviewPositionRef.current = activePreviewPosition;
 
@@ -968,7 +949,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
         : lyricTimelineIndices.indexOf(scrubbedLyricTimelineIndex);
       const firstLyric = lyricTimeline[lyricTimelineIndices[0]];
       const beforeFirstLyric = manualIndex < 0 &&
-        playerState.positionMs < firstLyric.startTimeMs;
+        playerState.positionMs - lyricsOffsetMs < firstLyric.startTimeMs;
       const startPosition = manualIndex >= 0
         ? manualIndex
         : beforeFirstLyric ? 0 : activePreviewPosition;
@@ -978,6 +959,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
           const line = lyricTimeline[timelineIndex];
           return {
             text: line.text,
+            words: line.kind === 'lyric' ? line.words : undefined,
             active: !beforeFirstLyric && (
               timelineIndex === activeLineIndex || timelineIndex === scrubbedLyricTimelineIndex
             ),
@@ -993,6 +975,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       .slice(0, 2)
       .map((text, index) => ({
         text,
+        words: undefined,
         active: playerState.positionMs > 0 && index === 0,
         timelineIndex: null,
         startTimeMs: null,
@@ -1003,6 +986,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     lyricTimeline,
     lyricTimelineIndices,
     lyricsData?.plainLyrics,
+    lyricsOffsetMs,
     playerState.positionMs,
     scrubbedLyricTimelineIndex,
   ]);
@@ -1013,27 +997,13 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     setPreviewCurrentLineCount(0);
   }, [currentTrackKey, previewCurrentText, previewNextText]);
 
-  React.useEffect(() => {
-    if (!isLyricsEditing || !playerState.isPlaying || activeLineIndex < 0) {
-      return;
-    }
-    const activeBlock = lyricTimeline[activeLineIndex];
-    if (!activeBlock) return;
-    setSelectedLyricTarget(
-      activeBlock.kind === 'lyric'
-        ? { kind: 'lyric', index: activeBlock.index }
-        : { kind: 'gap', target: getGapTarget(lyricTimeline, activeLineIndex) }
-    );
-  }, [activeLineIndex, isLyricsEditing, lyricTimeline, playerState.isPlaying]);
-
   const scrollLyricsToActive = React.useCallback(
     (animated: boolean) => {
       if (
-        !showLyricsFull ||
+        !showLyricsFull || !lyricsAutoScroll ||
         Date.now() < manualLyricsFollowUntilRef.current ||
         activeLineIndex < 0 ||
         !lyricsListRef.current ||
-        isLyricsEditing ||
         activeLineIndex >= lyricTimeline.length
       ) {
         return;
@@ -1045,7 +1015,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
         viewPosition: 0.35,
       });
     },
-    [activeLineIndex, isLyricsEditing, lyricTimeline.length, showLyricsFull]
+    [activeLineIndex, lyricTimeline.length, showLyricsFull, lyricsAutoScroll]
   );
 
   const scrollLyricsToActiveRef = React.useRef(scrollLyricsToActive);
@@ -1097,7 +1067,6 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     if (lyricScrollRetryTimerRef.current) clearTimeout(lyricScrollRetryTimerRef.current);
     if (
       !showLyricsFull ||
-      isLyricsEditing ||
       activeLineIndex < 0
     ) {
       return;
@@ -1109,7 +1078,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       shouldScrollLyricsOnOpenRef.current = false;
     });
     return () => cancelAnimationFrame(frame);
-  }, [activeLineIndex, isLyricsEditing, scrollLyricsToActive, showLyricsFull]);
+  }, [activeLineIndex, scrollLyricsToActive, showLyricsFull]);
 
   const openLyricsView = React.useCallback(() => {
     if (isArtworkEntrancePending || closingPlayerRef.current) return;
@@ -1175,7 +1144,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
         lastPreviewSeekTimelineIndexRef.current = timelineIndex;
         setScrubbedLyricTimelineIndex(timelineIndex);
         Haptics.selectionAsync().catch(() => {});
-        void seekToPositionRef.current(line.startTimeMs);
+        void seekToPositionRef.current(line.startTimeMs + lyricsOffsetMs);
     },
     onEnd: () => {
       if (!previewScrubbingRef.current) return;
@@ -1331,10 +1300,6 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     playerState.durationMs > 0
       ? playerState.durationMs
       : currentTrack.duration_ms || 0;
-  const editorDurationMs = Math.max(
-    totalDurationMs,
-    getLastSegmentEndMs(draftLyricSegments)
-  );
 
   const progress =
     !seeking && totalDurationMs > 0
@@ -1342,7 +1307,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       : seekValue;
 
   const handleDownloadAction = () => {
-    if (!currentTrack || isCurrentTrackDownloading || isDownloadMutationPending)
+    if (!currentTrack || currentTrack.localOnly || isCurrentTrackDownloading || isDownloadMutationPending)
       return;
 
     if (!isCurrentTrackDownloaded && currentTrackInput) {
@@ -1387,210 +1352,17 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
     );
   };
 
-  const beginLyricsEditing = () => {
-    const plainLyrics = lyricsData?.plainLyrics?.trim() || '';
-    // Persisted plain/empty provider responses may not contain a segment list.
-    const syncedSegments = Array.isArray(lyricsData?.segments)
-      ? normalizeLyricSegments(lyricsData.segments)
-      : [];
-    const draftDurationMs = totalDurationMs || Math.max(3000, plainLyrics.split('\n').filter(Boolean).length * 3000);
-    const nextDraft = syncedSegments.length
-      ? syncedSegments
-      : createEstimatedLyricSegments(plainLyrics, draftDurationMs);
-    if (!nextDraft.length) {
-      nextDraft.push({ index: 0, startTimeMs: 0, endTimeMs: Math.min(5000, draftDurationMs), text: plainLyrics });
-    }
-    const editTimeline = getLyricTimelineBlocks(nextDraft, totalDurationMs);
-    const activeTimelineIndex = editTimeline.findIndex(
-      (block) =>
-        playerState.positionMs >= block.startTimeMs &&
-        playerState.positionMs < block.endTimeMs
-    );
-    const activeBlock = editTimeline[activeTimelineIndex];
-    const followingSegmentIndex = nextDraft.findIndex(
-      (segment) => segment.startTimeMs >= playerState.positionMs
-    );
-    if (playerState.isPlaying) void togglePlayPause();
-    draftLyricSegmentsRef.current = nextDraft;
-    setDraftLyricSegments(nextDraft);
-    setSelectedLyricTarget(
-      activeBlock?.kind === 'gap' && syncedSegments.length > 0
-        ? {
-            kind: 'gap',
-            target: getGapTarget(editTimeline, activeTimelineIndex),
-          }
-        : {
-            kind: 'lyric',
-            index:
-              activeBlock?.kind === 'lyric'
-                ? activeBlock.index
-                : followingSegmentIndex >= 0
-                  ? followingSegmentIndex
-                  : nextDraft.length - 1,
-          }
-    );
-    setIsLyricsEditing(true);
-    Haptics.selectionAsync().catch(() => {});
-  };
-
-  const cancelLyricsEditing = () => {
-    setIsLyricsEditing(false);
-    setDraftLyricSegments([]);
-    draftLyricSegmentsRef.current = [];
-    Haptics.selectionAsync().catch(() => {});
-  };
-
-  const confirmLyricsEditing = async () => {
-    const nextSegments = draftLyricSegmentsRef.current;
-    if (!nextSegments.length) return cancelLyricsEditing();
-    if (nextSegments.some((segment) => !segment.text.trim())) {
-      Alert.alert('Letra incompleta', 'Preencha o texto dos trechos antes de salvar.');
-      return;
-    }
-
-    const wasSaved = await updateLyricsSegments(nextSegments);
-    if (!wasSaved) {
-      Alert.alert(
-        'Não foi possível salvar',
-        'A sincronização não foi alterada. Tente novamente.'
-      );
-      return;
-    }
-    setIsLyricsEditing(false);
-    setDraftLyricSegments([]);
-    draftLyricSegmentsRef.current = [];
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-      () => {}
-    );
-  };
-
-  const updateDraftSegments = (
-    update: (segments: LyricSegment[]) => LyricSegment[]
-  ) => {
-    const next = update(draftLyricSegmentsRef.current);
-    draftLyricSegmentsRef.current = next;
-    setDraftLyricSegments(next);
-    return next;
-  };
-
-  const applyImportedSegments = (segments: LyricSegment[]) => {
-    draftLyricSegmentsRef.current = segments;
-    setDraftLyricSegments(segments);
-    const selectedIndex = selectedLyricTarget.kind === 'lyric'
-      ? Math.min(selectedLyricTarget.index, Math.max(0, segments.length - 1))
-      : Math.max(0, segments.findIndex((segment) =>
-        playerState.positionMs >= segment.startTimeMs && playerState.positionMs < segment.endTimeMs
-      ));
-    setSelectedLyricTarget({ kind: 'lyric', index: selectedIndex });
-    Haptics.selectionAsync().catch(() => {});
-  };
-
-  const updateDraftLyricText = (index: number, text: string) => {
-    updateDraftSegments((segments) => segments.map((segment) =>
-      segment.index === index ? { ...segment, text } : segment
-    ));
-  };
-
-  const getEditorRange = (segments: LyricSegment[]) =>
-    selectedLyricTarget.kind === 'lyric'
-      ? segments[selectedLyricTarget.index] || null
-      : {
-          index: -1,
-          text: '♪ ♪ ♪',
-          ...getLyricGapRange(
-            segments,
-            selectedLyricTarget.target,
-            Math.max(totalDurationMs, getLastSegmentEndMs(segments))
-          ),
-        };
-  const selectedEditorRange = getEditorRange(draftLyricSegments);
-
-  const moveSelectedEditorRange = (deltaMs: number) => {
-    const previous = getEditorRange(draftLyricSegmentsRef.current);
-    const next = updateDraftSegments((segments) =>
-      selectedLyricTarget.kind === 'lyric'
-        ? moveLyricSegment(segments, selectedLyricTarget.index, deltaMs)
-        : moveLyricGap(segments, selectedLyricTarget.target, deltaMs)
-    );
-    const nextRange = getEditorRange(next);
-    return previous && nextRange
-      ? nextRange.startTimeMs - previous.startTimeMs
-      : 0;
-  };
-
-  const resizeSelectedEditorRangeStart = (deltaMs: number) => {
-    const previous = getEditorRange(draftLyricSegmentsRef.current);
-    const next = updateDraftSegments((segments) =>
-      selectedLyricTarget.kind === 'lyric'
-        ? resizeLyricSegmentStart(segments, selectedLyricTarget.index, deltaMs)
-        : resizeLyricGapStart(
-            segments,
-            selectedLyricTarget.target,
-            deltaMs,
-            editorDurationMs
-          )
-    );
-    const nextRange = getEditorRange(next);
-    return previous && nextRange
-      ? nextRange.startTimeMs - previous.startTimeMs
-      : 0;
-  };
-
-  const resizeSelectedEditorRangeEnd = (deltaMs: number) => {
-    const previous = getEditorRange(draftLyricSegmentsRef.current);
-    const next = updateDraftSegments((segments) =>
-      selectedLyricTarget.kind === 'lyric'
-        ? resizeLyricSegmentEnd(segments, selectedLyricTarget.index, deltaMs)
-        : resizeLyricGapEnd(segments, selectedLyricTarget.target, deltaMs)
-    );
-    const nextRange = getEditorRange(next);
-    return previous && nextRange ? nextRange.endTimeMs - previous.endTimeMs : 0;
-  };
-
-  const handleEditorScrubStart = () => {
-    resumeAfterLyricEditRef.current = playerState.isPlaying;
-    if (resumeAfterLyricEditRef.current) void togglePlayPause();
-  };
-
-  const handleEditorScrubEnd = (positionMs?: number) => {
-    const selected = getEditorRange(draftLyricSegmentsRef.current);
-    if (selected) void seekToPosition(positionMs ?? selected.startTimeMs);
-    if (resumeAfterLyricEditRef.current) void togglePlayPause();
-    resumeAfterLyricEditRef.current = false;
-  };
-
-  const handleEditorTogglePlayPause = async () => {
-    if (playerState.isPlaying) {
-      await togglePlayPause('lyrics-editor');
-      return;
-    }
-    const selected = getEditorRange(draftLyricSegmentsRef.current);
-    if (
-      selected &&
-      (playerState.positionMs < selected.startTimeMs ||
-        playerState.positionMs >= selected.endTimeMs)
-    ) {
-      await seekToPosition(selected.startTimeMs);
-    }
-    await togglePlayPause('lyrics-editor');
-  };
-
-  const handleLyricPress = async (segment: LyricSegment, index: number) => {
+  const handleLyricPress = async (segment: LyricSegment) => {
     pauseLyricsAutoFollow();
-    if (isLyricsEditing) setSelectedLyricTarget({ kind: 'lyric', index });
-    await seekToPosition(segment.startTimeMs);
+    await seekToPosition(segment.startTimeMs + lyricsOffsetMs);
   };
 
-  const handleGapPress = async (
-    target: LyricGapTarget,
-    startTimeMs: number
-  ) => {
+  const handleGapPress = async (_target: LyricGapTarget, startTimeMs: number) => {
     pauseLyricsAutoFollow();
-    if (isLyricsEditing) setSelectedLyricTarget({ kind: 'gap', target });
-    await seekToPosition(startTimeMs);
+    await seekToPosition(startTimeMs + lyricsOffsetMs);
   };
 
-  const renderArtistDetails = () => (
+  const renderArtistDetails = () => currentTrack.localOnly ? null : (
     <View testID="player-artist-details" style={styles.artistDetailsSection}>
       {albumRouteId && (playerAlbum?.name || currentTrack.albumName) ? (
         <View testID="player-album-details" style={styles.albumDetailsSection}>
@@ -1670,7 +1442,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
       artworkOverlayRef={stationaryArtworkRef}
       closing={isPlayerClosing}
       dismissEnabled={!artworkTransition.transitioning && !isArtworkEntrancePending}
-      scrollOffset={showLyricsFull || isLyricsEditing ? undefined : playerScrollOffsetRef}
+      scrollOffset={showLyricsFull ? undefined : playerScrollOffsetRef}
       visible={visible}
       onRequestClose={handleClose}
       onShow={() => {
@@ -1683,10 +1455,10 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
         <View ref={artworkTransition.containerRef} collapsable={false}
           onLayout={artworkTransition.captureFrames} style={styles.container}>
           <GlassBackdrop pointerEvents="none" style={StyleSheet.absoluteFill}>
-          <PlayerSheetBackground artworkURL={artworkUrl}>
-          <ArtworkBackground current={artworkUrl}
+          <PlayerSheetBackground artworkURL={artworkUrl} artworkEnabled={artworkBackdrop}>
+          {artworkBackdrop ? <ArtworkBackground current={artworkUrl}
             previous={getTrackArtworkUri(previousTrack)}
-            next={getTrackArtworkUri(nextTrack)} progress={artworkProgress} />
+            next={getTrackArtworkUri(nextTrack)} progress={artworkProgress} /> : null}
           </PlayerSheetBackground>
           </GlassBackdrop>
           {/* Grab Handle Header */}
@@ -1698,14 +1470,12 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
           <View testID="player-header" style={styles.header}>
             {showLyricsFull ? <PlayerChromeFade edge="header" /> : null}
             <PlayerGlassButton
-              accessibilityLabel={
-                isLyricsEditing ? 'Cancelar edição da letra' : 'Fechar player'
-              }
-              onPress={isLyricsEditing ? cancelLyricsEditing : handleClose}
+              accessibilityLabel="Fechar player"
+              onPress={handleClose}
               style={styles.headerIconButton}
             >
               <Ionicons
-                name={isLyricsEditing ? 'close' : 'chevron-down'}
+                name="chevron-down"
                 size={26}
                 color="#FFFFFF"
               />
@@ -1719,46 +1489,39 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   style={styles.scrolledMiniPlayer}
                 />
               ) : (
-                <Text style={styles.headerContext} numberOfLines={1}>
-                  {currentTrack.title || 'Reproduzindo'}
-                </Text>
+                <MarqueeText testID="player-title-marquee" text={currentTrack.title || 'Reproduzindo'}
+                  align="center" scrollMode="left" active={visible} style={styles.headerContext} />
               )}
             </View>
             <PlayerGlassButton
               accessibilityLabel={
-                isLyricsEditing
-                  ? 'Confirmar sincronização da letra'
-                  : showLyricsFull
-                    ? 'Editar sincronização da letra'
+                showLyricsFull
+                    ? 'Selecionar provedor da letra'
                     : playbackOrigin?.kind === 'album' ? 'Abrir álbum de origem'
                       : playbackOrigin?.kind === 'playlist' ? 'Abrir playlist de origem'
                         : playbackOrigin?.kind === 'artist' ? 'Abrir artista de origem' : 'Abrir fila de reprodução'
               }
               onPress={
-                isLyricsEditing
-                  ? () => void confirmLyricsEditing()
-                  : showLyricsFull
-                    ? beginLyricsEditing
+                showLyricsFull
+                    ? () => setIsProviderVisible(true)
                     : openPlaybackOrigin
               }
               style={styles.headerIconButton}
               tintColor={
-                isLyricsEditing || showLyricsFull
+                showLyricsFull
                   ? 'rgba(255,255,255,0.28)'
                   : undefined
               }
             >
               <Ionicons
                 name={
-                  isLyricsEditing
-                    ? 'checkmark'
-                    : showLyricsFull
-                      ? 'pencil-outline'
+                  showLyricsFull
+                      ? 'options-outline'
                       : playbackOrigin?.kind === 'album' ? 'disc' : 'list'
                 }
                 size={22}
                 color={
-                  isLyricsEditing || showLyricsFull
+                  showLyricsFull
                     ? '#FFFFFF'
                     : 'rgba(255,255,255,0.7)'
                 }
@@ -1774,9 +1537,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
               contentContainerStyle={[
                 styles.playerScrollContent,
                 { paddingTop: showLyricsFull ? CHROME_OVERLAP : undefined,
-                  paddingBottom: isLyricsEditing
-                  ? Math.max(16, insets.bottom + 8)
-                  : Math.max(24, insets.bottom + 20) },
+                  paddingBottom: Math.max(24, insets.bottom + 20) },
               ]}
               contentInsetAdjustmentBehavior="never"
               nestedScrollEnabled
@@ -1809,7 +1570,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   removeClippedSubviews={false}
                   ref={lyricsListRef}
                   data={lyricTimeline}
-                  extraData={`${activeLineIndex}:${isLyricsEditing}:${isLyricsUserScrolling}:${JSON.stringify(selectedLyricTarget)}`}
+                  extraData={`${activeLineIndex}:${isLyricsUserScrolling}:${playerState.positionMs}:${lyricsOffsetMs}:${playerState.isPlaying}:${playerState.isBuffering}:${playbackSpeed}:${visible}:${showLyricsFull}:${blurInactiveLyrics}:${lyricsWordHighlight}:${lyricsFontSize}`}
                   keyExtractor={(item) =>
                     item.kind === 'gap'
                       ? item.id
@@ -1835,7 +1596,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                     pauseLyricsAutoFollow();
                   }}
                   onScrollToIndexFailed={({ index, averageItemLength }) => {
-                    if (!showLyricsFull || isLyricsEditing || index !== activeLineIndex ||
+                    if (!showLyricsFull || index !== activeLineIndex ||
                       Date.now() < manualLyricsFollowUntilRef.current || lyricScrollRetriesRef.current >= 8) return;
                     lyricScrollRetriesRef.current += 1;
                     lyricsListRef.current?.scrollToOffset({
@@ -1861,7 +1622,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                         accessibilityLabel={item.text}
                         onPress={() => {
                           if (item.kind === 'lyric') {
-                            void handleLyricPress(item, item.index);
+                            void handleLyricPress(item);
                           } else {
                             void handleGapPress(
                               gapTarget || getGapTarget(lyricTimeline, index),
@@ -1871,29 +1632,16 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                         }}
                         style={[
                           styles.lyricLineButton,
-                          isLyricsEditing && styles.lyricEditorLine,
                         ]}
                       >
-                        {isLyricsEditing ? (
-                          <Text style={styles.lyricTiming}>
-                            {formatTime(item.startTimeMs)}
-                            {'\n'}
-                            {formatTime(item.endTimeMs)}
-                          </Text>
-                        ) : null}
-                        {isLyricsEditing && item.kind === 'lyric' &&
-                          selectedLyricTarget.kind === 'lyric' && selectedLyricTarget.index === item.index ? (
-                          <TextInput
-                            accessibilityLabel={`Texto do trecho ${item.index + 1}`}
-                            multiline
-                            placeholder="Texto da letra"
-                            placeholderTextColor="rgba(255,255,255,0.4)"
-                            onChangeText={(text) => updateDraftLyricText(item.index, text)}
-                            style={[styles.lyricText, styles.lyricEditorText, styles.lyricTextActive, { paddingVertical: 0 }]}
-                            value={item.text}
-                          />
-                        ) : !isLyricsEditing && item.kind === 'lyric' ? (
-                          <SyncedLyricText active={isActive} blurred={blurInactiveLyrics && !isActive && !isLyricsUserScrolling}>
+                        {item.kind === 'lyric' ? (
+                          <SyncedLyricText active={isActive} words={lyricsWordHighlight ? item.words : undefined}
+                            fontSize={lyricsFontSize} wordHighlight={lyricsWordHighlight}
+                            positionMs={isActive ? playerState.positionMs - lyricsOffsetMs : 0}
+                            playing={visible && showLyricsFull && playerState.isPlaying && !playerState.isBuffering}
+                            playbackSpeed={playbackSpeed} trackId={currentTrack.spotifyId}
+                            background={item.background}
+                            blurred={blurInactiveLyrics && !isActive && !isLyricsUserScrolling}>
                             {item.text}
                           </SyncedLyricText>
                         ) : <Text
@@ -1904,7 +1652,6 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                               : isActive
                                 ? styles.lyricTextActive
                                 : styles.lyricTextUnblurred,
-                            isLyricsEditing && styles.lyricEditorText,
                           ]}
                         >
                           {item.text}
@@ -2018,13 +1765,16 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                     </Animated.View>
                   ) : lyricPreview.length ? (
                     <>
-                      <Text
+                      <TimedLyricPreview
                         testID="player-lyric-preview-current"
                         numberOfLines={lyricPreview[0].active ? 2 : 1}
-                        ellipsizeMode="tail"
+                        active={lyricPreview[0].active} words={lyricsWordHighlight ? lyricPreview[0].words : undefined}
+                        positionMs={playerState.positionMs - lyricsOffsetMs}
+                        playing={visible && !showLyricsFull && !isPreviewScrubbing && playerState.isPlaying && !playerState.isBuffering}
+                        playbackSpeed={playbackSpeed} trackId={currentTrack.spotifyId}
                         onTextLayout={(event) => setPreviewCurrentLineCount(event.nativeEvent.lines.length)}
                         style={[styles.lyricPreviewText, lyricPreview[0].active && styles.lyricPreviewActive]}
-                      >{lyricPreview[0].text}</Text>
+                      >{lyricPreview[0].text}</TimedLyricPreview>
                       {lyricPreview[1] && (
                         !lyricPreview[0].active || previewCurrentLineCount === 1
                       ) ? (
@@ -2050,29 +1800,11 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
               testID="player-controls-block"
               style={styles.playerControlsBlock}
               onLayout={(event) => {
-                if (isLyricsEditing) return;
                 const { y, height } = event.nativeEvent.layout;
                 setControlsBottomOffset(y + height);
               }}
             >
             {showLyricsFull ? <PlayerChromeFade edge="controls" /> : null}
-            {isLyricsEditing ? (
-                <LyricSyncEditor
-                  currentPositionMs={playerState.positionMs}
-                  selectedRange={selectedEditorRange}
-                  totalDurationMs={editorDurationMs}
-                  onMove={moveSelectedEditorRange}
-                  onResizeStart={resizeSelectedEditorRangeStart}
-                  onResizeEnd={resizeSelectedEditorRangeEnd}
-                  onScrubStart={handleEditorScrubStart}
-                  onScrubEnd={handleEditorScrubEnd}
-                  isPlaying={playerState.isPlaying}
-                  onTogglePlayPause={() => void handleEditorTogglePlayPause()}
-                  waveformSeed={currentTrack.title}
-                  segments={draftLyricSegments}
-                  onApplySegments={applyImportedSegments}
-                />
-            ) : (
               <>
                 <View ref={artworkTransition.rowRef} collapsable={false}
                   onLayout={artworkTransition.captureFrames} style={styles.actionPillRow}>
@@ -2082,6 +1814,7 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                     importantForAccessibility={showLyricsFull ? 'no-hide-descendants' : 'auto'}>
                   <PlayerGlassButton
                     accessibilityLabel="Abrir letras sincronizadas"
+                    disabled={currentTrack.localOnly}
                     onPress={toggleLyricsView}
                     style={styles.circleActionBtn}
                     testID="player-lyrics-toggle"
@@ -2090,8 +1823,9 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   </PlayerGlassButton>
                   </Motion.View>
                   {renderArtistPill(showLyricsFull)}
-                  <PlayerGlassButton accessibilityLabel="Opções do YouTube" onPress={handleOpenYoutubeMenu} style={[styles.circleActionBtn, { marginLeft: 12 }]}>
-                    <Ionicons name="logo-youtube" size={20} color="rgba(255,255,255,0.85)" />
+                  <PlayerGlassButton accessibilityLabel={currentTrack.localOnly ? 'Abrir mix' : 'Opções do YouTube'}
+                    onPress={currentTrack.localOnly ? () => { onClose(); if (playbackOrigin) openDetail('playlist', playbackOrigin.id); } : handleOpenYoutubeMenu} style={[styles.circleActionBtn, { marginLeft: 12 }]}>
+                    <Ionicons name={currentTrack.localOnly ? 'pulse' : 'logo-youtube'} size={20} color="rgba(255,255,255,0.85)" />
                   </PlayerGlassButton>
                 </View>
                 <View style={styles.progressContainer}>
@@ -2121,45 +1855,49 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   </View>
                 </View>
               </>
-            )}
 
-            {!isLyricsEditing ? (
               <View
                 testID="player-controls-row"
                 style={styles.controlsRow}
               >
                 <PlayerGlassButton
-                  accessibilityLabel={isCurrentTrackDownloading ? `Baixando ${currentDownloadProgress}%` : isCurrentTrackDownloaded ? 'Excluir download' : isOffline ? 'Offline: download indisponível' : 'Baixar música'}
-                  disabled={isCurrentTrackDownloading || isDownloadMutationPending}
+                  accessibilityLabel={currentTrack.localOnly ? 'Mix disponível offline' : isCurrentTrackDownloading ? `Baixando ${currentDownloadProgress}%` : isCurrentTrackDownloaded ? 'Excluir download' : isOffline ? 'Offline: download indisponível' : 'Baixar música'}
+                  disabled={currentTrack.localOnly || isCurrentTrackDownloading || isDownloadMutationPending}
                   onPress={handleDownloadAction}
                   style={styles.sideControlBtn}
                 >
-                  {isCurrentTrackDownloading ? <Text style={styles.downloadProgressText}>{currentDownloadProgress}%</Text> : isDownloadMutationPending ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons name={isCurrentTrackDownloaded ? 'trash-outline' : isOffline ? 'cloud-offline-outline' : 'download-outline'} size={23} color="rgba(255,255,255,0.82)" />}
+                  {currentTrack.localOnly ? <Ionicons name="checkmark-circle" size={23} color="#1ED760" /> : isCurrentTrackDownloading ? <Text style={styles.downloadProgressText}>{currentDownloadProgress}%</Text> : isDownloadMutationPending ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons name={isCurrentTrackDownloaded ? 'trash-outline' : isOffline ? 'cloud-offline-outline' : 'download-outline'} size={23} color="rgba(255,255,255,0.82)" />}
                 </PlayerGlassButton>
                 <PlayerGlassButton accessibilityLabel="Faixa anterior" disabled={!canGoPrevious} onPress={handlePlayPrevious} style={styles.seekControlBtn}>
                   <Ionicons name="play-back" size={32} color={canGoPrevious ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} />
                 </PlayerGlassButton>
-                <PlayerGlassButton accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'} glass="thick" onPress={togglePlayPause} style={styles.playPauseCircle} tintColor="rgba(255,255,255,0.92)">
+                <PlayerGlassButton testID="player-play" accessibilityLabel={playerState.isPlaying ? 'Pausar' : 'Tocar'} glass="regular" onPress={togglePlayPause} style={styles.playPauseCircle}>
                   {playerState.isBuffering && !playerState.isPlaying ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name={playerState.isPlaying ? 'pause' : 'play'} size={34} color="#FFFFFF" style={!playerState.isPlaying ? { marginLeft: 3 } : undefined} />}
                 </PlayerGlassButton>
                 <PlayerGlassButton accessibilityLabel="Próxima faixa" disabled={!canGoNext} onPress={handlePlayNext} style={styles.seekControlBtn}>
                   <Ionicons name="play-forward" size={32} color={canGoNext ? '#FFFFFF' : 'rgba(255,255,255,0.42)'} />
                 </PlayerGlassButton>
-                <PlayerGlassButton accessibilityLabel="Adicionar música a playlists" onPress={() => setIsPlaylistPickerVisible(true)} style={styles.sideControlBtn}>
+                <PlayerGlassButton accessibilityLabel="Adicionar música a playlists" disabled={currentTrack.localOnly} onPress={() => setIsPlaylistPickerVisible(true)} style={styles.sideControlBtn}>
                   <MaterialCommunityIcons name="playlist-plus" size={24} color="rgba(255,255,255,0.82)" />
                 </PlayerGlassButton>
               </View>
-            ) : null}
 
             </View>
 
-            {!isLyricsEditing ? renderArtistDetails() : null}
+            {renderArtistDetails()}
             </ScrollView>
             </GestureDetector>
 
           <SheetFrame visible={isQueueVisible} title="Fila de reprodução" artworkURL={artworkUrl}
-            onClose={() => setIsQueueVisible(false)} scroll={false} contentHeight={Math.max(64, queue.length * 64)}>
+            onClose={() => setIsQueueVisible(false)} scroll={false} contentHeight={56 + Math.max(64, queue.length * 64)}>
             <ProgressiveFlatList data={queue} listKey={queueSourceId || 'queue'}
+              ListHeaderComponent={<View style={styles.queueSummary}>
+              <SettingIcon name="list" />
+              <Text numberOfLines={1} style={styles.queueTitle}>{playbackOrigin?.kind === 'album' ? currentTrack.albumName || 'Album'
+                : playbackOrigin?.kind === 'artist' ? currentTrack.artistName : playbackOrigin?.kind === 'playlist' ? 'Playlist' : 'Fila atual'}</Text>
+              <Text style={styles.queueCount}>{queue.length}</Text>
+            </View>}
+              style={styles.queueList}
               keyExtractor={(track, index) => `${track.spotifyId}:${index}`}
               renderItem={({ item, index }) => {
                 const status = downloads.find((job) => job.spotifyId === item.spotifyId)?.status;
@@ -2167,13 +1905,14 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
                   active={queueIndex === index} playing={playerState.isPlaying}
                   downloadState={status === 'completed' ? 'completed' :
                     ['queued', 'resolving', 'downloading'].includes(status || '') ? 'active' : 'idle'}
-                  onDownload={() => enqueueDownloads([toDownloadTrackInput(item)])}
+                  trailingAction={item.localOnly ? <Ionicons name="checkmark-circle" size={22} color="#1ED760" /> : undefined}
+                  onDownload={() => { if (!item.localOnly) enqueueDownloads([toDownloadTrackInput(item)]); }}
                   onPress={() => { void playQueueIndex(index); setIsQueueVisible(false); }} />;
               }}
               showsVerticalScrollIndicator={false} />
           </SheetFrame>
 
-          <TrackPlaylistPickerModal
+          {currentTrackInput ? <TrackPlaylistPickerModal
             onAdded={() => {
               refreshLibrary();
               void Haptics.notificationAsync(
@@ -2183,7 +1922,8 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
             onClose={() => setIsPlaylistPickerVisible(false)}
             track={currentTrackInput!}
             visible={isPlaylistPickerVisible}
-          />
+          /> : null}
+          <LyricsProviderSheet visible={isProviderVisible} onClose={() => setIsProviderVisible(false)} />
 
           <SheetFrame
             visible={isActionModalVisible}
@@ -2197,50 +1937,35 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
               </View>
               <Text style={styles.actionSheetSubtitle}>Fonte de áudio correspondente no YouTube</Text>
             </View>
-            <LoggedPressable style={styles.actionSheetItem} onPress={handleGoToYoutube}>
-              <Ionicons name="open-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.actionSheetItemText}>Ir para o vídeo do YouTube</Text>
-            </LoggedPressable>
-            <View style={styles.actionSheetDivider} />
-            <LoggedPressable style={styles.actionSheetItem} onPress={handleOpenEditLinkModal}>
-              <Ionicons name="create-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.actionSheetItemText}>Editar link do YouTube</Text>
-            </LoggedPressable>
-            <View style={styles.actionSheetDivider} />
-            <LoggedPressable style={[styles.actionSheetItem, styles.actionSheetCancelItem]}
-              onPress={() => setIsActionModalVisible(false)}>
-              <Text style={styles.actionSheetCancelText}>Cancelar</Text>
-            </LoggedPressable>
+            <ModalSection label="YouTube">
+              <SettingsRow title="Ir para o vídeo do YouTube" leading={<SettingIcon name="open-outline" />}
+                onPress={handleGoToYoutube} />
+              <Divider />
+              <SettingsRow title="Editar link do YouTube" leading={<SettingIcon name="create-outline" />}
+                onPress={handleOpenEditLinkModal} />
+            </ModalSection>
           </SheetFrame>
           <SheetFrame
             visible={isEditModalVisible}
             title="Editar link do YouTube"
             artworkURL={artworkUrl}
             onClose={() => setIsEditModalVisible(false)}
+            headerTrailing={<HeaderIconButton icon="check" filled label="Atualizar Áudio" busy={isUpdatingAudio}
+              disabled={!customLinkInput.trim()} onPress={() => void handleConfirmEditLink()} />}
           >
-            <View style={styles.inputWrapper}>
-              <Ionicons name="link" size={18} color="rgba(255,255,255,0.6)" style={styles.inputIcon} />
-              <TextInput
+            <ModalSection label="Fonte de audio">
+              <TextField label="Link do YouTube"
                 value={customLinkInput}
                 onChangeText={setCustomLinkInput}
                 placeholder="https://www.youtube.com/watch?v=..."
                 placeholderTextColor="rgba(255,255,255,0.4)"
-                style={styles.textInput}
                 autoCapitalize="none"
                 autoCorrect={false}
                 selectTextOnFocus
                 returnKeyType="done"
+                onSubmitEditing={() => void handleConfirmEditLink()}
               />
-            </View>
-            <View style={styles.modalButtonRow}>
-              <LoggedPressable style={styles.modalCancelBtn} onPress={() => setIsEditModalVisible(false)}>
-                <Text style={styles.modalCancelBtnText}>Cancelar</Text>
-              </LoggedPressable>
-              <LoggedPressable style={styles.modalConfirmBtn} onPress={handleConfirmEditLink} disabled={isUpdatingAudio}>
-                {isUpdatingAudio ? <ActivityIndicator size="small" color="#000000" /> :
-                  <Text style={styles.modalConfirmBtnText}>Atualizar Áudio</Text>}
-              </LoggedPressable>
-            </View>
+            </ModalSection>
           </SheetFrame>
           {!sharedArtworkPresentation ? artworkTransition.overlay : null}
         </View>
@@ -2251,6 +1976,10 @@ export const FullPlayer = ({ visible, onClose, miniArtworkRef }: FullPlayerProps
 };
 
 const styles = StyleSheet.create({
+  queueSummary: { flexDirection: 'row', alignItems: 'center', minHeight: 56, gap: 12, paddingHorizontal: 16 },
+  queueTitle: { flex: 1, minWidth: 0, color: '#F2F2F2', fontSize: 16, fontFamily: 'SF-Regular' },
+  queueCount: { color: '#9E9E9E', fontSize: 13, fontVariant: ['tabular-nums'] },
+  queueList: { minHeight: 0 },
   albumDetailsSection: { marginBottom: 22 },
   gestureRoot: {
     flex: 1,
@@ -2277,7 +2006,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   grabBar: {
-    width: 36,
+    width: 48,
     height: 5,
     borderRadius: 3,
     backgroundColor: 'rgba(255,255,255,0.3)',
@@ -2296,9 +2025,9 @@ const styles = StyleSheet.create({
   chromeMaskTop: { height: CHROME_OVERLAP },
   chromeMaskBottom: { height: CHROME_OVERLAP },
   headerIconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2315,8 +2044,9 @@ const styles = StyleSheet.create({
   },
   headerContext: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 17,
     fontWeight: '600',
+    letterSpacing: 0,
     marginTop: 0,
   },
   scrolledMiniPlayer: {
@@ -2416,25 +2146,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     width: '100%',
   },
-  lyricEditorLine: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 68,
-    paddingVertical: 12,
-    position: 'relative',
-    width: '100%',
-  },
   lyricText: {
     fontSize: 22,
     fontWeight: '600',
     letterSpacing: 0,
     textAlign: 'left',
-    width: '100%',
-  },
-  lyricEditorText: {
-    fontSize: 19,
-    lineHeight: 25,
-    paddingHorizontal: 52,
     width: '100%',
   },
   lyricTextActive: {
@@ -2449,17 +2165,6 @@ const styles = StyleSheet.create({
     letterSpacing: 6,
     textAlign: 'left',
     width: '100%',
-  },
-  lyricTiming: {
-    color: 'rgba(255,255,255,0.58)',
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
-    fontWeight: '600',
-    lineHeight: 15,
-    left: 0,
-    position: 'absolute',
-    textAlign: 'left',
-    width: 52,
   },
   plainLyricRow: {
     paddingVertical: 8,

@@ -3,6 +3,7 @@ import { getDownloadedTracks } from '../../download/downloadManager';
 import {
   getCatalogTracks,
   getLibraryTracks,
+  toDownloadTrackInput,
   removeCatalogTrack,
   upsertCatalogTracks,
 } from '../catalogLibrary';
@@ -10,6 +11,7 @@ import {
   getLocalPlaylists,
   upsertLocalPlaylist,
 } from '../localPlaylistManager';
+import { useLibraryStore } from '../../../stores/useLibraryStore';
 
 jest.mock('../../download/downloadManager', () => ({
   getDownloadedTracks: jest.fn(),
@@ -21,6 +23,7 @@ describe('catalogLibrary', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
     getDownloadedTracksMock.mockReset().mockResolvedValue([]);
+    useLibraryStore.getState().refreshLibrary();
   });
 
   it('persists playable metadata without requiring an audio URL', async () => {
@@ -43,6 +46,26 @@ describe('catalogLibrary', () => {
     });
     expect(saved).not.toHaveProperty('audioUrl');
     await expect(getCatalogTracks()).resolves.toEqual([saved]);
+  });
+
+  it('keeps a verified ISRC across partial metadata enrichment and download conversion', async () => {
+    const track = { spotifyId: 'recording', title: 'Song', artistName: 'Artist', albumName: '',
+      imageURL: '', duration_ms: 3000, isrc: 'brabc2600001' };
+    await upsertCatalogTracks([track]);
+    await upsertCatalogTracks([{ ...track, isrc: 'invalid' }]);
+    const saved = (await getCatalogTracks())[0];
+    expect(saved.isrc).toBe('BRABC2600001');
+    expect(toDownloadTrackInput(saved).isrc).toBe(saved.isrc);
+  });
+
+  it.each(['spotify-recording', 'yt_abcdefghijk'])('keeps a corrected link and its video ID consistent through later metadata updates: %s', async (spotifyId) => {
+    const track = { spotifyId, title: 'Song', artistName: 'Artist', albumName: '', imageURL: '', duration_ms: 180000 };
+    await upsertCatalogTracks([{ ...track, youtubeVideoId: 'abcdefghijk' }]);
+    await upsertCatalogTracks([{ ...track, youtubeUrl: 'https://youtu.be/zyxwvutsrqp' }]);
+    await upsertCatalogTracks([track]);
+    const saved = (await getCatalogTracks())[0];
+    expect(saved).toMatchObject({ youtubeVideoId: 'zyxwvutsrqp', youtubeUrl: 'https://www.youtube.com/watch?v=zyxwvutsrqp' });
+    expect(toDownloadTrackInput(saved).youtubeVideoId).toBe('zyxwvutsrqp');
   });
 
   it('persists complete ordered credits with both Spotify provenance and a native channel', async () => {

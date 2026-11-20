@@ -17,6 +17,28 @@ const matchesTrack = (track: TrackModel, saved: LibraryTrack) =>
       normalizeReleaseTitle(saved.artists?.[0]?.name || saved.artistName.split(',')[0])
   );
 
+const trackIdentity = (title: string, artist: string) =>
+  `${trackTitle(title)}:${normalizeReleaseTitle(artist)}`;
+
+/** One pass of a large library, rather than one scan per album member. */
+const savedTrackLookup = (library: LibraryTrack[]) => {
+  const byId = new Map<string, LibraryTrack>();
+  const byVideo = new Map<string, LibraryTrack>();
+  const byIdentity = new Map<string, LibraryTrack>();
+  library.forEach((saved) => {
+    if (!byId.has(saved.spotifyId)) byId.set(saved.spotifyId, saved);
+    if (saved.youtubeVideoId && !byVideo.has(saved.youtubeVideoId)) byVideo.set(saved.youtubeVideoId, saved);
+    const key = trackIdentity(saved.title, saved.artists?.[0]?.name || saved.artistName.split(',')[0]);
+    if (!byIdentity.has(key)) byIdentity.set(key, saved);
+  });
+  return (track: TrackModel) => {
+    const candidates = [byId.get(track.id),
+      track.youtubeVideoId ? byVideo.get(track.youtubeVideoId) : undefined,
+      byIdentity.get(trackIdentity(track.title, track.artists?.[0]?.name || track.subtitle.split(',')[0]))];
+    return candidates.find((candidate) => candidate && matchesTrack(track, candidate));
+  };
+};
+
 const readAlbums = async (): Promise<SavedAlbum[]> => {
   try {
     const data = JSON.parse(await AsyncStorage.getItem(STORAGE_KEY) || '[]');
@@ -31,9 +53,18 @@ export const rememberAlbumMetadata = async (album: YouTubeMusicAlbum) => {
   if (!album.tracks.length) return;
   const operation = mutation.then(async () => {
     const library = await getLibraryTracks();
+    const albumById = new Map(album.tracks.map((track) => [track.id, track]));
+    const albumByVideo = new Map(album.tracks.filter((track) => track.youtubeVideoId)
+      .map((track) => [track.youtubeVideoId!, track]));
+    const albumByIdentity = new Map(album.tracks.map((track) => [
+      trackIdentity(track.title, track.artists?.[0]?.name || track.subtitle.split(',')[0]), track,
+    ]));
     const aliases = new Set([album.id, `spotify:${album.id.replace(/^ytalbum_/, '')}`]);
     const updates = library.flatMap((saved) => {
-      const track = album.tracks.find((candidate) => matchesTrack(candidate, saved));
+      const track = [albumById.get(saved.spotifyId),
+        saved.youtubeVideoId ? albumByVideo.get(saved.youtubeVideoId) : undefined,
+        albumByIdentity.get(trackIdentity(saved.title, saved.artists?.[0]?.name || saved.artistName.split(',')[0]))]
+        .find((candidate) => candidate && matchesTrack(candidate, saved));
       if (!track) return [];
       const albumId = track.albumId || album.id.replace(/^ytalbum_/, '');
       const albumArtists = track.albumArtists?.length
@@ -96,10 +127,11 @@ export const getRememberedAlbum = async (id: string, title?: string, artist?: st
 
 export const withLibraryAlbumTracks = async (album: YouTubeMusicAlbum): Promise<YouTubeMusicAlbum> => {
   const library = await getLibraryTracks();
+  const lookup = savedTrackLookup(library);
   return {
     ...album,
     tracks: album.tracks.map((track) => {
-      const saved = library.find((candidate) => matchesTrack(track, candidate));
+      const saved = lookup(track);
       return saved ? {
         ...track,
         id: saved.spotifyId,

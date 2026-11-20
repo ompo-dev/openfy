@@ -1,10 +1,16 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, within } from '@testing-library/react-native';
 import { Dimensions, PanResponder, StyleSheet, Text } from 'react-native';
 import * as Motion from 'react-native-reanimated';
 import { SheetFrame } from '../SheetFrame';
 import { PlayerModal, shouldDismissSheet } from '../PlayerModal';
 import { ProgressiveFlatList } from '../../common/ProgressiveList';
+
+let mockBottomInset = 0;
+jest.mock('react-native-safe-area-context', () => ({
+  SafeAreaView: jest.requireActual('react-native').View,
+  useSafeAreaInsets: () => ({ top: 0, bottom: mockBottomInset, left: 0, right: 0 }),
+}));
 
 describe('shared player modal surface', () => {
   it('fits progressive lists and forwards their scroll position to drag dismissal', async () => {
@@ -13,22 +19,18 @@ describe('shared player modal surface', () => {
         renderItem={({ item }) => <Text>{item}</Text>} />
     </SheetFrame>);
     const list = screen.getByTestId('progressive-scroll');
-    expect(StyleSheet.flatten(list.props.style)).toMatchObject({ flexGrow: 1, flexShrink: 1, flexBasis: 'auto', minHeight: 0 });
-    expect(typeof list.props.onScroll).toBe('function');
-    await fireEvent.scroll(list, { nativeEvent: { contentOffset: { y: 120, x: 0 } } });
+    expect(StyleSheet.flatten(list.props.style)).toMatchObject({ flex: 1, minHeight: 0 });
   });
-  afterEach(() => jest.restoreAllMocks());
+  afterEach(() => { jest.restoreAllMocks(); mockBottomInset = 0; });
   it('fits short content in a transparent sheet and closes with the supplied action', async () => {
     const onClose = jest.fn();
-    const screen = await render(<SheetFrame visible title="Artistas" onClose={onClose}><Text>Contents</Text></SheetFrame>);
-    const modal = screen.getByTestId('player-modal');
-    expect(modal.props.presentationStyle).toBe('overFullScreen');
+    const screen = await render(<SheetFrame visible size="sheet" title="Artistas" onClose={onClose}><Text>Contents</Text></SheetFrame>);
+    const modal = screen.getByTestId('gym-sheet-modal');
     expect(modal.props.animationType).toBe('slide');
     expect(modal.props.transparent).toBe(true);
-    const surface = StyleSheet.flatten(screen.getByTestId('player-modal-surface').props.style);
+    const surface = StyleSheet.flatten(screen.getByTestId('gym-sheet-surface').props.style);
     expect(surface.flex).toBeUndefined();
-    expect(surface.maxHeight).toBe('90%');
-    expect(StyleSheet.flatten(screen.getByTestId('sheet-frame-body').props.style).flex).toBeUndefined();
+    expect(surface.maxHeight).toBe('88%');
     await fireEvent.press(screen.getByLabelText('Fechar'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -41,25 +43,91 @@ describe('shared player modal surface', () => {
     expect(screen.getByText('Copy')).toBeTruthy();
   });
 
-  it('lets editors request space but shrink to the available keyboard-safe height', async () => {
-    const screen = await render(<SheetFrame visible title="JSON" onClose={jest.fn()} scroll={false} contentHeight={640}>
-      <Text>Editor</Text>
-    </SheetFrame>);
-    const keyboardStyle = StyleSheet.flatten(screen.getByTestId('sheet-frame-body').props.style);
-    expect(keyboardStyle.flexShrink).toBe(1);
-    expect(keyboardStyle.minHeight).toBe(0);
-    const content = StyleSheet.flatten(screen.getByTestId('sheet-frame-content').props.style);
-    expect(content.height).toBe(640);
-    expect(content.flexShrink).toBe(1);
+  it('separates the two header actions around the title and balances their reserved width', async () => {
+    const screen = await render(<SheetFrame visible title="Provedor" onClose={jest.fn()}
+      headerTrailing={<Text>Refresh</Text>}><Text>Contents</Text></SheetFrame>);
+    const leading = screen.getByTestId('sheet-header-leading');
+    const trailing = screen.getByTestId('sheet-header-trailing');
+    expect(within(leading).getByLabelText('Fechar')).toBeTruthy();
+    expect(within(trailing).getByText('Refresh')).toBeTruthy();
+    expect(within(trailing).queryByLabelText('Fechar')).toBeNull();
+    expect(StyleSheet.flatten(leading.props.style).width).toBe(StyleSheet.flatten(trailing.props.style).width);
   });
 
-  it('keeps the music player in a full native page sheet', async () => {
+  it('lets editors request space but shrink to the available keyboard-safe height', async () => {
+    const screen = await render(<SheetFrame visible size="sheet" title="JSON" onClose={jest.fn()} scroll={false} contentHeight={640}>
+      <Text>Editor</Text>
+    </SheetFrame>);
+    const content = StyleSheet.flatten(screen.getByTestId('sheet-frame-content').props.style);
+    expect(content.height).toBeLessThanOrEqual(640);
+    expect(content.height).toBeLessThan(Dimensions.get('window').height * 0.88);
+    expect(content.flexShrink).toBe(1);
+    expect(content.flex).toBeUndefined();
+    expect(content.width).toBe('100%');
+  });
+
+  it('fills a full-page modal even when a caller supplies an estimated list height', async () => {
+    const screen = await render(<SheetFrame visible size="full" title="Editar playlist" onClose={jest.fn()} scroll={false} contentHeight={200}>
+      <ProgressiveFlatList testID="full-playlist" data={['Song']} keyExtractor={(item) => item}
+        renderItem={({ item }) => <Text>{item}</Text>} />
+    </SheetFrame>);
+    expect(screen.queryByTestId('sheet-frame-content')).toBeNull();
+    expect(screen.queryByTestId('gym-sheet-custom-content')).toBeNull();
+    const style = StyleSheet.flatten(screen.getByTestId('full-playlist').props.style);
+    expect(style).toMatchObject({ flex: 1, minHeight: 0 });
+    expect(style.height).toBeUndefined();
+    expect(style.paddingBottom).toBeUndefined();
+  });
+
+  it('scrolls lists beneath the same glass header and keeps safe-area space in the content, not the viewport', async () => {
+    mockBottomInset = 34;
+    const onScroll = jest.fn();
+    const screen = await render(<SheetFrame visible title="Editar playlist" onClose={jest.fn()} scroll={false}>
+      <ProgressiveFlatList testID="edge-list" onScroll={onScroll} data={['Song']} keyExtractor={(item) => item}
+        renderItem={({ item }) => <Text>{item}</Text>} />
+    </SheetFrame>);
+    expect(screen.getByTestId('gym-sheet-gesture-root')).toBeTruthy();
+    await fireEvent(screen.getByTestId('gym-sheet-header'), 'layout', { nativeEvent: { layout: { height: 84, width: 393, x: 0, y: 0 } } });
+    const list = screen.getByTestId('edge-list');
+    expect(StyleSheet.flatten(list.props.contentContainerStyle)).toMatchObject({ paddingTop: 100, paddingBottom: 50, paddingHorizontal: 16 });
+    expect(list.props.contentInsetAdjustmentBehavior).toBe('never');
+    expect(list.props.automaticallyAdjustContentInsets).toBe(false);
+    expect(screen.queryByTestId('gym-sheet-header-glass')).toBeNull();
+    await fireEvent.scroll(list, { nativeEvent: { contentOffset: { y: 45, x: 0 } } });
+    expect(onScroll).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('gym-sheet-header-glass')).toBeTruthy();
+    await fireEvent.scroll(list, { nativeEvent: { contentOffset: { y: 0, x: 0 } } });
+    expect(screen.queryByTestId('gym-sheet-header-glass')).toBeNull();
+  });
+
+  it('uses the shared Gym modal for the player with header-only dismissal', async () => {
     const onClose = jest.fn();
     const screen = await render(<PlayerModal visible fullScreen onRequestClose={onClose}><Text>Player</Text></PlayerModal>);
-    expect(screen.getByTestId('player-modal').props.presentationStyle).toBe('pageSheet');
-    expect(screen.getByTestId('player-modal').props.transparent).not.toBe(true);
+    expect(screen.getByTestId('player-modal').props.presentationStyle).toBe('overFullScreen');
+    expect(screen.getByTestId('player-modal').props.transparent).toBe(true);
     expect(StyleSheet.flatten(screen.getByTestId('player-modal-surface').props.style).flex).toBe(1);
-    expect(screen.getByTestId('player-modal').props.allowSwipeDismissal).toBe(true);
+    expect(screen.getByTestId('player-modal').props.allowSwipeDismissal).toBe(false);
+  });
+
+  it('defaults queue, imports and settings to the main Gym page presentation', async () => {
+    const screen = await render(<SheetFrame visible title="Fila" onClose={jest.fn()}><Text>Contents</Text></SheetFrame>);
+    const modal = screen.getByTestId('gym-sheet-modal');
+    expect(modal.props.presentationStyle).toBe('pageSheet');
+    expect(modal.props.transparent).toBe(false);
+    expect(screen.getByTestId('gym-sheet-scroll')).toBeTruthy();
+  });
+
+  it('gives custom scrolling content the same side margins and bottom clearance as regular sheets', async () => {
+    const screen = await render(<SheetFrame visible scroll={false} title="Letras" onClose={jest.fn()}>
+      <Text>Settings</Text>
+    </SheetFrame>);
+    const style = StyleSheet.flatten(screen.getByTestId('gym-sheet-custom-content').props.style);
+    expect(style.paddingHorizontal).toBe(16);
+    expect(style.paddingTop).toBeGreaterThanOrEqual(16);
+    expect(style.paddingBottom).toBeGreaterThanOrEqual(16);
+    expect(style.flex).toBe(1);
+    expect(style.overflow).toBe('hidden');
+    expect(style.minWidth).toBe(0);
   });
 
   it('lets the shared artwork flight own player presentation and dismissal without another slide', async () => {
@@ -113,9 +181,10 @@ describe('shared player modal surface', () => {
       <Text>Player</Text>
     </PlayerModal>;
     const screen = await render(view());
-    const pan = create.mock.calls.at(-1)![0];
+    const pan = create.mock.calls.find(([config]) => config.onPanResponderGrant)![0];
     const event = {} as any;
-    const gesture = { y0: 300, dy: 40, dx: 0, vy: 0 } as any;
+    const gesture = { y0: 50, dy: 40, dx: 0, vy: 0 } as any;
+    expect(pan.onMoveShouldSetPanResponderCapture!(event, { ...gesture, y0: 300, dy: 160, vy: 2 })).toBe(false);
     expect(pan.onMoveShouldSetPanResponderCapture!(event, gesture)).toBe(true);
     await act(() => {
       pan.onPanResponderGrant!(event, gesture);
@@ -171,7 +240,7 @@ describe('shared player modal surface', () => {
     const screen = await render(<PlayerModal visible fullScreen sharedArtworkTransition scrollOffset={offset}>
       <Text>Player</Text>
     </PlayerModal>);
-    const pan = create.mock.calls.at(-1)![0];
+    const pan = create.mock.calls.find(([config]) => config.onPanResponderGrant)![0];
     const event = {} as any;
     const down = { y0: 50, dy: 30, dx: 0, vy: 0 } as any;
     expect(pan.onMoveShouldSetPanResponderCapture!(event, down)).toBe(true);
@@ -193,8 +262,8 @@ describe('shared player modal surface', () => {
 
   it('dismisses a fitted sheet by tapping outside it', async () => {
     const onClose = jest.fn();
-    const screen = await render(<SheetFrame visible title="Test" onClose={onClose}><Text>Contents</Text></SheetFrame>);
-    await fireEvent.press(screen.getByTestId('player-modal-backdrop'));
+    const screen = await render(<SheetFrame visible size="sheet" title="Test" onClose={onClose}><Text>Contents</Text></SheetFrame>);
+    await fireEvent.press(screen.getByTestId('gym-sheet-backdrop'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,3 +1,5 @@
+import * as catalogMappings from '../../services/audio/catalogMappingCache';
+
 jest.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
 jest.mock('expo-file-system/legacy', () => ({ getInfoAsync: jest.fn() }));
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -74,7 +76,7 @@ import {
 } from '@services';
 import { usePlayerStore, type PlayerTrack } from '../usePlayerStore';
 import * as FileSystem from 'expo-file-system/legacy';
-import { isTrackUnavailable, useTrackAvailabilityStore } from '../useTrackAvailabilityStore';
+import { isTrackUnavailable, markTrackUnavailable, useTrackAvailabilityStore } from '../useTrackAvailabilityStore';
 import { resolveTrackCredits, type TrackCredits } from '../../services/search/trackCredits';
 
 const sampleTrack: PlayerTrack = {
@@ -198,6 +200,64 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       { trackChangeAlreadyBegun: true }
     );
     expect(resolveAudioUrl).not.toHaveBeenCalled();
+  });
+
+  it.each([{ youtubeUrl: 'https://music.youtube.com/watch?v=abcdefghijk' }, { videoId: 'abcdefghijk' }])
+    ('uses a saved recording reference instead of running an unrelated search: %o', async (reference) => {
+      const track = { ...sampleTrack, ...reference };
+      markTrackUnavailable(sampleTrack, 'no-canonical-match');
+      jest.mocked(hasNativeYouTubePlayback).mockReturnValue(true);
+      jest.mocked(resolveCatalogYouTubeVideoId).mockResolvedValue({ status: 'resolved', videoId: 'abcdefghijk', confidence: 100 });
+      jest.mocked(loadAndPlay).mockResolvedValue(true);
+      await usePlayerStore.getState().playWithQueue([track], 0);
+      expect(resolveCatalogYouTubeVideoId).toHaveBeenCalledWith(expect.objectContaining({ videoId: 'abcdefghijk', title: track.title }));
+      expect(resolveSpotifyTrackVideoId).not.toHaveBeenCalled();
+      expect(loadAndPlay).toHaveBeenCalledWith('openfy-youtube://video/abcdefghijk', expect.any(Function), expect.any(Object), 0, track, expect.any(Object));
+    });
+
+  it('retries a manually selected track after a transport failure without opening link repair', async () => {
+    markTrackUnavailable(sampleTrack, 'source-unavailable');
+    jest.mocked(resolveAudioUrl).mockResolvedValue({ url: 'https://media.test/retry.m4a', source: 'youtube' });
+    jest.mocked(loadAndPlay).mockResolvedValue(true);
+    await usePlayerStore.getState().playTrack(sampleTrack);
+    expect(loadAndPlay).toHaveBeenCalled();
+    expect(isTrackUnavailable(sampleTrack)).toBe(false);
+    expect(usePlayerStore.getState().isFullPlayerVisible).not.toBe(true);
+  });
+
+  it.each([
+    { source: 'youtube_search' as const, cachedId: 'oldvideo123', expectedId: 'abcdefghijk', validate: true },
+    { source: 'youtube_search' as const, cachedId: 'abcdefghijk', expectedId: 'abcdefghijk', validate: false },
+    { source: 'user_direct' as const, cachedId: 'manualvid01', expectedId: 'manualvid01', validate: false },
+  ])('honors corrected links without losing the matching cache or manual override: %o', async ({ source, cachedId, expectedId, validate }) => {
+    const mapping = jest.spyOn(catalogMappings, 'getCatalogMapping').mockResolvedValue({
+      videoId: cachedId, source, confidence: 100, confirmedAt: Date.now(),
+      policyVersion: catalogMappings.CATALOG_MATCH_POLICY_VERSION,
+    });
+    try {
+      const track = { ...sampleTrack, youtubeUrl: 'https://www.youtube.com/watch?v=abcdefghijk' };
+      jest.mocked(hasNativeYouTubePlayback).mockReturnValue(true);
+      jest.mocked(resolveCatalogYouTubeVideoId).mockResolvedValue({ status: 'resolved', videoId: 'abcdefghijk', confidence: 100 });
+      jest.mocked(loadAndPlay).mockResolvedValue(true);
+      await usePlayerStore.getState().playTrack(track);
+      expect(loadAndPlay).toHaveBeenCalledWith(`openfy-youtube://video/${expectedId}`, expect.any(Function), expect.any(Object), 0, track, expect.any(Object));
+      expect(resolveCatalogYouTubeVideoId).toHaveBeenCalledTimes(validate ? 1 : 0);
+      expect(resolveSpotifyTrackVideoId).not.toHaveBeenCalled();
+    } finally {
+      mapping.mockRestore();
+    }
+  });
+
+  it('allows an explicit queue selection to retry without reintroducing failed neighbors', async () => {
+    const next = { ...sampleTrack, spotifyId: 'cooling-down-neighbor' };
+    markTrackUnavailable(sampleTrack, 'playback-failed');
+    markTrackUnavailable(next, 'playback-failed');
+    jest.mocked(resolveAudioUrl).mockResolvedValue({ url: 'https://media.test/queue-retry.m4a', source: 'youtube' });
+    jest.mocked(loadAndPlay).mockResolvedValue(true);
+    await usePlayerStore.getState().playWithQueue([sampleTrack, next], 0);
+    expect(usePlayerStore.getState().queue).toEqual([sampleTrack]);
+    expect(loadAndPlay).toHaveBeenCalled();
+    expect(isTrackUnavailable(next)).toBe(true);
   });
 
   it('validates a YouTube catalog song before starting native playback', async () => {
@@ -572,7 +632,7 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
     await usePlayerStore.getState().playTrack(local);
     expect(loadAndPlay).toHaveBeenCalledTimes(2);
     expect(resolveAudioUrl).not.toHaveBeenCalled();
-    expect(usePlayerStore.getState().playerState.error).toBe('Áudio indisponível. Edite o link do YouTube.');
+    expect(usePlayerStore.getState().playerState.error).toBe('Não foi possível reproduzir agora. Tente novamente.');
     jest.mocked(FileSystem.getInfoAsync).mockReset();
   });
 

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { fireEvent, render } from '@testing-library/react-native';
+import { fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { ListeningHome } from '../ListeningHome';
 import { EMPTY_PERSONALIZED_HOME, type PersonalizedHomeSnapshot, type PersonalizedHomeTrack } from '../../../services/home/personalizedHome';
 import { getPlayerAlbum } from '../../../services/library/playerAlbum';
@@ -73,6 +73,56 @@ describe('ListeningHome', () => {
   it('shows a skeleton while initial data is loading', async () => {
     const view = await render(<ListeningHome home={EMPTY_PERSONALIZED_HOME} loading />);
     expect(view.getByTestId('home-skeleton')).toBeTruthy();
+  });
+
+  it('shows multiple different radio and discovery shelves and plays the complete radio queue', async () => {
+    const second = { ...song, spotifyId: 'two', title: 'Outra', artistName: 'Sotam' };
+    const discoveries = Array.from({ length: 17 }, (_, index) => ({ ...song, spotifyId: `discovery-${index}`, title: `Descoberta ${index}` }));
+    const expanded = { ...home, discoveries, radios: [
+      { seed: { name: 'Ebony', score: 1 }, tracks: [song] },
+      { seed: { name: 'Sotam', score: 1 }, tracks: [song, second] },
+    ] };
+    const view = await render(<ListeningHome home={expanded} loading={false} />);
+    expect(await view.findByText('Parecido com Ebony')).toBeTruthy();
+    expect(await view.findByText('Parecido com Sotam')).toBeTruthy();
+    await waitFor(() => expect(view.getAllByText('Mais descobertas para você')).toHaveLength(1));
+    expect(await view.findByLabelText('Tocar Descoberta 16, Ebony')).toBeTruthy();
+    await fireEvent.press(await view.findByLabelText('Tocar Outra, Sotam'));
+    expect(mockPlay).toHaveBeenCalledWith([song, second], 1, expect.stringMatching(/^playlist:home_mix_radio_/));
+  });
+
+  it('renders recommendation families interleaved, not in repeated vertical runs', async () => {
+    const discoveries = Array.from({ length: 17 }, (_, index) => ({ ...song, spotifyId: `fresh-${index}` }));
+    const releases = Array.from({ length: 24 }, (_, index) => ({ ...home.releases[0], id: `album-${index}`,
+      artistId: `artist-${index % 3}`, artistName: `Artist ${index % 3}`, title: `Release ${index}` }));
+    const radios = [0, 1, 2].map((index) => ({ seed: { name: `Artist ${index}`, score: 1 },
+      tracks: [{ ...song, spotifyId: `radio-${index}` }] }));
+    const view = await render(<ListeningHome home={{ ...home, releases, discoveries, radios }} loading={false} />);
+    await waitFor(() => expect(view.getAllByTestId('home-listening-section')).toHaveLength(16), { timeout: 5000 });
+    const families = view.getAllByTestId('home-listening-section').map((section) => {
+      const heading = within(section).getByRole('header');
+      const title = (heading.props.accessibilityLabel || heading.props.children) as string;
+      if (/lançamentos para/.test(title)) return 'releases';
+      if (/descobertas/.test(title)) return 'discoveries';
+      if (/Parecido com/.test(title)) return 'radio';
+      if (title.startsWith('Lançamento de')) return 'spotlight';
+      return title;
+    });
+    families.slice(1).forEach((family, index) => expect(family).not.toBe(families[index]));
+    const layouts = families.slice(3).map((family) => ['releases', 'radio'].includes(family) ? 'large-rail' : family);
+    layouts.slice(1).forEach((layout, index) => expect(layout).not.toBe(layouts[index]));
+  });
+
+  it('consolidates visually identical fallback rails without losing their actions or playback source', async () => {
+    const second = { ...song, spotifyId: 'radio-last', title: 'Radio final' };
+    const view = await render(<ListeningHome home={{ ...EMPTY_PERSONALIZED_HOME,
+      releases: Array.from({ length: 17 }, (_, i) => ({ ...home.releases[0], id: `release-${i}` })),
+      radios: [{ seed: { name: 'Ebony', score: 1 }, tracks: [song, second] }],
+    }} loading={false} />);
+    expect(await view.findByText('Mais para você')).toBeTruthy();
+    await waitFor(() => expect(view.getAllByLabelText('Abrir Álbum KM2')).toHaveLength(17), { timeout: 5000 });
+    await fireEvent.press(await view.findByLabelText('Tocar Radio final, Ebony'));
+    expect(mockPlay).toHaveBeenCalledWith([song, second], 1, expect.stringMatching(/^playlist:home_mix_radio_/));
   });
 
   it('opens dynamic listening collections as playlist pages, not modals', async () => {

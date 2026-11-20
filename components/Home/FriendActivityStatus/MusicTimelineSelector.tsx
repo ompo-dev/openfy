@@ -1,11 +1,12 @@
 import * as React from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { AppIcon as Ionicons } from "../../native/AppIcon";
 import * as Haptics from 'expo-haptics';
 import {
   GlassSurface,
   IOS_NATIVE_ENABLED,
   LoggedPressable,
+  SheetFrame,
   SwiftButton,
   SwiftHost,
   SwiftMenu,
@@ -14,7 +15,6 @@ import {
   swiftFont,
   swiftForegroundStyle,
 } from '../../native';
-import { WithoutGlassBackdrop } from '../../native/GlassBackdrop';
 
 type MusicTimelineSelectorProps = {
   totalDurationMs: number;
@@ -147,20 +147,11 @@ function TimelineWindowPicker({
         <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.72)" />
         </GlassSurface>
       </LoggedPressable>
-      <Modal
-        transparent
+      <SheetFrame
+        title="Janela do waveform"
         visible={fallbackMenuVisible}
-        animationType="fade"
-        onRequestClose={() => setFallbackMenuVisible(false)}
+        onClose={() => setFallbackMenuVisible(false)}
       >
-        <WithoutGlassBackdrop>
-        <View style={styles.menuOverlay}>
-          <LoggedPressable
-            accessibilityLabel="Fechar seleção"
-            onPress={() => setFallbackMenuVisible(false)}
-            style={StyleSheet.absoluteFill}
-          />
-          <GlassSurface glass="thick" style={styles.optionMenu}>
             {WINDOW_OPTIONS.map((option) => (
               <LoggedPressable
                 key={option}
@@ -178,10 +169,7 @@ function TimelineWindowPicker({
                 ) : null}
               </LoggedPressable>
             ))}
-          </GlassSurface>
-        </View>
-        </WithoutGlassBackdrop>
-      </Modal>
+      </SheetFrame>
     </>
   );
 }

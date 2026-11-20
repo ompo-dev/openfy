@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { useFocusEffect } from 'expo-router';
 import { Keyboard } from 'react-native';
 import { getCatalogSearchSuggestions, searchCatalog } from '@api';
 import { getCachedArtistImage, upsertCatalogTracks } from '@services';
@@ -108,12 +109,27 @@ describe('Home', () => {
     await fireEvent(input, 'focus');
     await fireEvent.changeText(input, 'aotam');
     expect(view.getByLabelText('Cancelar busca')).toBeTruthy();
-    mockTabPressListener?.();
+    await act(() => mockTabPressListener?.());
 
     await waitFor(() => {
       expect(view.getByLabelText('Buscar músicas e artistas').props.value).toBe('');
       expect(view.queryByLabelText('Cancelar busca')).toBeNull();
     });
+  });
+
+  it('preserves the query and artist results when leaving for a profile and returning', async () => {
+    jest.mocked(searchCatalog).mockResolvedValue({ artists: [{ type: 'artist', id: 'ytartist_UCsotam~Sotam', name: 'Sotam', imageURL: '' }], tracks: [] });
+    const view = await render(<Home />);
+    await fireEvent(view.getByLabelText('Buscar músicas e artistas'), 'focus');
+    await fireEvent.changeText(view.getByLabelText('Buscar músicas e artistas'), 'sotam');
+    await fireEvent.press(await view.findByLabelText('Abrir artista Sotam'));
+    expect(mockOpenDetail).toHaveBeenCalledWith('artist', 'ytartist_UCsotam~Sotam', 'home');
+    const focus = jest.mocked(useFocusEffect).mock.calls.at(-1)![0];
+    const blur = focus();
+    await act(() => { if (typeof blur === 'function') blur(); });
+    expect(view.getByLabelText('Buscar músicas e artistas').props.value).toBe('sotam');
+    expect(view.getByLabelText('Abrir artista Sotam')).toBeTruthy();
+    expect(view.getByLabelText('Cancelar busca')).toBeTruthy();
   });
 
   it('hydrates portraits for artists recovered from song credits', async () => {

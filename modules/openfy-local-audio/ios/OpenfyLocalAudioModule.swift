@@ -6,6 +6,10 @@ public final class OpenfyLocalAudioModule: Module {
   public func definition() -> ModuleDefinition {
     Name("OpenfyLocalAudio")
 
+    AsyncFunction("renderMixAsync") { (clips: [[String: Any]], outputURI: String) async throws -> [String: Any] in
+      try await MixAudioRenderer.render(clips: clips, outputURI: outputURI)
+    }
+
     AsyncFunction("repairLocalAudioAsync") { (uri: String) async throws -> [String: Any] in
       let result = try await Self.repairs.repair(uri: uri)
       var response: [String: Any] = [

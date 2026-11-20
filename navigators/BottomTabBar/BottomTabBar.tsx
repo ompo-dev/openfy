@@ -1,4 +1,4 @@
-/** Floating three-tab GlassSurface navigation for Android and web. */
+/** Floating GlassSurface navigation for Android and web. */
 import { StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,6 +7,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pages } from '@config';
 import { translations } from '@data';
 import { GlassSurface, LoggedPressable } from '../../components/native';
+import { FEED_ENABLED } from '../../config/features';
 
 type BottomTabBarProps = any;
 
@@ -30,10 +31,10 @@ const TAB_META: Record<string, { icon: string; iconActive: string; label: string
 
 export const BottomTabBar = ({ state, descriptors, navigation }: BottomTabBarProps) => {
   const insets = useSafeAreaInsets();
-  const routes = state.routes;
+  const routes = state.routes.filter((route: { name: string }) => FEED_ENABLED || route.name !== Pages.FEED);
 
   const renderTab = (route: (typeof routes)[0]) => {
-    const globalIndex = routes.indexOf(route);
+    const globalIndex = state.routes.indexOf(route);
     const { options } = descriptors[route.key];
     const isActive = state.index === globalIndex;
     const meta = TAB_META[route.name];

@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import {
+  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -11,11 +12,11 @@ import {
 import { Image } from 'expo-image';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 import { useFocusEffect } from 'expo-router';
-import { Swipeable } from 'react-native-gesture-handler';
 import { getArtistCatalogImage, getYouTubeMusicArtistProfile } from '@api';
 
 import {
   deleteDownloadedTrack,
+  deleteLocalPlaylist,
   getCachedArtistImage,
   getLibraryTracks,
   repairDownloadedTrackMetadata,
@@ -38,6 +39,9 @@ import { rememberDetailPreview } from '../../services/navigation/detailPreview';
 import { groupLibraryArtists } from '../../services/library/localCollections';
 import { useFollowedArtistsStore } from '../../stores/useFollowedArtistsStore';
 import { ArtistSearchRow } from '../Home/ArtistSearchRow';
+import { LibrarySwipeRow } from './LibrarySwipeRow';
+import { getMixProjects, deleteMixProject } from '../../services/mix/mixRepository';
+import { formatMixTime, mixDuration, type MixProject } from '../../services/mix/mixTimeline';
 
 const toPlayerTrack = (track: LibraryTrack) => ({
   ...track,
@@ -56,6 +60,7 @@ export const OfflineLibrary = () => {
   const { openDetail } = useDetailNavigation();
   const [tracks, setTracks] = React.useState<LibraryTrack[]>([]);
   const [playlists, setPlaylists] = React.useState<LocalPlaylist[]>([]);
+  const [mixes, setMixes] = React.useState<MixProject[]>([]);
   const [artistImageURLs, setArtistImageURLs] = React.useState<Record<string, string>>({});
   const [artistTrackCounts, setArtistTrackCounts] = React.useState<Record<string, number>>({});
   const [artistImageLoadLimit, setArtistImageLoadLimit] = React.useState(12);
@@ -66,6 +71,8 @@ export const OfflineLibrary = () => {
   const isMountedRef = React.useRef(true);
   const libraryLoadRef = React.useRef<Promise<void> | null>(null);
   const metadataRepairRef = React.useRef(false);
+  const openSwipeRow = React.useRef<(() => void) | null>(null);
+  const closeSwipeRow = React.useCallback(() => { openSwipeRow.current?.(); openSwipeRow.current = null; }, []);
   const { playWithQueue, currentTrack, isPlaying: playerIsPlaying } = usePlayer((state) => ({
     playWithQueue: state.playWithQueue,
     currentTrack: state.currentTrack,
@@ -89,6 +96,7 @@ export const OfflineLibrary = () => {
     libraryView,
     refreshLibrary,
   } = useLibrarySelectedCategory();
+  React.useEffect(() => { closeSwipeRow(); }, [libraryView, librarySearchQuery, librarySort, closeSwipeRow]);
 
   const loadLibrary = React.useCallback(async () => {
     if (libraryLoadRef.current) return libraryLoadRef.current;
@@ -104,6 +112,8 @@ export const OfflineLibrary = () => {
           )
         );
       }),
+      getMixProjects().then((items) => { if (isMountedRef.current) setMixes(items); })
+        .catch((error) => { log.error('mix library load failed', { error }); Alert.alert('Mix', 'Não foi possível carregar os mixes.'); }),
     ])
       .then(() => undefined)
       .finally(() => {
@@ -142,6 +152,21 @@ export const OfflineLibrary = () => {
     },
     [enqueueDownloads]
   );
+
+  const confirmDeletePlaylist = (playlist: LocalPlaylist) => Alert.alert('Excluir playlist?',
+    `"${playlist.title}" será removida. As músicas baixadas continuarão na biblioteca.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Excluir', style: 'destructive', onPress: () => {
+        void deleteLocalPlaylist(playlist.id).then(async () => {
+          log.playlist('library playlist removed', { playlistId: playlist.id });
+          refreshLibrary();
+          await loadLibrary();
+        }).catch((error) => {
+          log.error('library playlist removal failed', { playlistId: playlist.id, error });
+          Alert.alert('Não foi possível excluir', 'Tente novamente.');
+        });
+      } },
+    ]);
 
   const handleRefresh = React.useCallback(async () => {
     const startedAt = Date.now();
@@ -331,29 +356,13 @@ export const OfflineLibrary = () => {
     );
 
     return (
-      <Swipeable
-        overshootRight={false}
-        rightThreshold={40}
-        renderRightActions={() => (
-          <LoggedPressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              item.isDownloaded
-                ? `Remover download de ${item.title}`
-                : `Remover ${item.title} da biblioteca`
-            }
-            onPress={() => void handleDelete(item)}
-            style={styles.deleteAction}
-          >
-            <Ionicons name="trash-outline" size={22} color="#FFFFFF" />
-            <Text style={styles.deleteActionLabel}>
-              {item.isDownloaded ? 'Remover download' : 'Remover da biblioteca'}
-            </Text>
-          </LoggedPressable>
-        )}
-      >
+      <LibrarySwipeRow label={item.isDownloaded ? `Remover download de ${item.title}` : `Remover ${item.title} da biblioteca`}
+        onWillOpen={(close) => {
+          if (openSwipeRow.current !== close) openSwipeRow.current?.();
+          openSwipeRow.current = close;
+        }} onRemove={() => { log.ui('library swipe remove', { trackId: item.spotifyId, downloaded: item.isDownloaded }); void handleDelete(item); }}>
         {row}
-      </Swipeable>
+      </LibrarySwipeRow>
     );
   };
 
@@ -367,6 +376,9 @@ export const OfflineLibrary = () => {
     ].filter((url): url is string => Boolean(url)))];
 
     return (
+      <LibrarySwipeRow label={`Excluir playlist ${item.title}`}
+        onWillOpen={(close) => { if (openSwipeRow.current !== close) openSwipeRow.current?.(); openSwipeRow.current = close; }}
+        onRemove={() => confirmDeletePlaylist(item)}>
       <LoggedPressable
         accessibilityRole="button"
         accessibilityLabel={`Abrir playlist ${item.title}`}
@@ -389,6 +401,7 @@ export const OfflineLibrary = () => {
         </View>
         <Ionicons name="chevron-forward" size={20} color="#8B8B8B" />
       </LoggedPressable>
+      </LibrarySwipeRow>
     );
   };
 
@@ -444,6 +457,24 @@ export const OfflineLibrary = () => {
     );
   };
 
+  const visibleMixes = mixes.filter((mix) => !normalizedQuery || mix.title.toLocaleLowerCase().includes(normalizedQuery))
+    .sort((a, b) => librarySort === 'title' ? a.title.localeCompare(b.title) : b.updatedAt.localeCompare(a.updatedAt));
+  const renderMix = ({ item }: { item: MixProject }) => <LibrarySwipeRow label={`Excluir mix ${item.title}`}
+    onWillOpen={(close) => { openSwipeRow.current?.(); openSwipeRow.current = close; }}
+    onRemove={() => Alert.alert('Excluir mix?', `Excluir "${item.title}"? As músicas baixadas continuam na biblioteca.`, [
+      { text: 'Cancelar', style: 'cancel' }, { text: 'Excluir', style: 'destructive', onPress: () => {
+        void deleteMixProject(item.id).then(() => { refreshLibrary(); void loadLibrary(); })
+          .catch(() => Alert.alert('Mix', 'Não foi possível excluir o mix.'));
+      } },
+    ])}>
+    <LoggedPressable accessibilityRole="button" accessibilityLabel={`Abrir mix ${item.title}`} onPress={() => openDetail('playlist', item.id, 'library')} style={styles.playlistItem}>
+      <PlaylistMosaic imageURLs={item.tracks.map((track) => tracksById.get(track.spotifyId)?.localImagePath || track.imageURL).filter(Boolean).slice(0, 4)} size={62} />
+      <View style={styles.playlistInfo}><Text numberOfLines={1} style={styles.playlistTitle}>{item.title}</Text>
+        <Text style={styles.playlistMeta}>Mix · {item.clips.length} clipes · {formatMixTime(mixDuration(item.clips))}</Text></View>
+      <Ionicons name="chevron-forward" size={20} color="#8B8B8B" />
+    </LoggedPressable>
+  </LibrarySwipeRow>;
+
   const noResults = (
     <View style={styles.searchEmpty}>
       <Text style={styles.searchEmptyText}>
@@ -451,6 +482,7 @@ export const OfflineLibrary = () => {
           ? 'Nenhuma música encontrada'
           : libraryView === 'playlists'
             ? 'Nenhuma playlist encontrada'
+            : libraryView === 'mixes' ? 'Nenhum mix encontrado'
             : libraryView === 'albums'
               ? 'Nenhum álbum encontrado'
               : 'Nenhum artista encontrado'}
@@ -492,12 +524,14 @@ export const OfflineLibrary = () => {
           ]}
           ListEmptyComponent={noResults}
           showsVerticalScrollIndicator={false}
+          onScrollBeginDrag={closeSwipeRow}
           refreshControl={refreshControl}
         />
       ) : libraryView === 'playlists' ? (
         <ProgressiveFlatList
           listKey={`playlists:${librarySearchQuery}:${librarySort}`}
           data={visiblePlaylists}
+          onScrollBeginDrag={closeSwipeRow}
           renderItem={renderPlaylist}
           keyExtractor={(item) => item.id}
           contentContainerStyle={[
@@ -508,6 +542,11 @@ export const OfflineLibrary = () => {
           showsVerticalScrollIndicator={false}
           refreshControl={refreshControl}
         />
+      ) : libraryView === 'mixes' ? (
+        <ProgressiveFlatList listKey={`mixes:${librarySearchQuery}:${librarySort}`} data={visibleMixes}
+          renderItem={renderMix} keyExtractor={(item) => item.id} onScrollBeginDrag={closeSwipeRow}
+          contentContainerStyle={[styles.list, !visibleMixes.length && styles.listEmpty]} ListEmptyComponent={noResults}
+          showsVerticalScrollIndicator={false} refreshControl={refreshControl} />
       ) : (
         <ProgressiveFlatList
           listKey={`${libraryView}:${librarySearchQuery}:${librarySort}`}
@@ -560,19 +599,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#282828',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  deleteAction: {
-    width: 112,
-    marginBottom: StyleSheet.hairlineWidth,
-    backgroundColor: '#E5484D',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-  },
-  deleteActionLabel: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontFamily: 'SF-Semibold',
   },
   playlistItem: {
     minHeight: 82,

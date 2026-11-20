@@ -72,6 +72,14 @@ struct CheckYouTubeRetry {
       precondition((error as NSError).code == URLError.cancelled.rawValue)
       precondition(RetryProtocol.requests.count == 1)
     }
-    print("Native retry checks passed: lost connection, exact range, 503, 403, bounded retries, cancellation")
+    RetryProtocol.requests = []
+    RetryProtocol.outcomes = [.failure(URLError(.timedOut))]
+    do {
+      _ = try await YouTubeRequestRetry.data(for: request, session: session, maximumAttempts: 1)
+      preconditionFailure("Single-attempt requests must not retry")
+    } catch {
+      precondition(RetryProtocol.requests.count == 1)
+    }
+    print("Native retry checks passed: lost connection, exact range, 503, 403, bounded retries, cancellation, single attempt")
   }
 }

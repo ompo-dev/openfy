@@ -18,6 +18,7 @@ import {
   resolveDirectYouTubeAudio,
 } from '../audio/directYouTubeResolver';
 import { resolveCatalogYouTubeVideoId, resolveSpotifyTrackVideoId } from '../audio/catalogResolver';
+import { getTrackYouTubeVideoId } from '../spotify/linkParser';
 import { getCatalogMapping, isCurrentCatalogMapping } from '../audio/catalogMappingCache';
 import { repairLocalAudioFile } from '../audio/localAudioRepair';
 import { retryNetworkOperation } from '../audio/networkRetry';
@@ -38,6 +39,7 @@ import type { TrackAlbumRef } from '../../models/Track/TrackModel';
 export type DownloadStatus = 'idle' | 'downloading' | 'completed' | 'error';
 
 export type TrackCatalogMetadata = {
+  isrc?: string;
   artistCreditsVersion?: number;
   albumId?: string;
   albumAssociations?: TrackAlbumRef[];
@@ -1205,17 +1207,9 @@ const downloadTrackInternal = async (
     const suppliedAudioUrl = audioUrl || track.audioUrl;
     // Signed URLs can expire while the OS waits. Prefer resolving and saving
     // the matched video in the native session before requesting a JS URL.
-    let youtubeVideoId =
-      track.youtubeVideoId || youtubeVideoIdFromTrackId(track.spotifyId);
+    let youtubeVideoId = getTrackYouTubeVideoId(track);
     const manualMapping = await getCatalogMapping(track.spotifyId);
     if (manualMapping?.source === 'user_direct') youtubeVideoId = manualMapping.videoId;
-    if (youtubeVideoId && /^[A-Za-z0-9]{22}$/.test(track.spotifyId)) {
-      const mapping = await getCatalogMapping(track.spotifyId);
-      if (!mapping || !isCurrentCatalogMapping(mapping)) {
-        youtubeVideoId = undefined;
-        effectiveTrack = { ...effectiveTrack, youtubeVideoId: undefined, youtubeUrl: undefined };
-      }
-    }
     let sourceChanged = false;
     if (youtubeVideoId && manualMapping?.source !== 'user_direct') {
       const source = await resolveCatalogYouTubeVideoId({
@@ -1462,6 +1456,7 @@ const downloadTrackInternal = async (
         ? `https://www.youtube.com/watch?v=${effectiveTrack.youtubeVideoId}`
         : effectiveTrack.youtubeUrl,
       id: trackId,
+      isrc: effectiveTrack.isrc,
       spotifyId: effectiveTrack.spotifyId,
       title: effectiveTrack.title,
       artistName: effectiveTrack.artistName,
@@ -1480,10 +1475,12 @@ const downloadTrackInternal = async (
 
     // Save lyrics in background
     fetchLyrics(
-      track.title,
-      track.artistName,
-      track.duration_ms ? track.duration_ms / 1000 : undefined,
-      track.albumName
+      effectiveTrack.title,
+      effectiveTrack.artistName,
+      effectiveTrack.duration_ms ? effectiveTrack.duration_ms / 1000 : undefined,
+      effectiveTrack.albumName,
+      undefined,
+      { trackId: effectiveTrack.spotifyId, videoId: effectiveTrack.youtubeVideoId, isrc: effectiveTrack.isrc }
     )
       .then((lyrics) => {
         if (lyrics) {

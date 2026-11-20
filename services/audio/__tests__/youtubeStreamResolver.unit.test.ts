@@ -63,6 +63,29 @@ describe('resolveYouTubeStream', () => {
     });
   });
 
+  it('samples only 32 KiB while still checking authorization past the 1 MiB boundary', async () => {
+    mockCreate.mockResolvedValue({ getStreamingData: jest.fn().mockResolvedValue({
+      url: 'https://rr1.googlevideo.com/stream.m4a?c=ANDROID_MUSIC', mime_type: 'audio/mp4',
+    }) });
+    await expect(resolveYouTubeStream('V1M1hYxmRvA')).resolves.toMatchObject({ status: 'resolved' });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(jest.mocked(fetch).mock.calls.map(([, options]) => (options!.headers as Record<string, string>).Range))
+      .toEqual(['bytes=0-16383', 'bytes=1048576-1064959']);
+  });
+
+  it.each(['player', 'url', 'range'])('does not request beyond a short stream with a length from %s', async (source) => {
+    mockCreate.mockResolvedValue({ getStreamingData: jest.fn().mockResolvedValue({
+      url: `https://rr1.googlevideo.com/short.m4a?c=ANDROID_MUSIC${source === 'url' ? '&clen=100000' : ''}`,
+      mime_type: 'audio/mp4', ...(source === 'player' ? { content_length: 100000 } : {}),
+    }) });
+    jest.mocked(fetch).mockResolvedValue({ ...OK_PROBE,
+      headers: { get: (name: string) => name === 'content-type' ? 'audio/mp4' :
+        name === 'content-range' && source === 'range' ? 'bytes 0-16383/100000' : null },
+    } as Response);
+    await expect(resolveYouTubeStream('V1M1hYxmRvA')).resolves.toMatchObject({ status: 'resolved' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('deduplicates concurrent in-flight requests for the same videoId', async () => {
     const getStreamingData = jest.fn().mockResolvedValue({
       url: 'https://rr1.googlevideo.com/stream.m4a?c=ANDROID_MUSIC',

@@ -27,11 +27,25 @@ Operações com semântica própria, como a geração de request do player, pode
 
 Use TTL curto para resultados de busca, longo para metadados estáveis e um TTL negativo curto para ausências. Dados persistentes continuam sob responsabilidade do serviço correspondente; cache de memória não substitui persistência nem validação de identidade.
 
+### Reprodução interativa primeiro
+
+`services/network/audioPriority.ts` mantém uma reserva temporal cooperativa para o início da reprodução. Descoberta musical, hidratação de perfis e downloads podem ceder por um prazo limitado; nunca devem bloquear uma ação explícita de play. A fila de vizinhos do player escalona preloads, cancela os agendados ao mudar de faixa e impede que a preparação de faixas obsoletas compita com a próxima ação. Isso não é controle global de banda do sistema operacional.
+
+`stores/usePlayerStore.ts` usa `activeRequestId` para descartar respostas obsoletas, e `services/audio/playerService.ts` serializa comandos remotos de avançar/retroceder. Preservar a versão ativa da fila ao expandir uma playlist.
+
+### Home e coleções progressivas
+
+A Home publica um snapshot local, recupera um shell persistido de curta duração quando válido e publica descobertas quando cada busca termina. A UI não deve aguardar todos os artistas para mostrar a primeira seção útil. O cache persistido tem TTL e é associado à revisão da biblioteca e opções de recomendação.
+
+Playlists remotas podem ter apenas uma página carregada. O usuário começa a ouvir as faixas visíveis, e `extendQueueFromCollection()` acrescenta páginas posteriormente somente se a mesma coleção ainda estiver ativa. Salvar ou baixar uma coleção inteira continua exigindo todas as páginas. A biblioteca combinada de catálogo e downloads possui cache curto invalidado por mutações e revisão.
+
 ## Logs e Métricas
 
 Use `log.time(category, action, metadata)` para fluxos perceptíveis ou I/O, e finalize em sucesso, falha, timeout e resposta obsoleta. Os eventos devem identificar fase e contagens/IDs técnicos necessários para correlacionar pesquisa, perfil, fila e download. Não registre tokens, segredos nem URLs com query sensível.
 
 Os logs consultáveis em Configurações devem permitir relacionar início/fim, duração, origem, resultado e falha; métricas agregadas devem orientar otimização antes de adicionar paralelismo ou preloads adicionais.
+
+O logger em memória mantém no máximo 3.000 eventos. As métricas agregadas têm P50, P95 e P99. Observe separadamente `audio source resolution`, `time to first audio`, `audio buffering` e estágios nativos do AVPlayer. Consulte `docs/performance-stability-2026-11-20.md` para critérios de validação e limitações de testes em dispositivos.
 
 ## Widgets iOS
 

@@ -47,4 +47,14 @@ describe('home artist radio', () => {
     expect((await loadHomeRadio(seed, [])).length).toBeGreaterThan(0);
     expect(search).toHaveBeenCalledTimes(2);
   });
+
+  it('renews a cached radio and changes its actual song anchor on manual refresh', async () => {
+    const seed = { name: 'Refresh artist', score: 1 };
+    const anchors = [anchor(seed.name, 'abcdefghijk'), anchor(seed.name, 'zyxwvutsrqp')];
+    await loadHomeRadio(seed, anchors);
+    await loadHomeRadio(seed, anchors, true, 1);
+    expect(getUpNext.mock.calls.map(([id]) => id)).toEqual(['abcdefghijk', 'zyxwvutsrqp']);
+    await loadHomeRadio(seed, anchors);
+    expect(getUpNext).toHaveBeenCalledTimes(2);
+  });
 });

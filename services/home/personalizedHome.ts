@@ -1,4 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { preferUnseenHomeTracks, rotateHomeCandidates } from './homeVariation';
+import { log } from '../../utils/appLogger';
+import { yieldToPlaybackStartup } from '../network/audioPriority';
 
 import type { UserProfile } from '../recommendation/recommendationEngine';
 import type { LibraryTrack } from '../library/catalogLibrary';
@@ -73,9 +76,11 @@ export type HomeRelease = {
 export type HomeCatalog = {
   releases: HomeRelease[];
   similarTracks: PersonalizedHomeTrack[];
+  radios?: { seed: RecommendationSeed; tracks: PersonalizedHomeTrack[] }[];
 };
 
 export type PersonalizedHomeSnapshot = {
+  refreshRevision?: number;
   albums: LocalAlbumCollection[];
   artists: PersonalizedHomeArtist[];
   continueListening: PersonalizedHomeTrack[];
@@ -89,6 +94,7 @@ export type PersonalizedHomeSnapshot = {
   pinnedArtists: PersonalizedHomeArtist[];
   releases: HomeRelease[];
   similarTracks: PersonalizedHomeTrack[];
+  radios?: { seed: RecommendationSeed; tracks: PersonalizedHomeTrack[] }[];
   seeds: RecommendationSeed[];
   tracksById: Map<string, LibraryTrack>;
 };
@@ -208,14 +214,11 @@ const trackArtistNames = (track: Pick<PersonalizedHomeTrack, 'artistName' | 'art
 
 const affinityForTrack = (
   track: PersonalizedHomeTrack,
-  artistWeights: Record<string, number>
+  artistWeights: ReadonlyMap<string, number>
 ) => {
-  const weights = new Map(
-    Object.entries(artistWeights).map(([artist, weight]) => [normalize(artist), weight])
-  );
   return Math.max(
-    0,
-    ...trackArtistNames(track).map((artist) => weights.get(normalize(artist)) || 0)
+    ...trackArtistNames(track).map((artist) => artistWeights.get(normalize(artist)) || 0),
+    0
   );
 };
 
@@ -265,15 +268,17 @@ export const buildRecommendationSeeds = (
   });
 
   followedArtists.forEach((artist) => {
-    addSeed(artist.name, 120, artist.id);
+    addSeed(artist.name, 35, artist.id);
     const current = seeds.get(normalize(artist.name));
     if (current) seeds.set(normalize(artist.name), { ...current, id: artist.id || current.id, followed: true });
   });
 
-  return [...seeds.values()]
-    .sort((first, second) => Number(Boolean(second.followed)) - Number(Boolean(first.followed)) ||
-      second.score - first.score || first.name.localeCompare(second.name))
-    .slice(0, 5);
+  const sorted = [...seeds.values()].sort((first, second) =>
+    second.score - first.score || first.name.localeCompare(second.name));
+  // Following an artist matters, but five follows must not occupy every
+  // discovery seed and exclude everything the listener actually plays.
+  const followed = sorted.filter((seed) => seed.followed).slice(0, 2);
+  return [...followed, ...sorted.filter((seed) => !seed.followed)].slice(0, 5);
 };
 
 export const buildPersonalizedHome = ({
@@ -285,6 +290,8 @@ export const buildPersonalizedHome = ({
   playlists,
   profile,
   seed = new Date().toISOString().slice(0, 10),
+  refreshRevision = 0,
+  previousRecommendationIds = new Set<string>(),
   tracks,
 }: {
   allowExplicitRecommendations: boolean;
@@ -295,10 +302,20 @@ export const buildPersonalizedHome = ({
   playlists: LocalPlaylist[];
   profile: UserProfile;
   seed?: string;
+  refreshRevision?: number;
+  previousRecommendationIds?: ReadonlySet<string>;
   tracks: LibraryTrack[];
 }): PersonalizedHomeSnapshot => {
   const tracksById = new Map(tracks.map((track) => [track.spotifyId, track]));
   const homeTracks = tracks.map(libraryTrackToHomeTrack);
+  const artistWeights = new Map<string, number>();
+  Object.entries(profile.artistWeights).forEach(([artist, weight]) => {
+    const timestamp = profile.artistLastInteractedAt?.[artist];
+    const ageDays = timestamp ? Math.max(0, (Date.now() - timestamp) / 86_400_000) : 0;
+    const decayed = weight * (0.3 + 0.7 * Math.pow(0.5, ageDays / 30));
+    const key = normalize(artist);
+    artistWeights.set(key, (artistWeights.get(key) || 0) + decayed);
+  });
   const followedNames = new Set(followedArtists.map((artist) => artistFollowKey(artist.name)));
   const followAffinity = (track: PersonalizedHomeTrack) =>
     trackArtistNames(track).some((name) => followedNames.has(artistFollowKey(name))) ? 80 : 0;
@@ -351,7 +368,7 @@ export const buildPersonalizedHome = ({
   const rankedLibrary = [...homeTracks].sort((first, second) => {
     const score = (track: PersonalizedHomeTrack) =>
       (personalized
-        ? followAffinity(track) + affinityForTrack(track, profile.artistWeights) * 4 +
+        ? followAffinity(track) + affinityForTrack(track, artistWeights) * 4 +
           (playlistFrequency.get(track.spotifyId) || 0) * 8 +
           (playCounts.get(track.spotifyId) || 0) * 2
         : 0) +
@@ -376,26 +393,27 @@ export const buildPersonalizedHome = ({
   const remoteDiscoveries = discoveries.filter(
     (track) =>
       !knownIds.has(track.spotifyId) &&
+      !(profile.trackFeedback?.[track.spotifyId]?.dislikes) &&
       !knownNames.has(
         `${normalize(track.artists?.[0]?.name || track.artistName)}:${normalize(track.title)}`
       ) &&
       (allowExplicitRecommendations || !track.explicit)
-  ).sort((a, b) => personalized ? followAffinity(b) - followAffinity(a) : 0);
+  ).sort((a, b) => Number(previousRecommendationIds.has(a.spotifyId)) - Number(previousRecommendationIds.has(b.spotifyId)) ||
+    (personalized ?
+      (followAffinity(b) + affinityForTrack(b, artistWeights) * 4 -
+        (profile.trackFeedback?.[b.spotifyId]?.skips || 0) * 10) -
+      (followAffinity(a) + affinityForTrack(a, artistWeights) * 4 -
+        (profile.trackFeedback?.[a.spotifyId]?.skips || 0) * 10) : 0) ||
+    (refreshRevision ? stableHash(`${seed}:${a.spotifyId}`) - stableHash(`${seed}:${b.spotifyId}`) : 0));
   const quickPicks = diverseTracks(
     remoteDiscoveries.length ? remoteDiscoveries : libraryQuickPicks,
     12
   );
-  const quickPickIds = new Set(quickPicks.map((track) => track.spotifyId));
-  const remainingRemoteDiscoveries = remoteDiscoveries.filter(
-    (track) => !quickPickIds.has(track.spotifyId)
-  );
   const discoveryTracks = diverseTracks(
-    remainingRemoteDiscoveries.length
-      ? remainingRemoteDiscoveries
-      : remoteDiscoveries.length
+    remoteDiscoveries.length
         ? remoteDiscoveries
       : rankedLibrary.filter((track) => !recentIds.has(track.spotifyId)),
-    12
+    32
   );
   const albums = groupLocalAlbums(tracks)
     .sort((first, second) => {
@@ -458,6 +476,7 @@ export const buildPersonalizedHome = ({
   const featured = (discoveryTracks.length ? discoveryTracks : quickPicks).slice(0, 5);
 
   return {
+    refreshRevision,
     albums,
     artists,
     continueListening,
@@ -472,6 +491,9 @@ export const buildPersonalizedHome = ({
     pinnedTracks: mostPlayed.slice(0, 4),
     pinnedArtists,
     releases: catalog?.releases || [],
+    radios: catalog?.radios?.map((radio) => ({ ...radio,
+      tracks: diverseTracks(radio.tracks.filter((track) => allowExplicitRecommendations || !track.explicit), 20),
+    })).filter((radio) => radio.tracks.length),
     similarTracks: diverseTracks((catalog?.similarTracks || remoteDiscoveries).filter((track) =>
       allowExplicitRecommendations || !track.explicit
     ), 16),
@@ -498,6 +520,7 @@ const searchYouTubeMusic = async (
   seed: RecommendationSeed
 ): Promise<PersonalizedHomeTrack[]> => {
   try {
+    await yieldToPlaybackStartup();
     const client = await withDiscoveryTimeout(getYouTubeMusicClient());
     if (!client) return [];
     const result = await withDiscoveryTimeout(
@@ -541,7 +564,7 @@ const searchYouTubeMusic = async (
           youtubeUrl: `https://www.youtube.com/watch?v=${videoId}`,
         }];
       })
-      .slice(0, 8);
+      .slice(0, 24);
   } catch {
     return [];
   }
@@ -589,14 +612,19 @@ const queueItemToHomeTrack = (
 
 export const loadYouTubeMusicRadio = async (
   seed: RecommendationSeed,
-  anchorTracks: PersonalizedHomeTrack[]
+  anchorTracks: PersonalizedHomeTrack[],
+  variation = 0
 ): Promise<PersonalizedHomeTrack[]> => {
   try {
     const client = await withDiscoveryTimeout(getYouTubeMusicClient());
     if (!client) return [];
     const matchesSeed = (track: PersonalizedHomeTrack) => track.youtubeVideoId &&
       trackArtistNames(track).some((name) => normalize(name) === normalize(seed.name));
-    const anchor = anchorTracks.find(matchesSeed) || (await searchYouTubeMusic(seed)).find(matchesSeed);
+    let candidates = anchorTracks.filter(matchesSeed);
+    if (!candidates.length || (variation > 0 && candidates.length < 2)) {
+      candidates = uniqueTracks([...candidates, ...(await searchYouTubeMusic(seed)).filter(matchesSeed)]);
+    }
+    const anchor = rotateHomeCandidates(candidates, variation)[0];
     if (!anchor?.youtubeVideoId) return [];
     const panel = await withDiscoveryTimeout(
       client.music.getUpNext(anchor.youtubeVideoId, true)
@@ -609,7 +637,7 @@ export const loadYouTubeMusicRadio = async (
       !trackArtistNames(track).some((artist) => normalize(artist) === seedName)
     );
     const familiarArtists = tracks.filter((track) => !newArtists.includes(track));
-    return diverseTracks([...newArtists, ...familiarArtists], 16);
+    return diverseTracks([...rotateHomeCandidates(newArtists, variation), ...familiarArtists], 32);
   } catch {
     return [];
   }
@@ -619,9 +647,12 @@ const loadHomeDiscoveriesUnshared = async (
   seeds: RecommendationSeed[],
   knownTrackIds: Set<string>,
   allowExplicitRecommendations: boolean,
-  forceRefresh = false
+  forceRefresh = false,
+  variation = 0,
+  previousIds: ReadonlySet<string> = new Set(),
+  onUpdate?: (tracks: PersonalizedHomeTrack[]) => void
 ): Promise<PersonalizedHomeTrack[]> => {
-  const activeSeeds = seeds.slice(0, 3);
+  const activeSeeds = rotateHomeCandidates(seeds, variation).slice(0, 3);
   if (!activeSeeds.length) return [];
   const seedKey = activeSeeds
     .map((seed) => `${seed.matchArtist === false ? 'query' : 'artist'}:${seed.id || ''}:${normalize(seed.name)}`)
@@ -644,8 +675,18 @@ const loadHomeDiscoveriesUnshared = async (
   } catch {}
 
   const cacheGeneration = ++discoveryCacheGeneration;
-  const anchorGroups = await Promise.all(activeSeeds.map(searchYouTubeMusic));
-  const tracks = uniqueTracks(anchorGroups.flat());
+  const anchorGroups: PersonalizedHomeTrack[][] = Array.from({ length: activeSeeds.length }, () => []);
+  await Promise.all(activeSeeds.map(async (seed, index) => {
+    anchorGroups[index] = await searchYouTubeMusic(seed);
+    // Publish useful results as each search resolves, instead of holding
+    // every rail behind the slowest of three independent provider calls.
+    const partial = preferUnseenHomeTracks(uniqueTracks(anchorGroups.flat()), previousIds)
+      .filter((track) => !knownTrackIds.has(track.spotifyId) &&
+        (allowExplicitRecommendations || !track.explicit));
+    if (partial.length) onUpdate?.(partial);
+  }));
+  const radio = forceRefresh ? await loadYouTubeMusicRadio(activeSeeds[0], anchorGroups[0] || [], variation) : [];
+  const tracks = preferUnseenHomeTracks(uniqueTracks([...radio, ...anchorGroups.flat()]), previousIds);
   if (tracks.length && cacheGeneration === discoveryCacheGeneration) {
     await AsyncStorage.setItem(
       DISCOVERY_CACHE_KEY,
@@ -656,7 +697,7 @@ const loadHomeDiscoveriesUnshared = async (
     // discovery results behind a second round trip for every seed.
     const radioSeed = activeSeeds[0];
     const radioAnchors = anchorGroups[0] || [];
-    void loadYouTubeMusicRadio(radioSeed, radioAnchors).then(async (radio) => {
+    if (!forceRefresh) void loadYouTubeMusicRadio(radioSeed, radioAnchors).then(async (radio) => {
       if (!radio.length || cacheGeneration !== discoveryCacheGeneration) return;
       const expanded = uniqueTracks([...radio, ...tracks]);
       await AsyncStorage.setItem(
@@ -666,43 +707,59 @@ const loadHomeDiscoveriesUnshared = async (
     }).catch(() => {});
   }
 
-  return tracks.filter(
+  const visible = tracks.filter(
     (track) =>
       !knownTrackIds.has(track.spotifyId) &&
       (allowExplicitRecommendations || !track.explicit)
   );
+  log.home('discovery candidates renewed', { forceRefresh, variation, tracks: visible.length,
+    unseen: visible.filter((track) => !previousIds.has(track.spotifyId)).length });
+  return visible;
 };
 
-const pendingDiscoveryRequests = new Map<
-  string,
-  Promise<PersonalizedHomeTrack[]>
->();
+type DiscoveryUpdate = (tracks: PersonalizedHomeTrack[]) => void;
+const pendingDiscoveryRequests = new Map<string, {
+  request: Promise<PersonalizedHomeTrack[]>;
+  listeners: Set<DiscoveryUpdate>;
+}>();
 
 /** Share recommendation requests between Home and Feed when both become active. */
 export const loadHomeDiscoveries = (
   seeds: RecommendationSeed[],
   knownTrackIds: Set<string>,
   allowExplicitRecommendations: boolean,
-  forceRefresh = false
+  forceRefresh = false,
+  options: { variation?: number; previousTrackIds?: ReadonlySet<string>; onUpdate?: DiscoveryUpdate } = {}
 ): Promise<PersonalizedHomeTrack[]> => {
   const requestKey = JSON.stringify([
-    seeds.slice(0, 3).map((seed) => [seed.id, normalize(seed.name), seed.matchArtist]),
+    rotateHomeCandidates(seeds, options.variation || 0).slice(0, 3).map((seed) => [seed.id, normalize(seed.name), seed.matchArtist]),
     [...knownTrackIds].sort(),
     allowExplicitRecommendations,
     forceRefresh,
+    options.variation || 0,
+    [...(options.previousTrackIds || [])].sort(),
   ]);
   const pending = pendingDiscoveryRequests.get(requestKey);
-  if (pending) return pending;
+  if (pending) {
+    if (options.onUpdate) pending.listeners.add(options.onUpdate);
+    return pending.request;
+  }
 
+  const listeners = new Set<DiscoveryUpdate>();
+  if (options.onUpdate) listeners.add(options.onUpdate);
   const request = loadHomeDiscoveriesUnshared(
     seeds,
     knownTrackIds,
     allowExplicitRecommendations,
-    forceRefresh
+    forceRefresh,
+    options.variation || 0,
+    options.previousTrackIds,
+    (tracks) => listeners.forEach((listener) => listener(tracks))
   );
-  pendingDiscoveryRequests.set(requestKey, request);
+  const entry = { request, listeners };
+  pendingDiscoveryRequests.set(requestKey, entry);
   const clear = () => {
-    if (pendingDiscoveryRequests.get(requestKey) === request) {
+    if (pendingDiscoveryRequests.get(requestKey) === entry) {
       pendingDiscoveryRequests.delete(requestKey);
     }
   };

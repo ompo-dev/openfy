@@ -4,18 +4,15 @@ import {
   AppState,
   Linking,
   Platform,
-  ScrollView,
   StyleSheet,
-  Switch,
   Text,
   View,
 } from 'react-native';
 import Constants from 'expo-constants';
 import * as Clipboard from 'expo-clipboard';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
 import { useAppSettings } from '@context';
 import { checkForOTAUpdateNow } from '@hooks';
 import {
@@ -27,7 +24,7 @@ import {
   type AppSettings,
   type DownloadStorageInfo,
 } from '@services';
-import { AppIcon, LoggedPressable, NativeIconButton, SheetFrame } from '../native';
+import { AppIcon, GlassSurface, LoggedPressable, NativeIconButton, SheetFrame } from '../native';
 import { AUDIO_QUALITY_LABELS } from '../../services/audio/audioPreferences';
 import { getAudioCapabilities, getAudioOutputDiagnostics, getAudioDiagnosticsSnapshot, getPlayerState } from '../../services/audio/playerService';
 import { usePlayerStore } from '../../stores/usePlayerStore';
@@ -41,6 +38,14 @@ import {
   sanitizeLogData,
 } from '../../utils/appLogger';
 import { formatStorageSize, StorageManagerModal } from './StorageManagerModal';
+import { AudioSettingsSheet } from './AudioSettingsSheet';
+import { LyricsSettingsSheet } from './LyricsSettingsSheet';
+import { clearImageCache } from '../../services/images/imagePrefetch';
+import { AppText, Section as GymSection, SettingsRow, Toggle, Chevron, NativeSegmented, OptionMenu, useAppModalStore } from '../gym';
+import { useSettingsModal } from '../gym/useSettingsModal';
+import { SettingIcon } from '../gym/SettingIcon';
+import { useTransientNotice } from '../../hooks/useTransientNotice';
+import type { AppModalAnchor } from '../gym/appModals';
 
 type LibrarySummary = {
   downloads: number;
@@ -59,91 +64,97 @@ const SettingRow = ({
   onValueChange,
   value,
 }: {
-  description: string;
+  description?: string;
   icon: React.ComponentProps<typeof AppIcon>['name'];
   label: string;
   onValueChange: (value: boolean) => void;
   value: boolean;
 }) => (
-  <View style={styles.settingRow}>
-    <View style={styles.settingIcon}>
-      <AppIcon color="#D8D8DC" name={icon} size={19} />
-    </View>
-    <View style={styles.settingCopy}>
-      <Text style={styles.settingLabel}>{label}</Text>
-      <Text style={styles.settingDescription}>{description}</Text>
-    </View>
-    <Switch
-      accessibilityLabel={label}
+  <SettingsRow title={label} subtitle={description} leading={
+    <SettingIcon name={icon} />
+  } trailing={<Toggle label={label}
       onValueChange={onValueChange}
-      thumbColor="#FFFFFF"
-      trackColor={{ false: '#48484A', true: '#1DB954' }}
       value={value}
-    />
-  </View>
+    />} />
 );
 
 const ActionRow = ({
   detail,
+  disabled = false,
   destructive = false,
   icon,
   label,
   onPress,
 }: {
   detail?: string;
+  disabled?: boolean;
   destructive?: boolean;
   icon: React.ComponentProps<typeof AppIcon>['name'];
   label: string;
   onPress: () => void;
 }) => (
-  <LoggedPressable
-    accessibilityLabel={label}
-    accessibilityRole="button"
+  <SettingsRow title={label} titleColor={destructive ? '#FF7A7A' : undefined}
+    disabled={disabled}
     onPress={onPress}
-    style={({ pressed }) => [styles.actionRow, pressed && styles.rowPressed]}
-  >
-    <View style={[styles.settingIcon, destructive && styles.destructiveIcon]}>
-      <AppIcon
-        color={destructive ? '#FF6B6B' : '#D8D8DC'}
-        name={icon}
-        size={19}
-      />
-    </View>
-    <Text style={[styles.actionLabel, destructive && styles.destructiveText]}>
-      {label}
-    </Text>
-    {detail ? <Text style={styles.actionDetail}>{detail}</Text> : null}
-    <AppIcon color="#737378" name="chevron-forward" size={17} />
-  </LoggedPressable>
+    leading={
+    <SettingIcon name={icon} color={destructive ? '#FF6B6B' : undefined} />
+    } trailing={<View style={styles.actionTrailing}>
+      {detail ? <AppText variant="secondary" numberOfLines={1} style={styles.detailText}>{detail}</AppText> : null}
+      <Chevron />
+    </View>} />
 );
 
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <View style={styles.section}>
-    <Text style={styles.sectionTitle}>{title}</Text>
-    <View style={styles.sectionBody}>{children}</View>
-  </View>
+  <GymSection label={title}>{children}</GymSection>
 );
 
-export const Settings = () => {
+export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
   const router = useRouter();
-  const { top } = useSafeAreaInsets();
+  const insets = useSafeAreaInsets();
   const { settings, setSetting, resetSettings } = useAppSettings();
   const [summary, setSummary] = React.useState(EMPTY_SUMMARY);
   const [storage, setStorage] = React.useState(EMPTY_STORAGE);
-  const [storageVisible, setStorageVisible] = React.useState(false);
+  const [storageVisible, setStorageVisible] = useSettingsModal('settings.storage');
+  const [audioVisible, setAudioVisible] = useSettingsModal('settings.audio');
+  const [lyricsVisible, setLyricsVisible] = useSettingsModal('settings.lyrics');
+  const [rootVisible, setRootVisible] = useSettingsModal('settings.root');
+  const leaving = React.useRef(false);
+  React.useEffect(() => {
+    setRootVisible(true);
+    return () => useAppModalStore.getState().closeAllAppModals();
+  }, [setRootVisible]);
+  const closeSettings = () => {
+    if (leaving.current) return;
+    leaving.current = true;
+    useAppModalStore.getState().closeAllAppModals();
+    if (onClose) onClose();
+    else router.back();
+  };
   const [updateStatus, setUpdateStatus] = React.useState('');
   const [checkingUpdate, setCheckingUpdate] = React.useState(false);
   const developerVisible = settings.developerTools;
   const [qualityPicker, setQualityPicker] = React.useState<'streamingQuality' | 'downloadQuality' | null>(null);
+  const [qualityAnchor, setQualityAnchor] = React.useState<AppModalAnchor | null>(null);
+  const streamingRow = React.useRef<View>(null);
+  const downloadRow = React.useRef<View>(null);
   const [diagnosticsText, setDiagnosticsText] = React.useState<string | null>(null);
+  const [clearingImages, setClearingImages] = React.useState(false);
   const [notice, setNotice] = React.useState('');
+  useTransientNotice(notice || undefined, () => setNotice(''), 6000, notice);
   const [saving, setSaving] = React.useState(false);
   const capabilities = getAudioCapabilities();
+  const qualityOptions = (['high', 'economy'] as const).map((value) => ({ value, label: value === 'economy' ? 'Economia' : AUDIO_QUALITY_LABELS[value] }));
+  const openQualityMenu = (key: 'streamingQuality' | 'downloadQuality') => {
+    if (!capabilities.quality) { setNotice('A qualidade nativa requer o novo build do app.'); return; }
+    const ref = key === 'streamingQuality' ? streamingRow : downloadRow;
+    ref.current?.measureInWindow((x, y, width, height) => setQualityAnchor({ x, y, width, height }));
+    setQualityPicker(key);
+  };
   const [performanceMetrics, setPerformanceMetrics] = React.useState(
     getPerformanceMetricSummary
   );
 
-  useFocusEffect(React.useCallback(() => {
+  React.useEffect(() => {
     if (!developerVisible || !settings.captureLogs) return;
     setPerformanceMetrics(getPerformanceMetricSummary());
     const timer = setInterval(
@@ -153,7 +164,7 @@ export const Settings = () => {
       1_500
     );
     return () => clearInterval(timer);
-  }, [developerVisible, settings.captureLogs]));
+  }, [developerVisible, settings.captureLogs]);
 
   React.useEffect(() => {
     let active = true;
@@ -184,7 +195,7 @@ export const Settings = () => {
     };
 
   const changeChannels = async (value: AppSettings['audioChannelMode']) => {
-    if (saving || value === settings.audioChannelMode) return;
+    if (saving || value === settings.audioChannelMode || (value === 'mono' && !capabilities.channels)) return;
     setSaving(true);
     setNotice('');
     try { await setSetting('audioChannelMode', value); }
@@ -193,6 +204,15 @@ export const Settings = () => {
         ? 'Não foi possível processar esta fonte em mono. Permita o áudio no navegador; fontes externas precisam de CORS. A preferência anterior foi mantida.'
         : String(error));
     } finally { setSaving(false); }
+  };
+
+  const clearArtworkCache = async () => {
+    if (clearingImages) return;
+    setClearingImages(true);
+    setNotice('');
+    try { await clearImageCache(); setNotice('Cache de imagens limpo.'); }
+    catch (error) { setNotice(String(error)); }
+    finally { setClearingImages(false); }
   };
 
   const showAudioDiagnostics = () => {
@@ -312,23 +332,33 @@ export const Settings = () => {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: top + 8 }]}>
-        <NativeIconButton
-          systemImage="chevron.left"
-          iconName="chevron-back"
-          label="Voltar"
-          onPress={() => router.back()}
-        />
-        <Text style={styles.headerTitle}>Configurações</Text>
-        <View style={styles.headerSpacer} />
-      </View>
-
-      <ScrollView
-        contentContainerStyle={styles.content}
-        contentInsetAdjustmentBehavior="automatic"
-        showsVerticalScrollIndicator={false}
-      >
+    <SheetFrame visible={rootVisible} title="Configurações" size="full" onClose={closeSettings}
+      overlay={<><OptionMenu visible={qualityPicker !== null} anchor={qualityAnchor}
+        selectedValue={qualityPicker ? settings[qualityPicker] : settings.streamingQuality}
+        options={qualityOptions} onClose={() => setQualityPicker(null)}
+        onSelect={(quality) => { if (qualityPicker) change(qualityPicker)(quality); setQualityPicker(null); }} />
+        {notice ? <GlassSurface glass="regular" style={[styles.noticePosition, { bottom: insets.bottom + 16 }]}>
+          <LoggedPressable accessibilityRole="button" accessibilityLabel="Dispensar aviso"
+            onPress={() => setNotice('')} style={styles.notice}>
+            <Text accessibilityLiveRegion="polite" style={styles.noticeText}>{notice}</Text>
+            <AppIcon name="close" size={18} color="#FFFFFF" />
+          </LoggedPressable>
+        </GlassSurface> : null}
+      </>}
+      nested={<>
+        <StorageManagerModal visible={storageVisible} onClose={() => setStorageVisible(false)}
+          onStorageChanged={(nextStorage) => {
+            setStorage(nextStorage);
+            setSummary((current) => ({ ...current, downloads: nextStorage.tracks.length }));
+          }} />
+        <AudioSettingsSheet visible={audioVisible} onClose={() => setAudioVisible(false)} />
+        <LyricsSettingsSheet visible={lyricsVisible} onClose={() => setLyricsVisible(false)} />
+        <SheetFrame visible={diagnosticsText !== null} title="Diagnósticos" size="full" onClose={() => setDiagnosticsText(null)}
+          headerTrailing={<NativeIconButton iconName="copy" systemImage="doc.on.doc" label="Copiar diagnósticos"
+            onPress={() => void Clipboard.setStringAsync(diagnosticsText || '').then(() => setNotice('Diagnósticos copiados.')).catch(() => setNotice('Não foi possível copiar.'))} />}>
+          <Text selectable style={styles.diagnosticsCode}>{diagnosticsText}</Text>
+        </SheetFrame>
+      </>}>
         <Section title="HOME E DESCOBERTAS">
           <SettingRow
             description="Organiza sugestões com o que você ouve e salva neste aparelho."
@@ -348,20 +378,15 @@ export const Settings = () => {
         </Section>
 
         <Section title="REPRODUÇÃO">
+          <ActionRow icon="options" label="Audio e equalizador" detail={settings.equalizerEnabled ? 'Ativo' : `${settings.playbackSpeed}x`}
+            onPress={() => setAudioVisible(true)} />
+          <View style={styles.separator} />
           <View style={styles.audioBlock}>
             <Text style={styles.settingLabel}>Saída de áudio</Text>
-            <View accessibilityRole="radiogroup" style={styles.segmentedControl}>
-              {(['stereo', 'mono'] as const).map((mode) => (
-                <LoggedPressable key={mode} accessibilityRole="radio"
-                  accessibilityLabel={mode === 'stereo' ? 'Estéreo' : 'Mono'}
-                  accessibilityState={{ checked: settings.audioChannelMode === mode, disabled: saving || (mode === 'mono' && !capabilities.channels) }}
-                  disabled={saving || (mode === 'mono' && !capabilities.channels)}
-                  onPress={() => void changeChannels(mode)}
-                  style={[styles.segment, settings.audioChannelMode === mode && styles.segmentSelected]}>
-                  <AppIcon name={mode === 'stereo' ? 'headset' : 'volume-high'} size={20} color="#FFFFFF" />
-                  <Text style={styles.segmentLabel}>{mode === 'stereo' ? 'Estéreo' : 'Mono'}</Text>
-                </LoggedPressable>
-              ))}
+            <View pointerEvents={saving || !capabilities.channels ? 'none' : 'auto'} style={saving || !capabilities.channels ? { opacity: 0.5 } : undefined}>
+              <NativeSegmented accessibilityLabel="Saída de áudio" disabled={saving || !capabilities.channels} value={settings.audioChannelMode}
+                options={[{ value: 'stereo', label: 'Estéreo' }, { value: 'mono', label: 'Mono' }]}
+                onChange={(mode) => void changeChannels(mode)} />
             </View>
             <Text style={styles.settingDescription}>
               {capabilities.channels ? 'Mono combina os canais esquerdo e direito. Estéreo preserva os canais da fonte.'
@@ -369,9 +394,12 @@ export const Settings = () => {
             </Text>
           </View>
           <View style={styles.separator} />
-          <ActionRow icon="musical-notes" label="Qualidade do streaming"
-            detail={AUDIO_QUALITY_LABELS[settings.streamingQuality]}
-            onPress={() => capabilities.quality ? setQualityPicker('streamingQuality') : setNotice('A qualidade nativa requer o novo build do app.')} />
+          <View ref={streamingRow} collapsable={false}>
+            <SettingsRow title="Streaming" accessibilityLabel="Qualidade do streaming" leading={<SettingIcon name="musical-notes" />}
+              disabled={!capabilities.quality} onPress={() => openQualityMenu('streamingQuality')}
+              select={{ value: settings.streamingQuality, options: qualityOptions,
+                onSelect: (value) => change('streamingQuality')(value as AppSettings['streamingQuality']) }} />
+          </View>
           <Text style={styles.statusText}>Vale para as próximas músicas. Arquivos baixados mantêm sua qualidade.</Text>
           <View style={styles.separator} />
           <SettingRow
@@ -384,15 +412,29 @@ export const Settings = () => {
         </Section>
 
         <Section title="APARÊNCIA">
+          <SettingRow icon="options" label="Reduzir animacoes"
+            value={settings.reduceAnimations} onValueChange={change('reduceAnimations')} />
+          <View style={styles.separator} />
+          <SettingRow icon="eye" label="Reduzir blur dinamico"
+            value={settings.reduceDynamicBlur} onValueChange={change('reduceDynamicBlur')} />
+          <View style={styles.separator} />
+          <SettingRow icon="palette" label="Fundo com a capa no player"
+            value={settings.artworkBackdrop} onValueChange={change('artworkBackdrop')} />
+          <View style={styles.separator} />
+          <ActionRow icon="chatbubble-ellipses-outline" label="Letras e provedores" onPress={() => setLyricsVisible(true)} />
+          <View style={styles.separator} />
           <SettingRow icon="eye" label="Blur nas letras inativas"
             description="Mantém em foco a frase que está tocando."
             value={settings.blurInactiveLyrics} onValueChange={change('blurInactiveLyrics')} />
         </Section>
 
         <Section title="DOWNLOADS">
-          <ActionRow icon="download" label="Qualidade dos novos downloads"
-            detail={AUDIO_QUALITY_LABELS[settings.downloadQuality]}
-            onPress={() => capabilities.quality ? setQualityPicker('downloadQuality') : setNotice('A qualidade nativa requer o novo build do app.')} />
+          <View ref={downloadRow} collapsable={false}>
+            <SettingsRow title="Qualidade" accessibilityLabel="Qualidade dos downloads" leading={<SettingIcon name="download" />}
+              disabled={!capabilities.quality} onPress={() => openQualityMenu('downloadQuality')}
+              select={{ value: settings.downloadQuality, options: qualityOptions,
+                onSelect: (value) => change('downloadQuality')(value as AppSettings['downloadQuality']) }} />
+          </View>
           <View style={styles.separator} />
           <SettingRow
             description="Avisa quando um lote termina, inclusive em segundo plano."
@@ -418,13 +460,18 @@ export const Settings = () => {
           <Text selectable numberOfLines={2} style={styles.storagePath}>
             {storage.directory || 'Armazenamento interno do app'}
           </Text>
+          {Platform.OS !== 'web' ? <>
+            <View style={styles.separator} />
+            <ActionRow icon="trash" label="Limpar cache de imagens" disabled={clearingImages}
+              detail={clearingImages ? 'Aguarde' : undefined} onPress={() => void clearArtworkCache()} />
+          </> : null}
         </Section>
 
         <Section title="ATUALIZAÇÕES">
           <SettingRow
             description="Detecta a janela temporária publicada pelo CI e avisa quando for preciso reabrir o app."
             icon="download"
-            label="Verificar ao voltar ao app"
+            label="Avisos de atualizacao do CI"
             onValueChange={change('automaticUpdates')}
             value={settings.automaticUpdates}
           />
@@ -485,7 +532,7 @@ export const Settings = () => {
                   {metric.category} · {metric.action}
                 </Text>
                 <Text style={styles.metricValue}>
-                  n={metric.count} · média {metric.averageMs} ms · p50 {metric.p50Ms} ms · máx {metric.maxMs} ms · falhas {metric.failures}
+                  n={metric.count} · média {metric.averageMs} ms · p50 {metric.p50Ms} ms · p95 {metric.p95Ms} ms · p99 {metric.p99Ms} ms · máx {metric.maxMs} ms · falhas {metric.failures}
                 </Text>
               </View>
             )) : (
@@ -538,166 +585,35 @@ export const Settings = () => {
             onPress={restoreDefaults}
           />
         </Section>
-      </ScrollView>
-      {notice ? <LoggedPressable accessibilityRole="button" accessibilityLabel="Dispensar aviso"
-        onPress={() => setNotice('')} style={styles.notice}><Text style={styles.noticeText}>{notice}</Text><AppIcon name="close" size={18} color="#FFFFFF" /></LoggedPressable> : null}
-      <SheetFrame visible={qualityPicker !== null} title={qualityPicker === 'downloadQuality' ? 'Qualidade dos downloads' : 'Qualidade do streaming'}
-        onClose={() => setQualityPicker(null)}>
-        {(['high', 'economy'] as const).map((quality) => (
-          <LoggedPressable key={quality} accessibilityRole="radio" accessibilityLabel={AUDIO_QUALITY_LABELS[quality]}
-            accessibilityState={{ checked: qualityPicker ? settings[qualityPicker] === quality : false }}
-            onPress={() => {
-              if (qualityPicker) change(qualityPicker)(quality);
-              setQualityPicker(null);
-            }} style={styles.qualityOption}>
-            <View style={styles.settingCopy}>
-              <Text style={styles.settingLabel}>{AUDIO_QUALITY_LABELS[quality]}</Text>
-              <Text style={styles.settingDescription}>{quality === 'high' ? 'Maior bitrate disponível na fonte.' : 'Menor bitrate disponível na fonte.'}</Text>
-            </View>
-            <AppIcon name={qualityPicker && settings[qualityPicker] === quality ? 'radio-button-on' : 'radio-button-off'} size={24} color="#1DB954" />
-          </LoggedPressable>
-        ))}
-      </SheetFrame>
-      <SheetFrame visible={diagnosticsText !== null} title="Diagnósticos" onClose={() => setDiagnosticsText(null)}
-        headerTrailing={<NativeIconButton iconName="copy" systemImage="doc.on.doc" label="Copiar diagnósticos"
-          onPress={() => void Clipboard.setStringAsync(diagnosticsText || '').then(() => setNotice('Diagnósticos copiados.')).catch(() => setNotice('Não foi possível copiar.'))} />}>
-        <Text selectable style={styles.diagnosticsCode}>{diagnosticsText}</Text>
-      </SheetFrame>
-      <StorageManagerModal
-        visible={storageVisible}
-        onClose={() => setStorageVisible(false)}
-        onStorageChanged={(nextStorage) => {
-          setStorage(nextStorage);
-          setSummary((current) => ({
-            ...current,
-            downloads: nextStorage.tracks.length,
-          }));
-        }}
-      />
-    </View>
+    </SheetFrame>
   );
 };
 
 const styles = StyleSheet.create({
-  audioBlock: { padding: 14, gap: 10 },
-  segmentedControl: { flexDirection: 'row', backgroundColor: '#121212', borderRadius: 8, padding: 3 },
-  segment: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, minHeight: 44, borderRadius: 6 },
-  segmentSelected: { backgroundColor: '#3A3A3C' },
-  segmentLabel: { color: '#FFFFFF', fontFamily: 'SF-Semibold', fontSize: 14 },
-  qualityOption: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 16, minHeight: 64 },
+  actionTrailing: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 150 },
+  detailText: { flexShrink: 1, textAlign: 'right' },
+  settingIcon: { width: 26, alignItems: 'center', justifyContent: 'center' },
+  separator: { backgroundColor: 'rgba(255,255,255,0.09)', height: StyleSheet.hairlineWidth, marginLeft: 16 },
+  audioBlock: { padding: 16, gap: 12 },
+  settingLabel: { color: '#F2F2F2', fontSize: 16, fontFamily: 'SF-Regular', letterSpacing: 0 },
+  settingDescription: { color: '#C8C8C8', fontSize: 13, lineHeight: 18, fontFamily: 'SF-Regular' },
+  statusText: { color: '#C8C8C8', fontSize: 13, lineHeight: 18, paddingHorizontal: 16, paddingVertical: 12 },
+  summaryRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 12 },
+  summaryText: { color: '#C8C8C8', fontFamily: 'SF-Regular', fontSize: 13 },
+  summaryDot: { color: '#9E9E9E', fontSize: 13 },
+  storagePath: { color: '#9E9E9E', fontSize: 11, lineHeight: 16, paddingHorizontal: 16, paddingBottom: 12 },
+  metricsBlock: { gap: 8, padding: 16 },
+  metricsTitle: { color: '#F2F2F2', fontFamily: 'SF-Semibold', fontSize: 14 },
+  metricRow: { gap: 4, paddingTop: 4 },
+  metricAction: { color: '#C8C8C8', fontFamily: 'SF-Semibold', fontSize: 12 },
+  metricValue: { color: '#9E9E9E', fontFamily: 'SF-Regular', fontSize: 11, lineHeight: 16 },
+  privacyRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
+  privacyText: { flex: 1, color: '#C8C8C8', fontSize: 15, lineHeight: 21, fontFamily: 'SF-Regular' },
+  aboutRow: { flexDirection: 'row', alignItems: 'center', minHeight: 56, paddingHorizontal: 16 },
+  actionLabel: { flex: 1, minWidth: 0, color: '#F2F2F2', fontFamily: 'SF-Regular', fontSize: 18 },
+  actionDetail: { color: '#C8C8C8', maxWidth: '40%', flexShrink: 1, textAlign: 'right', fontSize: 15 },
+  noticePosition: { position: 'absolute', left: 16, right: 16, borderRadius: 18, zIndex: 40 },
+  notice: { padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  noticeText: { flex: 1, color: '#F2F2F2', fontSize: 13, lineHeight: 19 },
   diagnosticsCode: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: '#D6E6E1', fontSize: 12, lineHeight: 19 },
-  notice: { position: 'absolute', bottom: BOTTOM_NAVIGATION_HEIGHT + 110, left: 16, right: 16, padding: 14, borderRadius: 8, backgroundColor: '#303033', flexDirection: 'row', alignItems: 'center', gap: 12 },
-  noticeText: { flex: 1, color: '#FFFFFF', fontSize: 13, lineHeight: 19 },
-  container: { backgroundColor: '#121212', flex: 1 },
-  header: {
-    alignItems: 'center',
-    backgroundColor: '#121212',
-    flexDirection: 'row',
-    minHeight: 60,
-    paddingBottom: 8,
-    paddingHorizontal: 12,
-  },
-  headerTitle: {
-    color: '#FFFFFF',
-    flex: 1,
-    fontFamily: 'SF-Bold',
-    fontSize: 20,
-    textAlign: 'center',
-  },
-  headerSpacer: { height: 44, width: 44 },
-  content: {
-    gap: 24,
-    paddingBottom: BOTTOM_NAVIGATION_HEIGHT + 110,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  section: { gap: 8 },
-  sectionTitle: {
-    color: '#8E8E93',
-    fontFamily: 'SF-Semibold',
-    fontSize: 12,
-    paddingHorizontal: 4,
-  },
-  sectionBody: {
-    backgroundColor: '#1C1C1E',
-    borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-  },
-  settingRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    minHeight: 72,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-  },
-  settingIcon: {
-    alignItems: 'center',
-    backgroundColor: '#2C2C2E',
-    borderRadius: 7,
-    height: 34,
-    justifyContent: 'center',
-    width: 34,
-  },
-  destructiveIcon: { backgroundColor: 'rgba(255,69,58,0.12)' },
-  settingCopy: { flex: 1, gap: 3, minWidth: 0 },
-  settingLabel: { color: '#FFFFFF', fontFamily: 'SF-Semibold', fontSize: 15 },
-  settingDescription: {
-    color: '#8E8E93',
-    fontFamily: 'SF-Regular',
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  separator: { backgroundColor: '#303033', height: StyleSheet.hairlineWidth, marginLeft: 60 },
-  actionRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    minHeight: 56,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  rowPressed: { opacity: 0.65 },
-  actionLabel: { color: '#FFFFFF', flex: 1, minWidth: 0, fontFamily: 'SF-Semibold', fontSize: 15 },
-  actionDetail: { color: '#8E8E93', maxWidth: '40%', flexShrink: 1, textAlign: 'right', fontFamily: 'SF-Regular', fontSize: 13 },
-  destructiveText: { color: '#FF6B6B' },
-  summaryRow: {
-    alignItems: 'center',
-    borderTopColor: '#303033',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  summaryText: { color: '#A8A8AD', fontFamily: 'SF-Regular', fontSize: 12 },
-  summaryDot: { color: '#5A5A5F', fontSize: 12 },
-  storagePath: {
-    color: '#6F6F74',
-    fontFamily: 'SF-Regular',
-    fontSize: 10,
-    lineHeight: 14,
-    paddingBottom: 11,
-    paddingHorizontal: 14,
-  },
-  statusText: {
-    borderTopColor: '#303033',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    color: '#A8A8AD',
-    fontFamily: 'SF-Regular',
-    fontSize: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-  },
-  metricsBlock: { gap: 7, paddingHorizontal: 14, paddingVertical: 12 },
-  metricsTitle: { color: '#FFFFFF', fontFamily: 'SF-Semibold', fontSize: 12 },
-  metricRow: { gap: 2, paddingTop: 4 },
-  metricAction: { color: '#A8A8AD', fontFamily: 'SF-Semibold', fontSize: 11 },
-  metricValue: { color: '#77777D', fontFamily: 'SF-Regular', fontSize: 10, lineHeight: 14 },
-  privacyRow: { alignItems: 'center', flexDirection: 'row', gap: 11, padding: 14 },
-  privacyText: { color: '#A8A8AD', flex: 1, fontFamily: 'SF-Regular', fontSize: 13, lineHeight: 18 },
-  aboutRow: { alignItems: 'center', flexDirection: 'row', minHeight: 54, paddingHorizontal: 14 },
 });

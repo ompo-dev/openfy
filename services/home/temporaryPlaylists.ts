@@ -21,6 +21,9 @@ export const publishHomePlaylists = (home: PersonalizedHomeSnapshot) => {
   const seed = home.seeds?.[0];
   if (seed) collections.push({ id: homeRadioPlaylistId(seed.name), title: `Rádio de ${seed.name}`,
     tracks: home.similarTracks?.length ? home.similarTracks : home.discoveries });
+  for (const radio of home.radios || []) collections.push({
+    id: homeRadioPlaylistId(radio.seed.name), title: `Rádio de ${radio.seed.name}`, tracks: radio.tracks,
+  });
   for (const collection of collections) {
     playlists.delete(collection.id);
     playlists.set(collection.id, { ...collection, tracks: collection.tracks.slice(0, 100) });

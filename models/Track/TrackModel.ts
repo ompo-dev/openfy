@@ -10,6 +10,7 @@ export type TrackAlbumRef = {
 };
 
 export type TrackModel = {
+  isrc?: string;
   artistCreditsVersion?: number;
   id: string;
   title: string;
@@ -33,6 +34,12 @@ export type TrackModel = {
   isDownloaded?: boolean;
   isPlaying?: boolean;
   explicit?: boolean;
+};
+
+export const normalizeTrackIsrc = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const isrc = value.trim().toUpperCase();
+  return /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(isrc) ? isrc : undefined;
 };
 
 const albumKey = (album: TrackAlbumRef) =>

@@ -52,7 +52,7 @@ const uniqueChannels = (artists: { id?: string; name: string }[]): ArtistReferen
     if (!key.startsWith('youtube:')) return;
     const known = canonicalArtistReference(artist);
     const id = known.id!.startsWith('UC') ? toYouTubeMusicArtistRouteId(known.id, known.name) : known.id!;
-    channels.set(key, { id, name: known.name });
+    channels.set(key, { id, name: artist.name.trim() || known.name });
   });
   return [...channels.values()];
 };
@@ -103,17 +103,10 @@ export const resolveTrackArtists = async (track: ArtistIdentityTrack): Promise<A
       return /^UC[\w-]{22}$/.test(channel) && name
         ? [{ id: toYouTubeMusicArtistRouteId(channel, name), name }] : [];
     }));
-    return Promise.all(artists.map(async (artist) => {
-      const known = canonicalArtistReference(artist);
-      if (known !== artist) return { id: known.id!, name: known.name };
-      const channel = parseYouTubeMusicArtistRoute(artist.id).browseId;
-      const page = client.music.getArtist
-        ? await withYouTubeMusicTimeout(client.music.getArtist(channel), 3_000).catch(() => null) : null;
-      const name = getYouTubeMusicText(page?.header?.title) || artist.name;
-      const resolved = { id: toYouTubeMusicArtistRouteId(channel, name), name };
-      rememberPublicArtistIdentity(resolved);
-      return resolved;
-    }));
+    // A credit endpoint already identifies its channel. Loading every profile
+    // here delays credits and can replace an artist name with an uploader label.
+    artists.forEach(rememberPublicArtistIdentity);
+    return artists;
   }, 6 * 60 * 60_000).catch(() => sameRecording ? native : []);
 };
 
@@ -165,7 +158,8 @@ export const personalizeArtistSearch = async (
   const candidates = (context.tracks || []).filter((track) =>
     (track.artists || []).some((artist) => normalize(artist.name).includes(term)) ||
     normalize(track.artistName || '').includes(term)).slice(0, 3);
-  for (const track of candidates) known.push(...await resolveTrackArtists(track));
+  const recordingCredits = await Promise.all(candidates.map(resolveTrackArtists));
+  recordingCredits.forEach((credits) => known.push(...credits));
   const relevant = known.filter((artist) => artistIdentityKey(artist.id).startsWith('youtube:') && normalize(artist.name).includes(term));
   const merged = new Map<string, ArtistModel>(results.map((artist) => [artistIdentityKey(artist.id) || artist.id, artist]));
   relevant.forEach((artist) => {

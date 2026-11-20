@@ -35,5 +35,6 @@ export const localizeYouTubeMusicClient = (
     search, getArtist,
     getPlaylist: music.getPlaylist?.bind(music), getAlbum: music.getAlbum?.bind(music),
     getUpNext: music.getUpNext?.bind(music), getSearchSuggestions: music.getSearchSuggestions?.bind(music),
+    getLyrics: music.getLyrics?.bind(music),
   }, getChannel: client.getChannel?.bind(client) };
 };

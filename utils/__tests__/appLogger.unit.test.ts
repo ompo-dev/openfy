@@ -5,6 +5,7 @@ import {
   formatPerformanceMetricSummary,
   getLogBuffer,
   getPerformanceMetricSummary,
+  MAX_LOG_ENTRIES,
   log,
   logConfig,
   sanitizeLogData,
@@ -33,6 +34,14 @@ describe('app logger', () => {
     expect(entries[0].event).toBe('event-1504');
     expect(entries[1_504].event).toBe('event-0');
     expect(formatLogBuffer()).toContain('event-0');
+  });
+
+  it('bounds diagnostics from long playback sessions and keeps the newest records', () => {
+    for (let index = 0; index < MAX_LOG_ENTRIES + 20; index += 1) log.player(`play-${index}`);
+    const entries = getLogBuffer();
+    expect(entries).toHaveLength(MAX_LOG_ENTRIES);
+    expect(entries[0].event).toBe(`play-${MAX_LOG_ENTRIES + 19}`);
+    expect(entries.at(-1)?.event).toBe('play-20');
   });
 
   it('redacts secrets and URL query values before storing details', () => {
@@ -84,6 +93,8 @@ describe('app logger', () => {
       action: 'catalog query',
       count: 1,
       failures: 0,
+      p95Ms: expect.any(Number),
+      p99Ms: expect.any(Number),
     });
     expect(formatPerformanceMetricSummary(metrics)).toContain('catalog query');
   });

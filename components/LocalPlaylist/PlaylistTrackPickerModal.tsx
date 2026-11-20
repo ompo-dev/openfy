@@ -2,7 +2,7 @@ import * as React from 'react';
 import {
   StyleSheet,
   Text,
-  TextInput,
+  View,
 } from 'react-native';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 
@@ -11,6 +11,7 @@ import { SheetFrame } from '../native';
 import { TrackRow } from '../common/TrackRow';
 import { ProgressiveFlatList } from '../common/ProgressiveList';
 import { PlaylistSheetAction } from './PlaylistForm';
+import { Section, TextField } from '../gym';
 
 type PlaylistTrackPickerModalProps = {
   existingTrackIds: string[];
@@ -74,22 +75,18 @@ export const PlaylistTrackPickerModal = ({
 
   return (
     <SheetFrame visible={visible} title="Adicionar músicas" onClose={onClose} scroll={false}
-      headerTrailing={<PlaylistSheetAction label={confirmLabel} disabled={!selectedCount} onPress={confirm} />}
-      contentHeight={72 + Math.max(1, visibleTracks.length) * 64}>
-      <TextInput
-        autoCapitalize="none"
-        autoCorrect={false}
-        onChangeText={setQuery}
-        placeholder="Buscar na biblioteca"
-        placeholderTextColor="#858585"
-        style={styles.searchInput}
-        value={query}
-      />
+      headerTrailing={<PlaylistSheetAction label={confirmLabel} disabled={!selectedCount} onPress={confirm} />}>
       <ProgressiveFlatList
+        testID="playlist-track-picker-list"
         listKey={query}
         data={visibleTracks}
         keyExtractor={(track) => track.spotifyId}
         keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={<View style={styles.searchField}>
+          <Section><TextField label="Buscar" accessibilityLabel="Buscar na biblioteca"
+            autoCapitalize="none" autoCorrect={false} onChangeText={setQuery}
+            placeholder="Buscar na biblioteca" placeholderTextColor="#858585" value={query} /></Section>
+        </View>}
         ListEmptyComponent={
           <Text style={styles.empty}>Nenhuma música encontrada na biblioteca.</Text>
         }
@@ -127,19 +124,11 @@ export const PlaylistTrackPickerModal = ({
 };
 
 const styles = StyleSheet.create({
-  searchInput: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 8,
-    color: '#FFFFFF',
-    fontFamily: 'SF-Regular',
-    fontSize: 14,
-    height: 42,
-    paddingHorizontal: 12,
-  },
   trackList: {
     flex: 1,
     minHeight: 0,
   },
+  searchField: { paddingBottom: 16 },
   empty: {
     color: 'rgba(255, 255, 255, 0.62)',
     fontFamily: 'SF-Regular',

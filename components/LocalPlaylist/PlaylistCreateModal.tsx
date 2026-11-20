@@ -4,6 +4,7 @@ import { createLocalPlaylist, type LocalPlaylist } from '@services';
 import { SheetFrame } from '../native';
 import { PlaylistForm, PlaylistSheetAction } from './PlaylistForm';
 import { useLibraryStore } from '../../stores/useLibraryStore';
+import { HeaderIconButton } from '../gym';
 
 type PlaylistCreateModalProps = {
   onClose: () => void;
@@ -36,6 +37,7 @@ export const PlaylistCreateModal = ({ onClose, onCreated, visible }: PlaylistCre
     } finally { pending.current = false; setIsSaving(false); }
   };
   return <SheetFrame visible={visible} title="Nova playlist" onClose={onClose}
+    hideDefaultClose headerLeading={<HeaderIconButton icon="x" onPress={onClose} />}
     headerTrailing={<PlaylistSheetAction label="Criar playlist" onPress={() => void create()}
       disabled={!title.trim()} busy={isSaving} />}>
     <PlaylistForm title={title} description={description} onTitleChange={setTitle}

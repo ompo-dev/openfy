@@ -34,6 +34,7 @@ import { rememberCachedArtistImage } from '../services/library/artistImageCache'
 import { useConnectivityStore } from '../stores/useConnectivityStore';
 import { useOTAStartupUpdate } from '../hooks/useOTAStartupUpdate';
 import { AppUpdateScreen } from '../components/Updates/AppUpdateScreen';
+import { SettingsModalHost } from '../components/Settings/SettingsModalHost';
 
 import 'react-native-reanimated';
 
@@ -162,6 +163,7 @@ export default function RootLayout() {
                       />
                     </Stack>
                     <PlayerOverlay />
+                    <SettingsModalHost />
                     <GlobalConnectivity />
                     <LibraryImportFeedback />
                     <AppUpdateScreen phase={updatePhase} progress={startupUpdate.downloadProgress}

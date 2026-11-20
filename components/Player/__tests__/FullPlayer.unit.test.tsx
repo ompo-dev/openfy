@@ -25,6 +25,10 @@ jest.mock('../../../services/library/playerAlbum', () => ({
 const mockNavigate = jest.fn();
 const mockReplace = jest.fn();
 const mockTrackPlaylistPicker = jest.fn(() => null);
+jest.mock('../LyricsProviderSheet', () => ({
+  LyricsProviderSheet: ({ visible }: { visible: boolean }) => visible
+    ? require('react').createElement(require('react-native').View, { testID: 'lyrics-provider-sheet' }) : null,
+}));
 const mockSwipeableArtwork = jest.fn((props) => {
   const React = require('react');
   const { Image, View } = require('react-native');
@@ -102,7 +106,6 @@ jest.mock('react-native-gesture-handler', () => {
   };
 });
 jest.mock('@services', () => ({
-  createEstimatedLyricSegments: jest.requireActual('../../../services/lyrics/lyricsService').createEstimatedLyricSegments,
   ...jest.requireActual('../../../services/lyrics/lyricTimeline'),
   ...jest.requireActual('../../../services/spotify/linkParser'),
   getCatalogMapping: jest.fn(),
@@ -132,7 +135,7 @@ jest.mock('../../native', () => {
 });
 jest.mock('@expo/ui/swift-ui', () => {
   const { View, Text } = require('react-native');
-  return { Host: View, VStack: View, Text };
+  return { Host: View, VStack: View, RNHostView: View, Text };
 });
 jest.mock('@react-native-masked-view/masked-view', () => {
   const React = require('react');
@@ -189,7 +192,6 @@ const makePlayer = (track = {}) => ({
   isLoadingLyrics: false,
   isShuffle: false,
   repeatMode: 'off',
-  updateLyricsSegments: jest.fn().mockResolvedValue(true),
 });
 
 const makePlayerWithoutTrack = () => ({
@@ -230,6 +232,25 @@ const getLastArtworkProps = () =>
   mockSwipeableArtwork.mock.calls.at(-1)?.[0] as Record<string, any>;
 
 describe('FullPlayer artist row and YouTube source', () => {
+  it('treats a composed mix as local audio rather than searching or downloading a YouTube replacement', async () => {
+    const player = { ...makePlayer({ localOnly: true, spotifyId: 'local_mix_test_render_2' }), queueSourceId: 'playlist:local_mix_test:revision:2' };
+    jest.mocked(usePlayer).mockReturnValue(player as any);
+    const view = await render(<FullPlayer visible onClose={jest.fn()} />);
+    expect(view.getByLabelText('Mix disponível offline').props.accessibilityState.disabled).toBe(true);
+    expect(view.queryByLabelText('Opções do YouTube')).toBeNull();
+    expect(view.queryByTestId('player-artist-details')).toBeNull();
+    expect(resolveSpotifyTrackVideoId).not.toHaveBeenCalled();
+    expect(getCatalogMapping).not.toHaveBeenCalled();
+    expect(mockTrackPlaylistPicker).not.toHaveBeenCalled();
+    await fireEvent.press(view.getByLabelText('Abrir mix'));
+    expect(mockNavigate).toHaveBeenCalledWith('/(tabs)/library/playlist/local_mix_test', { dangerouslySingular: true });
+  });
+  it('keeps the play surface untinted so the white glyph remains visible', async () => {
+    const screen = await mountPlayer();
+    const surface = screen.getByTestId('player-play-surface');
+    expect(surface.props.tintColor).toBeUndefined();
+    expect(StyleSheet.flatten(surface.props.style).backgroundColor).toBeUndefined();
+  });
   it('opens the source only after closing and retains the lower lyrics button', async () => {
     const onClose = jest.fn();
     const state = { ...makePlayer(), queueSourceId: 'playlist:home_mix_radio_sotam' };
@@ -538,7 +559,7 @@ describe('FullPlayer artist row and YouTube source', () => {
     await fireEvent.press(screen.getByText('Editar link do YouTube'));
     await fireEvent.changeText(screen.getByPlaceholderText('https://www.youtube.com/watch?v=...'),
       'https://www.youtube.com/watch?v=bbbbbbbbbbb');
-    await fireEvent.press(screen.getByText('Atualizar Áudio'));
+    await fireEvent.press(screen.getByLabelText('Atualizar Áudio'));
     await waitFor(() => expect(player.playTrack).toHaveBeenCalled());
     const repaired = { ...player.currentTrack, youtubeVideoId: 'bbbbbbbbbbb',
       youtubeUrl: 'https://www.youtube.com/watch?v=bbbbbbbbbbb', isDownloaded: false,
@@ -668,10 +689,9 @@ describe('FullPlayer artist row and YouTube source', () => {
       await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
       await act(async () => { jest.advanceTimersByTime(120); });
       expect(scroll).toHaveBeenLastCalledWith({ index: 2, animated: false, viewPosition: 0.35 });
-      expect(screen.getByText('First line').props.modifiers.find((modifier: { $type: string }) => modifier.$type === 'blur').radius).toBe(3);
-      await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
-      expect(screen.queryByTestId('player-artist-details')).toBeNull();
-      await fireEvent.press(screen.getByLabelText('Cancelar edição da letra'));
+      expect(screen.getAllByTestId('lyric-blur-layer')[0].props.modifiers.find((modifier: { $type: string }) => modifier.$type === 'blur').radius).toBe(3);
+      await fireEvent.press(screen.getByLabelText('Selecionar provedor da letra'));
+      expect(screen.getByTestId('lyrics-provider-sheet')).toBeTruthy();
       expect(screen.getByTestId('player-artist-details')).toBeTruthy();
       await screen.unmount();
     } finally {
@@ -722,8 +742,8 @@ describe('FullPlayer artist row and YouTube source', () => {
       } as any);
       const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
       await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
-      const blurRadii = () => ['Current line', 'Next line'].map((text) =>
-        screen.getByText(text).props.modifiers.find((modifier: { $type: string }) => modifier.$type === 'blur').radius
+      const blurRadii = () => screen.getAllByTestId('lyric-blur-layer').map((layer) =>
+        layer.props.modifiers.find((modifier: { $type: string }) => modifier.$type === 'blur').radius
       );
       expect(blurRadii()).toEqual([0, 3]);
       await fireEvent(screen.getByTestId('player-synced-lyrics'), 'scrollBeginDrag');
@@ -781,7 +801,7 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(screen.getByLabelText('Fechar letras sincronizadas')).toBeTruthy();
   });
 
-  it('keeps the timing editor in a controls block that can grow to fit its content', async () => {
+  it('keeps playback controls and credits available while selecting a lyrics provider', async () => {
     Platform.OS = 'ios';
     jest.mocked(usePlayer).mockReturnValue({
       ...makePlayer(),
@@ -792,17 +812,12 @@ describe('FullPlayer artist row and YouTube source', () => {
     } as any);
     const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
     await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
-    await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
+    await fireEvent.press(screen.getByLabelText('Selecionar provedor da letra'));
     const block = screen.getByTestId('player-controls-block');
     expect(StyleSheet.flatten(block.props.style).height).toBeUndefined();
-    expect(within(block).getByTestId('lyric-sync-times')).toBeTruthy();
-    expect(within(block).getByText('INICIO')).toBeTruthy();
-    expect(within(block).getByText('FIM')).toBeTruthy();
-    expect(within(block).getByText('DURACAO')).toBeTruthy();
-    expect(within(block).getByText('16,220 s')).toBeTruthy();
-    expect(within(block).getByLabelText('Abrir JSON da letra')).toBeTruthy();
-    expect(screen.queryByTestId('player-artist-details')).toBeNull();
-    await fireEvent.press(screen.getByLabelText('Cancelar edição da letra'));
+    expect(within(block).getByLabelText('Tocar')).toBeTruthy();
+    expect(screen.getByTestId('lyrics-provider-sheet')).toBeTruthy();
+    expect(screen.queryByTestId('lyric-sync-times')).toBeNull();
     expect(screen.getByTestId('player-artist-details')).toBeTruthy();
   });
 
@@ -821,83 +836,13 @@ describe('FullPlayer artist row and YouTube source', () => {
     expect(screen.queryByTestId('player-synced-lyrics')).toBeNull();
   });
 
-  it('creates lyrics from an unavailable track and saves the typed text', async () => {
-    const player = makePlayer();
-    player.playerState.positionMs = 15000;
-    jest.mocked(usePlayer).mockReturnValue(player as any);
+  it.each([null, { segments: [], plainLyrics: 'Sem timestamps' }])('opens providers with missing or plain lyrics: %s', async (lyricsData) => {
+    jest.mocked(usePlayer).mockReturnValue({ ...makePlayer(), lyricsData } as any);
     const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
     await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
-    await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
-    expect(screen.getByTestId('lyric-sync-editor')).toBeTruthy();
-    expect(screen.getByLabelText('Abrir JSON da letra')).toBeTruthy();
-    await fireEvent.press(screen.getByLabelText('Confirmar sincronização da letra'));
-    expect(player.updateLyricsSegments).not.toHaveBeenCalled();
-    await fireEvent.changeText(screen.getByLabelText('Texto do trecho 1'), 'Letra criada');
-    await fireEvent.press(screen.getByLabelText('Confirmar sincronização da letra'));
-    expect(player.updateLyricsSegments).toHaveBeenCalledWith([
-      { index: 0, startTimeMs: 0, endTimeMs: 5000, text: 'Letra criada' },
-    ]);
-  });
-
-  it('imports JSON into a new lyric and preserves a cancelled empty draft', async () => {
-    const player = makePlayer();
-    jest.mocked(usePlayer).mockReturnValue(player as any);
-    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
-    await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
-    await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
-    await fireEvent.press(screen.getByLabelText('Cancelar edição da letra'));
-    expect(player.updateLyricsSegments).not.toHaveBeenCalled();
-    expect(screen.getByText('Letra não disponível para esta faixa.')).toBeTruthy();
-    await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
-    await fireEvent.press(screen.getByLabelText('Abrir JSON da letra'));
-    await fireEvent.press(screen.getByLabelText('Editar JSON'));
-    await fireEvent.changeText(screen.getByLabelText('Conteudo JSON da letra'), JSON.stringify({ segments: [
-      { startTimeMs: 2000, endTimeMs: 10000, text: 'Criada no JSON' },
-    ] }));
-    await fireEvent.press(screen.getByLabelText('Aplicar JSON da letra'));
-    await fireEvent.press(screen.getByLabelText('Confirmar sincronização da letra'));
-    expect(player.updateLyricsSegments).toHaveBeenCalledWith([
-      { index: 0, startTimeMs: 2000, endTimeMs: 10000, text: 'Criada no JSON' },
-    ]);
-  });
-
-  it.each(['Primeiro verso\nSegundo verso', 'Uma única frase'])('edits untimed lyrics with a selectable draft: %s', async (plainLyrics) => {
-    const player = { ...makePlayer(), lyricsData: { segments: [], plainLyrics } };
-    jest.mocked(usePlayer).mockReturnValue(player as any);
-    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
-    await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
-    await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
-    expect(screen.getByTestId('lyric-sync-times')).toBeTruthy();
-    expect(screen.getByLabelText('Texto do trecho 1').props.value).toBe(plainLyrics.split('\n')[0]);
-    await fireEvent.press(screen.getByLabelText('Confirmar sincronização da letra'));
-    const [draft] = player.updateLyricsSegments.mock.calls[0];
-    expect(draft.map((segment: any) => segment.text)).toEqual(plainLyrics.split('\n'));
-    draft.forEach((segment: any) => expect(segment.endTimeMs).toBeGreaterThan(segment.startTimeMs));
-    expect(player.lyricsData.segments).toEqual([]);
-  });
-
-  it.each([
-    { label: 'empty cached response without segments', lyrics: { isSynced: false } },
-    { label: 'plain cached lyrics without segments', lyrics: { isSynced: false, plainLyrics: 'Primeiro verso\nSegundo verso' } },
-    { label: 'plain cached lyrics with null segments', lyrics: { isSynced: false, plainLyrics: 'Primeiro verso\nSegundo verso', segments: null } },
-    { label: 'cached segments with non-contiguous indices', lyrics: { isSynced: true, segments: [
-      { index: 14, startTimeMs: 0, endTimeMs: 5000, text: 'Verso salvo' },
-    ] } },
-  ])('opens the pencil editor for $label', async ({ lyrics }) => {
-    const player = { ...makePlayer(), lyricsData: lyrics };
-    jest.mocked(usePlayer).mockReturnValue(player as any);
-    const screen = await render(<FullPlayer visible onClose={jest.fn()} />);
-    await fireEvent.press(screen.getByTestId('player-lyrics-toggle'));
-    await fireEvent.press(screen.getByLabelText('Editar sincronização da letra'));
-    expect(screen.getByLabelText('Confirmar sincronização da letra')).toBeTruthy();
-    expect(screen.getByTestId('lyric-sync-editor')).toBeTruthy();
-    expect(screen.getByLabelText('Texto do trecho 1')).toBeTruthy();
-    expect(screen.getByLabelText('Abrir JSON da letra')).toBeTruthy();
-    await fireEvent.changeText(screen.getByLabelText('Texto do trecho 1'), 'Texto ajustado');
-    await fireEvent.press(screen.getByLabelText('Confirmar sincronização da letra'));
-    expect(player.updateLyricsSegments).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ index: 0, text: 'Texto ajustado' }),
-    ]));
+    await fireEvent.press(screen.getByLabelText('Selecionar provedor da letra'));
+    expect(screen.getByTestId('lyrics-provider-sheet')).toBeTruthy();
+    expect(screen.queryByTestId('lyric-sync-editor')).toBeNull();
   });
 
   it('replaces the loading state when lyrics arrive without closing the lyrics view', async () => {

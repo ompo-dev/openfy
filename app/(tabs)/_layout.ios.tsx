@@ -4,6 +4,7 @@
  * Android/web resolve `_layout.tsx` (custom GlassSurface tab bar).
  */
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
+import { FEED_ENABLED } from '../../config/features';
 
 const { Label, Icon } = NativeTabs.Trigger;
 
@@ -19,13 +20,13 @@ export default function TabLayout() {
         <Icon sf={{ default: 'house', selected: 'house.fill' }} />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger
+      {FEED_ENABLED ? <NativeTabs.Trigger
         name="feed"
         contentStyle={{ backgroundColor: '#121212' }}
       >
         <Label>Feed</Label>
         <Icon sf={{ default: 'text.bubble', selected: 'text.bubble.fill' }} />
-      </NativeTabs.Trigger>
+      </NativeTabs.Trigger> : []}
 
       <NativeTabs.Trigger
         name="library"

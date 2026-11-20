@@ -28,6 +28,16 @@ describe('appSettings', () => {
     expect(normalizeAppSettings({ audioChannelMode: 'mono', streamingQuality: 'economy',
       downloadQuality: 'high' })).toMatchObject({ audioChannelMode: 'mono', streamingQuality: 'economy', downloadQuality: 'high' });
   });
+  it('normalizes and persists real lyric, motion and preload preferences', async () => {
+    expect(normalizeAppSettings({ lyricsFontSize: 500, preloadRadius: -2 })).toMatchObject({
+      lyricsFontSize: 34, preloadRadius: 1 });
+    expect(normalizeAppSettings({ lyricsFontSize: NaN, preloadRadius: 1.6 })).toMatchObject({
+      lyricsFontSize: 26, preloadRadius: 2 });
+    await updateAppSettings({ lyricsWordHighlight: false, lyricsAutoScroll: false,
+      reduceAnimations: true, reduceDynamicBlur: true, artworkBackdrop: false, preloadRadius: 1, lyricsFontSize: 30 });
+    expect(getCachedAppSettings()).toMatchObject({ lyricsWordHighlight: false, lyricsAutoScroll: false,
+      reduceAnimations: true, reduceDynamicBlur: true, artworkBackdrop: false, preloadRadius: 1, lyricsFontSize: 30 });
+  });
 
   it('persists audio and diagnostic preferences independently', async () => {
     await updateAppSettings({ audioChannelMode: 'mono', streamingQuality: 'economy',
@@ -94,5 +104,15 @@ describe('appSettings', () => {
       preloadNextTrack: false,
       automaticUpdates: false,
     });
+  });
+
+  it('sanitizes processing ranges and migrates provider order without duplicate sources', () => {
+    const settings = normalizeAppSettings({ equalizerBands: [99, -99, NaN, '3'],
+      playbackSpeed: 8, equalizerToneX: -20, audioBalance: Infinity, lyricsOffsetMs: -50000,
+      lyricsSourceOrder: ['lrclib', 'lrclib', 'unknown'], lyricsDisabledSources: ['youtube', 'youtube', 'unknown'] });
+    expect(settings).toMatchObject({ equalizerBands: [12, -12, 0, 0, 0, 0, 0], playbackSpeed: 2,
+      equalizerToneX: -5, audioBalance: 0, lyricsOffsetMs: -10000, lyricsDisabledSources: ['youtube'] });
+    expect(settings.lyricsSourceOrder[0]).toBe('lrclib');
+    expect(new Set(settings.lyricsSourceOrder).size).toBe(DEFAULT_APP_SETTINGS.lyricsSourceOrder.length);
   });
 });

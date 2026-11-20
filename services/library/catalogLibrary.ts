@@ -6,11 +6,14 @@ import {
   type DownloadTrackInput,
 } from '../download/downloadManager';
 import { removeTrackFromLocalPlaylists } from './localPlaylistManager';
-import { albumAssociationsForTrack, mergeAlbumAssociations, type TrackAlbumRef } from '../../models/Track/TrackModel';
+import { albumAssociationsForTrack, mergeAlbumAssociations, normalizeTrackIsrc, type TrackAlbumRef } from '../../models/Track/TrackModel';
+import { getTrackYouTubeVideoId } from '../spotify/linkParser';
+import { useLibraryStore } from '../../stores/useLibraryStore';
 
 export type CatalogSourcePlatform = 'spotify' | 'youtube';
 
 export type CatalogTrackInput = {
+  isrc?: string;
   artistCreditsVersion?: number;
   spotifyId: string;
   title: string;
@@ -48,6 +51,9 @@ export type LibraryTrack = CatalogTrack & {
 const STORAGE_KEY = 'openfy_catalog_tracks_v1';
 let storageMutation = Promise.resolve();
 let libraryTracksRequest: Promise<LibraryTrack[]> | null = null;
+let libraryTracksCache: { revision: number; expiresAt: number; tracks: LibraryTrack[] } | null = null;
+let catalogCacheGeneration = 0;
+const invalidateLibraryTracksCache = () => { libraryTracksCache = null; catalogCacheGeneration += 1; };
 
 const sourcePlatformFrom = (
   track: Pick<CatalogTrackInput, 'spotifyId' | 'youtubeVideoId' | 'sourcePlatform'>
@@ -103,12 +109,15 @@ const normalizeInput = (
   current?: CatalogTrack
 ): CatalogTrack => {
   const now = new Date().toISOString();
+  const youtubeVideoId = getTrackYouTubeVideoId({ youtubeVideoId: input.youtubeVideoId, youtubeUrl: input.youtubeUrl })
+    || (current && getTrackYouTubeVideoId(current)) || getTrackYouTubeVideoId(input);
   const albumAssociations = normalizeAlbumAssociations([
     ...(current ? albumAssociationsForTrack(current) || [] : []),
     ...(input.albumAssociations || []),
     ...(albumAssociationsForTrack(input) || []),
   ]);
   return {
+    isrc: normalizeTrackIsrc(input.isrc) || normalizeTrackIsrc(current?.isrc),
     artistCreditsVersion: input.artistCreditsVersion || current?.artistCreditsVersion,
     spotifyId: input.spotifyId.trim(),
     title: input.title.trim() || current?.title || 'Música',
@@ -141,16 +150,13 @@ const normalizeInput = (
     ...(input.discNumber || current?.discNumber
       ? { discNumber: input.discNumber || current?.discNumber }
       : {}),
-    ...(input.youtubeVideoId || current?.youtubeVideoId
-      ? { youtubeVideoId: input.youtubeVideoId || current?.youtubeVideoId }
-      : {}),
-    ...(input.youtubeUrl || current?.youtubeUrl
-      ? { youtubeUrl: input.youtubeUrl || current?.youtubeUrl }
-      : {}),
+    ...(youtubeVideoId ? { youtubeVideoId, youtubeUrl: `https://www.youtube.com/watch?v=${youtubeVideoId}` }
+      : input.youtubeUrl || current?.youtubeUrl ? { youtubeUrl: input.youtubeUrl || current?.youtubeUrl } : {}),
   };
 };
 
 const catalogInputFromDownload = (track: DownloadedTrack): CatalogTrackInput => ({
+  isrc: track.isrc,
   artistCreditsVersion: track.artistCreditsVersion,
   spotifyId: track.spotifyId,
   title: track.title,
@@ -204,6 +210,7 @@ export const upsertCatalogTracks = async (
       ...[...touchedIds].map((id) => byId.get(id)!),
     ];
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+    invalidateLibraryTracksCache();
   });
   storageMutation = operation.catch(() => {});
   await operation;
@@ -224,6 +231,7 @@ export const removeCatalogTracks = async (
     removed = current.length - next.length;
     if (removed > 0) {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      invalidateLibraryTracksCache();
     }
   });
   storageMutation = operation.catch(() => {});
@@ -305,10 +313,18 @@ const loadLibraryTracks = async (): Promise<LibraryTrack[]> => {
 };
 
 export const getLibraryTracks = (): Promise<LibraryTrack[]> => {
+  const revision = useLibraryStore.getState().libraryRevision;
+  const generation = catalogCacheGeneration;
+  if (libraryTracksCache?.revision === revision && libraryTracksCache.expiresAt > Date.now()) {
+    return Promise.resolve(libraryTracksCache.tracks);
+  }
   if (libraryTracksRequest) return libraryTracksRequest;
 
   libraryTracksRequest = loadLibraryTracks()
     .then((tracks) => {
+      if (generation === catalogCacheGeneration && revision === useLibraryStore.getState().libraryRevision) {
+        libraryTracksCache = { revision, expiresAt: Date.now() + 5_000, tracks };
+      }
       void import('./artistChannelHydration').then(({ hydrateLibraryArtistChannels }) =>
         hydrateLibraryArtistChannels(tracks)).catch(() => {});
       return tracks;
@@ -322,6 +338,7 @@ export const getLibraryTracks = (): Promise<LibraryTrack[]> => {
 export const toDownloadTrackInput = (
   track: CatalogTrackInput
 ): DownloadTrackInput => ({
+  isrc: track.isrc,
   artistCreditsVersion: track.artistCreditsVersion,
   spotifyId: track.spotifyId,
   title: track.title,

@@ -34,7 +34,7 @@ describe('YouTube channel identities', () => {
       title: 'Untrusted title', youtubeVideoId: videoId,
     })).toEqual({ id: sid, name: 'Sid' });
     expect(getUpNext).toHaveBeenCalledWith(videoId, false);
-    expect(getArtist).toHaveBeenCalledWith(channel);
+    expect(getArtist).not.toHaveBeenCalled();
     expect(search).not.toHaveBeenCalled();
   });
 
@@ -76,13 +76,14 @@ describe('YouTube channel identities', () => {
     expect(await resolveTrackArtists({ youtubeVideoId: videoId })).toEqual([{ id: sid, name: 'Sid' }]);
   });
 
-  it('uses the real channel header for renamed credits', async () => {
+  it('retains the credited name and channel endpoint without waiting for a profile header', async () => {
     getUpNext.mockResolvedValue({ contents: [{ video_id: videoId,
       artists: [{ name: 'RND', channel_id: channel }] }] });
     getArtist.mockResolvedValue({ header: { title: 'Sotam' } });
     const artists = await resolveTrackArtists({ youtubeVideoId: videoId });
-    expect(artists).toEqual([{ id: toYouTubeMusicArtistRouteId(channel, 'Sotam'), name: 'Sotam' }]);
+    expect(artists).toEqual([{ id: toYouTubeMusicArtistRouteId(channel, 'RND'), name: 'RND' }]);
     expect(await resolveTrackArtist({ id: toYouTubeMusicArtistRouteId(channel, 'RND'), name: 'RND' })).toEqual(artists[0]);
+    expect(getArtist).not.toHaveBeenCalled();
   });
 
   it('retains the linked duo channel instead of inventing individual member channels', async () => {
@@ -97,7 +98,7 @@ describe('YouTube channel identities', () => {
   it('coalesces the exact recording request across concurrent credits', async () => {
     await Promise.all([resolveTrackArtists({ youtubeVideoId: videoId }), resolveTrackArtists({ youtubeVideoId: videoId })]);
     expect(getUpNext).toHaveBeenCalledTimes(1);
-    expect(getArtist).toHaveBeenCalledTimes(1);
+    expect(getArtist).not.toHaveBeenCalled();
   });
 
   it('uses a previously confirmed recording mapping without a new search', async () => {

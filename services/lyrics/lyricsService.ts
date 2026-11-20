@@ -1,25 +1,31 @@
 /**
  * Lyrics Service
- * Multi-Engine Lyrics Provider:
- * 1. LRCLIB (Synchronized LRC Karaokê & Timestamps)
- * 2. Letras.mus.br (Complete Brazilian & International Lyrics database)
- * 3. Offline Cache & Fallback System
+ * Common lyric contracts, LRC parsing and legacy offline storage.
+ * Provider orchestration and per-recording choices live in lyricsRepository.
  */
 
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { log } from '../../utils/appLogger';
+import { requestLyricsJson, requestLyricsText } from './lyricsHttp';
 import {
   hasCanonicalArtistMatch,
   hasConflictingNumberedTitleInLyrics,
   hasCanonicalTitleMatch,
 } from '../canonical/canonicalMatcher';
 
+export type LyricSyllable = { text: string; startTimeMs: number; endTimeMs: number };
+export type LyricWord = LyricSyllable & { syllables?: LyricSyllable[] };
+export type LyricVocal = { text: string; startTimeMs: number; endTimeMs: number; words?: LyricWord[] };
+
 export type LyricSegment = {
   index: number;
   startTimeMs: number;
   endTimeMs: number;
   text: string;
+  words?: LyricWord[];
+  background?: LyricVocal;
 };
 
 export type LyricsData = {
@@ -30,42 +36,8 @@ export type LyricsData = {
   syncedLyrics?: string;
   segments: LyricSegment[];
   isSynced: boolean;
-  source?: 'backend' | 'lrclib' | 'letras' | 'vagalume' | 'user';
+  source?: 'backend' | 'vagalume' | 'user' | import('./lyricsSources').LyricsProviderId;
   timeOffsetMs?: number;
-};
-
-export const createEstimatedLyricSegments = (
-  plainLyrics: string | undefined,
-  durationMs: number
-): LyricSegment[] => {
-  if (!plainLyrics || durationMs <= 0) return [];
-
-  const lines = plainLyrics
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.length < 2) return [];
-
-  const startOffsetMs = Math.min(2500, Math.round(durationMs * 0.04));
-  const availableMs = Math.max(0, durationMs - startOffsetMs);
-  const weights = lines.map((line) => Math.max(1, line.split(/\s+/).length));
-  const totalWeight = weights.reduce((total, weight) => total + weight, 0);
-  let startTimeMs = startOffsetMs;
-
-  return lines.map((text, index) => {
-    const nextStartMs =
-      index === lines.length - 1
-        ? durationMs
-        : startTimeMs + (availableMs * weights[index]) / totalWeight;
-    const segment = {
-      index,
-      startTimeMs: Math.round(startTimeMs),
-      endTimeMs: Math.round(nextStartMs),
-      text,
-    };
-    startTimeMs = nextStartMs;
-    return segment;
-  });
 };
 
 const LYRICS_DIR = `${FileSystem.documentDirectory || ''}openfy_lyrics/`;
@@ -185,7 +157,7 @@ export const ensureLyricsDirectory = async (): Promise<void> => {
     if (!info.exists) {
       await FileSystem.makeDirectoryAsync(LYRICS_DIR, { intermediates: true });
     }
-  } catch {}
+  } catch (error) { log.error('lyrics directory creation failed', error); }
 };
 
 /**
@@ -198,26 +170,27 @@ export const parseLrcToSegments = (
   if (!lrcString) return [];
 
   const lines = lrcString.split('\n');
-  const raw: { timeMs: number; text: string }[] = [];
-
-  const regex = /\[(\d{2}):(\d{2})\.?(\d{2,3})?\](.*)/;
+  const raw: { timeMs: number; text: string; words?: LyricSegment['words'] }[] = [];
+  const offset = Number(lrcString.match(/\[offset:([+-]?\d+)\]/i)?.[1]) || 0;
+  const time = (minutes: string, seconds: string, fraction?: string) =>
+    Number(minutes) * 60000 + Number(seconds) * 1000 + Number((fraction || '').padEnd(3, '0').slice(0, 3)) + offset;
 
   for (const rawLine of lines) {
-    const match = rawLine.match(regex);
-    if (match) {
-      const minutes = parseInt(match[1], 10);
-      const seconds = parseInt(match[2], 10);
-      const fraction = match[3]
-        ? parseInt(match[3].padEnd(3, '0').slice(0, 3), 10)
-        : 0;
-
-      const timeMs = minutes * 60 * 1000 + seconds * 1000 + fraction;
-      const text = match[4].trim();
-
-      if (text) {
-        raw.push({ timeMs, text });
-      }
-    }
+    const stamps = [...rawLine.matchAll(/\[(\d{1,3}):(\d{2})(?:\.(\d{1,3}))?\]/g)];
+    if (!stamps.length) continue;
+    const body = rawLine.slice(stamps.at(-1)!.index! + stamps.at(-1)![0].length);
+    const text = body.replace(/<\d{1,3}:\d{2}(?:\.\d{1,3})?>/g, '').trim();
+    if (!text) continue;
+    const wordStamps = [...body.matchAll(/<(\d{1,3}):(\d{2})(?:\.(\d{1,3}))?>/g)];
+    const words = wordStamps.flatMap((stamp, index) => {
+      const start = time(stamp[1], stamp[2], stamp[3]);
+      const next = wordStamps[index + 1];
+      const word = body.slice(stamp.index! + stamp[0].length, next?.index ?? body.length);
+      const end = next ? time(next[1], next[2], next[3]) : totalDurationMs || start + 5000;
+      return word.trim() && end > start ? [{ text: word, startTimeMs: Math.max(0, start), endTimeMs: end }] : [];
+    });
+    stamps.forEach((stamp, index) => raw.push({ timeMs: Math.max(0, time(stamp[1], stamp[2], stamp[3])), text,
+      ...(index === 0 && words.length ? { words } : {}) }));
   }
 
   if (raw.length === 0) return [];
@@ -238,6 +211,7 @@ export const parseLrcToSegments = (
       startTimeMs,
       endTimeMs,
       text: item.text,
+      ...(item.words?.length ? { words: item.words.map((word) => ({ ...word, endTimeMs: Math.min(endTimeMs, word.endTimeMs) })) } : {}),
     };
   });
 };
@@ -248,7 +222,8 @@ export const parseLrcToSegments = (
 export const fetchLyricsFromLetras = async (
   trackName: string,
   artistName: string,
-  durationSeconds?: number
+  durationSeconds?: number,
+  signal?: AbortSignal
 ): Promise<LyricsData | null> => {
   try {
     const cleanA = (artistName || '')
@@ -264,17 +239,15 @@ export const fetchLyricsFromLetras = async (
     for (const query of queries) {
       const searchUrl = `https://solr.sscdn.co/letras/m1/?q=${encodeURIComponent(query)}`;
 
-      const res = await fetch(searchUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-      });
-      if (!res.ok) continue;
-
-      const raw = await res.text();
+      const raw = await requestLyricsText(searchUrl, { provider: 'letras', signal,
+        headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (!raw) continue;
       const match = raw.match(/LetrasSug\(([\s\S]*)\)/);
       if (!match) continue;
 
       const data = JSON.parse(match[1]);
       const docs = data.response?.docs || [];
+      log.player('lyrics search candidates', { provider: 'letras', candidates: docs.length });
       if (docs.length === 0) continue;
 
       for (const doc of docs.slice(0, 3)) {
@@ -295,12 +268,9 @@ export const fetchLyricsFromLetras = async (
         }
 
         const pageUrl = `https://www.letras.mus.br/${doc.dns}/${doc.url}/`;
-        const pageRes = await fetch(pageUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0' },
-        });
-        if (!pageRes.ok) continue;
-
-        const html = await pageRes.text();
+        const html = await requestLyricsText(pageUrl, { provider: 'letras', signal,
+          headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (!html) continue;
         const m =
           html.match(/<div class="lyric-original"[^>]*>([\s\S]*?)<\/div>/i) ||
           html.match(/<div class="cnt-letra"[^>]*>([\s\S]*?)<\/div>/i);
@@ -313,25 +283,22 @@ export const fetchLyricsFromLetras = async (
             .trim();
 
           if (plain.length > 20) {
-            const segments = createEstimatedLyricSegments(
-              plain,
-              Math.round((durationSeconds || 0) * 1000)
-            );
             return {
               id: doc.id || `letras_${doc.dns}`,
               trackName: doc.txt || trackName,
               artistName: doc.art || artistName,
               plainLyrics: plain,
-              segments,
-              isSynced: segments.length > 0,
+              segments: [],
+              isSynced: false,
               source: 'letras',
             };
           }
         }
       }
     }
-  } catch (err) {
-    console.warn('[LyricsService] Letras.mus.br lookup failed:', err);
+  } catch (error) {
+    if (!signal?.aborted) log.error('lyrics Letras lookup failed', { trackName, artistName, error });
+    throw error;
   }
   return null;
 };
@@ -339,12 +306,13 @@ export const fetchLyricsFromLetras = async (
 /**
  * Main fetch lyrics dispatcher with multi-provider fallback
  */
-export const fetchLyrics = async (
+export const fetchLyricsFromLrclib = async (
   trackName: string,
   artistName: string,
   durationSeconds?: number,
   albumName?: string,
-  releaseDate?: string
+  releaseDate?: string,
+  signal?: AbortSignal
 ): Promise<LyricsData | null> => {
   const isUnknown =
     !artistName ||
@@ -353,7 +321,7 @@ export const fetchLyrics = async (
 
   const primaryArtist = isUnknown
     ? ''
-    : artistName.split(',')[0].split('&')[0].trim();
+    : artistName.split(',')[0].trim();
   const durationMs = durationSeconds ? Math.round(durationSeconds * 1000) : 0;
 
   let exactLyrics: LyricsData | null = null;
@@ -372,12 +340,9 @@ export const fetchLyrics = async (
     }
 
     const url = `https://lrclib.net/api/get?${params.toString()}`;
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Openfy-App/1.0 (https://github.com/openfy)' },
-    });
-
-    if (res.ok) {
-      const data = (await res.json()) as {
+    const result = await requestLyricsJson(url, { provider: 'lrclib', signal });
+    if (result) {
+      const data = result as {
         id?: number;
         trackName: string;
         artistName: string;
@@ -424,23 +389,20 @@ export const fetchLyrics = async (
         !hasConflictingLyricsTitle(data.plainLyrics, trackName) &&
         data.plainLyrics.trim().length > 0
       ) {
-        const segments = createEstimatedLyricSegments(
-          data.plainLyrics,
-          durationMs
-        );
         exactLyrics = {
           id: data.id,
           trackName: data.trackName || trackName,
           artistName: data.artistName || artistName,
           plainLyrics: data.plainLyrics,
-          segments,
-          isSynced: segments.length > 0,
+          segments: [],
+          isSynced: false,
           source: 'lrclib',
         };
       }
     }
   } catch (error) {
-    console.warn('[LyricsService] Exact lookup error:', error);
+    if (signal?.aborted) throw error;
+    log.error('lyrics LRCLIB exact lookup failed', { trackName, artistName, error });
   }
 
   // 3. TERTIARY: Search query fallback on LRCLIB
@@ -450,12 +412,7 @@ export const fetchLyrics = async (
         ? `${primaryArtist} ${lookupTitle}`
         : lookupTitle;
       const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(query)}`;
-      const sRes = await fetch(searchUrl, {
-        headers: { 'User-Agent': 'Openfy-App/1.0 (https://github.com/openfy)' },
-      });
-
-      if (!sRes.ok) continue;
-      const sData = (await sRes.json()) as {
+      const sData = (await requestLyricsJson(searchUrl, { provider: 'lrclib', signal })) as {
         id?: number;
         trackName: string;
         artistName: string;
@@ -481,6 +438,8 @@ export const fetchLyrics = async (
         const matchedSynced = matchedCandidates.find(
           (item) => item.syncedLyrics && item.syncedLyrics.trim().length > 0
         );
+        log.player('lyrics search candidates', { provider: 'lrclib', candidates: sData.length,
+          matches: matchedCandidates.length, synced: Boolean(matchedSynced) });
         if (matchedSynced?.syncedLyrics) {
           const segments = parseLrcToSegments(
             matchedSynced.syncedLyrics,
@@ -504,39 +463,46 @@ export const fetchLyrics = async (
           (item) => item.plainLyrics && item.plainLyrics.trim().length > 0
         );
         if (matchedPlain?.plainLyrics) {
-          const segments = createEstimatedLyricSegments(
-            matchedPlain.plainLyrics,
-            durationMs
-          );
           return {
             id: matchedPlain.id,
             trackName: matchedPlain.trackName || trackName,
             artistName: matchedPlain.artistName || artistName,
             plainLyrics: matchedPlain.plainLyrics,
-            segments,
-            isSynced: segments.length > 0,
+            segments: [],
+            isSynced: false,
             source: 'lrclib',
           };
         }
       }
     }
   } catch (error) {
-    console.warn('[LyricsService] Search fallback error:', error);
+    if (signal?.aborted || !exactLyrics) throw error;
+    log.error('lyrics LRCLIB search fallback failed', { trackName, artistName, error });
   }
 
   if (exactLyrics) return exactLyrics;
 
-  // 4. QUATERNARY: Direct Letras.mus.br Scraper
-  const letrasData = await fetchLyricsFromLetras(
-    trackName,
-    primaryArtist || artistName,
-    durationSeconds
-  );
-  if (letrasData) {
-    return letrasData;
-  }
-
   return null;
+};
+
+export type LyricsFetchOptions = {
+  force?: boolean;
+  offline?: boolean;
+  trackId?: string;
+  videoId?: string;
+  isrc?: string;
+  provider?: import('./lyricsSources').LyricsProviderSelection;
+  signal?: AbortSignal;
+  onAttempt?: (provider: import('./lyricsSources').LyricsProviderId, status: import('./lyricsSources').LyricsProviderStatus) => void;
+};
+
+export const fetchLyrics = async (
+  trackName: string, artistName: string, durationSeconds?: number,
+  albumName?: string, releaseDate?: string, options?: LyricsFetchOptions,
+): Promise<LyricsData | null> => {
+  const { fetchProviderLyrics } = await import('./lyricsRepository');
+  return fetchProviderLyrics({ trackName, artistName, durationMs: Math.round((durationSeconds || 0) * 1000),
+    albumName, releaseDate, ...options });
 };
 
 /**
@@ -558,7 +524,8 @@ export const saveLyricsOffline = async (
     await FileSystem.writeAsStringAsync(filePath, JSON.stringify(lyrics));
     await AsyncStorage.setItem(key, JSON.stringify(lyrics));
     return filePath;
-  } catch {
+  } catch (error) {
+    log.error('lyrics offline save failed', { trackId, error });
     return null;
   }
 };
@@ -586,7 +553,8 @@ export const getOfflineLyrics = async (
     }
 
     return null;
-  } catch {
+  } catch (error) {
+    log.error('lyrics offline read failed', { trackId, error });
     return null;
   }
 };

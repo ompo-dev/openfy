@@ -46,10 +46,9 @@ import {
 import {
   fetchLyrics,
   LyricsData,
-  LyricSegment,
-  saveLyricsOffline,
 } from '../services/lyrics/lyricsService';
-import { normalizeLyricSegments } from '../services/lyrics/lyricTimeline';
+import { getCachedTrackLyricsProvider, getTrackLyricsProvider, lyricsPolicyKey, setTrackLyricsProvider } from '../services/lyrics/lyricsRepository';
+import type { LyricsProviderId, LyricsProviderSelection, LyricsProviderStatus } from '../services/lyrics/lyricsSources';
 import type {
   TrackCatalogMetadata,
   DownloadedTrack,
@@ -59,6 +58,7 @@ import { audioQualityCacheKey } from '../services/audio/audioPreferences';
 import { log } from '../utils/appLogger';
 import { useConnectivityStore } from './useConnectivityStore';
 import { showOfflineActionMessage } from '../services/network/offlineFeedback';
+import { reservePlaybackStartup } from '../services/network/audioPriority';
 import {
   prefetchArtistData,
   prefetchTrackArtistData,
@@ -66,10 +66,12 @@ import {
 import { prefetchTrackAlbumData } from '../services/library/playerAlbum';
 import { isSameRecording } from '../services/library/trackIdentity';
 import { hydrateTrackAvailability, isTrackUnavailable, markTrackUnavailable, clearTrackUnavailable } from './useTrackAvailabilityStore';
+import { getTrackYouTubeVideoId } from '../services/spotify/linkParser';
 import { getCatalogMapping, isCurrentCatalogMapping } from '../services/audio/catalogMappingCache';
 import { resolveTrackCredits } from '../services/search/trackCredits';
 
 export type PlayerTrack = TrackCatalogMetadata & {
+  localOnly?: boolean;
   spotifyId: string;
   title: string;
   artistName: string;
@@ -105,6 +107,8 @@ export interface PlayerStoreState {
   isLoadingAudio: boolean;
   isLoadingLyrics: boolean;
   lyricsData: LyricsData | null;
+  lyricsProvider: LyricsProviderSelection;
+  lyricsProviderAttempts: Partial<Record<LyricsProviderId, LyricsProviderStatus>>;
 
   // Queue & Navigation
   queue: PlayerTrack[];
@@ -121,7 +125,7 @@ export interface PlayerStoreState {
   // Actions
   playTrack: (
     track: PlayerTrack,
-    options?: { showPlayer?: boolean; setQueue?: boolean; skipUnavailable?: boolean }
+    options?: { showPlayer?: boolean; setQueue?: boolean; skipUnavailable?: boolean; retryTransient?: boolean }
   ) => Promise<void>;
   playWithQueue: (
     tracks: PlayerTrack[],
@@ -136,6 +140,7 @@ export interface PlayerStoreState {
   playNext: () => Promise<void>;
   playPrevious: () => Promise<void>;
   addToQueue: (tracks: PlayerTrack[]) => void;
+  extendQueueFromCollection: (tracks: PlayerTrack[], sourceId: string) => void;
   removeFromQueue: (index: number) => void;
   clearQueue: () => void;
   toggleShuffle: () => void;
@@ -145,18 +150,19 @@ export interface PlayerStoreState {
   setArtworkFlight: (flight: PlayerArtworkFlight | null) => void;
   closePlayer: () => Promise<void>;
   replaceQueueTrack: (previous: PlayerTrack, replacement: PlayerTrack) => void;
-  refreshLyrics: () => Promise<void>;
-  updateLyricsSegments: (segments: LyricSegment[]) => Promise<boolean>;
+  refreshLyrics: (force?: boolean) => Promise<void>;
+  selectLyricsProvider: (provider: LyricsProviderSelection) => Promise<void>;
 }
 
 // In-Memory Fast Caches
 const lyricsCache = new Map<string, LyricsData>();
 const pendingLyricsLoads = new Map<string, Promise<LyricsData | null>>();
+let lyricsLoadGeneration = 0;
+let activeLyricsController: AbortController | null = null;
 
 // Existing entries were created by native fallback providers. Start new caches
 // on canonical backend so iPhone cannot reuse a different song or expired URL.
-const LYRICS_CACHE_VERSION = 'v9';
-const STORAGE_LYRICS_PREFIX = `openfy_lyrics_cache_${LYRICS_CACHE_VERSION}_`;
+const LYRICS_CACHE_VERSION = 'v12-timed-arrays';
 const AUDIO_SOURCE_TTL_MS = 10 * 60_000;
 const MAX_RECENT_AUDIO_SOURCES = 24;
 const MIN_PRELOADED_SOURCE_LIFETIME_MS = 5_000;
@@ -167,10 +173,16 @@ const warmedAudioSources = new Map<
 >();
 const activeAudioWarmups = new Map<string, Promise<void>>();
 const queuePreloadKeys = new Set<string>();
+const pendingNeighborWarmupTimers = new Set<ReturnType<typeof setTimeout>>();
 const preparedNativeAudio = new Map<string, { bytes: number; expiresAt: number }>();
 const pendingNativeAudioPreloads = new Map<string, Promise<number | null>>();
 const isAppActiveForPreload = () =>
   !AppState?.currentState || AppState.currentState === 'active';
+
+const cancelScheduledNeighborWarmups = () => {
+  pendingNeighborWarmupTimers.forEach(clearTimeout);
+  pendingNeighborWarmupTimers.clear();
+};
 
 const shuffleTracks = (tracks: PlayerTrack[]): PlayerTrack[] => {
   const shuffled = [...tracks];
@@ -196,10 +208,10 @@ const findTrackIndex = (tracks: PlayerTrack[], target?: PlayerTrack) => {
   );
 };
 
-const getResolverTrackId = (track: PlayerTrack): string =>
-  track.youtubeVideoId && /^[A-Za-z0-9_-]{11}$/.test(track.youtubeVideoId)
-    ? `yt_${track.youtubeVideoId}`
-    : track.spotifyId;
+const getResolverTrackId = (track: PlayerTrack): string => {
+  const videoId = getTrackYouTubeVideoId(track);
+  return videoId ? `yt_${videoId}` : track.spotifyId;
+};
 
 const resolveNativeYouTubeSource = async (
   track: PlayerTrack
@@ -211,10 +223,12 @@ const resolveNativeYouTubeSource = async (
   ) return null;
 
   const manualMapping = await getCatalogMapping(track.spotifyId);
-  if (manualMapping && isCurrentCatalogMapping(manualMapping)) return toNativeYouTubePlaybackUri(manualMapping.videoId);
+  const exactVideoId = getTrackYouTubeVideoId(track);
+  if (manualMapping && isCurrentCatalogMapping(manualMapping) &&
+      (manualMapping.source === 'user_direct' || !exactVideoId || manualMapping.videoId === exactVideoId)) {
+    return toNativeYouTubePlaybackUri(manualMapping.videoId);
+  }
 
-  const exactVideoId = track.youtubeVideoId ||
-    track.spotifyId.match(/^yt_([A-Za-z0-9_-]{11})$/)?.[1];
   if (exactVideoId && /^[A-Za-z0-9_-]{11}$/.test(exactVideoId)) {
     const source = await resolveCatalogYouTubeVideoId({
       videoId: exactVideoId, title: track.title,
@@ -266,7 +280,8 @@ const getLockScreenArtworkMetadata = (track: PlayerTrack) => ({
 });
 
 const getLyricsCacheKey = (track: PlayerTrack) =>
-  `${getCacheKey(track)}:${LYRICS_CACHE_VERSION}`;
+  `${getCacheKey(track)}:${LYRICS_CACHE_VERSION}:${JSON.stringify([track.title, track.artistName,
+    track.duration_ms, track.albumName, track.isrc, track.youtubeVideoId || track.videoId])}:${getCachedTrackLyricsProvider(track.spotifyId)}:${lyricsPolicyKey()}`;
 
 export const getExistingLocalAudioPath = async (
   path?: string
@@ -279,7 +294,7 @@ export const getExistingLocalAudioPath = async (
 
   try {
     const info = await FileSystem.getInfoAsync(path);
-    return info.exists && (!info.size || info.size > 5000) ? path : null;
+    return info.exists && (info.size === undefined || info.size > 5000) ? path : null;
   } catch {
     return null;
   }
@@ -319,7 +334,7 @@ const getWarmedAudioSource = (track: PlayerTrack, quality: AudioQuality): AudioS
       (typeof hasNativeYouTubePlayback !== 'function' || !hasNativeYouTubePlayback())) return null;
   return warmed &&
     warmed.trackId === track.spotifyId &&
-    warmed.videoId === track.youtubeVideoId &&
+    warmed.videoId === getTrackYouTubeVideoId(track) &&
     warmed.expiresAt > now + MIN_PRELOADED_SOURCE_LIFETIME_MS
     ? warmed.source
     : null;
@@ -352,7 +367,7 @@ const cacheAudioSource = (track: PlayerTrack, source: AudioSourceInput, quality:
     source,
     expiresAt: Date.now() + AUDIO_SOURCE_TTL_MS,
     trackId: track.spotifyId,
-    videoId: track.youtubeVideoId,
+    videoId: getTrackYouTubeVideoId(track),
   });
   while (warmedAudioSources.size > MAX_RECENT_AUDIO_SOURCES) {
     const oldest = warmedAudioSources.keys().next().value;
@@ -364,7 +379,6 @@ const cacheAudioSource = (track: PlayerTrack, source: AudioSourceInput, quality:
 };
 
 const loadLyricsForTrack = (track: PlayerTrack): Promise<LyricsData | null> => {
-  const cacheKey = getCacheKey(track);
   const lyricsCacheKey = getLyricsCacheKey(track);
   const cached = lyricsCache.get(lyricsCacheKey);
   if (cached) return Promise.resolve(cached);
@@ -373,33 +387,17 @@ const loadLyricsForTrack = (track: PlayerTrack): Promise<LyricsData | null> => {
 
   const loading = (async () => {
     try {
-      const stored = await AsyncStorage.getItem(`${STORAGE_LYRICS_PREFIX}${cacheKey}`);
-      const edited = lyricsCache.get(lyricsCacheKey);
-      if (edited?.source === 'user') return edited;
-      if (stored) {
-        const lyrics = JSON.parse(stored) as LyricsData;
-        lyricsCache.set(lyricsCacheKey, lyrics);
-        return lyrics;
-      }
-    } catch {}
-
-    if (useConnectivityStore.getState().status === 'offline') return null;
-
-    try {
       const lyrics = await fetchLyrics(
         track.title,
         track.artistName,
         track.duration_ms ? track.duration_ms / 1000 : undefined,
-        track.albumName
+        track.albumName, track.releaseDate,
+        { trackId: track.spotifyId, isrc: track.isrc, videoId: track.youtubeVideoId || track.videoId ||
+          (track.spotifyId.startsWith('yt_') ? track.spotifyId.slice(3) : undefined),
+          offline: useConnectivityStore.getState().status === 'offline' }
       );
-      const edited = lyricsCache.get(lyricsCacheKey);
-      if (edited?.source === 'user') return edited;
-      if (lyrics) {
+      if (lyrics && !lyricsCache.has(lyricsCacheKey) && getLyricsCacheKey(track) === lyricsCacheKey) {
         lyricsCache.set(lyricsCacheKey, lyrics);
-        void AsyncStorage.setItem(
-          `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
-          JSON.stringify(lyrics)
-        ).catch(() => {});
       }
       return lyrics;
     } catch {
@@ -413,6 +411,7 @@ const loadLyricsForTrack = (track: PlayerTrack): Promise<LyricsData | null> => {
 };
 
 const warmTrackLyrics = (track: PlayerTrack, direction: string) => {
+  if (!getCachedAppSettings().lyricsEnabled) return;
   if (useConnectivityStore.getState().status === 'offline') return;
   if (lyricsCache.has(getLyricsCacheKey(track))) return;
   const finishWarmup = log.time('player', 'queue lyrics warmup', {
@@ -602,16 +601,21 @@ const warmTrackAudio = (
 };
 
 const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
+  cancelScheduledNeighborWarmups();
   if (!getCachedAppSettings().preloadNextTrack) return;
   if (usePlayerStore.getState().playerState.isBuffering) return;
   if (Platform.OS !== 'web' && !isAppActiveForPreload()) return;
   const currentTrack = queue[queueIndex];
-  const neighbors = [
-    { track: queue[queueIndex + 1], ratio: 0.5, direction: 'next' },
-    { track: queue[queueIndex - 1], ratio: 0.25, direction: 'previous' },
-    { track: queue[queueIndex + 2], ratio: 0.25, direction: 'next-two' },
-    { track: queue[queueIndex - 2], ratio: 0.125, direction: 'previous-two' },
-  ].filter((neighbor): neighbor is {
+  const radius = getCachedAppSettings().preloadRadius;
+  const neighbors = Array.from({ length: radius }, (_, index) => {
+    const distance = index + 1;
+    return [
+      { track: queue[queueIndex + distance], ratio: 0.5 / 2 ** index,
+        direction: distance === 1 ? 'next' : distance === 2 ? 'next-two' : `next-${distance}` },
+      { track: queue[queueIndex - distance], ratio: 0.25 / 2 ** index,
+        direction: distance === 1 ? 'previous' : distance === 2 ? 'previous-two' : `previous-${distance}` },
+    ];
+  }).flat().filter((neighbor): neighbor is {
     track: PlayerTrack;
     ratio: number;
     direction: string;
@@ -636,19 +640,26 @@ const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
     }
   });
 
-  neighbors.forEach(({ track, ratio, direction }) => {
+  const warmNeighbor = ({ track, ratio, direction }: typeof neighbors[number]) => {
+    const live = usePlayerStore.getState();
+    if (!isAppActiveForPreload() || live.isLoadingAudio || live.playerState.isBuffering ||
+        live.currentTrack?.spotifyId !== currentTrack?.spotifyId ||
+        !queuePreloadKeys.has(audioQualityCacheKey(getCacheKey(track), quality))) return;
     log.player('queue preloading target', {
       direction,
       trackId: track.spotifyId,
       bufferRatio: ratio,
     });
-    prefetchArtistData(track.artists?.length
+    // Artist portraits and lyrics are enrichment, never prerequisites to the
+    // selected stream. Delayed neighbors do not compete at first audio.
+    if (direction === 'next') prefetchArtistData(track.artists?.length
       ? track.artists
       : track.artistName
           .split(/\s*(?:,|&| feat\.?)\s*/i)
           .filter(Boolean)
           .map((name) => ({ name })));
-    warmTrackLyrics(track, direction);
+    // Multi-provider lyrics should not compete with neighboring streams.
+    if (direction === 'next') warmTrackLyrics(track, direction);
     warmTrackAudio(
       track,
       () => isAppActiveForPreload() && quality === getCachedAppSettings().streamingQuality &&
@@ -656,6 +667,17 @@ const warmQueueNeighbors = (queue: PlayerTrack[], queueIndex: number) => {
       ratio,
       true
     );
+  };
+  neighbors.forEach((neighbor, index) => {
+    if (index === 0) {
+      warmNeighbor(neighbor);
+      return;
+    }
+    const timer = setTimeout(() => {
+      pendingNeighborWarmupTimers.delete(timer);
+      warmNeighbor(neighbor);
+    }, index * 3_000);
+    pendingNeighborWarmupTimers.add(timer);
   });
 };
 
@@ -668,6 +690,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   isLoadingAudio: false,
   isLoadingLyrics: false,
   lyricsData: null,
+  lyricsProvider: 'auto',
+  lyricsProviderAttempts: {},
   queue: [],
   queueOriginalOrder: [],
   queueIndex: 0,
@@ -688,9 +712,12 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   },
 
   playTrack: async (track: PlayerTrack, options = {}) => {
+    reservePlaybackStartup();
+    lyricsLoadGeneration += 1;
+    activeLyricsController?.abort();
     const { showPlayer = true, setQueue = true } = options;
     let offlinePlaybackBlocked = false;
-    if (isTrackUnavailable(track)) {
+    if (isTrackUnavailable(track, undefined, Boolean(options.skipUnavailable && !options.retryTransient))) {
       if (options.skipUnavailable) { await get().playNext(); return; }
       const requestId = get().activeRequestId + 1;
       beginTrackChange();
@@ -698,9 +725,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         isFullPlayerVisible: true, isLoadingAudio: false, isLoadingLyrics: true,
         lyricsData: null, playerState: { ...DEFAULT_STATE, durationMs: track.duration_ms,
           error: 'Áudio indisponível. Edite o link do YouTube para corrigir esta faixa.' } });
-      void loadLyricsForTrack(track).then((lyrics) => {
-        if (get().activeRequestId === requestId) set({ lyricsData: lyrics, isLoadingLyrics: false });
-      });
+      void get().refreshLyrics();
       await unload();
       return;
     }
@@ -717,9 +742,32 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       }
     }
 
+    const previous = get();
+    if (previous.currentTrack && !isSameRecording(previous.currentTrack, track) &&
+        previous.playerState.isPlaying && previous.playerState.positionMs >= 3_000 &&
+        previous.playerState.positionMs < 30_000 &&
+        (previous.playerState.durationMs <= 0 ||
+          previous.playerState.positionMs < previous.playerState.durationMs * 0.8)) {
+      void recordInteraction(previous.currentTrack, 'skip');
+    }
+
     // 1. ATOMIC GENERATION LOCK 🔒: Increments request counter to cancel any stale in-flight fetches
     const requestId = get().activeRequestId + 1;
     const requestedAt = Date.now();
+    const finishFirstAudioMetric = log.time('player', 'time to first audio', {
+      requestId, trackId: track.spotifyId,
+    });
+    let firstAudioMetricClosed = false;
+    let firstAudioTimeout: ReturnType<typeof setTimeout> | undefined;
+    const closeFirstAudioMetric = (result: Record<string, unknown>) => {
+      if (firstAudioMetricClosed) return;
+      firstAudioMetricClosed = true;
+      if (firstAudioTimeout) clearTimeout(firstAudioTimeout);
+      finishFirstAudioMetric(result);
+    };
+    firstAudioTimeout = setTimeout(() => {
+      closeFirstAudioMetric({ ok: false, reason: 'startup-timeout' });
+    }, 25_000);
     const finishTransition = log.time('player', 'track transition', {
       requestId,
       trackId: track.spotifyId,
@@ -728,6 +776,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     try {
       beginTrackChange();
     } catch (error) {
+      closeFirstAudioMetric({ ok: false, reason: 'begin-track-change' });
       finishTransition({ ok: false, stage: 'begin-track-change' });
       set({ isLoadingAudio: false, playerState: { ...DEFAULT_STATE, error: String(error) } });
       return;
@@ -748,6 +797,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       isLoadingAudio: true,
       isLoadingLyrics: !cachedLyrics,
       lyricsData: cachedLyrics,
+      lyricsProvider: getCachedTrackLyricsProvider(track.spotifyId),
+      lyricsProviderAttempts: {},
       playerState: {
         ...DEFAULT_STATE,
         isBuffering: true,
@@ -765,9 +816,19 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     });
     // 2. CONCURRENT AUDIO STREAM RESOLUTION & PERSISTENT CACHE
     let playbackQuality = getCachedAppSettings().streamingQuality;
+    let sourceRoute = 'unresolved';
     const resolveAudioPromise = (async (): Promise<AudioSourceInput | null> => {
+      if (track.localOnly) {
+        const local = await getExistingLocalAudioPath(track.localAudioPath);
+        if (local) sourceRoute = 'local-only';
+        return local?.startsWith('file:') ? local : null;
+      }
       await hydrateTrackAvailability();
-      if (isTrackUnavailable(track)) return null;
+      if (isTrackUnavailable(track, undefined, Boolean(options.skipUnavailable && !options.retryTransient))) return null;
+      if ((!options.skipUnavailable || options.retryTransient) && isTrackUnavailable(track)) {
+        log.player('retrying transient audio failure', { trackId: track.spotifyId });
+        clearTrackUnavailable(track);
+      }
       await getAppSettings();
       const quality = getCachedAppSettings().streamingQuality;
       playbackQuality = quality;
@@ -780,6 +841,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       if (hasFreshTrackStream) {
         const trackStream = getFreshPreloadedSource(track, quality);
         if (trackStream) {
+          sourceRoute = 'track-stream-cache';
           cacheAudioSource(track, trackStream, quality);
           return trackStream;
         }
@@ -787,11 +849,13 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
       const preloadedSource = getWarmedAudioSource(track, quality);
       if (preloadedSource) {
+        sourceRoute = 'neighbor-warmup';
         return preloadedSource;
       }
 
       const directSavedSource = await getSavedAudioSource(track, quality);
       if (directSavedSource) {
+        sourceRoute = 'local-file';
         cacheAudioSource(track, directSavedSource, quality);
         return directSavedSource;
       }
@@ -802,6 +866,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       const downloaded = await getDownloadedTrack(track.spotifyId);
       const downloadedSavedSource = await getSavedAudioSource(downloaded, quality);
       if (downloadedSavedSource) {
+        sourceRoute = 'download-registry';
         cacheAudioSource(track, downloadedSavedSource, quality);
         return downloadedSavedSource;
       }
@@ -813,6 +878,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
       const nativeYouTubeSource = await resolveNativeYouTubeSource(track);
       if (nativeYouTubeSource) {
+        sourceRoute = 'native-youtube';
         cacheAudioSource(track, nativeYouTubeSource, quality);
         return nativeYouTubeSource;
       }
@@ -821,6 +887,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       if (manualMapping?.source === 'user_direct') {
         const resolved = await resolveAudioUrl('', '', `yt_${manualMapping.videoId}`, 0, undefined, false, quality);
         if (resolved?.url) {
+          sourceRoute = 'manual-youtube';
           const source = resolved.headers ? { uri: resolved.url, headers: resolved.headers } : resolved.url;
           cacheAudioSource(track, source, quality);
           return source;
@@ -839,6 +906,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       );
 
       if (resolved?.url) {
+        sourceRoute = 'resolver';
         const source: AudioSourceInput = resolved.headers
           ? { uri: resolved.url, headers: resolved.headers }
           : resolved.url;
@@ -849,16 +917,13 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       return null;
     })();
 
+    let lyricsStarted = false;
     const startLyricsLoading = () => {
-      if (cachedLyrics) return;
-      void loadLyricsForTrack(track).then((lyrics) => {
-        if (get().activeRequestId === requestId && get().lyricsData?.source !== 'user') {
-          set({ lyricsData: lyrics, isLoadingLyrics: false });
-        }
-      });
+      if (lyricsStarted || get().activeRequestId !== requestId) return;
+      lyricsStarted = true;
+      if (track.localOnly) { set({ isLoadingLyrics: false, lyricsData: null }); return; }
+      void get().refreshLyrics();
     };
-
-    startLyricsLoading();
 
     // Execute Audio resolution
     const finishResolution = log.time('player', 'audio source resolution', {
@@ -869,10 +934,11 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       console.warn('[PlayerStore] Source loading failed:', error);
       return null;
     });
-    finishResolution({ ok: Boolean(streamSource), trackId: track.spotifyId });
+    finishResolution({ ok: Boolean(streamSource), trackId: track.spotifyId, sourceRoute });
 
     // RACE CONDITION CHECK: Discard if user clicked another track in the meantime
     if (get().activeRequestId !== requestId) {
+      closeFirstAudioMetric({ ok: false, reason: 'superseded' });
       finishTransition({ ok: false, stale: true, stage: 'source-resolution' });
       console.log(
         `[PlayerStore #${requestId}] Discarding stale playback response for "${track.title}"`
@@ -881,6 +947,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     }
 
     if (!streamSource) {
+      closeFirstAudioMetric({ ok: false, reason: 'source-unavailable' });
+      startLyricsLoading();
       finishTransition({ ok: false, stage: 'source-resolution' });
       console.warn(
         `[PlayerStore #${requestId}] Failed to resolve audio for: "${track.title}"`
@@ -918,6 +986,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     let durationLimitReached = false;
     let lastPlaybackPositionMs = 0;
     let didStartPlayback = false;
+    let didRecordCompletion = false;
+    let finishBufferingMetric: ((result?: unknown) => void) | null = null;
 
     console.log(`[PlayerStore #${requestId}] Playing stream:`, activeStreamUri);
     if (get().activeRequestId !== requestId) return;
@@ -935,14 +1005,19 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     const failPlayback = async () => {
       if (get().activeRequestId !== requestId || playbackFailureHandled) return;
+      finishBufferingMetric?.({ ok: false, reason: 'playback-failed' });
+      finishBufferingMetric = null;
+      closeFirstAudioMetric({ ok: false, reason: 'native-playback-failed' });
       playbackFailureHandled = true;
+      startLyricsLoading();
       if (useConnectivityStore.getState().status !== 'offline') markTrackUnavailable(track, 'playback-failed');
-      set({ isLoadingAudio: false, playerState: { ...DEFAULT_STATE, error: 'Áudio indisponível. Edite o link do YouTube.' } });
+      set({ isLoadingAudio: false, playerState: { ...DEFAULT_STATE, error: 'Não foi possível reproduzir agora. Tente novamente.' } });
       await unload();
       if (get().activeRequestId === requestId && options.skipUnavailable &&
           useConnectivityStore.getState().status !== 'offline') await get().playNext();
     };
     const resolveFreshAudio = async (quality: ReturnType<typeof getCachedAppSettings>['streamingQuality']) => {
+      if (track.localOnly) return null;
       try {
         const mapping = await getCatalogMapping(track.spotifyId);
         const manual = mapping?.source === 'user_direct';
@@ -959,6 +1034,15 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const handleStatusUpdate = (state: PlayerState) => {
       // Only process updates if this track is still the active one
       if (get().activeRequestId !== requestId || playbackFailureHandled) return;
+
+      if (state.isBuffering && !finishBufferingMetric) {
+        finishBufferingMetric = log.time('player', 'audio buffering', {
+          requestId, trackId: track.spotifyId, phase: didStartPlayback ? 'rebuffer' : 'startup',
+        });
+      } else if (!state.isBuffering && finishBufferingMetric) {
+        finishBufferingMetric({ ok: !state.error, positionMs: state.positionMs });
+        finishBufferingMetric = null;
+      }
 
       if (state.isLoaded && !state.error) lastPlaybackPositionMs = state.positionMs;
 
@@ -1003,11 +1087,19 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
       if (state.isPlaying && !didStartPlayback) {
         didStartPlayback = true;
+        closeFirstAudioMetric({ ok: true, sourceRoute });
+        startLyricsLoading();
+        if (!track.localOnly) void recordInteraction(track, 'play');
         log.player('audio playback started', { trackId: track.spotifyId,
           durationMs: Date.now() - requestedAt, mediaDurationMs: currentDuration });
         warmQueueNeighbors(get().queue, get().queueIndex);
-        prefetchTrackArtistData(track);
-        prefetchTrackAlbumData(track);
+        if (!track.localOnly) { prefetchTrackArtistData(track); prefetchTrackAlbumData(track); }
+      }
+
+      if (!didRecordCompletion && !track.localOnly && state.isLoaded && currentDuration > 0 &&
+          (state.didJustFinish || reachedCanonicalDuration)) {
+        didRecordCompletion = true;
+        void recordInteraction(track, 'complete');
       }
 
       // Reset consecutive recovery counter once stream has played stably past resume position
@@ -1184,7 +1276,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
 
     if (success) {
       clearTrackUnavailable(track);
-      void resolveTrackCredits(track).then(({ artists, artistCreditsVersion }) => {
+      if (!track.localOnly) void resolveTrackCredits(track).then(({ artists, artistCreditsVersion }) => {
         if (!artists.length || get().activeRequestId !== requestId) return;
         const current = get().currentTrack;
         if (!current) return;
@@ -1193,16 +1285,15 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         set({ currentTrack: enriched });
         get().replaceQueueTrack(current, enriched);
       }).catch(() => {});
-      void ensurePlaybackDiagnostics(track).catch(() => {});
-      recordInteraction(track, 'play').catch(() => {});
-      warmQueueNeighbors(get().queue, get().queueIndex);
+      if (!track.localOnly) {
+        void ensurePlaybackDiagnostics(track).catch(() => {});
+      }
       set((state) => ({
         isLoadingAudio: false,
         history: [track, ...state.history.slice(0, 49)],
       }));
 
     } else {
-      startLyricsLoading();
       void ensurePlaybackDiagnostics(track).catch(() => {});
       // A native file load error must not resolve a different online recording.
       if (activeStreamUri.startsWith('file:')) { await failPlayback(); return; }
@@ -1252,6 +1343,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   ) => {
     if (!tracks || tracks.length === 0) return;
     const selectedTrack = tracks[Math.max(0, Math.min(startIndex, tracks.length - 1))];
+    if (isTrackUnavailable(selectedTrack) && !isTrackUnavailable(selectedTrack, undefined, false)) {
+      log.player('retrying selected queue track', { trackId: selectedTrack.spotifyId });
+      clearTrackUnavailable(selectedTrack);
+    }
     tracks = tracks.filter((track) => !isTrackUnavailable(track));
     if (!tracks.length) return;
     startIndex = Math.max(0, tracks.indexOf(selectedTrack));
@@ -1282,7 +1377,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       queueSourceId: sourceId ?? null,
       isShuffle: shouldShuffle,
     });
-    await get().playTrack(playbackQueue[playbackIndex], { setQueue: false, skipUnavailable: true });
+    await get().playTrack(playbackQueue[playbackIndex], { setQueue: false, skipUnavailable: true, retryTransient: true });
   },
 
   playDownloadedTrack: async (downloaded: DownloadedTrack) => {
@@ -1350,7 +1445,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     if (!Number.isInteger(index) || index < 0 || index >= queue.length) return;
 
     set({ queueIndex: index });
-    await playTrack(queue[index], { setQueue: false, skipUnavailable: true });
+    await playTrack(queue[index], { setQueue: false, skipUnavailable: true, retryTransient: true });
   },
 
   playNext: async () => {
@@ -1426,6 +1521,25 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       queue: [...state.queue, ...tracks.filter((track) => !isTrackUnavailable(track))],
       queueOriginalOrder: [...state.queueOriginalOrder, ...tracks.filter((track) => !isTrackUnavailable(track))],
     }));
+  },
+  extendQueueFromCollection: (tracks, sourceId) => {
+    set((state) => {
+      if (!sourceId || state.queueSourceId !== sourceId || !state.queue.length) return state;
+      const known = new Set(state.queueOriginalOrder.map((track) => track.spotifyId));
+      const additional = tracks.filter((track) => {
+        if (known.has(track.spotifyId) || isTrackUnavailable(track)) return false;
+        known.add(track.spotifyId);
+        return true;
+      });
+      if (!additional.length) return state;
+      log.player('collection queue expanded', {
+        sourceId, added: additional.length, original: state.queueOriginalOrder.length,
+      });
+      return {
+        queue: [...state.queue, ...(state.isShuffle ? shuffleTracks(additional) : additional)],
+        queueOriginalOrder: [...state.queueOriginalOrder, ...additional],
+      };
+    });
   },
   replaceQueueTrack: (previous, replacement) => {
     set((state) => ({
@@ -1511,6 +1625,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   },
 
   closePlayer: async () => {
+    cancelScheduledNeighborWarmups();
+    lyricsLoadGeneration += 1;
+    activeLyricsController?.abort();
     await unload();
     set({
       currentTrack: null,
@@ -1522,85 +1639,57 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     });
   },
 
-  refreshLyrics: async () => {
+  refreshLyrics: async (force = false) => {
     const { currentTrack, activeRequestId } = get();
     if (!currentTrack) return;
-    set({ isLoadingLyrics: true });
-
-    const lyrics = await fetchLyrics(
-      currentTrack.title,
-      currentTrack.artistName,
-      currentTrack.duration_ms ? currentTrack.duration_ms / 1000 : undefined,
-      currentTrack.albumName
-    );
-
-    if (get().activeRequestId === activeRequestId) {
-      if (get().lyricsData?.source === 'user') {
-        set({ isLoadingLyrics: false });
-        return;
-      }
-      const cacheKey = getCacheKey(currentTrack);
-      if (lyrics) {
-        lyricsCache.set(getLyricsCacheKey(currentTrack), lyrics);
-        AsyncStorage.setItem(
-          `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
-          JSON.stringify(lyrics)
-        ).catch(() => {});
-      }
-      set({
-        lyricsData: lyrics,
-        isLoadingLyrics: false,
-      });
+    if (currentTrack.localOnly) { set({ lyricsData: null, isLoadingLyrics: false }); return; }
+    const generation = ++lyricsLoadGeneration;
+    const finish = log.time('player', 'active lyrics refresh', { trackId: currentTrack.spotifyId, generation, force });
+    activeLyricsController?.abort();
+    const controller = new AbortController();
+    activeLyricsController = controller;
+    const current = () => get().activeRequestId === activeRequestId && generation === lyricsLoadGeneration;
+    set({ isLoadingLyrics: true, lyricsProviderAttempts: {} });
+    try {
+      const provider = await getTrackLyricsProvider(currentTrack.spotifyId);
+      if (!current()) { finish({ ok: true, outcome: 'stale' }); return; }
+      set({ lyricsProvider: provider });
+      const lyrics = await fetchLyrics(currentTrack.title, currentTrack.artistName,
+        currentTrack.duration_ms / 1000, currentTrack.albumName, currentTrack.releaseDate,
+        { trackId: currentTrack.spotifyId, isrc: currentTrack.isrc, provider, force,
+          videoId: currentTrack.youtubeVideoId || currentTrack.videoId ||
+            (currentTrack.spotifyId.startsWith('yt_') ? currentTrack.spotifyId.slice(3) : undefined),
+          offline: useConnectivityStore.getState().status === 'offline', signal: controller.signal,
+          onAttempt: (source, status) => {
+            if (current()) set({ lyricsProviderAttempts: { ...get().lyricsProviderAttempts, [source]: status } });
+          } });
+      if (!current()) { finish({ ok: true, outcome: 'stale' }); return; }
+      if (lyrics) lyricsCache.set(getLyricsCacheKey(currentTrack), lyrics);
+      set({ lyricsData: lyrics, isLoadingLyrics: false });
+      finish({ ok: true, found: Boolean(lyrics), provider: lyrics?.source, lines: lyrics?.segments.length || 0,
+        words: lyrics?.segments.reduce((count, line) => count + (line.words?.length || 0), 0) || 0 });
+    } catch (error) {
+      finish({ ok: controller.signal.aborted, outcome: controller.signal.aborted ? 'cancelled' : 'error', error: String(error) });
+      if (current()) set({ isLoadingLyrics: false });
+      if (!controller.signal.aborted) log.error('lyrics provider lookup failed', error);
     }
   },
 
-  updateLyricsSegments: async (segments: LyricSegment[]) => {
-    const { currentTrack, lyricsData, activeRequestId } = get();
-    if (!currentTrack || !segments.length || segments.some((segment) =>
-      !segment.text.trim() || !Number.isFinite(segment.startTimeMs) ||
-      !Number.isFinite(segment.endTimeMs) || segment.startTimeMs < 0 ||
-      segment.endTimeMs <= segment.startTimeMs
-    )) return false;
-
-    const normalizedSegments = normalizeLyricSegments(segments);
-    const updatedLyrics: LyricsData = {
-      ...lyricsData,
-      trackName: currentTrack.title,
-      artistName: currentTrack.artistName,
-      plainLyrics: normalizedSegments.map((segment) => segment.text).join('\n'),
-      syncedLyrics: undefined,
-      source: 'user',
-      isSynced: true,
-      segments: normalizedSegments,
-    };
-    const cacheKey = getCacheKey(currentTrack);
-    lyricsCache.set(getLyricsCacheKey(currentTrack), updatedLyrics);
-    set({ lyricsData: updatedLyrics, isLoadingLyrics: false });
-
+  selectLyricsProvider: async (provider) => {
+    const { currentTrack, activeRequestId } = get();
+    if (!currentTrack) return;
+    log.player('active lyrics provider changed', { trackId: currentTrack.spotifyId, provider });
+    const generation = ++lyricsLoadGeneration;
+    activeLyricsController?.abort();
+    set({ lyricsProvider: provider, lyricsData: null, lyricsProviderAttempts: {}, isLoadingLyrics: true });
     try {
-      await AsyncStorage.setItem(
-        `${STORAGE_LYRICS_PREFIX}${cacheKey}`,
-        JSON.stringify(updatedLyrics)
-      );
-      const offlineCopy = await saveLyricsOffline(
-        currentTrack.spotifyId,
-        updatedLyrics
-      );
-      if (!offlineCopy) {
-        console.warn('[PlayerStore] Could not save offline lyric copy.');
-      }
-      return true;
+      await setTrackLyricsProvider(currentTrack.spotifyId, provider);
+      if (get().activeRequestId === activeRequestId && generation === lyricsLoadGeneration) await get().refreshLyrics();
     } catch (error) {
-      console.warn('[PlayerStore] Could not save edited lyrics:', error);
-      if (get().activeRequestId === activeRequestId && get().lyricsData === updatedLyrics) {
-        set({ lyricsData });
+      if (get().activeRequestId === activeRequestId && generation === lyricsLoadGeneration) {
+        set({ lyricsProvider: getCachedTrackLyricsProvider(currentTrack.spotifyId), isLoadingLyrics: false });
       }
-      const lyricsCacheKey = getLyricsCacheKey(currentTrack);
-      if (lyricsCache.get(lyricsCacheKey) === updatedLyrics) {
-        if (lyricsData) lyricsCache.set(lyricsCacheKey, lyricsData);
-        else lyricsCache.delete(lyricsCacheKey);
-      }
-      return false;
+      throw error;
     }
   },
 }));
@@ -1612,12 +1701,22 @@ setRemotePlaybackHandlers({
 
 let previousStreamingQuality = getCachedAppSettings().streamingQuality;
 let previousPreloading = getCachedAppSettings().preloadNextTrack;
+let previousPreloadRadius = getCachedAppSettings().preloadRadius;
+let previousLyricsPolicy = lyricsPolicyKey();
 subscribeAppSettings((settings) => {
+  const policy = lyricsPolicyKey();
+  if (policy !== previousLyricsPolicy) {
+    previousLyricsPolicy = policy;
+    lyricsCache.clear();
+    void usePlayerStore.getState().refreshLyrics();
+  }
   const changed = settings.streamingQuality !== previousStreamingQuality ||
-    settings.preloadNextTrack !== previousPreloading;
+    settings.preloadNextTrack !== previousPreloading || settings.preloadRadius !== previousPreloadRadius;
   previousStreamingQuality = settings.streamingQuality;
   previousPreloading = settings.preloadNextTrack;
+  previousPreloadRadius = settings.preloadRadius;
   if (!changed) return;
+  cancelScheduledNeighborWarmups();
   queuePreloadKeys.clear();
   warmedAudioSources.forEach(({ source }) => releasePreloadedAudio(source));
   warmedAudioSources.clear();

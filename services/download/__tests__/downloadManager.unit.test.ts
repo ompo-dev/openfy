@@ -252,6 +252,19 @@ describe('queueDownloads', () => {
     );
   });
 
+  it('validates and downloads a saved YouTube URL even without a current Spotify mapping', async () => {
+    mockNativePlayerAndDownload.mockResolvedValue({ uri: 'file:///mock_dir/linked.m4a', status: 206,
+      mimeType: 'audio/mp4', totalBytes: 100000 });
+    await expect(downloadTrack({ spotifyId: 'AAAAAAAAAAAAAAAAAAAAAA', title: 'Linked song', artistName: 'Artist',
+      albumName: 'Album', imageURL: '', duration_ms: 180000,
+      youtubeUrl: 'https://youtu.be/abcdefghijk' })).resolves.toMatchObject({
+      youtubeVideoId: 'abcdefghijk', youtubeUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
+    });
+    expect(resolveCatalogYouTubeVideoId).toHaveBeenCalledWith(expect.objectContaining({ videoId: 'abcdefghijk', title: 'Linked song' }));
+    expect(catalogMock).not.toHaveBeenCalled();
+    expect(mockNativePlayerAndDownload).toHaveBeenCalledWith('abcdefghijk', expect.any(String), 1024 * 1024);
+  });
+
   it('repairs existing metadata, high-resolution artwork and video links without replacing audio', async () => {
     const saved = { id: 'track_repair', spotifyId: 'repair-metadata', title: 'Song',
       artistName: 'Artist, Guest', albumName: 'Spotify', imageURL: 'file:///old.jpg',
