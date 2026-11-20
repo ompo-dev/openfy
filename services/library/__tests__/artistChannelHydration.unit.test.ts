@@ -44,6 +44,8 @@ describe('saved recording channel migration', () => {
     await flush();
     expect(resolveTrackCredits).toHaveBeenCalledWith(saved);
     expect(upsertCatalogTracks).toHaveBeenCalledWith([{ ...saved, artists, artistName: 'Channel', artistCreditsVersion: 2 }]);
+    // Library revision updates are now batched after successive credit repairs.
+    await new Promise((resolve) => setTimeout(resolve, 800));
     expect(useLibraryStore.getState().refreshLibrary).toHaveBeenCalledTimes(1);
   });
 

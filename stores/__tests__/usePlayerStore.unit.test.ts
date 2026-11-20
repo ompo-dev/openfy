@@ -12,11 +12,24 @@ jest.mock('../../services/lyrics/lyricsRepository', () => ({
 }));
 
 import { setRemotePlaybackHandlers } from '@services';
+import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 import { getExistingLocalAudioPath, usePlayerStore } from '../usePlayerStore';
 import { fetchLyrics } from '../../services/lyrics/lyricsService';
 import { getTrackLyricsProvider, setTrackLyricsProvider } from '../../services/lyrics/lyricsRepository';
 
 describe('getExistingLocalAudioPath', () => {
+  it('rejects zero-byte and truncated local audio without rejecting a file with unknown size', async () => {
+    (Platform as { OS: string }).OS = 'ios';
+    const file = 'file:///offline.m4a';
+    jest.mocked(FileSystem.getInfoAsync).mockResolvedValueOnce({ exists: true, size: 0 } as never)
+      .mockResolvedValueOnce({ exists: true, size: 1024 } as never)
+      .mockResolvedValueOnce({ exists: true } as never);
+    await expect(getExistingLocalAudioPath(file)).resolves.toBeNull();
+    await expect(getExistingLocalAudioPath(file)).resolves.toBeNull();
+    await expect(getExistingLocalAudioPath(file)).resolves.toBe(file);
+    (Platform as { OS: string }).OS = 'web';
+  });
   it('drops expired web proxy URLs so the track resolves again', async () => {
     await expect(
       getExistingLocalAudioPath('https://r1.googlevideo.com/stale.m4a')

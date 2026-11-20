@@ -170,6 +170,7 @@ let loadGeneration = 0;
 let pendingSeek: { positionMs: number; generation: number } | null = null;
 let seekOperation: Promise<void> | null = null;
 let remoteCommandInFlight = false;
+const remoteCommandQueue: (keyof RemotePlaybackHandlers)[] = [];
 let remotePlaybackHandlers: RemotePlaybackHandlers = {};
 let currentSourceKind: AudioDiagnosticEvent['sourceKind'] = 'none';
 let currentSourceHost: string | undefined;
@@ -401,10 +402,26 @@ export const setRemotePlaybackHandlers = (
 };
 
 const runRemoteCommand = (command: keyof RemotePlaybackHandlers): void => {
-  const handler = remotePlaybackHandlers[command];
-  if (!handler || remoteCommandInFlight) return;
+  if (!remotePlaybackHandlers[command]) return;
+  // Hardware and lock-screen presses may arrive while the previous stream is
+  // resolving. Serialize commands instead of dropping a user's next/previous.
+  if (remoteCommandQueue.length >= 16) {
+    log.player('remote command queue saturated', { command });
+    return;
+  }
+  remoteCommandQueue.push(command);
+  if (remoteCommandInFlight) return;
   remoteCommandInFlight = true;
-  void Promise.resolve(handler()).finally(() => {
+  void (async () => {
+    while (remoteCommandQueue.length) {
+      const next = remoteCommandQueue.shift()!;
+      try {
+        await remotePlaybackHandlers[next]?.();
+      } catch (error) {
+        log.error('remote playback command failed', { command: next, error: String(error) });
+      }
+    }
+  })().finally(() => {
     remoteCommandInFlight = false;
   });
 };
@@ -771,7 +788,8 @@ const loadAndPlayNativeYouTube = async (
     const diagnostic = addNativeYouTubePlaybackListener('onNativePlaybackDiagnostic', (payload?: unknown) => {
       if (generation === loadGeneration && payload && typeof payload === 'object' &&
           'videoId' in payload && payload.videoId === videoId) {
-        log.player('native startup stage', { ...payload });
+        log.player('native startup stage', { ...payload, trackId: diagnosticTrack?.spotifyId,
+          loadGeneration: generation });
       }
     });
     nativeYouTubeSubscriptions = [ended, next, previous, diagnostic].filter(

@@ -3,10 +3,19 @@ import { getArtistRecordingVideoId } from '../search/artistIdentity';
 import { ARTIST_CREDITS_VERSION, resolveTrackCredits } from '../search/trackCredits';
 import { getCatalogTracks, upsertCatalogTracks, type LibraryTrack } from './catalogLibrary';
 import { useLibraryStore } from '../../stores/useLibraryStore';
+import { yieldToPlaybackStartup } from '../network/audioPriority';
 
 const queued = new Map<string, LibraryTrack>();
 const attempted = new Map<string, number>();
 let running = 0;
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+const scheduleLibraryRefresh = () => {
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = undefined;
+    useLibraryStore.getState().refreshLibrary();
+  }, 750);
+};
 
 /** Recover complete saved credits, then attach verified channels without blocking rendering. */
 export const hydrateLibraryArtistChannels = (tracks: LibraryTrack[]) => {
@@ -27,6 +36,7 @@ const pump = () => {
     queued.delete(key);
     running += 1;
     void (async () => {
+      await yieldToPlaybackStartup();
       const videoId = await getArtistRecordingVideoId(track);
       const { artists, artistCreditsVersion } = await resolveTrackCredits(track);
       if (!artists.length || !artistCreditsVersion) return;
@@ -37,7 +47,7 @@ const pump = () => {
       if (JSON.stringify(current.artists) !== JSON.stringify(track.artists)) return;
       await upsertCatalogTracks([{ ...current, artists, artistCreditsVersion,
         artistName: artists.map((artist) => artist.name).join(', ') }]);
-      useLibraryStore.getState().refreshLibrary();
+      scheduleLibraryRefresh();
     })().catch(() => {}).finally(() => { running -= 1; pump(); });
   }
 };

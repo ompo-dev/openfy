@@ -1,4 +1,5 @@
 import * as React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 
 import { useAppSettings, useLibrarySelectedCategory } from '@context';
@@ -22,6 +23,33 @@ import { useFollowedArtistsStore } from '../stores/useFollowedArtistsStore';
 
 const MIN_REFRESH_INDICATOR_MS = 350;
 const HOME_DATA_TTL_MS = 60_000;
+const HOME_SHELL_TTL_MS = 6 * 60 * 60_000;
+const HOME_SHELL_STORAGE_KEY = 'openfy_home_shell_v1';
+let homeShellSaveTimer: ReturnType<typeof setTimeout> | undefined;
+
+const persistHomeShell = (key: string, snapshot: PersonalizedHomeSnapshot) => {
+  if (homeShellSaveTimer) clearTimeout(homeShellSaveTimer);
+  homeShellSaveTimer = setTimeout(() => {
+    homeShellSaveTimer = undefined;
+    const payload = JSON.stringify({ key, savedAt: Date.now(),
+      snapshot: { ...snapshot, tracksById: [...snapshot.tracksById] } });
+    // Avoid large AsyncStorage writes while the user is trying to play music.
+    if (payload.length <= 900_000) {
+      void AsyncStorage.setItem(HOME_SHELL_STORAGE_KEY, payload).catch(() => {});
+    }
+  }, 1_500);
+};
+
+const loadHomeShell = async (key: string): Promise<PersonalizedHomeSnapshot | null> => {
+  const raw = await AsyncStorage.getItem(HOME_SHELL_STORAGE_KEY);
+  if (!raw) return null;
+  const parsed = JSON.parse(raw) as { key?: string; savedAt?: number;
+    snapshot?: Omit<PersonalizedHomeSnapshot, 'tracksById'> & { tracksById?: [string, LibraryTrack][] } };
+  if (parsed.key !== key || !parsed.savedAt || Date.now() - parsed.savedAt > HOME_SHELL_TTL_MS ||
+      !parsed.snapshot || !Array.isArray(parsed.snapshot.playlists) ||
+      !Array.isArray(parsed.snapshot.discoveries) || !Array.isArray(parsed.snapshot.tracksById)) return null;
+  return { ...parsed.snapshot, tracksById: new Map(parsed.snapshot.tracksById) };
+};
 
 type HomeSourceData = {
   tracks: LibraryTrack[];
@@ -142,6 +170,10 @@ export const usePersonalizedHome = () => {
       forceRefreshRef.current = false;
       if (forceRefresh) finishManualRefresh.current = null;
       const cachedSnapshot = snapshotCache.get(snapshotKey);
+      let publishedFresh = false;
+      let restoredSnapshot: PersonalizedHomeSnapshot | null = null;
+      const persistedShellRequest = !forceRefresh && !cachedSnapshot
+        ? loadHomeShell(snapshotKey).catch(() => null) : Promise.resolve(null);
       const variation = (cachedSnapshot?.snapshot.refreshRevision || 0) + (forceRefresh ? 1 : 0);
 
       if (cachedSnapshot) {
@@ -168,20 +200,33 @@ export const usePersonalizedHome = () => {
           request !== generation.current ||
           requestKeyForEffect !== latestRequestKey.current
         ) return;
+        publishedFresh = true;
         cacheHomeSnapshot(snapshotKey, snapshot);
+        persistHomeShell(snapshotKey, snapshot);
         setHome(snapshot);
         setIsLoading(false);
       };
 
       void (async () => {
-        const { tracks, playlists, profile } = await loadHomeSourceData(
+        const sourceRequest = loadHomeSourceData(
           libraryRevision,
           forceRefresh
         );
+        const saved = await persistedShellRequest;
+        if (saved && active && !publishedFresh && request === generation.current &&
+            requestKeyForEffect === latestRequestKey.current) {
+          restoredSnapshot = saved;
+          setHome(saved);
+          setIsLoading(false);
+          log.home('restored persisted home shell', { tracks: saved.tracksById.size,
+            discoveries: saved.discoveries.length });
+        }
+        const { tracks, playlists, profile } = await sourceRequest;
+        const warmSnapshot = cachedSnapshot?.snapshot || restoredSnapshot;
         let catalog: HomeCatalog = {
-          releases: cachedSnapshot?.snapshot.releases || [],
-          similarTracks: cachedSnapshot?.snapshot.similarTracks || [],
-          radios: cachedSnapshot?.snapshot.radios || [],
+          releases: warmSnapshot?.releases || [],
+          similarTracks: warmSnapshot?.similarTracks || [],
+          radios: warmSnapshot?.radios || [],
         };
         const build = (discoveries: PersonalizedHomeTrack[]) =>
           buildPersonalizedHome({
@@ -196,7 +241,7 @@ export const usePersonalizedHome = () => {
             seed: `${new Date().toISOString().slice(0, 10)}:${variation}`,
             refreshRevision: variation,
             previousRecommendationIds: forceRefresh
-              ? new Set(cachedSnapshot?.snapshot.discoveries.map((track) => track.spotifyId) || []) : undefined,
+              ? new Set(warmSnapshot?.discoveries.map((track) => track.spotifyId) || []) : undefined,
           });
         const finishLocalBuild = log.time('home', 'local recommendation snapshot build', {
           tracks: tracks.length,
@@ -204,7 +249,7 @@ export const usePersonalizedHome = () => {
         });
         const localSnapshot = build(
           settings.personalizedHome
-            ? cachedSnapshot?.snapshot.discoveries || []
+            ? warmSnapshot?.discoveries || []
             : []
         );
         finishLocalBuild({
@@ -252,7 +297,12 @@ export const usePersonalizedHome = () => {
             new Set(tracks.map((track) => track.spotifyId)),
             settings.allowExplicitRecommendations,
             forceRefresh,
-            { variation, previousTrackIds: new Set(cachedSnapshot?.snapshot.discoveries.map((track) => track.spotifyId) || []) }
+            { variation, previousTrackIds: new Set(warmSnapshot?.discoveries.map((track) => track.spotifyId) || []),
+              onUpdate: (partial) => {
+                if (!active || request !== generation.current) return;
+                latestDiscoveries = partial;
+                publish(build(partial));
+              } }
           );
           finishDiscoveries({ ok: true, tracks: discoveries.length });
           if (active && request === generation.current) {

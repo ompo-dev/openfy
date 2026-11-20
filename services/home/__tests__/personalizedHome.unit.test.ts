@@ -74,6 +74,15 @@ describe('personalizedHome', () => {
     expect(unfollowed.seeds.map((seed) => seed.name)).not.toContain('Novo artista');
     expect(profile.totalListens).toBe(12);
   });
+  it('reserves discovery seeds for listening affinity when many artists are followed', () => {
+    const followedArtists = Array.from({ length: 5 }, (_, index) => ({
+      id: `ytartist_follow_${index}`, name: `Follow ${index}`, imageURL: '', followedAt: index + 1,
+    }));
+    const home = buildPersonalizedHome({ tracks: library, playlists, profile,
+      personalized: true, allowExplicitRecommendations: true, followedArtists });
+    expect(home.seeds.filter((seed) => seed.followed)).toHaveLength(2);
+    expect(home.seeds.some((seed) => seed.name === 'Sotam')).toBe(true);
+  });
   it('ranks pinned songs and artists by actual listens, while recents use playback order', () => {
     const history: UserProfile = { ...profile, recentlyPlayedTracks: library.slice(0, 3).map((item, index) => ({
       track: { id: item.spotifyId, spotifyId: item.spotifyId, title: item.title, artists: [item.artistName],

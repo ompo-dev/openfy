@@ -8,6 +8,7 @@ import {
 import { removeTrackFromLocalPlaylists } from './localPlaylistManager';
 import { albumAssociationsForTrack, mergeAlbumAssociations, normalizeTrackIsrc, type TrackAlbumRef } from '../../models/Track/TrackModel';
 import { getTrackYouTubeVideoId } from '../spotify/linkParser';
+import { useLibraryStore } from '../../stores/useLibraryStore';
 
 export type CatalogSourcePlatform = 'spotify' | 'youtube';
 
@@ -50,6 +51,9 @@ export type LibraryTrack = CatalogTrack & {
 const STORAGE_KEY = 'openfy_catalog_tracks_v1';
 let storageMutation = Promise.resolve();
 let libraryTracksRequest: Promise<LibraryTrack[]> | null = null;
+let libraryTracksCache: { revision: number; expiresAt: number; tracks: LibraryTrack[] } | null = null;
+let catalogCacheGeneration = 0;
+const invalidateLibraryTracksCache = () => { libraryTracksCache = null; catalogCacheGeneration += 1; };
 
 const sourcePlatformFrom = (
   track: Pick<CatalogTrackInput, 'spotifyId' | 'youtubeVideoId' | 'sourcePlatform'>
@@ -206,6 +210,7 @@ export const upsertCatalogTracks = async (
       ...[...touchedIds].map((id) => byId.get(id)!),
     ];
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+    invalidateLibraryTracksCache();
   });
   storageMutation = operation.catch(() => {});
   await operation;
@@ -226,6 +231,7 @@ export const removeCatalogTracks = async (
     removed = current.length - next.length;
     if (removed > 0) {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      invalidateLibraryTracksCache();
     }
   });
   storageMutation = operation.catch(() => {});
@@ -307,10 +313,18 @@ const loadLibraryTracks = async (): Promise<LibraryTrack[]> => {
 };
 
 export const getLibraryTracks = (): Promise<LibraryTrack[]> => {
+  const revision = useLibraryStore.getState().libraryRevision;
+  const generation = catalogCacheGeneration;
+  if (libraryTracksCache?.revision === revision && libraryTracksCache.expiresAt > Date.now()) {
+    return Promise.resolve(libraryTracksCache.tracks);
+  }
   if (libraryTracksRequest) return libraryTracksRequest;
 
   libraryTracksRequest = loadLibraryTracks()
     .then((tracks) => {
+      if (generation === catalogCacheGeneration && revision === useLibraryStore.getState().libraryRevision) {
+        libraryTracksCache = { revision, expiresAt: Date.now() + 5_000, tracks };
+      }
       void import('./artistChannelHydration').then(({ hydrateLibraryArtistChannels }) =>
         hydrateLibraryArtistChannels(tracks)).catch(() => {});
       return tracks;

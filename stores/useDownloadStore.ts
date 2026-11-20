@@ -16,6 +16,7 @@ import { log } from '../utils/appLogger';
 import { Platform } from 'react-native';
 import { useConnectivityStore } from './useConnectivityStore';
 import { showOfflineActionMessage } from '../services/network/offlineFeedback';
+import { yieldToPlaybackStartup } from '../services/network/audioPriority';
 
 export type DownloadJobStatus =
   | 'queued'
@@ -97,6 +98,8 @@ const runDownload = (
       cancelledIds.delete(track.spotifyId);
       updateJob(track.spotifyId, (job) => ({ ...job, status: 'resolving', progress: 0 }));
       try {
+        await yieldToPlaybackStartup();
+        if (cancelledIds.has(track.spotifyId)) return false;
         const downloaded = await downloadTrack(
           track,
           audioUrl,

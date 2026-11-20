@@ -11,6 +11,7 @@ import {
   getLocalPlaylists,
   upsertLocalPlaylist,
 } from '../localPlaylistManager';
+import { useLibraryStore } from '../../../stores/useLibraryStore';
 
 jest.mock('../../download/downloadManager', () => ({
   getDownloadedTracks: jest.fn(),
@@ -22,6 +23,7 @@ describe('catalogLibrary', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
     getDownloadedTracksMock.mockReset().mockResolvedValue([]);
+    useLibraryStore.getState().refreshLibrary();
   });
 
   it('persists playable metadata without requiring an audio URL', async () => {

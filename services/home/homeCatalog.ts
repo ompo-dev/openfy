@@ -3,6 +3,7 @@ import { getYouTubeMusicArtistProfile } from '../../api/search/catalog';
 import { artistIdentityKey, resolveTrackArtist } from '../search/artistIdentity';
 import { createAsyncResourceCache } from '../../src/application/asyncResourceCache';
 import { loadHomeRadio } from './homeRadio';
+import { yieldToPlaybackStartup } from '../network/audioPriority';
 import {
   type HomeCatalog,
   type HomeRelease,
@@ -46,6 +47,7 @@ export const loadHomeCatalog = (
       const stored = raw ? JSON.parse(raw) : null;
       if (stored?.key === key && Array.isArray(stored.catalog?.releases) && Array.isArray(stored.catalog?.similarTracks)) {
         previous = stored.catalog;
+        onUpdate?.(previous!);
         if (!force && Date.now() - stored.fetchedAt < TTL) return previous!;
       }
     } catch {}
@@ -61,6 +63,7 @@ export const loadHomeCatalog = (
       similarTracks: radios.get(selected[0].name)?.tracks || previous?.similarTracks || [],
     });
     const loadReleases = async (seed: RecommendationSeed): Promise<HomeRelease[]> => {
+      await yieldToPlaybackStartup();
       const recording = anchors.find((track) => track.artists?.some((credit) => credit.id === seed.id ||
         normalize(credit.name) === normalize(seed.name)));
       const route = artistIdentityKey(seed.id).startsWith('youtube:')

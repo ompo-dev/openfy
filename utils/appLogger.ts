@@ -21,6 +21,9 @@ export type LogEntry = {
 };
 
 const META_LIMIT = 1_000;
+// Retain enough history for multi-track diagnostics without growing for the
+// lifetime of a foreground session (especially when status events are noisy).
+export const MAX_LOG_ENTRIES = 3_000;
 const isDevelopment =
   typeof __DEV__ !== 'undefined' &&
   __DEV__ &&
@@ -128,6 +131,7 @@ const emit = (category: LogCategory, event: string, meta?: unknown) => {
   }
   if (!logConfig.capture) return;
   ring.push({ ts: stamp(), category, event, ...(text ? { meta: text } : {}) });
+  if (ring.length > MAX_LOG_ENTRIES) ring.splice(0, ring.length - MAX_LOG_ENTRIES);
 };
 
 const make = (category: LogCategory) => (event: string, meta?: unknown) =>
@@ -142,6 +146,7 @@ const time = (category: LogCategory, event: string, meta?: unknown) => {
     ended = true;
     emit(category, `${event} finished`, {
       durationMs: Date.now() - startedAt,
+      ...(meta === undefined ? {} : { context: meta }),
       ...(result === undefined ? {} : { result }),
     });
   };
@@ -177,6 +182,8 @@ export type PerformanceMetricSummary = {
   failures: number;
   averageMs: number;
   p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
   maxMs: number;
 };
 
@@ -219,6 +226,8 @@ export const getPerformanceMetricSummary = (): PerformanceMetricSummary[] => {
       failures: group.failures,
       averageMs: Math.round(sorted.reduce((total, duration) => total + duration, 0) / sorted.length),
       p50Ms: sorted[Math.floor((sorted.length - 1) / 2)],
+      p95Ms: sorted[Math.ceil(sorted.length * 0.95) - 1],
+      p99Ms: sorted[Math.ceil(sorted.length * 0.99) - 1],
       maxMs: sorted[sorted.length - 1],
     };
   }).sort((a, b) => b.count - a.count || b.maxMs - a.maxMs);

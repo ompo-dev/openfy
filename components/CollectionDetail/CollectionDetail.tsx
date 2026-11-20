@@ -42,6 +42,7 @@ import { matchesFollowedArtist, setArtistFollowed } from '../../services/library
 import { ArtistSearchRow } from '../Home/ArtistSearchRow';
 import { isCollectionSaved, saveCollection } from '../../services/library/savedCollections';
 import { useLibraryStore } from '../../stores/useLibraryStore';
+import { loadCollectionSimilarTracks } from '../../services/recommendation/collectionSimilar';
 
 type CollectionTrack = TrackModel & {
   localAudioPath?: string;
@@ -305,6 +306,7 @@ export const CollectionDetail = ({
   const { downloads, enqueueDownloads } = useDownloads();
   const {
     addToQueue,
+    extendQueueFromCollection,
     currentTrack,
     isLoadingAudio,
     isShuffle,
@@ -315,6 +317,7 @@ export const CollectionDetail = ({
     toggleShuffle,
   } = usePlayer((state) => ({
     addToQueue: state.addToQueue,
+    extendQueueFromCollection: state.extendQueueFromCollection,
     currentTrack: state.currentTrack,
     isLoadingAudio: state.isLoadingAudio,
     isShuffle: state.isShuffle,
@@ -343,6 +346,27 @@ export const CollectionDetail = ({
       totalDurationMs ?? tracks.reduce((total, track) => total + (track.durationMs || 0), 0),
   });
   const normalizedSearchQuery = normalizeSearchValue(searchQuery);
+  const [relatedTracks, setRelatedTracks] = React.useState<TrackModel[]>([]);
+  const relatedSeedKey = tracks.slice(0, 8).map((track) => track.id).join('|');
+  const relatedInputRef = React.useRef(tracks);
+  relatedInputRef.current = tracks;
+  React.useEffect(() => {
+    setRelatedTracks([]);
+    if (kind === 'artist' || onPlayMix || !relatedSeedKey || process.env.NODE_ENV === 'test') return;
+    let active = true;
+    // Recommendations must not occupy the first render or initial play path.
+    const timer = setTimeout(() => {
+      void loadCollectionSimilarTracks(collectionId, relatedInputRef.current).then((similar) => {
+        if (active) setRelatedTracks(similar);
+      }).catch((error) => log.playlist('similar collection lookup failed', { collectionId, error: String(error) }));
+    }, 1_800);
+    return () => { active = false; clearTimeout(timer); };
+  }, [collectionId, kind, onPlayMix, relatedSeedKey]);
+  const allExtraTrackSections = React.useMemo(() => [
+    ...extraTrackSections,
+    ...(relatedTracks.length && kind !== 'artist' ? [{ id: 'similar', title: `Parecido com ${title}`,
+      tracks: relatedTracks }] : []),
+  ], [extraTrackSections, kind, relatedTracks, title]);
   const matchingTracks = React.useMemo(
     () => selectCollectionTracks(tracks, normalizedSearchQuery, sortAscending),
     [normalizedSearchQuery, sortAscending, tracks]
@@ -355,13 +379,13 @@ export const CollectionDetail = ({
   );
   const matchingExtraSections = React.useMemo(
     () =>
-      extraTrackSections
+      allExtraTrackSections
         .map((section) => ({
           ...section,
           tracks: selectCollectionTracks(section.tracks, normalizedSearchQuery),
         }))
         .filter((section) => section.tracks.length > 0),
-    [extraTrackSections, normalizedSearchQuery]
+    [allExtraTrackSections, normalizedSearchQuery]
   );
   const visibleExtraSections = React.useMemo(
     () => matchingExtraSections.map((section) => ({
@@ -512,12 +536,27 @@ export const CollectionDetail = ({
       await playWithQueue(playerTracks, startIndex, sourceId, {
         shuffle: shuffled,
       });
+      // A remote playlist can expose only its first page. Start audio now;
+      // complete its queue later without replacing the current playback.
+      if (kind === 'playlist' && resolveTracksForPlayback &&
+          sourceId === collectionPlaybackId && (trackCount === undefined || sourceTracks.length < trackCount)) {
+        void resolveTracksForPlayback().then((loaded) => {
+          const complete = selectCollectionTracks(loaded, normalizedSearchQuery, sortAscending);
+          extendQueueFromCollection?.(complete.map((item) => toPlayerTrack(item, title)), sourceId);
+        }).catch((error) => log.error('playlist queue expansion failed', { sourceId, error: String(error) }));
+      }
     },
     [
       collectionPlaybackId,
       playWithQueue,
       title,
       onPlayMix,
+      kind,
+      trackCount,
+      resolveTracksForPlayback,
+      normalizedSearchQuery,
+      sortAscending,
+      extendQueueFromCollection,
     ]
   );
 
@@ -533,7 +572,7 @@ export const CollectionDetail = ({
 
   const playCollection = React.useCallback(
     async (shuffled = false, startIndex = 0) => {
-      const playableTracks = await resolveCollectionTracks();
+      const playableTracks = matchingTracks.length ? matchingTracks : await resolveCollectionTracks();
       await playTrackList(
         playableTracks,
         startIndex,
@@ -541,7 +580,7 @@ export const CollectionDetail = ({
         shuffled
       );
     },
-    [collectionPlaybackId, playTrackList, resolveCollectionTracks]
+    [collectionPlaybackId, matchingTracks, playTrackList, resolveCollectionTracks]
   );
 
   const handleAddToQueue = React.useCallback(async () => {
@@ -573,15 +612,21 @@ export const CollectionDetail = ({
   );
 
   const handleDownloadCollection = React.useCallback(() => {
-    const pending = tracks.filter((track) => {
-      if (track.isDownloaded) return false;
-      const download = downloadsById.get(track.id);
-      return !download || download.status === 'error';
-    });
-    if (pending.length) {
-      enqueueDownloads(pending.map((track) => toDownloadInput(track, title)));
-    }
-  }, [downloadsById, enqueueDownloads, title, tracks]);
+    void (async () => {
+      // A playlist may render 12 songs while hundreds of remote pages remain.
+      // Download the requested collection, not just the visible page.
+      const source = resolveTracksForPlayback && (trackCount === undefined || tracks.length < trackCount)
+        ? await resolveTracksForPlayback() : tracks;
+      const pending = selectCollectionTracks(source).filter((track) => {
+        if (track.isDownloaded) return false;
+        const download = downloadsById.get(track.id);
+        return !download || download.status === 'error';
+      });
+      if (pending.length) enqueueDownloads(pending.map((track) => toDownloadInput(track, title)));
+    })().catch((error) => log.error('collection download preparation failed', {
+      collectionId, error: String(error),
+    }));
+  }, [collectionId, downloadsById, enqueueDownloads, resolveTracksForPlayback, title, trackCount, tracks]);
 
   const collectionDownloadState = React.useMemo(() => {
     if (!tracks.length) return 'empty' as const;

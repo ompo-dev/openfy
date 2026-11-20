@@ -532,7 +532,7 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
                   {metric.category} · {metric.action}
                 </Text>
                 <Text style={styles.metricValue}>
-                  n={metric.count} · média {metric.averageMs} ms · p50 {metric.p50Ms} ms · máx {metric.maxMs} ms · falhas {metric.failures}
+                  n={metric.count} · média {metric.averageMs} ms · p50 {metric.p50Ms} ms · p95 {metric.p95Ms} ms · p99 {metric.p99Ms} ms · máx {metric.maxMs} ms · falhas {metric.failures}
                 </Text>
               </View>
             )) : (

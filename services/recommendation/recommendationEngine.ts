@@ -38,6 +38,8 @@ export type UserInteraction = {
 
 export type UserProfile = {
   artistWeights: Record<string, number>;
+  artistLastInteractedAt?: Record<string, number>;
+  trackFeedback?: Record<string, { skips: number; completes: number; repeats: number; dislikes: number; lastFeedbackAt: number }>;
   genreWeights: Record<string, number>;
   recentlyPlayedTracks: {
     track: CanonicalTrack;
@@ -49,6 +51,7 @@ export type UserProfile = {
 
 const USER_PROFILE_KEY = 'openfy_user_profile';
 const STREAM_CACHE = new Map<string, { resolved: ResolvedAudio; expiresAt: number }>();
+let profileMutations: Promise<unknown> = Promise.resolve();
 
 const INTERACTION_WEIGHTS: Record<InteractionType, number> = {
   like: 10,
@@ -114,9 +117,10 @@ export const recordInteraction = async (
   },
   interaction: InteractionType
 ): Promise<void> => {
-  try {
+  const mutation = profileMutations.catch(() => undefined).then(async () => {
     const profile = await getUserProfile();
-    const weight = INTERACTION_WEIGHTS[interaction] || 1;
+    const weight = INTERACTION_WEIGHTS[interaction];
+    const now = Date.now();
     const artistNames = track.artists?.map((artist) => artist.name.trim()).filter(Boolean) || [];
     const canonicalArtists = artistNames.length
       ? [...new Set(artistNames)]
@@ -129,7 +133,26 @@ export const recordInteraction = async (
     // Update Artist Weight
     canonicalArtists.forEach((name) => {
       profile.artistWeights[name] = (profile.artistWeights[name] || 0) + weight;
+      (profile.artistLastInteractedAt ||= {})[name] = now;
     });
+
+    if (interaction === 'skip' || interaction === 'complete' || interaction === 'repeat' ||
+        interaction === 'dislike' || interaction === 'like') {
+      const feedback = (profile.trackFeedback ||= {});
+      const previous = feedback[track.spotifyId] || { skips: 0, completes: 0, repeats: 0, dislikes: 0, lastFeedbackAt: 0 };
+      feedback[track.spotifyId] = {
+        skips: previous.skips + Number(interaction === 'skip'),
+        completes: previous.completes + Number(interaction === 'complete'),
+        repeats: previous.repeats + Number(interaction === 'repeat'),
+        dislikes: interaction === 'like' ? 0 : (previous.dislikes || 0) + Number(interaction === 'dislike'),
+        lastFeedbackAt: now,
+      };
+      const keys = Object.keys(feedback);
+      if (keys.length > 300) {
+        keys.sort((first, second) => feedback[first].lastFeedbackAt - feedback[second].lastFeedbackAt);
+        keys.slice(0, keys.length - 300).forEach((key) => delete feedback[key]);
+      }
+    }
 
     // Update Recently Played
     const existingIndex = profile.recentlyPlayedTracks.findIndex(
@@ -149,32 +172,34 @@ export const recordInteraction = async (
       updatedAt: new Date().toISOString(),
     };
 
-    if (existingIndex >= 0) {
+    if (existingIndex >= 0 && interaction === 'play') {
       const previous = profile.recentlyPlayedTracks[existingIndex].track;
       profile.recentlyPlayedTracks[existingIndex].track = {
         ...previous, ...canonical,
         imageURL: canonical.imageURL || previous.imageURL,
         createdAt: previous.createdAt,
       };
-      profile.recentlyPlayedTracks[existingIndex].lastPlayedAt = Date.now();
-      if (interaction === 'play') {
-        profile.recentlyPlayedTracks[existingIndex].playCount += 1;
-      }
-    } else {
+      profile.recentlyPlayedTracks[existingIndex].lastPlayedAt = now;
+      profile.recentlyPlayedTracks[existingIndex].playCount += 1;
+    } else if (existingIndex < 0 && interaction === 'play') {
       profile.recentlyPlayedTracks.unshift({
         track: canonical,
-        lastPlayedAt: Date.now(),
+        lastPlayedAt: now,
         playCount: 1,
       });
     }
 
-    // Keep top 30 recently played
-    if (profile.recentlyPlayedTracks.length > 30) {
-      profile.recentlyPlayedTracks = profile.recentlyPlayedTracks.slice(0, 30);
+    // Keep a wider recent history for preference diversity, without unbounded storage.
+    if (profile.recentlyPlayedTracks.length > 100) {
+      profile.recentlyPlayedTracks = profile.recentlyPlayedTracks.slice(0, 100);
     }
 
-    profile.totalListens += 1;
+    if (interaction === 'play') profile.totalListens += 1;
     await saveUserProfile(profile);
+  });
+  profileMutations = mutation.catch(() => undefined);
+  try {
+    await mutation;
   } catch (err) {
     console.warn('[RecommendationEngine] recordInteraction error:', err);
   }

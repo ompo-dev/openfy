@@ -26,3 +26,23 @@ it('manual refresh bypasses cached suggestions, changes the anchor and returns u
   await loadHomeDiscoveries([seed], new Set(), true);
   expect(search).toHaveBeenCalledTimes(2);
 });
+
+it('publishes a useful discovery while another artist search is still pending', async () => {
+  await AsyncStorage.clear();
+  const resolvers: Record<string, (result: unknown) => void> = {};
+  const search = jest.fn((artist: string) => new Promise((resolve) => { resolvers[artist] = resolve; }));
+  jest.mocked(getYouTubeMusicClient).mockResolvedValue({ music: { search, getUpNext: jest.fn().mockResolvedValue({ contents: [] }) } } as never);
+  const onUpdate = jest.fn();
+  const pending = loadHomeDiscoveries([{ name: 'First Artist', score: 1 },
+    { name: 'Second Artist', score: 1 }], new Set(), true, false, { onUpdate });
+  for (let index = 0; index < 12; index += 1) await Promise.resolve();
+  expect(search).toHaveBeenCalledTimes(2);
+  resolvers['First Artist']({ songs: { contents: [{ id: 'abcdefghijk', title: 'First Song',
+    artists: [{ name: 'First Artist' }], duration: { seconds: 120 } }] } });
+  for (let index = 0; index < 12; index += 1) await Promise.resolve();
+  expect(onUpdate).toHaveBeenCalledWith([expect.objectContaining({ title: 'First Song' })]);
+  resolvers['Second Artist']({ songs: { contents: [{ id: 'lmnopqrstuv', title: 'Second Song',
+    artists: [{ name: 'Second Artist' }], duration: { seconds: 180 } }] } });
+  const result = await pending;
+  expect(result.map((item) => item.title)).toEqual(['First Song', 'Second Song']);
+});

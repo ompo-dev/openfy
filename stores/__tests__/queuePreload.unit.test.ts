@@ -133,7 +133,40 @@ const flushAsync = async () => {
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
 };
 
+const finishStaggeredPreloads = async (ms = 12_000) => {
+  await jest.advanceTimersByTimeAsync(ms);
+  jest.useRealTimers();
+  await flushAsync();
+};
+
 describe('queue preload window', () => {
+  it('extends only the active collection and deduplicates additional pages', () => {
+    usePlayerStore.setState({
+      queue: tracks.slice(0, 2), queueOriginalOrder: tracks.slice(0, 2),
+      queueIndex: 1, queueSourceId: 'playlist:test',
+    });
+    const store = usePlayerStore.getState();
+    store.extendQueueFromCollection(tracks, 'playlist:stale');
+    expect(usePlayerStore.getState().queue).toHaveLength(2);
+    store.extendQueueFromCollection([...tracks, tracks[3]], 'playlist:test');
+    expect(usePlayerStore.getState()).toMatchObject({ queueIndex: 1, queueSourceId: 'playlist:test' });
+    expect(usePlayerStore.getState().queue.map((item) => item.spotifyId)).toEqual(tracks.map((item) => item.spotifyId));
+  });
+
+  it('keeps the final selection after a burst of 30 rapid queue jumps', async () => {
+    await updateAppSettings({ preloadNextTrack: false });
+    usePlayerStore.setState({
+      queue: tracks, queueOriginalOrder: tracks, queueIndex: 0,
+      queueSourceId: 'playlist:burst',
+    });
+    const actions = Array.from({ length: 30 }, (_, index) =>
+      usePlayerStore.getState().playQueueIndex(index % tracks.length));
+    await Promise.all(actions);
+    const player = usePlayerStore.getState();
+    expect(player.queueIndex).toBe(4);
+    expect(player.currentTrack?.spotifyId).toBe(tracks[4].spotifyId);
+    expect(player.playerState.isPlaying).toBe(true);
+  });
   afterEach(async () => {
     Platform.OS = 'web';
     usePlayerStore.setState({ queue: [], currentTrack: null });
@@ -321,8 +354,9 @@ describe('queue preload window', () => {
   });
 
   it('warms a five-track window with forward and backward buffer targets', async () => {
+    jest.useFakeTimers();
     await usePlayerStore.getState().playWithQueue(tracks, 1, 'library:songs');
-    await flushAsync();
+    await finishStaggeredPreloads();
 
     expect(preloadAudio).toHaveBeenCalledWith(
       'https://media.test/Anterior.m4a',
@@ -348,15 +382,17 @@ describe('queue preload window', () => {
 
   it('limits source preparation to the configured radius without reloading playback', async () => {
     await updateAppSettings({ preloadRadius: 1 });
+    jest.useFakeTimers();
     await usePlayerStore.getState().playWithQueue(tracks, 2, 'library:radius');
-    await flushAsync();
+    await finishStaggeredPreloads();
     expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Atual.m4a', 8);
     expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Mais uma.m4a', 8);
     expect(preloadAudio).not.toHaveBeenCalledWith('https://media.test/Anterior.m4a', expect.anything());
     expect(preloadAudio).not.toHaveBeenCalledWith('https://media.test/Última.m4a', expect.anything());
     jest.mocked(loadAndPlay).mockClear();
+    jest.useFakeTimers();
     await updateAppSettings({ preloadRadius: 3 });
-    await flushAsync();
+    await finishStaggeredPreloads();
     expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Anterior.m4a', 8);
     expect(preloadAudio).toHaveBeenCalledWith('https://media.test/Última.m4a', 8);
     expect(loadAndPlay).not.toHaveBeenCalled();
@@ -452,6 +488,7 @@ describe('queue preload window', () => {
   });
 
   it('warms the same five-track window in the stable shuffled order', async () => {
+    jest.useFakeTimers();
     const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
     const shuffledTracks = tracks.map((track, index) => ({
       ...track,
@@ -462,7 +499,7 @@ describe('queue preload window', () => {
     await usePlayerStore
       .getState()
       .playWithQueue(shuffledTracks, 0, 'playlist:shuffle-preload', { shuffle: true });
-    await flushAsync();
+    await finishStaggeredPreloads();
 
     const shuffledQueue = [...usePlayerStore.getState().queue];
     expect(preloadAudio).toHaveBeenCalledWith(
@@ -474,15 +511,17 @@ describe('queue preload window', () => {
       8
     );
 
+    jest.useFakeTimers();
     await usePlayerStore.getState().playNext();
-    await flushAsync();
+    await finishStaggeredPreloads();
     expect(preloadAudio).toHaveBeenCalledWith(
       `https://media.test/${shuffledQueue[3].title}.m4a`,
       8
     );
 
+    jest.useFakeTimers();
     await usePlayerStore.getState().playNext();
-    await flushAsync();
+    await finishStaggeredPreloads();
     expect(preloadAudio).toHaveBeenCalledWith(
       `https://media.test/${shuffledQueue[4].title}.m4a`,
       8
@@ -493,6 +532,7 @@ describe('queue preload window', () => {
   it.each([false, true])(
     'preloads the next two native audio tracks and lyrics (shuffle=%s)',
     async (shuffle) => {
+      jest.useFakeTimers();
       Platform.OS = 'ios';
       (hasNativeYouTubePlayback as jest.Mock).mockReturnValue(true);
       const nativeTracks = Array.from({ length: 5 }, (_, index) => ({
@@ -509,7 +549,7 @@ describe('queue preload window', () => {
         `library:native-${shuffle}`,
         { shuffle }
       );
-      await flushAsync();
+      await finishStaggeredPreloads();
 
       const { queue, queueIndex } = usePlayerStore.getState();
       const neighbors = [
