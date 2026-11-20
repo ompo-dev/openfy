@@ -59,9 +59,42 @@ private struct ContentRange {
 public final class YouTubeHTTPRangeClient: Sendable {
   private let session: URLSession
   private let cache = YouTubePlaybackRangeCache()
+  private let temporaryBuffer = YouTubeTemporaryPlaybackBuffer()
+
+  private func temporaryKey(_ descriptor: YouTubeStreamDescriptor) -> String {
+    // Signed URL is held only in memory as an identity discriminator. Never log it.
+    "\(descriptor.videoId):\(descriptor.itag ?? -1):\(descriptor.contentLength):\(descriptor.sourceURL.absoluteString)"
+  }
 
   public init(session: URLSession) {
     self.session = session
+  }
+
+  /// All AVPlayer range reads and proactive background transfers share this
+  /// scratch buffer. A session token prevents a delayed stop from deleting a
+  /// replacement player session, even when replaying the same recording.
+  public func prepareTemporaryPlayback(
+    descriptor: YouTubeStreamDescriptor,
+    session: UUID,
+    prefetched: Data?
+  ) async {
+    await temporaryBuffer.prepare(key: temporaryKey(descriptor), session: session,
+                                  length: descriptor.contentLength, prefetched: prefetched)
+  }
+
+  public func startTemporaryPrefetch(
+    descriptor: YouTubeStreamDescriptor,
+    session: UUID,
+    progress: @escaping @Sendable (String, Int64, Int64) -> Void
+  ) async {
+    await temporaryBuffer.startPrefetch(key: temporaryKey(descriptor), session: session,
+      fetch: { [self] start, end in
+        try await self.request(descriptor: descriptor, start: start, end: end)
+      }, progress: progress)
+  }
+
+  public func endTemporaryPlayback(session: UUID) async {
+    await temporaryBuffer.end(session: session)
   }
 
   /**
@@ -73,9 +106,15 @@ public final class YouTubeHTTPRangeClient: Sendable {
     start: Int64,
     end: Int64
   ) async throws -> Data {
+    let playbackKey = temporaryKey(descriptor)
+    if let buffered = await temporaryBuffer.read(key: playbackKey, from: start, through: end) {
+      NSLog("[RANGE] Served %ld verified temporary bytes at %lld for %@", buffered.count, start, descriptor.videoId)
+      return buffered
+    }
     let cacheKey = "\(descriptor.sourceURL.absoluteString):\(start)-\(end)"
     if let cached = await cache.get(cacheKey) {
       NSLog("[RANGE] Reused %ld cached bytes for %@", cached.count, descriptor.videoId)
+      await temporaryBuffer.store(key: playbackKey, offset: start, data: cached)
       return cached
     }
     NSLog("[RANGE] GET bytes=%lld-%lld for %@", start, end, descriptor.videoId)
@@ -118,6 +157,7 @@ public final class YouTubeHTTPRangeClient: Sendable {
     NSLog("[RANGE] 206 bytes %lld-%lld/%lld (received %ld bytes)",
           parsed.start, parsed.end, parsed.total, data.count)
     await cache.store(data, for: cacheKey)
+    await temporaryBuffer.store(key: playbackKey, offset: start, data: data)
     return data
   }
 

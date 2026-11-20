@@ -108,6 +108,10 @@ public final class OpenfyYouTubeModule: Module {
     player.onDiagnostic = { [weak self] stage, elapsedMs, videoId in
       self?.sendEvent("onNativePlaybackDiagnostic", ["stage": stage, "durationMs": elapsedMs, "videoId": videoId])
     }
+    player.onCacheEvent = { [weak self] stage, bufferedBytes, totalBytes, videoId in
+      self?.sendEvent("onNativePlaybackCache", ["stage": stage, "bufferedBytes": bufferedBytes,
+        "totalBytes": totalBytes, "videoId": videoId])
+    }
     return player
   }()
 
@@ -119,6 +123,7 @@ public final class OpenfyYouTubeModule: Module {
       "onNativeRemoteNext",
       "onNativeRemotePrevious",
       "onNativePlaybackDiagnostic",
+      "onNativePlaybackCache",
       "onSuggestedMediaPlayback"
     )
 

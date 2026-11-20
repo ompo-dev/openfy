@@ -1,5 +1,26 @@
 # Reprodução e downloads em segundo plano
 
+## Buffer temporário de streaming no iPhone (novembro de 2026)
+
+**Problema:** uma faixa reproduzida via rede não era equivalente a uma faixa baixada. O `AVAssetResourceLoader` fazia solicitações HTTP Range com cache LRU de apenas 8 MiB, insuficiente para manter a música inteira após perda de conexão.
+
+**Novo fluxo iOS:**
+
+1. O usuário toca e o AVPlayer começa normalmente por HTTP Range, sem esperar a transferência integral. O cabeçalho/prefixo já preparado continua sendo reutilizado.
+2. Um `YouTubeTemporaryPlaybackBuffer` cria um arquivo esparso no diretório temporário do aplicativo, exclusivo para a sessão de reprodução. Somente intervalos confirmados com HTTP 206, tamanho exato e `Content-Range` correto são marcados como disponíveis.
+3. O `YouTubeHTTPRangeClient` consulta primeiro esse arquivo e só solicita a rede se a região estiver ausente. Leituras fora de ordem e seeks são suportados. O limite por faixa é **128 MiB**, para não consumir armazenamento indefinidamente.
+4. **Depois do primeiro áudio**, uma tarefa de baixa prioridade inicia o preenchimento progressivo do restante da faixa, em intervalos de 512 KiB. Ela compartilha o mesmo cache do player; não salva a música na biblioteca de downloads e não troca o áudio em reprodução.
+5. Se a rede cair, todas as regiões já armazenadas continuam disponíveis localmente. Quando um intervalo ainda não foi recebido, a requisição do AVPlayer tolera erros de conectividade transitórios por até **15 segundos**, aguardando o retorno da conexão. Erros de autorização/HTTP 403 não são tratados como simples queda.
+6. O buffer é cancelado e excluído ao fechar/trocar de faixa. Os arquivos órfãos de encerramentos abruptos são limpos depois de seis horas. O token de sessão impede que uma limpeza antiga exclua o arquivo de uma nova reprodução.
+
+O buffer temporário é **diferente do download offline persistente**: não é exibido na Biblioteca, não permite baixar conteúdo de forma implícita para outras sessões e não promete audição offline indefinida. Uma queda só pode ser atravessada por todo o restante da música quando os bytes necessários já tiverem sido recebidos; uma conexão lenta, falha imediata após o play, espaço insuficiente ou mídia maior que 128 MiB podem limitar essa proteção. O armazenamento provisório usa a proteção de arquivos adequada para reprodução após o primeiro desbloqueio do iPhone.
+
+O novo evento nativo `onNativePlaybackCache` informa estágios `started`, `progress`, `complete` e `interrupted`, além de `bufferedBytes` e `totalBytes`. O JS registra `native temporary streaming cache`; os estágios finais aparecem em diagnósticos como `native-cache-complete` e `native-cache-interrupted`. Não registrar URLs assinadas, credenciais ou dados binários.
+
+**Disponibilidade:** somente o player YouTube nativo iOS tem essa implementação de buffer temporário compartilhado. Os caminhos com `expo-audio` no Android/web ainda usam as políticas de buffering de cada plataforma, sem garantia equivalente de arquivo temporário completo. É necessário **recompilar e instalar o IPA**; uma atualização OTA JavaScript não instala o novo código Swift.
+
+**Validação obrigatória em iPhone:** reproduzir uma faixa de 4–8 minutos; esperar `native-cache-complete`, desativar Wi-Fi e dados móveis e confirmar que a música termina normalmente; repetir interrompendo a rede após 25%, com retorno em até 15 segundos; testar seek dentro e fora das regiões armazenadas, tela bloqueada, avançar rapidamente para outra música e verificar a limpeza do buffer. Comparar tempos de primeiro áudio e uso de rede antes/depois. O teste macOS `scripts/check-youtube-playback-cache.swift` valida o buffer com dados sintéticos; **não equivale à validação física do AVPlayer**.
+
 O player usa a integração nativa do `expo-audio` para registrar uma sessão de mídia com título, artista, álbum e capa. Em iPhones com Dynamic Island, o próprio iOS apresenta essa sessão de “Now Playing” na Ilha Dinâmica; a mesma sessão alimenta a Tela Bloqueada e a Central de Controle.
 
 ## O que a configuração ativa
