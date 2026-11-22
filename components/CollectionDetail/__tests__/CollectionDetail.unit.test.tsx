@@ -2,11 +2,18 @@ import * as React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import { Keyboard, StyleSheet } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { exportPlaylistJson } from '../../../services/library/playlistJsonTransfer';
 
 import { useDownloads, usePlayer } from '@context';
 import { CollectionDetail } from '../CollectionDetail';
 import { getFollowedArtistsSnapshot } from '../../../services/library/followedArtists';
 import { markTrackUnavailable, useTrackAvailabilityStore } from '../../../stores/useTrackAvailabilityStore';
+
+jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(undefined) }));
+jest.mock('../../../services/library/playlistJsonTransfer', () => ({
+  exportPlaylistJson: jest.fn().mockResolvedValue('{"format":"openfy.playlist"}'),
+}));
 
 const mockReplace = jest.fn();
 const mockPush = jest.fn();
@@ -142,6 +149,17 @@ const renderCollection = (props = {}) =>
   );
 
 describe('CollectionDetail', () => {
+  it('copies the full playlist JSON when sharing, including remote pages', async () => {
+    const all = [...tracks, { ...tracks[1], id: 'third', title: 'Terceira' }];
+    const resolveTracksForPlayback = jest.fn().mockResolvedValue(all);
+    const screen = await renderCollection({ kind: 'playlist', trackCount: 3, resolveTracksForPlayback });
+    fireEvent.press(screen.getByLabelText('Compartilhar playlist (copiar JSON)'));
+    await waitFor(() => expect(exportPlaylistJson).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'album-test', title: 'Álbum teste', tracks: all })
+    ));
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith('{"format":"openfy.playlist"}');
+  });
+
   it('exposes swipe removal inside editable playlists without playing or deleting a download', async () => {
     const remove = jest.fn();
     const screen = await renderCollection({ kind: 'playlist', onRemoveTrack: remove });

@@ -59,6 +59,14 @@ Os scripts `npm run android` e `npm run ios` compilam código nativo e exigem SD
 | `utils/appLogger.ts` | Logs limitados, métricas P50/P95/P99 |
 | `docs/` | Arquitetura, streaming, background e auditorias |
 
+## Compartilhar e importar playlists
+
+Nas páginas de playlists, o botão de compartilhar copia um JSON `openfy.playlist` versão 1 com os metadados de todas as páginas: títulos, artistas, ordem, álbuns, capas, IDs, URLs estáveis e mapeamentos de áudio existentes. Em **Configurações > Playlists > Importar playlist por JSON**, cole esse conteúdo ou use o botão de colar: um JSON válido começa a ser importado imediatamente, sem pesquisar cada música outra vez. Importações repetidas reutilizam a mesma playlist local.
+
+O JSON não inclui bytes dos downloads, caminhos privados do aparelho, cookies, URLs temporárias assinadas ou credenciais. Os metadados e links são restaurados; uma fonte de streaming ainda exige conexão quando a música for reproduzida, e links externos podem deixar de funcionar com o tempo. O limite é 2.000 faixas e 3 MB por JSON.
+
+As marcações antigas de “Áudio indisponível” não devem bloquear faixas com vínculo manual de vídeo ou link de áudio já persistido. O player continua relatando falhas reais do provedor de áudio.
+
 ## Diagnósticos e testes
 
 O painel de desenvolvedor em Configurações expõe logs, estatísticas e inspeção de áudio. Procure eventos `time to first audio`, `audio source resolution`, `audio buffering`, `native startup stage`, `queue neighbor warmup` e `collection queue expanded`.
