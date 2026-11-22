@@ -295,7 +295,25 @@ const getSavedAudioSource = async (
   const localPath = await getExistingLocalAudioPath(track.localAudioPath);
   if (localPath) return localPath;
 
-  if (Platform.OS !== 'web') return null;
+  if (Platform.OS !== 'web') {
+    if (useConnectivityStore.getState().status === 'offline') return null;
+    // Portable playlists can carry stable, explicitly provided audio URLs.
+    // Do not replay signed CDN links, YouTube watch pages, or temporary media
+    // addresses as permanent sources; these still use the regular resolver.
+    const candidate = track.audioUrl || track.streamUrl;
+    if (candidate) {
+      try {
+        const url = new URL(candidate);
+        if (['http:', 'https:'].includes(url.protocol) &&
+            !/(^|\.)(youtube\.com|youtu\.be|googlevideo\.com)$/i.test(url.hostname) &&
+            !/\.(?:m3u8)(?:$|\?)/i.test(candidate) &&
+            !/[?&](?:sig|signature|expire|expires|token|auth|policy|x-amz-[^=]+)=/i.test(candidate)) {
+          return getPlayableAudioUrl(candidate);
+        }
+      } catch { /* A malformed URL is not a playable external source. */ }
+    }
+    return null;
+  }
 
   const webSource = track.streamUrl || track.audioUrl || track.localAudioPath;
   // Web "downloads" may just be remote URLs, not immutable offline files.

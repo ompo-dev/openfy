@@ -222,6 +222,18 @@ describe('queue preload window', () => {
     });
   });
 
+  it('plays imported stable direct audio URLs natively without searching again', async () => {
+    Platform.OS = 'ios';
+    const imported = { ...tracks[0], streamUrl: 'https://media.example.com/audio/musica.m4a' };
+    await usePlayerStore.getState().playTrack(imported);
+    expect(loadAndPlay).toHaveBeenCalledWith(
+      imported.streamUrl, expect.any(Function), expect.any(Object), 0, imported,
+      { trackChangeAlreadyBegun: true }
+    );
+    expect(resolveAudioUrl).not.toHaveBeenCalled();
+    expect(getDownloadedTrack).not.toHaveBeenCalled();
+  });
+
   it('plays an offline download by registry even when the remote recording was marked unavailable', async () => {
     Platform.OS = 'ios';
     useConnectivityStore.setState({ status: 'offline', isOnline: false });
