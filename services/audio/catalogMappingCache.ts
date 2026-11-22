@@ -31,10 +31,12 @@ const MIN_CONFIDENCE_TO_CACHE = 90;
 // In-memory layer on top of AsyncStorage for hot path (current session).
 const memoryCache = new Map<string, CatalogMapping>();
 let hydrated = false;
+let hydrationRequest: Promise<void> | null = null;
 
-const hydrateIfNeeded = async (): Promise<void> => {
-  if (hydrated) return;
-  hydrated = true;
+const hydrateIfNeeded = (): Promise<void> => {
+  if (hydrated) return Promise.resolve();
+  if (hydrationRequest) return hydrationRequest;
+  hydrationRequest = (async () => {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (!raw) return;
@@ -55,6 +57,17 @@ const hydrateIfNeeded = async (): Promise<void> => {
       }
     }
   } catch { /* Non-fatal: we just start with an empty cache. */ }
+  finally { hydrated = true; }
+  })();
+  return hydrationRequest;
+};
+
+/** Warm manual mappings before interpreting persisted unavailable flags. */
+export const hydrateCatalogMappings = (): Promise<void> => hydrateIfNeeded();
+export const hasUserDirectCatalogMapping = (trackId?: string): boolean => {
+  if (!trackId) return false;
+  const mapping = memoryCache.get(trackId);
+  return Boolean(mapping?.source === 'user_direct' && Date.now() - mapping.confirmedAt < MAPPING_MAX_AGE_MS);
 };
 
 const persist = async (): Promise<void> => {
@@ -100,4 +113,5 @@ export const invalidateCatalogMapping = async (spotifyId: string): Promise<void>
 export const _resetCatalogMappingCacheForTests = (): void => {
   memoryCache.clear();
   hydrated = false;
+  hydrationRequest = null;
 };

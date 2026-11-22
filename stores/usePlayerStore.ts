@@ -703,6 +703,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     activeLyricsController?.abort();
     const { showPlayer = true, setQueue = true } = options;
     let offlinePlaybackBlocked = false;
+    if (isTrackUnavailable(track, undefined, Boolean(options.skipUnavailable && !options.retryTransient))) {
+      await hydrateTrackAvailability();
+    }
     if (useConnectivityStore.getState().status !== 'offline' &&
         isTrackUnavailable(track, undefined, Boolean(options.skipUnavailable && !options.retryTransient))) {
       if (options.skipUnavailable) { await get().playNext(); return; }
@@ -1329,6 +1332,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     options = {}
   ) => {
     if (!tracks || tracks.length === 0) return;
+    if (tracks.some((track) => isTrackUnavailable(track))) await hydrateTrackAvailability();
     const selectedTrack = tracks[Math.max(0, Math.min(startIndex, tracks.length - 1))];
     if (isTrackUnavailable(selectedTrack) && !isTrackUnavailable(selectedTrack, undefined, false)) {
       log.player('retrying selected queue track', { trackId: selectedTrack.spotifyId });
