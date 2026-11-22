@@ -32,6 +32,9 @@ export type CatalogTrackInput = {
   audioUrl?: string;
   streamUrl?: string;
   releaseDate?: string;
+  releaseType?: TrackAlbumRef['releaseType'];
+  viewCount?: number;
+  popularity?: number;
   explicit?: boolean;
   sourcePlatform?: CatalogSourcePlatform;
 };
@@ -139,6 +142,12 @@ const normalizeInput = (
       ? { streamUrl: input.streamUrl?.match(/^https?:\/\//i) ? input.streamUrl : current?.streamUrl } : {}),
     ...(input.releaseDate || current?.releaseDate
       ? { releaseDate: input.releaseDate || current?.releaseDate } : {}),
+    ...(input.releaseType || current?.releaseType
+      ? { releaseType: input.releaseType || current?.releaseType } : {}),
+    ...(Number.isFinite(input.viewCount) || current?.viewCount !== undefined
+      ? { viewCount: Number.isFinite(input.viewCount) ? input.viewCount : current?.viewCount } : {}),
+    ...(Number.isFinite(input.popularity) || current?.popularity !== undefined
+      ? { popularity: Number.isFinite(input.popularity) ? input.popularity : current?.popularity } : {}),
     ...(input.explicit !== undefined || current?.explicit !== undefined
       ? { explicit: input.explicit ?? current?.explicit } : {}),
     addedAt: current?.addedAt || now,

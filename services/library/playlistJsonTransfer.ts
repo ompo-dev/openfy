@@ -120,6 +120,10 @@ const normalizeTrack = (input: PlaylistTransferTrack): PortableTrack => {
     trackNumber: Number.isInteger(input.trackNumber) && input.trackNumber! > 0 ? input.trackNumber : undefined,
     discNumber: Number.isInteger(input.discNumber) && input.discNumber! > 0 ? input.discNumber : undefined,
     releaseDate: stringValue(input.releaseDate, 32) || undefined,
+    releaseType: ['album', 'single', 'ep', 'compilation', 'release'].includes(input.releaseType || '')
+      ? input.releaseType : undefined,
+    viewCount: Number.isFinite(input.viewCount) ? input.viewCount : undefined,
+    popularity: Number.isFinite(input.popularity) ? input.popularity : undefined,
     explicit: typeof input.explicit === 'boolean' ? input.explicit : undefined,
     youtubeVideoId: videoId,
     youtubeUrl: videoId ? 'https://www.youtube.com/watch?v=' + videoId : portableUrl(input.youtubeUrl),

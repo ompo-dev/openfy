@@ -152,6 +152,8 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
     isrc: track.isrc,
     artistCreditsVersion: track.artistCreditsVersion,
     releaseDate: track.releaseDate,
+    viewCount: track.viewCount,
+    popularity: track.popularity,
     explicit: track.explicit,
     sourcePlatform: track.sourcePlatform,
     artists: track.artists,

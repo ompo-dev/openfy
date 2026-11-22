@@ -51,7 +51,8 @@ const hydrateIfNeeded = (): Promise<void> => {
         'confirmedAt' in entry &&
         typeof (entry as CatalogMapping).videoId === 'string' &&
         typeof (entry as CatalogMapping).confirmedAt === 'number' &&
-        now - (entry as CatalogMapping).confirmedAt < MAPPING_MAX_AGE_MS
+        ((entry as CatalogMapping).source === 'user_direct' ||
+          now - (entry as CatalogMapping).confirmedAt < MAPPING_MAX_AGE_MS)
       ) {
         memoryCache.set(id, entry as CatalogMapping);
       }
@@ -67,7 +68,7 @@ export const hydrateCatalogMappings = (): Promise<void> => hydrateIfNeeded();
 export const hasUserDirectCatalogMapping = (trackId?: string): boolean => {
   if (!trackId) return false;
   const mapping = memoryCache.get(trackId);
-  return Boolean(mapping?.source === 'user_direct' && Date.now() - mapping.confirmedAt < MAPPING_MAX_AGE_MS);
+  return Boolean(mapping?.source === 'user_direct' && /^[A-Za-z0-9_-]{11}$/.test(mapping.videoId));
 };
 
 const persist = async (): Promise<void> => {
@@ -81,7 +82,7 @@ export const getCatalogMapping = async (spotifyId: string): Promise<CatalogMappi
   await hydrateIfNeeded();
   const entry = memoryCache.get(spotifyId);
   if (!entry) return null;
-  if (Date.now() - entry.confirmedAt > MAPPING_MAX_AGE_MS) {
+  if (entry.source !== 'user_direct' && Date.now() - entry.confirmedAt > MAPPING_MAX_AGE_MS) {
     memoryCache.delete(spotifyId);
     return null;
   }

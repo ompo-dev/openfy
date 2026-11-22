@@ -950,7 +950,7 @@ export const CollectionDetail = ({
                     accessibilityRole="button"
                     accessibilityLabel="Compartilhar playlist (copiar JSON)"
                     accessibilityState={{ busy: sharingPlaylist }}
-                    disabled={sharingPlaylist}
+                    disabled={sharingPlaylist || loadingTracks}
                     onPress={() => void handleSharePlaylist()}
                     style={styles.pillAction}
                   >{sharingPlaylist ? <ActivityIndicator size="small" color="#FFFFFF" />

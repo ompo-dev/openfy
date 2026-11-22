@@ -1,6 +1,7 @@
 ﻿import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getCatalogMapping,
+  hasUserDirectCatalogMapping,
   setCatalogMapping,
   invalidateCatalogMapping,
   _resetCatalogMappingCacheForTests,
@@ -51,6 +52,18 @@ describe('catalogMappingCache', () => {
 
     const mapping = await getCatalogMapping('spotify_persist');
     expect(mapping?.videoId).toBe('persist_vid');
+  });
+
+  it('retains manually chosen links across app restarts even after 30 days', async () => {
+    await setCatalogMapping('spotify_manual', {
+      videoId: 'abcdefghijk',
+      confirmedAt: Date.now() - 45 * 24 * 60 * 60_000,
+      confidence: 100,
+      source: 'user_direct',
+    });
+    _resetCatalogMappingCacheForTests();
+    expect((await getCatalogMapping('spotify_manual'))?.videoId).toBe('abcdefghijk');
+    expect(hasUserDirectCatalogMapping('spotify_manual')).toBe(true);
   });
 
   it('invalidates a specific mapping', async () => {
