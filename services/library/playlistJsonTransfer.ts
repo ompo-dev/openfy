@@ -1,6 +1,6 @@
 import { getCatalogMapping, setCatalogMappingsBatch, type CatalogMapping } from '../audio/catalogMappingCache';
 import { getTrackYouTubeVideoId } from '../spotify/linkParser';
-import { getLibraryTracks, upsertCatalogTracks, type CatalogTrackInput } from './catalogLibrary';
+import { upsertCatalogTracks, type CatalogTrackInput } from './catalogLibrary';
 import { upsertLocalPlaylist, type LocalPlaylist } from './localPlaylistManager';
 import { clearTrackUnavailableMany } from '../../stores/useTrackAvailabilityStore';
 import { useLibraryStore } from '../../stores/useLibraryStore';

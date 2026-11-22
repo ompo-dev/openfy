@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Clipboard from 'expo-clipboard';
 import { Href, useRouter, useSegments } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -43,6 +44,7 @@ import { ArtistSearchRow } from '../Home/ArtistSearchRow';
 import { isCollectionSaved, saveCollection } from '../../services/library/savedCollections';
 import { useLibraryStore } from '../../stores/useLibraryStore';
 import { loadCollectionSimilarTracks } from '../../services/recommendation/collectionSimilar';
+import { exportPlaylistJson } from '../../services/library/playlistJsonTransfer';
 
 type CollectionTrack = TrackModel & {
   localAudioPath?: string;
@@ -232,6 +234,7 @@ export const CollectionDetail = ({
   const libraryRevision = useLibraryStore((state) => state.libraryRevision);
   const [collectionSaved, setCollectionSaved] = React.useState(Boolean(onEditPress));
   const [savingCollection, setSavingCollection] = React.useState(false);
+  const [sharingPlaylist, setSharingPlaylist] = React.useState(false);
   const collectionSavePending = React.useRef(false);
   React.useEffect(() => {
     if (kind === 'artist' || onEditPress) return;
@@ -241,6 +244,26 @@ export const CollectionDetail = ({
       .then((saved) => { if (active) setCollectionSaved(saved); }).catch(() => {});
     return () => { active = false; };
   }, [collectionId, kind, libraryRevision, onEditPress, tracks, trackCount]);
+  const handleSharePlaylist = async () => {
+    if (kind !== 'playlist' || sharingPlaylist) return;
+    setSharingPlaylist(true);
+    try {
+      // Remote playlists load every page only for this explicit export action.
+      const allTracks = resolveTracksForPlayback ? await resolveTracksForPlayback() : tracks;
+      const json = await exportPlaylistJson({
+        id: collectionId, title, description, createdAt, imageURL, imageURLs,
+        tracks: allTracks,
+      });
+      await Clipboard.setStringAsync(json);
+      Alert.alert('Playlist copiada', String(allTracks.length) +
+        ' músicas e seus metadados foram copiados em JSON. Importe em Configurações > Playlists.');
+    } catch (error) {
+      log.error('playlist json export failed', { collectionId, error: String(error) });
+      Alert.alert('Não foi possível compartilhar', 'Confira a playlist e tente novamente.');
+    } finally {
+      setSharingPlaylist(false);
+    }
+  };
   const handleSaveCollection = async () => {
     if (kind === 'artist' || collectionSaved || collectionSavePending.current) return;
     collectionSavePending.current = true;
@@ -922,6 +945,18 @@ export const CollectionDetail = ({
                     <View style={styles.pillDivider} />
                   </>
                 ) : null}
+                {kind === 'playlist' ? <>
+                  <LoggedPressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Compartilhar playlist (copiar JSON)"
+                    accessibilityState={{ busy: sharingPlaylist }}
+                    disabled={sharingPlaylist}
+                    onPress={() => void handleSharePlaylist()}
+                    style={styles.pillAction}
+                  >{sharingPlaylist ? <ActivityIndicator size="small" color="#FFFFFF" />
+                    : <Ionicons name="share-social-outline" size={21} color="#FFFFFF" />}</LoggedPressable>
+                  <View style={styles.pillDivider} />
+                </> : null}
                 <LoggedPressable
                   accessibilityLabel={
                     collectionDownloadState === 'completed'

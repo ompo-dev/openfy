@@ -5,6 +5,7 @@ import {
   Linking,
   Platform,
   StyleSheet,
+  TextInput,
   Text,
   View,
 } from 'react-native';
@@ -46,6 +47,7 @@ import { useSettingsModal } from '../gym/useSettingsModal';
 import { SettingIcon } from '../gym/SettingIcon';
 import { useTransientNotice } from '../../hooks/useTransientNotice';
 import type { AppModalAnchor } from '../gym/appModals';
+import { importPlaylistJson, parsePlaylistJson } from '../../services/library/playlistJsonTransfer';
 
 type LibrarySummary = {
   downloads: number;
@@ -139,6 +141,52 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
   const downloadRow = React.useRef<View>(null);
   const [diagnosticsText, setDiagnosticsText] = React.useState<string | null>(null);
   const [clearingImages, setClearingImages] = React.useState(false);
+  const [playlistImportVisible, setPlaylistImportVisible] = React.useState(false);
+  const [playlistImportText, setPlaylistImportText] = React.useState('');
+  const [playlistImportStatus, setPlaylistImportStatus] = React.useState('');
+  const [playlistImportBusy, setPlaylistImportBusy] = React.useState(false);
+  const lastImportedJson = React.useRef('');
+  const importRunning = React.useRef(false);
+  const onPastePlaylistJson = (value: string) => {
+    setPlaylistImportText(value);
+    setPlaylistImportStatus('');
+    const raw = value.trim();
+    if (!raw || !raw.endsWith('}')) return;
+    try {
+      parsePlaylistJson(raw);
+    } catch (error) {
+      setPlaylistImportStatus(error instanceof Error ? error.message : 'JSON inválido.');
+      return;
+    }
+    if (importRunning.current || lastImportedJson.current === raw) return;
+    lastImportedJson.current = raw;
+    importRunning.current = true;
+    setPlaylistImportBusy(true);
+    setPlaylistImportStatus('Importando músicas e fontes conhecidas…');
+    void importPlaylistJson(raw).then(({ playlist, trackCount }) => {
+      setPlaylistImportStatus('Playlist "' + playlist.title + '" importada: ' +
+        trackCount + ' músicas. Abra a Biblioteca para escutar.');
+      setSummary((previous) => ({
+        ...previous,
+        tracks: previous.tracks + trackCount,
+        playlists: previous.playlists + 1,
+      }));
+    }).catch((error) => {
+      lastImportedJson.current = '';
+      setPlaylistImportStatus('Falha ao importar: ' +
+        (error instanceof Error ? error.message : 'tente novamente.'));
+      log.error('playlist json import failed', { error: String(error) });
+    }).finally(() => {
+      importRunning.current = false;
+      setPlaylistImportBusy(false);
+    });
+  };
+  const openPlaylistImport = () => {
+    setPlaylistImportText('');
+    setPlaylistImportStatus('');
+    lastImportedJson.current = '';
+    setPlaylistImportVisible(true);
+  };
   const [notice, setNotice] = React.useState('');
   useTransientNotice(notice || undefined, () => setNotice(''), 6000, notice);
   const [saving, setSaving] = React.useState(false);
@@ -353,6 +401,40 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
           }} />
         <AudioSettingsSheet visible={audioVisible} onClose={() => setAudioVisible(false)} />
         <LyricsSettingsSheet visible={lyricsVisible} onClose={() => setLyricsVisible(false)} />
+        <SheetFrame visible={playlistImportVisible} title="Importar playlist JSON" size="full"
+          onClose={() => setPlaylistImportVisible(false)}>
+          <View style={styles.playlistImportContent}>
+            <Text style={styles.settingDescription}>
+              Cole o JSON compartilhado por outra playlist do Openfy. Quando válido, a importação inicia automaticamente, sem buscar novamente as músicas.
+            </Text>
+            <LoggedPressable accessibilityRole="button"
+              accessibilityLabel="Colar JSON da área de transferência"
+              disabled={playlistImportBusy}
+              style={styles.playlistPasteButton}
+              onPress={() => void Clipboard.getStringAsync()
+                .then(onPastePlaylistJson)
+                .catch(() => setPlaylistImportStatus('Não foi possível ler a área de transferência.'))}>
+              <AppIcon name="clipboard-outline" size={20} color="#FFFFFF" />
+              <Text style={styles.playlistPasteText}>Colar da área de transferência</Text>
+            </LoggedPressable>
+            <TextInput
+              accessibilityLabel="JSON da playlist"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!playlistImportBusy}
+              multiline
+              onChangeText={onPastePlaylistJson}
+              placeholder="Cole o JSON completo da playlist aqui"
+              placeholderTextColor="#888888"
+              style={styles.playlistImportInput}
+              textAlignVertical="top"
+              value={playlistImportText}
+            />
+            {playlistImportBusy ? <Text style={styles.statusText}>Importando…</Text> : null}
+            {playlistImportStatus ? <Text accessibilityLiveRegion="polite"
+              style={styles.settingDescription}>{playlistImportStatus}</Text> : null}
+          </View>
+        </SheetFrame>
         <SheetFrame visible={diagnosticsText !== null} title="Diagnósticos" size="full" onClose={() => setDiagnosticsText(null)}
           headerTrailing={<NativeIconButton iconName="copy" systemImage="doc.on.doc" label="Copiar diagnósticos"
             onPress={() => void Clipboard.setStringAsync(diagnosticsText || '').then(() => setNotice('Diagnósticos copiados.')).catch(() => setNotice('Não foi possível copiar.'))} />}>
@@ -426,6 +508,12 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
           <SettingRow icon="eye" label="Blur nas letras inativas"
             description="Mantém em foco a frase que está tocando."
             value={settings.blurInactiveLyrics} onValueChange={change('blurInactiveLyrics')} />
+        </Section>
+
+        <Section title="PLAYLISTS">
+          <ActionRow icon="document-text-outline" label="Importar playlist por JSON"
+            detail="Cole ou use a área de transferência" onPress={openPlaylistImport} />
+          <Text style={styles.statusText}>Músicas, artistas, capas, ordem e links conhecidos são restaurados sem pesquisa de metadados. Arquivos de áudio baixados não fazem parte do JSON.</Text>
         </Section>
 
         <Section title="DOWNLOADS">
@@ -615,5 +703,9 @@ const styles = StyleSheet.create({
   noticePosition: { position: 'absolute', left: 16, right: 16, borderRadius: 18, zIndex: 40 },
   notice: { padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
   noticeText: { flex: 1, color: '#F2F2F2', fontSize: 13, lineHeight: 19 },
+  playlistImportContent: { padding: 18, gap: 16 },
+  playlistPasteButton: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 14, paddingHorizontal: 12, backgroundColor: '#292929' },
+  playlistPasteText: { color: '#FFFFFF', fontFamily: 'SF-Semibold', fontSize: 15 },
+  playlistImportInput: { minHeight: 180, maxHeight: 320, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', color: '#FFFFFF', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12, padding: 12 },
   diagnosticsCode: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: '#D6E6E1', fontSize: 12, lineHeight: 19 },
 });
