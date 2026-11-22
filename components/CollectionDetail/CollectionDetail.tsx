@@ -954,7 +954,7 @@ export const CollectionDetail = ({
                     onPress={() => void handleSharePlaylist()}
                     style={styles.pillAction}
                   >{sharingPlaylist ? <ActivityIndicator size="small" color="#FFFFFF" />
-                    : <Ionicons name="share-social-outline" size={21} color="#FFFFFF" />}</LoggedPressable>
+                    : <Ionicons name="share-outline" size={21} color="#FFFFFF" />}</LoggedPressable>
                   <View style={styles.pillDivider} />
                 </> : null}
                 <LoggedPressable
