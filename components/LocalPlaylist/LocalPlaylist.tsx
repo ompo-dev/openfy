@@ -147,7 +147,9 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
     title: track.title,
     subtitle: track.artistName,
     albumName: track.albumName,
-    imageURL: track.localImagePath || track.imageURL,
+    // Keep remote cover metadata for JSON sharing. The renderer still prefers
+    // localImagePath so downloaded artwork works offline.
+    imageURL: track.imageURL,
     durationMs: track.duration_ms,
     isrc: track.isrc,
     artistCreditsVersion: track.artistCreditsVersion,
