@@ -6,7 +6,7 @@ import {
   exportPlaylistJson, importPlaylistJson, parsePlaylistJson,
 } from '../playlistJsonTransfer';
 
-const refreshLibrary = jest.fn();
+const mockRefreshLibrary = jest.fn();
 jest.mock('../catalogLibrary', () => ({
   upsertCatalogTracks: jest.fn().mockResolvedValue([]),
 }));
@@ -23,7 +23,7 @@ jest.mock('../../../stores/useTrackAvailabilityStore', () => ({
   clearTrackUnavailableMany: jest.fn(),
 }));
 jest.mock('../../../stores/useLibraryStore', () => ({
-  useLibraryStore: { getState: () => ({ refreshLibrary }) },
+  useLibraryStore: { getState: () => ({ refreshLibrary: mockRefreshLibrary }) },
 }));
 
 const makeInput = () => ({
@@ -102,7 +102,7 @@ describe('playlist JSON exchange', () => {
     expect(upsertLocalPlaylist).toHaveBeenCalledWith(expect.objectContaining({
       sourcePlatform: 'local', title: 'Favoritas', trackIds: ['spotify-001', 'spotify-002'],
     }));
-    expect(refreshLibrary).toHaveBeenCalledTimes(1);
+    expect(mockRefreshLibrary).toHaveBeenCalledTimes(1);
   });
 
   it('reimporting the same document reuses its stable playlist ID', async () => {
