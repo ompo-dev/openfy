@@ -100,6 +100,7 @@ const toPlayerTrack = (track: CollectionTrack, collectionName: string) => ({
   albumName: track.albumName || collectionName,
   imageURL: track.localImagePath || track.imageURL || '',
   localAudioPath: track.localAudioPath,
+  isDownloaded: track.isDownloaded,
   streamUrl: track.streamUrl || track.audioUrl,
   releaseDate: track.releaseDate,
   duration_ms: track.durationMs || 0,

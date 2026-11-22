@@ -1,5 +1,17 @@
 # Reprodução e downloads em segundo plano
 
+## Correção da biblioteca offline e início rápido (novembro de 2026)
+
+- Downloads concluídos são indexados a partir de `openfy_downloads` e confirmados por listagem do diretório local antes de receber o indicador de arquivo baixado. Um registro antigo sem arquivo não deve aparecer como reproduzível offline.
+- URLs absolutas guardadas por builds anteriores podem apontar para um sandbox antigo do iOS. O player reconstroi o caminho dentro do `FileSystem.documentDirectory` atual e tenta validar o arquivo antes de recorrer à rede. Nenhum conteúdo é baixado novamente durante essa recuperação.
+- O player verifica o arquivo da música **antes** da hidratação de disponibilidade, resolução de provedores ou outros caches de streaming. A música selecionada offline não precisa consultar um resolvedor remoto para começar.
+- Um arquivo de download já concluído pode abrir sem repetir o reparo de contêiner no caminho crítico. Se a inicialização local falhar, o player tenta novamente com a preparação/reparo normal; o arquivo original não é descartado.
+- Pausar durante uma queda de rede não impede retomar um item que já esteja carregado no motor de áudio. O alerta modal duplicado foi removido do caminho de reprodução, mantendo o aviso discreto quando não há nenhum arquivo local disponível.
+- O índice fica em memória por 30 segundos e é invalidado após alterações de downloads. Na inicialização, uma listagem do diretório evita centenas de chamadas individuais para arquivos normais. Arquivos fora da pasta gerenciada são verificados individualmente.
+
+**Teste em aparelho:** baixar três músicas, entrar em modo avião, abrir cada faixa pela Home, biblioteca e playlist, avançar/voltar, pausar/retomar; conferir que nenhum resolvedor de rede é chamado. Repetir após atualizar o IPA mantendo os arquivos de Documents. Remover um arquivo manualmente e verificar que a interface não o marca como disponível. Comparar o tempo de toque até primeiro áudio, com arquivo novo e com download anterior à migração.
+
+
 ## Buffer temporário de streaming no iPhone (novembro de 2026)
 
 **Problema:** uma faixa reproduzida via rede não era equivalente a uma faixa baixada. O `AVAssetResourceLoader` fazia solicitações HTTP Range com cache LRU de apenas 8 MiB, insuficiente para manter a música inteira após perda de conexão.

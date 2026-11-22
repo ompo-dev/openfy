@@ -878,7 +878,7 @@ export const loadAndPlay = async (
   lockScreenMetadata?: LockScreenMetadata,
   fadeInDurationMs = 0,
   diagnosticTrack?: PlaybackDiagnosticTrack,
-  options: { trackChangeAlreadyBegun?: boolean } = {}
+  options: { trackChangeAlreadyBegun?: boolean; skipLocalAudioPreparation?: boolean } = {}
 ): Promise<boolean> => {
   const trackChangeAlreadyBegun = options.trackChangeAlreadyBegun === true;
   if (!trackChangeAlreadyBegun) beginTrackChange();
@@ -905,7 +905,8 @@ export const loadAndPlay = async (
     await configureAudioSession(diagnosticTrack?.spotifyId);
     if (generation !== loadGeneration) return false;
     const [repair, resolvedLockScreenMetadata] = await Promise.all([
-      prepareLocalAudioForPlayback(uri),
+      options.skipLocalAudioPreparation && uri.startsWith('file:')
+        ? Promise.resolve(null) : prepareLocalAudioForPlayback(uri),
       resolveLockScreenMetadata(lockScreenMetadata),
     ]);
     if (generation !== loadGeneration) return false;

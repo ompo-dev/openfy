@@ -76,6 +76,17 @@ const flushMicrotasks = async () => {
 };
 
 describe('playerService fades', () => {
+  it('opens a verified downloaded file without waiting for container repair', async () => {
+    const player = createPlayer();
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+    jest.mocked(prepareLocalAudioForPlayback).mockClear();
+    try {
+      expect(await loadAndPlay('file:///saved-song.m4a', undefined, undefined, 0, undefined,
+        { skipLocalAudioPreparation: true })).toBe(true);
+      expect(prepareLocalAudioForPlayback).not.toHaveBeenCalled();
+      expect(player.play).toHaveBeenCalled();
+    } finally { await unload(); }
+  });
   it('records sanitized temporary-stream progress from the active native player', async () => {
     (Platform as { OS: string }).OS = 'ios';
     const callbacks = new Map<string, (payload?: unknown) => void>();

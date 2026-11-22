@@ -2,6 +2,7 @@ jest.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///mock_dir/',
   getInfoAsync: jest.fn().mockResolvedValue({ exists: true, size: 100000 }),
   makeDirectoryAsync: jest.fn().mockResolvedValue(undefined),
+  readDirectoryAsync: jest.fn().mockRejectedValue(new Error('directory listing unavailable')),
   createDownloadResumable: jest.fn().mockReturnValue({
     downloadAsync: jest
       .fn()
@@ -102,7 +103,8 @@ describe('queueDownloads', () => {
     }));
     jest.requireMock('../../../modules/openfy-youtube').default
       .resolveAndDownloadGoogleVideoAsync = mockNativePlayerAndDownload;
-    fileSystemMock.getInfoAsync.mockReset();
+    fileSystemMock.getInfoAsync.mockReset(); 
+    fileSystemMock.readDirectoryAsync.mockReset().mockRejectedValue(new Error('directory listing unavailable'));
     fileSystemMock.getInfoAsync.mockImplementation(async (path) => {
       const isManagedCover = String(path).includes('openfy_covers');
       return isManagedCover
@@ -125,7 +127,29 @@ describe('queueDownloads', () => {
     global.fetch = fetchMock;
   });
 
+  it('rebases legacy iPhone download paths and hides missing files while offline', async () => {
+    useConnectivityStore.setState({ status: 'offline', isOnline: false });
+    const entries = [
+      { spotifyId: 'valid', title: 'Saved', artistName: 'Artist',
+        albumName: 'Album', imageURL: '', localAudioPath: 'file:///old-app/Documents/openfy_downloads/track_valid.m4a',
+        localImagePath: '', downloadedAt: '2026-11-01T00:00:00Z', duration_ms: 100000, id: 'track_valid' },
+      { spotifyId: 'missing', title: 'Missing', artistName: 'Artist',
+        albumName: 'Album', imageURL: '', localAudioPath: 'file:///old-app/Documents/openfy_downloads/track_missing.m4a',
+        localImagePath: '', downloadedAt: '2026-11-01T00:00:00Z', duration_ms: 100000, id: 'track_missing' },
+    ];
+    await AsyncStorage.setItem('openfy_downloads', JSON.stringify(entries));
+    fileSystemMock.readDirectoryAsync.mockResolvedValueOnce(['track_valid.m4a']);
+    const result = await getDownloadedTracks();
+    expect(result).toEqual([expect.objectContaining({
+      spotifyId: 'valid',
+      localAudioPath: 'file:///mock_dir/openfy_downloads/track_valid.m4a',
+    })]);
+    expect(fileSystemMock.getInfoAsync).not.toHaveBeenCalled();
+    expect(resolveAudioUrlMock).not.toHaveBeenCalled();
+  });
+
   it('does not start remote download resolution while offline', async () => {
+
     useConnectivityStore.setState({ status: 'offline', isOnline: false });
 
     await expect(
