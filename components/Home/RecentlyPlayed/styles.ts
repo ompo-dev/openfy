@@ -1,4 +1,4 @@
-import { COLORS, Shapes } from '@config';
+import { COLORS } from '@config';
 import { StyleSheet } from 'react-native';
 
 export const styles = StyleSheet.create({
@@ -7,7 +7,7 @@ export const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   link: {
-    borderRadius: Shapes.SQUARE_BORDER,
+    borderRadius: 0,
     backgroundColor: COLORS.SECONDARY,
     flexDirection: 'row',
     alignItems: 'center',

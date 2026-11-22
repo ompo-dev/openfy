@@ -130,7 +130,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
   },
   albumImageContainer: {
-    borderRadius: 16,
+    borderRadius: 0,
   },
   artistImageContainer: {
     borderRadius: ITEM_SIZE / 2,

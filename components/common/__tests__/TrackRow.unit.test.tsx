@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { StyleSheet } from 'react-native';
 import { fireEvent, render } from '@testing-library/react-native';
 import { TrackRow } from '../TrackRow';
 import { markTrackUnavailable, useTrackAvailabilityStore } from '../../../stores/useTrackAvailabilityStore';
@@ -12,6 +13,15 @@ const setup = (onPress = jest.fn()) => render(<TrackRow track={track} title="Son
   active={false} playing={false} downloadState="idle" onDownload={jest.fn()} onPress={onPress} />);
 
 beforeEach(() => { jest.clearAllMocks(); useTrackAvailabilityStore.setState({ failures: {} }); });
+
+it('renders square artwork and square selection highlights in music lists', () => {
+  const screen = render(<TrackRow track={track} title="Song" subtitle="Artist"
+    active playing downloadState="idle" onDownload={jest.fn()} onPress={jest.fn()} />);
+  const rowStyle = StyleSheet.flatten(screen.getByLabelText('Tocar Song').props.style);
+  const artworkStyle = StyleSheet.flatten(screen.getByTestId('track-row-artwork').props.style);
+  expect(rowStyle.borderRadius).toBe(0);
+  expect(artworkStyle.borderRadius).toBe(0);
+});
 
 it.each([[50, 100], [150, 100], [100, 150], [100, 50]])('does not play after dragging to (%s, %s), even if the finger returns to the start', async (x, y) => {
   const play = jest.fn();

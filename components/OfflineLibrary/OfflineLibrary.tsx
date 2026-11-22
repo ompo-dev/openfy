@@ -590,7 +590,7 @@ const styles = StyleSheet.create({
   collectionCover: {
     width: 62,
     height: 62,
-    borderRadius: 5,
+    borderRadius: 0,
   },
   artistCover: {
     borderRadius: 31,

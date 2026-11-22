@@ -578,7 +578,7 @@ const styles = StyleSheet.create({
   },
   partyCard: {
     marginTop: 14,
-    borderRadius: 12,
+    borderRadius: 0,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.15)',
@@ -599,7 +599,7 @@ const styles = StyleSheet.create({
   partyCover: {
     width: 42,
     height: 58,
-    borderRadius: 6,
+    borderRadius: 0,
     borderWidth: 1.5,
     borderColor: '#112117',
   },
@@ -659,7 +659,7 @@ const styles = StyleSheet.create({
     fontFamily: 'SF-Semibold',
   },
   lyricCard: {
-    borderRadius: 12,
+    borderRadius: 0,
     overflow: 'hidden',
     backgroundColor: '#071617',
     borderWidth: StyleSheet.hairlineWidth,
@@ -688,7 +688,7 @@ const styles = StyleSheet.create({
   lyricCover: {
     width: 42,
     height: 42,
-    borderRadius: 6,
+    borderRadius: 0,
   },
   lyricTrackCopy: {
     flex: 1,

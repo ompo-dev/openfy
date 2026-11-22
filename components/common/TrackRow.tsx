@@ -72,9 +72,10 @@ export const TrackRow = React.memo(function TrackRow({
           priority="high"
           source={{ uri: imageURL }}
           style={styles.artwork}
+          testID="track-row-artwork"
         />
       ) : (
-        <View style={[styles.artwork, styles.artworkFallback]}>
+        <View testID="track-row-artwork" style={[styles.artwork, styles.artworkFallback]}>
           <Ionicons name="musical-note" size={18} color="#9A9A9A" />
         </View>
       )}
@@ -137,9 +138,9 @@ export const TrackRow = React.memo(function TrackRow({
 
 const styles = StyleSheet.create({
   row: { alignItems: 'center', flexDirection: 'row', gap: 11, minHeight: 64, paddingHorizontal: 16, paddingVertical: 8 },
-  rowActive: { backgroundColor: 'rgba(255,255,255,0.085)', borderRadius: 6 },
+  rowActive: { backgroundColor: 'rgba(255,255,255,0.085)', borderRadius: 0 },
   rowDisabled: { opacity: 0.58 },
-  artwork: { borderRadius: 3, height: 42, width: 42 },
+  artwork: { borderRadius: 0, height: 42, width: 42 },
   artworkFallback: { alignItems: 'center', backgroundColor: '#292929', justifyContent: 'center' },
   trackNumber: { color: 'rgba(255,255,255,0.68)', fontFamily: 'SF-Regular', fontSize: 13, textAlign: 'center', width: 22 },
   copy: { flex: 1, minWidth: 0, gap: 3 },
