@@ -103,6 +103,21 @@ export const setCatalogMapping = async (
  * Removes a cached mapping (use only when the mapping is wrong, not on 403).
  * A GVS 403 means stream authorization failed — the videoId is still correct.
  */
+/** Batch restore known recording IDs without an AsyncStorage write per song. */
+export const setCatalogMappingsBatch = async (
+  entries: { spotifyId: string; mapping: CatalogMapping }[]
+): Promise<void> => {
+  await hydrateIfNeeded();
+  let changed = false;
+  for (const { spotifyId, mapping } of entries) {
+    if (!spotifyId || mapping.confidence < MIN_CONFIDENCE_TO_CACHE ||
+        !/^[A-Za-z0-9_-]{11}$/.test(mapping.videoId)) continue;
+    memoryCache.set(spotifyId, mapping);
+    changed = true;
+  }
+  if (changed) await persist();
+};
+
 export const invalidateCatalogMapping = async (spotifyId: string): Promise<void> => {
   await hydrateIfNeeded();
   memoryCache.delete(spotifyId);

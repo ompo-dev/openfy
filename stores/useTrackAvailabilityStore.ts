@@ -48,6 +48,20 @@ export const markTrackUnavailable = (track: AvailabilityTrack, reason: string) =
     [keyFor(track)]: { reason, videoId: getTrackYouTubeVideoId(track), at: Date.now() } } }));
   persist();
 };
+/** Clear stale error badges for a whole imported playlist in a single write. */
+export const clearTrackUnavailableMany = (tracks: AvailabilityTrack[]): void => {
+  const current = useTrackAvailabilityStore.getState().failures;
+  const next = { ...current };
+  let changed = false;
+  tracks.forEach((track) => {
+    const key = keyFor(track);
+    if (key in next) { delete next[key]; changed = true; }
+  });
+  if (!changed) return;
+  useTrackAvailabilityStore.setState({ failures: next });
+  persist();
+};
+
 export const clearTrackUnavailable = (track: AvailabilityTrack) => {
   if (!useTrackAvailabilityStore.getState().failures[keyFor(track)]) return;
   useTrackAvailabilityStore.setState((state) => {
