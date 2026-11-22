@@ -144,11 +144,13 @@ public final class OpenfyAssetResourceLoader: NSObject, AVAssetResourceLoaderDel
     while offset <= targetEnd {
       try Task.checkCancellation()
       let end = min(offset + chunkSize - 1, targetEnd)
-      let data = try await rangeClient.request(
-        descriptor: descriptor,
-        start: offset,
-        end: end
-      )
+      let client = rangeClient
+      let source = descriptor
+      let byteStart = offset
+      let byteEnd = end
+      let data = try await YouTubeRequestRetry.withConnectivityGrace {
+        try await client.request(descriptor: source, start: byteStart, end: byteEnd)
+      }
       try Task.checkCancellation()
       guard !loadingRequest.isCancelled, !loadingRequest.isFinished else { return }
       dataRequest.respond(with: data)

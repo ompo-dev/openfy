@@ -26,7 +26,7 @@ const shelves = <T,>(items: T[], count: number): T[][] => Array.from(
   { length: Math.ceil(items.length / count) }, (_, index) => items.slice(index * count, (index + 1) * count));
 
 function Artwork({ uri, size, artist = false }: { uri?: string; size: number; artist?: boolean }) {
-  const shape = { width: size, height: size, borderRadius: artist ? size / 2 : 6 };
+  const shape = { width: size, height: size, borderRadius: artist ? size / 2 : 0 };
   return uri ? <SkeletonImage source={{ uri }} cachePolicy="memory-disk" contentFit="cover" style={shape} /> : (
     <View style={[shape, styles.placeholder]}><Ionicons name={artist ? 'person' : 'musical-notes'} size={size / 4} color="#737373" /></View>
   );
@@ -309,12 +309,12 @@ const styles = StyleSheet.create({
   artistHeading: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   artistTitle: { color: '#FFFFFF', fontFamily: 'SF-Bold', fontSize: 22, lineHeight: 28 },
   flexCopy: { flex: 1, minWidth: 0 },
-  spotlight: { flexDirection: 'row', overflow: 'hidden', borderRadius: 6, backgroundColor: '#28282B' },
+  spotlight: { flexDirection: 'row', overflow: 'hidden', borderRadius: 0, backgroundColor: '#28282B' },
   spotlightCopy: { flex: 1, minWidth: 0, padding: 14, gap: 5 },
   spotlightTitle: { color: '#FFFFFF', fontFamily: 'SF-Semibold', fontSize: 17, lineHeight: 21 },
   spotlightPlay: { alignSelf: 'flex-end', marginTop: 'auto', paddingTop: 8 },
   playButton: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   playForeground: { position: 'relative', zIndex: 1, alignItems: 'center', justifyContent: 'center' },
   skeletonHeading: { width: 160, height: 24, backgroundColor: '#252528', borderRadius: 4, margin: 18 },
-  skeletonTile: { backgroundColor: '#252528', borderRadius: 6 },
+  skeletonTile: { backgroundColor: '#252528', borderRadius: 0 },
 });

@@ -12,7 +12,7 @@ export const styling = (size: Sizes, shape: Shapes) =>
       position: 'relative',
       width: size,
       height: size,
-      borderRadius: shape,
+      borderRadius: shape === Shapes.CIRCLE ? shape : 0,
       backgroundColor: COLORS.SECONDARY,
       justifyContent: 'center',
       alignItems: 'center',

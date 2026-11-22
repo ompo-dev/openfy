@@ -40,7 +40,7 @@ Os scripts `npm run android` e `npm run ios` compilam código nativo e exigem SD
 
 1. A biblioteca guarda metadados, capas, relações entre músicas, álbuns e playlists sem exigir o download do áudio.
 2. Ao tocar, o player verifica fonte offline, cache, vínculo de gravação e fonte remota; a faixa atual tem prioridade sobre enriquecimento em segundo plano.
-3. O iOS pode transmitir por requisições HTTP Range nativas. Download completo é operação separada do streaming.
+3. O iOS pode transmitir por requisições HTTP Range nativas. Durante a reprodução, um cache temporário em disco guarda os bytes recebidos e antecipa o resto da música, permitindo continuar durante quedas de rede quando os dados necessários já estiverem disponíveis. Download permanente continua sendo uma operação separada. Faixas baixadas são encontradas e reproduzidas **diretamente do arquivo local**, inclusive offline; caminhos de downloads anteriores são adaptados ao diretório atual do aplicativo. Consulte [reprodução em segundo plano](docs/background-playback.md) para limitações e validação.
 4. As listas remotas exibem páginas progressivas. A fila inicia com o conteúdo disponível e pode expandir sem reiniciar a reprodução.
 5. A Home reutiliza snapshots locais e persistidos, publica resultados remotos progressivamente e aprende com reprodução, conclusão, skip e outras interações.
 6. Álbuns e playlists oferecem sugestões contextuais baseadas em suas faixas quando há dados suficientes.
@@ -58,6 +58,14 @@ Os scripts `npm run android` e `npm run ios` compilam código nativo e exigem SD
 | `services/library/` | Catálogo e coleções locais |
 | `utils/appLogger.ts` | Logs limitados, métricas P50/P95/P99 |
 | `docs/` | Arquitetura, streaming, background e auditorias |
+
+## Compartilhar e importar playlists
+
+Nas páginas de playlists, o botão de compartilhar copia um JSON `openfy.playlist` versão 1 com os metadados de todas as páginas: títulos, artistas, ordem, álbuns, capas, IDs, URLs estáveis e mapeamentos de áudio existentes. Em **Configurações > Playlists > Importar playlist por JSON**, cole esse conteúdo ou use o botão de colar: um JSON válido começa a ser importado imediatamente, sem pesquisar cada música outra vez. Importações repetidas reutilizam a mesma playlist local.
+
+O JSON não inclui bytes dos downloads, caminhos privados do aparelho, cookies, URLs temporárias assinadas ou credenciais. Os metadados e links são restaurados; uma fonte de streaming ainda exige conexão quando a música for reproduzida, e links externos podem deixar de funcionar com o tempo. O limite é 2.000 faixas e 3 MB por JSON.
+
+As marcações antigas de “Áudio indisponível” não devem bloquear faixas com vínculo manual de vídeo ou link de áudio já persistido. O player continua relatando falhas reais do provedor de áudio.
 
 ## Diagnósticos e testes
 

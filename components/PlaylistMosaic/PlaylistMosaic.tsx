@@ -47,7 +47,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     overflow: 'hidden',
-    borderRadius: 6,
+    borderRadius: 0,
     backgroundColor: '#242424',
   },
   cover: {

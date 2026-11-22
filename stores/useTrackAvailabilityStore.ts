@@ -1,9 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { getTrackYouTubeVideoId, type YouTubeTrackReference } from '../services/spotify/linkParser';
+import { hasUserDirectCatalogMapping, hydrateCatalogMappings } from '../services/audio/catalogMappingCache';
 
 export type AvailabilityTrack = YouTubeTrackReference & { title: string;
-  localAudioPath?: string; isDownloaded?: boolean };
+  localAudioPath?: string; isDownloaded?: boolean; audioUrl?: string; streamUrl?: string };
 type Failure = { reason: string; videoId?: string; at: number };
 // Old flags did not identify URL/alternate-ID sources and can contain permanent false negatives.
 const STORAGE_KEY = 'openfy_track_availability_v2';
@@ -17,7 +18,9 @@ const persist = () => {
   const snapshot = useTrackAvailabilityStore.getState().failures;
   writes = writes.catch(() => {}).then(() => AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot))).catch(() => {});
 };
-export const hydrateTrackAvailability = () => hydration ||= AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
+export const hydrateTrackAvailability = () => hydration ||= Promise.all([
+  AsyncStorage.getItem(STORAGE_KEY), hydrateCatalogMappings(),
+]).then(([raw]) => {
   if (!raw) return;
   const stored = JSON.parse(raw);
   if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
@@ -32,6 +35,10 @@ export const hydrateTrackAvailability = () => hydration ||= AsyncStorage.getItem
 /** Queue cooldowns include transport failures; repair UI only uses confirmed missing recordings. */
 export const isTrackUnavailable = (track: AvailabilityTrack, failures = useTrackAvailabilityStore.getState().failures, includeTransient = true) => {
   if (track.isDownloaded || track.localAudioPath?.startsWith('file:')) return false;
+  // A user-selected link overrides stale canonical-match errors. Native audio
+  // still reports real transport failures when attempting that chosen source.
+  if (hasUserDirectCatalogMapping(track.spotifyId || track.id)) return false;
+  if (/^https?:\/\//i.test(track.streamUrl || track.audioUrl || '')) return false;
   const failure = failures[keyFor(track)];
   return Boolean(failure && failure.videoId === getTrackYouTubeVideoId(track) &&
     (failure.reason === 'no-canonical-match' || includeTransient && Date.now() - failure.at < TRANSIENT_FAILURE_TTL_MS));
@@ -41,6 +48,20 @@ export const markTrackUnavailable = (track: AvailabilityTrack, reason: string) =
     [keyFor(track)]: { reason, videoId: getTrackYouTubeVideoId(track), at: Date.now() } } }));
   persist();
 };
+/** Clear stale error badges for a whole imported playlist in a single write. */
+export const clearTrackUnavailableMany = (tracks: AvailabilityTrack[]): void => {
+  const current = useTrackAvailabilityStore.getState().failures;
+  const next = { ...current };
+  let changed = false;
+  tracks.forEach((track) => {
+    const key = keyFor(track);
+    if (key in next) { delete next[key]; changed = true; }
+  });
+  if (!changed) return;
+  useTrackAvailabilityStore.setState({ failures: next });
+  persist();
+};
+
 export const clearTrackUnavailable = (track: AvailabilityTrack) => {
   if (!useTrackAvailabilityStore.getState().failures[keyFor(track)]) return;
   useTrackAvailabilityStore.setState((state) => {

@@ -1,5 +1,5 @@
 jest.mock('react-native', () => ({ Platform: { OS: 'web' } }));
-jest.mock('expo-file-system/legacy', () => ({ getInfoAsync: jest.fn() }));
+jest.mock('expo-file-system/legacy', () => ({ documentDirectory: 'file:///new-app/Documents/', getInfoAsync: jest.fn() }));
 jest.mock('@services', () => ({ setRemotePlaybackHandlers: jest.fn() }));
 jest.mock('../../services/lyrics/lyricsService', () => ({
   fetchLyrics: jest.fn(),
@@ -19,6 +19,15 @@ import { fetchLyrics } from '../../services/lyrics/lyricsService';
 import { getTrackLyricsProvider, setTrackLyricsProvider } from '../../services/lyrics/lyricsRepository';
 
 describe('getExistingLocalAudioPath', () => {
+  it('recovers an existing file in the new app Documents directory', async () => {
+    (Platform as { OS: string }).OS = 'ios';
+    const oldUri = 'file:///old-app/Documents/openfy_downloads/track_saved.m4a';
+    const currentUri = 'file:///new-app/Documents/openfy_downloads/track_saved.m4a';
+    jest.mocked(FileSystem.getInfoAsync).mockResolvedValueOnce({ exists: true, size: 90000 } as never);
+    await expect(getExistingLocalAudioPath(oldUri)).resolves.toBe(currentUri);
+    expect(FileSystem.getInfoAsync).toHaveBeenCalledWith(currentUri);
+    (Platform as { OS: string }).OS = 'web';
+  });
   it('rejects zero-byte and truncated local audio without rejecting a file with unknown size', async () => {
     (Platform as { OS: string }).OS = 'ios';
     const file = 'file:///offline.m4a';

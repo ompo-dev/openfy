@@ -82,7 +82,7 @@ export const CompactMusicCards = ({
   const scaleFactor = getHomeCardScale(size);
   const cardWidth = Math.round(156 * scaleFactor);
   const cardHeight = Math.round(195 * scaleFactor);
-  const cardRadius = Math.round(18 * scaleFactor);
+  const cardRadius = 0;
   const snapWidth = cardWidth + 14;
 
   const queue = React.useMemo(

@@ -271,8 +271,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   list: { flex: 1, minHeight: 0 },
-  playlistRow: { backgroundColor: '#303030', borderRadius: 8, marginBottom: 8, overflow: 'hidden' },
-  createRow: { marginTop: 12, borderRadius: 8, backgroundColor: '#303030', overflow: 'hidden' },
+  playlistRow: { backgroundColor: '#303030', borderRadius: 0, marginBottom: 8, overflow: 'hidden' },
+  createRow: { marginTop: 12, borderRadius: 0, backgroundColor: '#303030', overflow: 'hidden' },
   row: {
     alignItems: 'center',
     borderBottomColor: 'rgba(255,255,255,0.08)',
@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
   playlistIcon: {
     alignItems: 'center',
     backgroundColor: '#292929',
-    borderRadius: 5,
+    borderRadius: 0,
     height: 48,
     justifyContent: 'center',
     overflow: 'hidden',

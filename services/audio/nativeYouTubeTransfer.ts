@@ -36,6 +36,7 @@ export type NativeYouTubePlaybackEvent =
   | 'onNativePlaybackEnded'
   | 'onNativeRemoteNext'
   | 'onNativePlaybackDiagnostic'
+  | 'onNativePlaybackCache'
   | 'onNativeRemotePrevious';
 
 type NativeSubscription = { remove(): void };

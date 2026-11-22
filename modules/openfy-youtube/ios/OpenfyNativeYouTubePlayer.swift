@@ -33,6 +33,8 @@ public struct OpenfyNowPlayingMetadata: Sendable {
 public final class OpenfyNativeYouTubePlayer {
   private var player: AVPlayer?
   private var resourceLoader: OpenfyAssetResourceLoader?
+  private var temporaryBufferSession: UUID?
+  private var temporaryRangeClient: YouTubeHTTPRangeClient?
   private var itemStatusObserver: NSKeyValueObservation?
   private var timeControlStatusObserver: NSKeyValueObservation?
   private var playbackEndObserver: NSObjectProtocol?
@@ -86,6 +88,7 @@ public final class OpenfyNativeYouTubePlayer {
 
   public var onPlaybackEnded: (() -> Void)?
   public var onDiagnostic: ((String, Double, String) -> Void)?
+  public var onCacheEvent: ((String, Int64, Int64, String) -> Void)?
   public var onNextTrack: (() -> Void)?
   public var onPreviousTrack: (() -> Void)?
 
@@ -118,6 +121,14 @@ public final class OpenfyNativeYouTubePlayer {
       throw StreamTransportError.invalidVirtualURL
     }
 
+    // Scratch file receives verified playback ranges and proactively buffered
+    // bytes. Only the active player session owns it, never the offline library.
+    let bufferSession = UUID()
+    await rangeClient.prepareTemporaryPlayback(descriptor: descriptor, session: bufferSession,
+                                               prefetched: prefetchedAudio)
+    temporaryBufferSession = bufferSession
+    temporaryRangeClient = rangeClient
+
     let asset = AVURLAsset(url: virtualURL)
     let loader = OpenfyAssetResourceLoader(
       descriptor: descriptor,
@@ -133,7 +144,7 @@ public final class OpenfyNativeYouTubePlayer {
 
     let item = AVPlayerItem(asset: asset)
     item.audioTimePitchAlgorithm = .spectral
-    item.preferredForwardBufferDuration = 2
+    item.preferredForwardBufferDuration = 12
     let player = AVPlayer(playerItem: item)
     // AVFoundation cannot predict delivery through a custom resource loader.
     // Automatic stall minimization can wait for the entire progressive file.
@@ -188,6 +199,22 @@ public final class OpenfyNativeYouTubePlayer {
           self.reportedFirstAudio = true
           self.onDiagnostic?("first-audio", Date().timeIntervalSince(startedAt) * 1000, descriptor.videoId)
         }
+        if player.timeControlStatus == .playing {
+          // Never compete with first-audio startup: background buffering begins
+          // only after the initial frames have actually reached AVPlayer.
+          // A later return from buffering can restart an interrupted prefetch.
+          Task { [weak self] in
+            guard let self, self.player === player,
+                  self.temporaryBufferSession == bufferSession else { return }
+            await rangeClient.startTemporaryPrefetch(descriptor: descriptor, session: bufferSession) {
+              [weak self] stage, buffered, total in
+              Task { @MainActor [weak self] in
+                guard let self, self.temporaryBufferSession == bufferSession else { return }
+                self.onCacheEvent?(stage, buffered, total, descriptor.videoId)
+              }
+            }
+          }
+        }
         self.updateNowPlayingInfo()
       }
     }
@@ -224,6 +251,11 @@ public final class OpenfyNativeYouTubePlayer {
   }
 
   public func stop() {
+    if let temporaryRangeClient, let temporaryBufferSession {
+      Task { await temporaryRangeClient.endTemporaryPlayback(session: temporaryBufferSession) }
+    }
+    temporaryRangeClient = nil
+    temporaryBufferSession = nil
     channelProcessor?.invalidate()
     channelProcessor = nil
     itemStatusObserver?.invalidate()

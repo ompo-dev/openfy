@@ -1,5 +1,38 @@
 # Reprodução e downloads em segundo plano
 
+## Correção da biblioteca offline e início rápido (novembro de 2026)
+
+- Downloads concluídos são indexados a partir de `openfy_downloads` e confirmados por listagem do diretório local antes de receber o indicador de arquivo baixado. Um registro antigo sem arquivo não deve aparecer como reproduzível offline.
+- URLs absolutas guardadas por builds anteriores podem apontar para um sandbox antigo do iOS. O player reconstroi o caminho dentro do `FileSystem.documentDirectory` atual e tenta validar o arquivo antes de recorrer à rede. Nenhum conteúdo é baixado novamente durante essa recuperação.
+- O player verifica o arquivo da música **antes** da hidratação de disponibilidade, resolução de provedores ou outros caches de streaming. A música selecionada offline não precisa consultar um resolvedor remoto para começar.
+- Um arquivo de download já concluído pode abrir sem repetir o reparo de contêiner no caminho crítico. Se a inicialização local falhar, o player tenta novamente com a preparação/reparo normal; o arquivo original não é descartado.
+- Pausar durante uma queda de rede não impede retomar um item que já esteja carregado no motor de áudio. O alerta modal duplicado foi removido do caminho de reprodução, mantendo o aviso discreto quando não há nenhum arquivo local disponível.
+- O índice fica em memória por 30 segundos e é invalidado após alterações de downloads. Na inicialização, uma listagem do diretório evita centenas de chamadas individuais para arquivos normais. Arquivos fora da pasta gerenciada são verificados individualmente.
+
+**Teste em aparelho:** baixar três músicas, entrar em modo avião, abrir cada faixa pela Home, biblioteca e playlist, avançar/voltar, pausar/retomar; conferir que nenhum resolvedor de rede é chamado. Repetir após atualizar o IPA mantendo os arquivos de Documents. Remover um arquivo manualmente e verificar que a interface não o marca como disponível. Comparar o tempo de toque até primeiro áudio, com arquivo novo e com download anterior à migração.
+
+
+## Buffer temporário de streaming no iPhone (novembro de 2026)
+
+**Problema:** uma faixa reproduzida via rede não era equivalente a uma faixa baixada. O `AVAssetResourceLoader` fazia solicitações HTTP Range com cache LRU de apenas 8 MiB, insuficiente para manter a música inteira após perda de conexão.
+
+**Novo fluxo iOS:**
+
+1. O usuário toca e o AVPlayer começa normalmente por HTTP Range, sem esperar a transferência integral. O cabeçalho/prefixo já preparado continua sendo reutilizado.
+2. Um `YouTubeTemporaryPlaybackBuffer` cria um arquivo esparso no diretório temporário do aplicativo, exclusivo para a sessão de reprodução. Somente intervalos confirmados com HTTP 206, tamanho exato e `Content-Range` correto são marcados como disponíveis.
+3. O `YouTubeHTTPRangeClient` consulta primeiro esse arquivo e só solicita a rede se a região estiver ausente. Leituras fora de ordem e seeks são suportados. O limite por faixa é **128 MiB**, para não consumir armazenamento indefinidamente.
+4. **Depois do primeiro áudio**, uma tarefa de baixa prioridade inicia o preenchimento progressivo do restante da faixa, em intervalos de 512 KiB. Ela compartilha o mesmo cache do player; não salva a música na biblioteca de downloads e não troca o áudio em reprodução.
+5. Se a rede cair, todas as regiões já armazenadas continuam disponíveis localmente. Quando um intervalo ainda não foi recebido, a requisição do AVPlayer tolera erros de conectividade transitórios por até **15 segundos**, aguardando o retorno da conexão. Erros de autorização/HTTP 403 não são tratados como simples queda.
+6. O buffer é cancelado e excluído ao fechar/trocar de faixa. Os arquivos órfãos de encerramentos abruptos são limpos depois de seis horas. O token de sessão impede que uma limpeza antiga exclua o arquivo de uma nova reprodução.
+
+O buffer temporário é **diferente do download offline persistente**: não é exibido na Biblioteca, não permite baixar conteúdo de forma implícita para outras sessões e não promete audição offline indefinida. Uma queda só pode ser atravessada por todo o restante da música quando os bytes necessários já tiverem sido recebidos; uma conexão lenta, falha imediata após o play, espaço insuficiente ou mídia maior que 128 MiB podem limitar essa proteção. O armazenamento provisório usa a proteção de arquivos adequada para reprodução após o primeiro desbloqueio do iPhone.
+
+O novo evento nativo `onNativePlaybackCache` informa estágios `started`, `progress`, `complete` e `interrupted`, além de `bufferedBytes` e `totalBytes`. O JS registra `native temporary streaming cache`; os estágios finais aparecem em diagnósticos como `native-cache-complete` e `native-cache-interrupted`. Não registrar URLs assinadas, credenciais ou dados binários.
+
+**Disponibilidade:** somente o player YouTube nativo iOS tem essa implementação de buffer temporário compartilhado. Os caminhos com `expo-audio` no Android/web ainda usam as políticas de buffering de cada plataforma, sem garantia equivalente de arquivo temporário completo. É necessário **recompilar e instalar o IPA**; uma atualização OTA JavaScript não instala o novo código Swift.
+
+**Validação obrigatória em iPhone:** reproduzir uma faixa de 4–8 minutos; esperar `native-cache-complete`, desativar Wi-Fi e dados móveis e confirmar que a música termina normalmente; repetir interrompendo a rede após 25%, com retorno em até 15 segundos; testar seek dentro e fora das regiões armazenadas, tela bloqueada, avançar rapidamente para outra música e verificar a limpeza do buffer. Comparar tempos de primeiro áudio e uso de rede antes/depois. O teste macOS `scripts/check-youtube-playback-cache.swift` valida o buffer com dados sintéticos; **não equivale à validação física do AVPlayer**.
+
 O player usa a integração nativa do `expo-audio` para registrar uma sessão de mídia com título, artista, álbum e capa. Em iPhones com Dynamic Island, o próprio iOS apresenta essa sessão de “Now Playing” na Ilha Dinâmica; a mesma sessão alimenta a Tela Bloqueada e a Central de Controle.
 
 ## O que a configuração ativa

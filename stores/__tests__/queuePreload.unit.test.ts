@@ -16,6 +16,8 @@ import {
   unload,
 } from '@services';
 import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
+import { useConnectivityStore } from '../useConnectivityStore';
 import { usePlayerStore, type PlayerTrack } from '../usePlayerStore';
 import { fetchLyrics } from '../../services/lyrics/lyricsService';
 import { prefetchTrackArtistData } from '../../services/library/artistProfilePrefetch';
@@ -24,7 +26,7 @@ import { resetAppSettings, updateAppSettings } from '../../services/settings/app
 import { markTrackUnavailable, isTrackUnavailable, useTrackAvailabilityStore } from '../useTrackAvailabilityStore';
 
 jest.mock('react-native', () => ({ Platform: { OS: 'web' } }));
-jest.mock('expo-file-system/legacy', () => ({ getInfoAsync: jest.fn() }));
+jest.mock('expo-file-system/legacy', () => ({ documentDirectory: 'file:///current/Documents/', getInfoAsync: jest.fn() }));
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn().mockResolvedValue(null),
   setItem: jest.fn().mockResolvedValue(undefined),
@@ -168,14 +170,17 @@ describe('queue preload window', () => {
     expect(player.playerState.isPlaying).toBe(true);
   });
   afterEach(async () => {
-    Platform.OS = 'web';
+    Platform.OS = 'web'; 
+    useConnectivityStore.setState({ status: 'online', isOnline: true });
     usePlayerStore.setState({ queue: [], currentTrack: null });
     await resetAppSettings();
     jest.restoreAllMocks();
   });
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.clearAllMocks(); 
+    useConnectivityStore.setState({ status: 'online', isOnline: true });
+    jest.mocked(FileSystem.getInfoAsync).mockResolvedValue({ exists: true, size: 100_000 } as never);
     useTrackAvailabilityStore.setState({ failures: {} });
     jest.mocked(getStatus).mockReturnValue(DEFAULT_STATE);
     queueTestRun += 1;
@@ -217,7 +222,47 @@ describe('queue preload window', () => {
     });
   });
 
-  it('keeps recent sources after jumping beyond the neighbor window', async () => {
+  it('plays imported stable direct audio URLs natively without searching again', async () => {
+    Platform.OS = 'ios';
+    const imported = { ...tracks[0], streamUrl: 'https://media.example.com/audio/musica.m4a' };
+    await usePlayerStore.getState().playTrack(imported);
+    expect(loadAndPlay).toHaveBeenCalledWith(
+      imported.streamUrl, expect.any(Function), expect.any(Object), 0, imported,
+      { trackChangeAlreadyBegun: true }
+    );
+    expect(resolveAudioUrl).not.toHaveBeenCalled();
+    expect(getDownloadedTrack).not.toHaveBeenCalled();
+  });
+
+  it('plays an offline download by registry even when the remote recording was marked unavailable', async () => {
+    Platform.OS = 'ios';
+    useConnectivityStore.setState({ status: 'offline', isOnline: false });
+    const selected = tracks[0];
+    markTrackUnavailable(selected, 'no-canonical-match');
+    const localPath = 'file:///current/Documents/openfy_downloads/track_offline.m4a';
+    jest.mocked(getDownloadedTrack).mockResolvedValue({ ...selected, localAudioPath: localPath } as never);
+    await usePlayerStore.getState().playTrack(selected);
+    expect(loadAndPlay).toHaveBeenCalledWith(localPath, expect.any(Function),
+      expect.any(Object), 0, selected,
+      { trackChangeAlreadyBegun: true, skipLocalAudioPreparation: true });
+    expect(resolveAudioUrl).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().playerState.isPlaying).toBe(true);
+  });
+
+  it('resumes an already loaded track offline without querying downloads or restarting audio', async () => {
+    Platform.OS = 'ios';
+    useConnectivityStore.setState({ status: 'offline', isOnline: false });
+    const selected = tracks[1];
+    usePlayerStore.setState({ currentTrack: selected, playerState: { ...DEFAULT_STATE, isLoaded: true } });
+    jest.mocked(getStatus).mockReturnValue({ ...DEFAULT_STATE, isLoaded: true, isPlaying: false });
+    await usePlayerStore.getState().togglePlayPause();
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(getDownloadedTrack).not.toHaveBeenCalled();
+    expect(loadAndPlay).not.toHaveBeenCalled();
+  });
+
+  it('keeps recent sources after jumping beyond the neighbor window', async () => { 
+
     await usePlayerStore.getState().playWithQueue(tracks, 0, 'library:songs');
     await flushAsync();
     await usePlayerStore.getState().playQueueIndex(4);

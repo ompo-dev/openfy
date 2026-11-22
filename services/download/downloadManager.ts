@@ -34,6 +34,7 @@ import {
 } from './downloadDiagnostics';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
 import { getAppSettings, type AudioQuality } from '../settings/appSettings';
+import { currentManagedAudioPath, getExistingLocalAudioPath, managedDownloadFilename } from './localAudioPaths';
 import type { TrackAlbumRef } from '../../models/Track/TrackModel';
 
 export type DownloadStatus = 'idle' | 'downloading' | 'completed' | 'error';
@@ -298,10 +299,18 @@ export const ensureDirectories = async (): Promise<void> => {
   }
 };
 
-/**
- * Get all downloaded tracks from AsyncStorage
- */
-export const getDownloadedTracks = async (): Promise<DownloadedTrack[]> => {
+// A single directory listing validates hundreds of managed downloads without
+// hundreds of JS/native getInfoAsync roundtrips on each Home render or tap.
+const DOWNLOAD_SNAPSHOT_TTL_MS = 30_000;
+let downloadSnapshot: { at: number; tracks: DownloadedTrack[] } | null = null;
+let downloadSnapshotRequest: Promise<DownloadedTrack[]> | null = null;
+let downloadSnapshotVersion = 0;
+const invalidateDownloadSnapshot = () => {
+  downloadSnapshotVersion += 1;
+  downloadSnapshot = null;
+};
+
+const readStoredDownloadedTracks = async (): Promise<DownloadedTrack[]> => {
   try {
     const stored = await AsyncStorage.getItem(DOWNLOADS_STORAGE_KEY);
     if (!stored) return [];
@@ -312,6 +321,43 @@ export const getDownloadedTracks = async (): Promise<DownloadedTrack[]> => {
   }
 };
 
+/** Only actual local files receive a downloaded badge or an offline playback route. */
+export const getDownloadedTracks = (): Promise<DownloadedTrack[]> => {
+  const cacheEnabled = process.env.NODE_ENV !== 'test';
+  if (cacheEnabled && downloadSnapshot && Date.now() - downloadSnapshot.at < DOWNLOAD_SNAPSHOT_TTL_MS) {
+    return Promise.resolve(downloadSnapshot.tracks);
+  }
+  if (downloadSnapshotRequest) return downloadSnapshotRequest;
+  const version = downloadSnapshotVersion;
+  const request = (async () => {
+    const tracks = await readStoredDownloadedTracks();
+    if (Platform.OS === 'web') return tracks;
+    const filenames = typeof FileSystem.readDirectoryAsync === 'function'
+      ? await FileSystem.readDirectoryAsync(DOWNLOADS_DIR)
+          .then((names) => new Set(names)).catch(() => null)
+      : null;
+    const verified = await Promise.all(tracks.map(async (track) => {
+      const normalized = currentManagedAudioPath(track.localAudioPath);
+      const filename = managedDownloadFilename(track.localAudioPath);
+      if (filenames && normalized && filename) {
+        return filenames.has(filename) ? { ...track, localAudioPath: normalized } : null;
+      }
+      const existing = await getExistingLocalAudioPath(track.localAudioPath);
+      return existing ? { ...track, localAudioPath: existing } : null;
+    }));
+    return verified.filter((track): track is DownloadedTrack => Boolean(track));
+  })();
+  downloadSnapshotRequest = request;
+  void request.then((tracks) => {
+    if (version === downloadSnapshotVersion && cacheEnabled) {
+      downloadSnapshot = { at: Date.now(), tracks };
+    }
+  }).catch(() => {}).finally(() => {
+    if (downloadSnapshotRequest === request) downloadSnapshotRequest = null;
+  });
+  return request;
+};
+
 /**
  * Save downloaded tracks list to AsyncStorage
  */
@@ -319,13 +365,14 @@ const saveDownloadedTracks = async (
   tracks: DownloadedTrack[]
 ): Promise<void> => {
   await AsyncStorage.setItem(DOWNLOADS_STORAGE_KEY, JSON.stringify(tracks));
+  invalidateDownloadSnapshot();
 };
 
 const updateDownloadedTracks = async (
   update: (tracks: DownloadedTrack[]) => DownloadedTrack[]
 ): Promise<void> => {
   await mutateDownloadedStorage(async () => {
-    await saveDownloadedTracks(update(await getDownloadedTracks()));
+    await saveDownloadedTracks(update(await readStoredDownloadedTracks()));
   });
 };
 

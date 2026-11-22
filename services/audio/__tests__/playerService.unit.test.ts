@@ -76,6 +76,48 @@ const flushMicrotasks = async () => {
 };
 
 describe('playerService fades', () => {
+  it('opens a verified downloaded file without waiting for container repair', async () => {
+    const player = createPlayer();
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(player as any);
+    jest.mocked(prepareLocalAudioForPlayback).mockClear();
+    try {
+      expect(await loadAndPlay('file:///saved-song.m4a', undefined, undefined, 0, undefined,
+        { skipLocalAudioPreparation: true })).toBe(true);
+      expect(prepareLocalAudioForPlayback).not.toHaveBeenCalled();
+      expect(player.play).toHaveBeenCalled();
+    } finally { await unload(); }
+  });
+  it('records sanitized temporary-stream progress from the active native player', async () => {
+    (Platform as { OS: string }).OS = 'ios';
+    const callbacks = new Map<string, (payload?: unknown) => void>();
+    const spies = [
+      jest.spyOn(nativeTransfer, 'hasNativeYouTubePlayback').mockReturnValue(true),
+      jest.spyOn(nativeTransfer, 'hasNativeYouTubeAudioPreferences').mockReturnValue(false),
+      jest.spyOn(nativeTransfer, 'addNativeYouTubePlaybackListener').mockImplementation((event, listener) => {
+        callbacks.set(event, listener);
+        return { remove: jest.fn() };
+      }),
+      jest.spyOn(nativeTransfer, 'getNativeYouTubePlaybackStatus').mockResolvedValue({
+        isPlaying: true, isLoaded: true, isBuffering: false, positionMs: 0, durationMs: 180_000,
+      }),
+      jest.spyOn(nativeTransfer, 'playYouTubeVideoNatively').mockResolvedValue(true),
+      jest.spyOn(nativeTransfer, 'stopNativeYouTubePlayback').mockResolvedValue(undefined),
+    ];
+    try {
+      expect(await loadAndPlay(nativeTransfer.toNativeYouTubePlaybackUri('abcdefghijk'))).toBe(true);
+      callbacks.get('onNativePlaybackCache')?.({ stage: 'complete', bufferedBytes: 512_000,
+        totalBytes: 512_000, videoId: 'abcdefghijk' });
+      expect(getAudioDiagnosticsSnapshot().some((entry) => entry.event === 'native-cache-complete' &&
+        entry.note === '512000/512000 bytes')).toBe(true);
+      callbacks.get('onNativePlaybackCache')?.({ stage: 'interrupted', bufferedBytes: 3,
+        totalBytes: 4, videoId: 'differentid' });
+      expect(getAudioDiagnosticsSnapshot().some((entry) => entry.event === 'native-cache-interrupted')).toBe(false);
+    } finally {
+      await unload();
+      spies.forEach((spy) => spy.mockRestore());
+      (Platform as { OS: string }).OS = 'web';
+    }
+  });
   it('does not stop the current native stream when an older play command finishes late', async () => {
     (Platform as { OS: string }).OS = 'ios';
     let finishOld!: (started: boolean) => void;

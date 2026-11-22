@@ -792,7 +792,26 @@ const loadAndPlayNativeYouTube = async (
           loadGeneration: generation });
       }
     });
-    nativeYouTubeSubscriptions = [ended, next, previous, diagnostic].filter(
+    const cache = addNativeYouTubePlaybackListener('onNativePlaybackCache', (payload?: unknown) => {
+      if (generation !== loadGeneration || !payload || typeof payload !== 'object' ||
+          !('videoId' in payload) || payload.videoId !== videoId ||
+          !('stage' in payload) || typeof payload.stage !== 'string' ||
+          !('bufferedBytes' in payload) || typeof payload.bufferedBytes !== 'number' ||
+          !('totalBytes' in payload) || typeof payload.totalBytes !== 'number') return;
+      const details = payload as { stage: string; bufferedBytes: number; totalBytes: number };
+      log.player('native temporary streaming cache', {
+        trackId: diagnosticTrack?.spotifyId, videoId,
+        stage: details.stage, bufferedBytes: details.bufferedBytes,
+        totalBytes: details.totalBytes,
+        percent: details.totalBytes > 0
+          ? Math.round(details.bufferedBytes / details.totalBytes * 100) : 0,
+      });
+      if (details.stage === 'complete' || details.stage === 'interrupted') {
+        recordAudioDiagnostic(`native-cache-${details.stage}`,
+          `${details.bufferedBytes}/${details.totalBytes} bytes`);
+      }
+    });
+    nativeYouTubeSubscriptions = [ended, next, previous, diagnostic, cache].filter(
       (subscription): subscription is { remove(): void } => Boolean(subscription)
     );
 
@@ -859,7 +878,7 @@ export const loadAndPlay = async (
   lockScreenMetadata?: LockScreenMetadata,
   fadeInDurationMs = 0,
   diagnosticTrack?: PlaybackDiagnosticTrack,
-  options: { trackChangeAlreadyBegun?: boolean } = {}
+  options: { trackChangeAlreadyBegun?: boolean; skipLocalAudioPreparation?: boolean } = {}
 ): Promise<boolean> => {
   const trackChangeAlreadyBegun = options.trackChangeAlreadyBegun === true;
   if (!trackChangeAlreadyBegun) beginTrackChange();
@@ -886,7 +905,8 @@ export const loadAndPlay = async (
     await configureAudioSession(diagnosticTrack?.spotifyId);
     if (generation !== loadGeneration) return false;
     const [repair, resolvedLockScreenMetadata] = await Promise.all([
-      prepareLocalAudioForPlayback(uri),
+      options.skipLocalAudioPreparation && uri.startsWith('file:')
+        ? Promise.resolve(null) : prepareLocalAudioForPlayback(uri),
       resolveLockScreenMetadata(lockScreenMetadata),
     ]);
     if (generation !== loadGeneration) return false;

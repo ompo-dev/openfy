@@ -23,6 +23,19 @@ final class RetryProtocol: URLProtocol {
   }
 }
 
+actor GraceRecoveryProbe {
+  private(set) var attempts = 0
+  func recoverAfterTwoFailures() throws -> Int {
+    attempts += 1
+    if attempts <= 2 { throw URLError(.notConnectedToInternet) }
+    return 42
+  }
+  func rejectImmediately() throws -> Int {
+    attempts += 1
+    throw URLError(.userAuthenticationRequired)
+  }
+}
+
 @main
 struct CheckYouTubeRetry {
   static func main() async throws {
@@ -80,6 +93,23 @@ struct CheckYouTubeRetry {
     } catch {
       precondition(RetryProtocol.requests.count == 1)
     }
-    print("Native retry checks passed: lost connection, exact range, 503, 403, bounded retries, cancellation, single attempt")
+
+    let recoverable = GraceRecoveryProbe()
+    let value = try await YouTubeRequestRetry.withConnectivityGrace(seconds: 2,
+      retryDelayNanoseconds: 1_000_000) { try await recoverable.recoverAfterTwoFailures() }
+    let recoveredAttempts = await recoverable.attempts
+    precondition(value == 42 && recoveredAttempts == 3)
+
+    let nonTransient = GraceRecoveryProbe()
+    do {
+      _ = try await YouTubeRequestRetry.withConnectivityGrace(seconds: 2,
+        retryDelayNanoseconds: 1_000_000) { try await nonTransient.rejectImmediately() }
+      preconditionFailure("Authentication errors must never be retried")
+    } catch {
+      let rejectedAttempts = await nonTransient.attempts
+      precondition((error as NSError).code == URLError.userAuthenticationRequired.rawValue)
+      precondition(rejectedAttempts == 1)
+    }
+    print("Native retry checks passed: lost connection, exact range, 503, 403, bounded retries, connectivity grace, cancellation")
   }
 }

@@ -31,10 +31,12 @@ const MIN_CONFIDENCE_TO_CACHE = 90;
 // In-memory layer on top of AsyncStorage for hot path (current session).
 const memoryCache = new Map<string, CatalogMapping>();
 let hydrated = false;
+let hydrationRequest: Promise<void> | null = null;
 
-const hydrateIfNeeded = async (): Promise<void> => {
-  if (hydrated) return;
-  hydrated = true;
+const hydrateIfNeeded = (): Promise<void> => {
+  if (hydrated) return Promise.resolve();
+  if (hydrationRequest) return hydrationRequest;
+  hydrationRequest = (async () => {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (!raw) return;
@@ -49,12 +51,24 @@ const hydrateIfNeeded = async (): Promise<void> => {
         'confirmedAt' in entry &&
         typeof (entry as CatalogMapping).videoId === 'string' &&
         typeof (entry as CatalogMapping).confirmedAt === 'number' &&
-        now - (entry as CatalogMapping).confirmedAt < MAPPING_MAX_AGE_MS
+        ((entry as CatalogMapping).source === 'user_direct' ||
+          now - (entry as CatalogMapping).confirmedAt < MAPPING_MAX_AGE_MS)
       ) {
         memoryCache.set(id, entry as CatalogMapping);
       }
     }
   } catch { /* Non-fatal: we just start with an empty cache. */ }
+  finally { hydrated = true; }
+  })();
+  return hydrationRequest;
+};
+
+/** Warm manual mappings before interpreting persisted unavailable flags. */
+export const hydrateCatalogMappings = (): Promise<void> => hydrateIfNeeded();
+export const hasUserDirectCatalogMapping = (trackId?: string): boolean => {
+  if (!trackId) return false;
+  const mapping = memoryCache.get(trackId);
+  return Boolean(mapping?.source === 'user_direct' && /^[A-Za-z0-9_-]{11}$/.test(mapping.videoId));
 };
 
 const persist = async (): Promise<void> => {
@@ -68,7 +82,7 @@ export const getCatalogMapping = async (spotifyId: string): Promise<CatalogMappi
   await hydrateIfNeeded();
   const entry = memoryCache.get(spotifyId);
   if (!entry) return null;
-  if (Date.now() - entry.confirmedAt > MAPPING_MAX_AGE_MS) {
+  if (entry.source !== 'user_direct' && Date.now() - entry.confirmedAt > MAPPING_MAX_AGE_MS) {
     memoryCache.delete(spotifyId);
     return null;
   }
@@ -90,6 +104,21 @@ export const setCatalogMapping = async (
  * Removes a cached mapping (use only when the mapping is wrong, not on 403).
  * A GVS 403 means stream authorization failed — the videoId is still correct.
  */
+/** Batch restore known recording IDs without an AsyncStorage write per song. */
+export const setCatalogMappingsBatch = async (
+  entries: { spotifyId: string; mapping: CatalogMapping }[]
+): Promise<void> => {
+  await hydrateIfNeeded();
+  let changed = false;
+  for (const { spotifyId, mapping } of entries) {
+    if (!spotifyId || mapping.confidence < MIN_CONFIDENCE_TO_CACHE ||
+        !/^[A-Za-z0-9_-]{11}$/.test(mapping.videoId)) continue;
+    memoryCache.set(spotifyId, mapping);
+    changed = true;
+  }
+  if (changed) await persist();
+};
+
 export const invalidateCatalogMapping = async (spotifyId: string): Promise<void> => {
   await hydrateIfNeeded();
   memoryCache.delete(spotifyId);
@@ -100,4 +129,5 @@ export const invalidateCatalogMapping = async (spotifyId: string): Promise<void>
 export const _resetCatalogMappingCacheForTests = (): void => {
   memoryCache.clear();
   hydrated = false;
+  hydrationRequest = null;
 };

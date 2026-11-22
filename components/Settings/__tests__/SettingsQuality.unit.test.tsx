@@ -1,8 +1,20 @@
 import React from 'react';
-import { act, fireEvent, render, within } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
+import { importPlaylistJson, parsePlaylistJson } from '../../../services/library/playlistJsonTransfer';
 import { Settings } from '../Settings';
 import { DEFAULT_APP_SETTINGS } from '../../../services/settings/appSettings';
 import { useAppModalStore } from '../../gym';
+
+jest.mock('../../../services/library/playlistJsonTransfer', () => ({
+  parsePlaylistJson: jest.fn((raw: string) => {
+    const value = JSON.parse(raw);
+    if (value.format !== 'openfy.playlist') throw new Error('Formato inválido');
+    return value;
+  }),
+  importPlaylistJson: jest.fn().mockResolvedValue({
+    playlist: { id: 'local_local_shared', title: 'Favoritas JSON' }, trackCount: 2,
+  }),
+}));
 
 const mockSave = jest.fn().mockResolvedValue(undefined);
 const mockSettings = DEFAULT_APP_SETTINGS;
@@ -46,4 +58,16 @@ it('automatically clears a transient settings notice', async () => {
   expect(screen.queryByText('Logs da sessão limpos.')).toBeNull();
   await screen.unmount();
   jest.useRealTimers();
+});
+
+it('automatically imports valid playlist JSON pasted into Settings', async () => {
+  const view = await render(<Settings onClose={() => {}} />);
+  await fireEvent.press(view.getByText('Importar playlist por JSON'));
+  const raw = JSON.stringify({ format: 'openfy.playlist', version: 1, playlist: {
+    id: 'local_shared', title: 'Favoritas JSON',
+  }, tracks: [] });
+  await fireEvent.changeText(await view.findByLabelText('JSON da playlist'), raw);
+  await waitFor(() => expect(parsePlaylistJson).toHaveBeenCalledWith(raw));
+  await waitFor(() => expect(importPlaylistJson).toHaveBeenCalledWith(raw));
+  expect(await view.findByText(/Favoritas JSON.*importada/)).toBeTruthy();
 });

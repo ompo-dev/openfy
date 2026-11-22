@@ -11,7 +11,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Platform } from 'react-native';
-import * as FileSystem from 'expo-file-system/legacy';
 import {
   loadAndPlay,
   beginTrackChange,
@@ -59,6 +58,7 @@ import { log } from '../utils/appLogger';
 import { useConnectivityStore } from './useConnectivityStore';
 import { showOfflineActionMessage } from '../services/network/offlineFeedback';
 import { reservePlaybackStartup } from '../services/network/audioPriority';
+import { getExistingLocalAudioPath as findExistingLocalAudioPath } from '../services/download/localAudioPaths';
 import {
   prefetchArtistData,
   prefetchTrackArtistData,
@@ -80,6 +80,7 @@ export type PlayerTrack = TrackCatalogMetadata & {
   releaseDate?: string;
   localAudioPath?: string;
   localImagePath?: string;
+  isDownloaded?: boolean;
   streamUrl?: string;
   streamExpiresAt?: number;
   streamQuality?: AudioQuality;
@@ -283,22 +284,7 @@ const getLyricsCacheKey = (track: PlayerTrack) =>
   `${getCacheKey(track)}:${LYRICS_CACHE_VERSION}:${JSON.stringify([track.title, track.artistName,
     track.duration_ms, track.albumName, track.isrc, track.youtubeVideoId || track.videoId])}:${getCachedTrackLyricsProvider(track.spotifyId)}:${lyricsPolicyKey()}`;
 
-export const getExistingLocalAudioPath = async (
-  path?: string
-): Promise<string | null> => {
-  if (!path || path.endsWith('.m3u8')) return null;
-
-  if (Platform.OS === 'web') return null;
-
-  if (!path.startsWith('file:')) return null;
-
-  try {
-    const info = await FileSystem.getInfoAsync(path);
-    return info.exists && (info.size === undefined || info.size > 5000) ? path : null;
-  } catch {
-    return null;
-  }
-};
+export const getExistingLocalAudioPath = findExistingLocalAudioPath;
 
 const getSavedAudioSource = async (
   track: (Partial<PlayerTrack> & { audioUrl?: string }) | null | undefined,
@@ -309,7 +295,25 @@ const getSavedAudioSource = async (
   const localPath = await getExistingLocalAudioPath(track.localAudioPath);
   if (localPath) return localPath;
 
-  if (Platform.OS !== 'web') return null;
+  if (Platform.OS !== 'web') {
+    if (useConnectivityStore.getState().status === 'offline') return null;
+    // Portable playlists can carry stable, explicitly provided audio URLs.
+    // Do not replay signed CDN links, YouTube watch pages, or temporary media
+    // addresses as permanent sources; these still use the regular resolver.
+    const candidate = track.audioUrl || track.streamUrl;
+    if (candidate) {
+      try {
+        const url = new URL(candidate);
+        if (['http:', 'https:'].includes(url.protocol) &&
+            !/(^|\.)(youtube\.com|youtu\.be|googlevideo\.com)$/i.test(url.hostname) &&
+            !/\.(?:m3u8)(?:$|\?)/i.test(candidate) &&
+            !/[?&](?:sig|signature|expire|expires|token|auth|policy|x-amz-[^=]+)=/i.test(candidate)) {
+          return getPlayableAudioUrl(candidate);
+        }
+      } catch { /* A malformed URL is not a playable external source. */ }
+    }
+    return null;
+  }
 
   const webSource = track.streamUrl || track.audioUrl || track.localAudioPath;
   // Web "downloads" may just be remote URLs, not immutable offline files.
@@ -718,6 +722,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const { showPlayer = true, setQueue = true } = options;
     let offlinePlaybackBlocked = false;
     if (isTrackUnavailable(track, undefined, Boolean(options.skipUnavailable && !options.retryTransient))) {
+      await hydrateTrackAvailability();
+    }
+    if (useConnectivityStore.getState().status !== 'offline' &&
+        isTrackUnavailable(track, undefined, Boolean(options.skipUnavailable && !options.retryTransient))) {
       if (options.skipUnavailable) { await get().playNext(); return; }
       const requestId = get().activeRequestId + 1;
       beginTrackChange();
@@ -728,18 +736,6 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       void get().refreshLyrics();
       await unload();
       return;
-    }
-
-    if (useConnectivityStore.getState().status === 'offline') {
-      const localTrackAudio = await getExistingLocalAudioPath(track.localAudioPath);
-      const downloaded = localTrackAudio ? null : await getDownloadedTrack(track.spotifyId);
-      const downloadedAudio = localTrackAudio
-        ? localTrackAudio
-        : await getExistingLocalAudioPath(downloaded?.localAudioPath);
-      if (!downloadedAudio) {
-        showOfflineActionMessage();
-        return;
-      }
     }
 
     const previous = get();
@@ -817,11 +813,43 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     // 2. CONCURRENT AUDIO STREAM RESOLUTION & PERSISTENT CACHE
     let playbackQuality = getCachedAppSettings().streamingQuality;
     let sourceRoute = 'unresolved';
+    let trustedLocalDownload = false;
     const resolveAudioPromise = (async (): Promise<AudioSourceInput | null> => {
       if (track.localOnly) {
         const local = await getExistingLocalAudioPath(track.localAudioPath);
         if (local) sourceRoute = 'local-only';
         return local?.startsWith('file:') ? local : null;
+      }
+      // Offline files always win over stream caches, network availability flags,
+      // disk-wide settings hydration and any provider resolution.
+      const initialQuality = getCachedAppSettings().streamingQuality;
+      const directSavedSource = await getSavedAudioSource(track, initialQuality);
+      if (directSavedSource) {
+        sourceRoute = directSavedSource.startsWith('file:') ? 'local-file' : 'saved-web-source';
+        trustedLocalDownload = directSavedSource.startsWith('file:');
+        return directSavedSource;
+      }
+      // A verified local file takes precedence; when online, reuse a warmed
+      // adjacent stream before doing any asynchronous download-registry lookup.
+      // Never use an in-memory remote stream as an offline substitute.
+      if (useConnectivityStore.getState().status !== 'offline') {
+        const warmedSource = getWarmedAudioSource(track, initialQuality);
+        if (warmedSource) {
+          sourceRoute = 'neighbor-warmup';
+          return warmedSource;
+        }
+      }
+      const downloaded = await getDownloadedTrack(track.spotifyId);
+      const downloadedSavedSource = await getSavedAudioSource(downloaded, initialQuality);
+      if (downloadedSavedSource) {
+        sourceRoute = downloadedSavedSource.startsWith('file:') ? 'download-registry' : 'saved-web-source';
+        trustedLocalDownload = downloadedSavedSource.startsWith('file:');
+        log.player('downloaded audio source selected', { trackId: track.spotifyId, offline: useConnectivityStore.getState().status === 'offline' });
+        return downloadedSavedSource;
+      }
+      if (useConnectivityStore.getState().status === 'offline') {
+        offlinePlaybackBlocked = true;
+        return null;
       }
       await hydrateTrackAvailability();
       if (isTrackUnavailable(track, undefined, Boolean(options.skipUnavailable && !options.retryTransient))) return null;
@@ -853,28 +881,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         return preloadedSource;
       }
 
-      const directSavedSource = await getSavedAudioSource(track, quality);
-      if (directSavedSource) {
-        sourceRoute = 'local-file';
-        cacheAudioSource(track, directSavedSource, quality);
-        return directSavedSource;
-      }
-
       // Resolver owners coalesce metadata requests. Never await a neighbor's
       // audio buffer before starting an explicit playback request.
-
-      const downloaded = await getDownloadedTrack(track.spotifyId);
-      const downloadedSavedSource = await getSavedAudioSource(downloaded, quality);
-      if (downloadedSavedSource) {
-        sourceRoute = 'download-registry';
-        cacheAudioSource(track, downloadedSavedSource, quality);
-        return downloadedSavedSource;
-      }
-
-      if (useConnectivityStore.getState().status === 'offline') {
-        offlinePlaybackBlocked = true;
-        return null;
-      }
 
       const nativeYouTubeSource = await resolveNativeYouTubeSource(track);
       if (nativeYouTubeSource) {
@@ -960,7 +968,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           error: 'Não foi possível carregar o áudio desta faixa.',
         },
       });
-      if (offlinePlaybackBlocked) showOfflineActionMessage();
+      if (offlinePlaybackBlocked) showOfflineActionMessage({ alert: false });
       else if (!isTrackUnavailable(track)) markTrackUnavailable(track, 'source-unavailable');
       void ensurePlaybackDiagnostics(track).catch(() => {});
       // Resolution failed for the selected id. Dispose the paused previous
@@ -1253,7 +1261,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         },
         0,
         track,
-        { trackChangeAlreadyBegun: true }
+        { trackChangeAlreadyBegun: true, ...(trustedLocalDownload ? { skipLocalAudioPreparation: true } : {}) }
       );
       if (!success && activeStreamUri.startsWith('file:') && get().activeRequestId === requestId) {
         log.player('retrying local playback with fresh engine', { trackId: track.spotifyId });
@@ -1342,6 +1350,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     options = {}
   ) => {
     if (!tracks || tracks.length === 0) return;
+    if (tracks.some((track) => isTrackUnavailable(track))) await hydrateTrackAvailability();
     const selectedTrack = tracks[Math.max(0, Math.min(startIndex, tracks.length - 1))];
     if (isTrackUnavailable(selectedTrack) && !isTrackUnavailable(selectedTrack, undefined, false)) {
       log.player('retrying selected queue track', { trackId: selectedTrack.spotifyId });
@@ -1403,23 +1412,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     const realState = getStatus();
     if (get().isLoadingAudio && !realState.isLoaded && !realState.isPlaying) return;
 
-    if (
-      useConnectivityStore.getState().status === 'offline' &&
-      !realState.isPlaying &&
-      currentTrack
-    ) {
-      const localTrackAudio = await getExistingLocalAudioPath(currentTrack.localAudioPath);
-      const downloaded = localTrackAudio
-        ? null
-        : await getDownloadedTrack(currentTrack.spotifyId);
-      const downloadedAudio = localTrackAudio
-        ? localTrackAudio
-        : await getExistingLocalAudioPath(downloaded?.localAudioPath);
-      if (!downloadedAudio) {
-        showOfflineActionMessage();
-        return;
-      }
-    }
+    // Paused players retain their already-loaded audio buffer. Never block
+    // resume solely because connectivity changed while they were paused.
 
     if (!realState.isLoaded && currentTrack) {
       await playTrack(currentTrack, { setQueue: false });
