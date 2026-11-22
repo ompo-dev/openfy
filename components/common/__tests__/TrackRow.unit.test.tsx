@@ -14,8 +14,8 @@ const setup = (onPress = jest.fn()) => render(<TrackRow track={track} title="Son
 
 beforeEach(() => { jest.clearAllMocks(); useTrackAvailabilityStore.setState({ failures: {} }); });
 
-it('renders square artwork and square selection highlights in music lists', () => {
-  const screen = render(<TrackRow track={track} title="Song" subtitle="Artist"
+it('renders square artwork and square selection highlights in music lists', async () => {
+  const screen = await render(<TrackRow track={track} title="Song" subtitle="Artist"
     active playing downloadState="idle" onDownload={jest.fn()} onPress={jest.fn()} />);
   const rowStyle = StyleSheet.flatten(screen.getByLabelText('Tocar Song').props.style);
   const artworkStyle = StyleSheet.flatten(screen.getByTestId('track-row-artwork').props.style);

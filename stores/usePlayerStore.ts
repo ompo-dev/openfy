@@ -808,6 +808,16 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
         trustedLocalDownload = directSavedSource.startsWith('file:');
         return directSavedSource;
       }
+      // A verified local file takes precedence; when online, reuse a warmed
+      // adjacent stream before doing any asynchronous download-registry lookup.
+      // Never use an in-memory remote stream as an offline substitute.
+      if (useConnectivityStore.getState().status !== 'offline') {
+        const warmedSource = getWarmedAudioSource(track, initialQuality);
+        if (warmedSource) {
+          sourceRoute = 'neighbor-warmup';
+          return warmedSource;
+        }
+      }
       const downloaded = await getDownloadedTrack(track.spotifyId);
       const downloadedSavedSource = await getSavedAudioSource(downloaded, initialQuality);
       if (downloadedSavedSource) {
