@@ -58,6 +58,15 @@ describe('catalogLibrary', () => {
     expect(toDownloadTrackInput(saved).isrc).toBe(saved.isrc);
   });
 
+  it('preserves explicit metadata for downloaded music and content-rating badges', async () => {
+    const track = { spotifyId: 'explicit-recording', title: 'Música', artistName: 'Artista',
+      albumName: 'Single', imageURL: '', duration_ms: 155_000, explicit: true };
+    await upsertCatalogTracks([track]);
+    const saved = (await getCatalogTracks())[0];
+    expect(saved.explicit).toBe(true);
+    expect(toDownloadTrackInput(saved).explicit).toBe(true);
+  });
+
   it.each(['spotify-recording', 'yt_abcdefghijk'])('keeps a corrected link and its video ID consistent through later metadata updates: %s', async (spotifyId) => {
     const track = { spotifyId, title: 'Song', artistName: 'Artist', albumName: '', imageURL: '', duration_ms: 180000 };
     await upsertCatalogTracks([{ ...track, youtubeVideoId: 'abcdefghijk' }]);

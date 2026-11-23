@@ -178,6 +178,7 @@ const normalizeInput = (
 
 const catalogInputFromDownload = (track: DownloadedTrack): CatalogTrackInput => ({
   isrc: track.isrc,
+  explicit: track.explicit,
   artistCreditsVersion: track.artistCreditsVersion,
   spotifyId: track.spotifyId,
   title: track.title,
@@ -361,6 +362,7 @@ export const toDownloadTrackInput = (
   track: CatalogTrackInput
 ): DownloadTrackInput => ({
   isrc: track.isrc,
+  explicit: track.explicit,
   artistCreditsVersion: track.artistCreditsVersion,
   spotifyId: track.spotifyId,
   title: track.title,

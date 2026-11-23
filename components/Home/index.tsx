@@ -37,6 +37,7 @@ import {
 
 
 const toPlayerTrackFromSearch = (track: TrackModel): PlayerTrack => ({
+  explicit: track.explicit,
   spotifyId: track.id,
   title: track.title,
   artistName: track.subtitle,

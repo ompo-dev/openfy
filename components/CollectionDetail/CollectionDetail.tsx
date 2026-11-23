@@ -114,6 +114,7 @@ const toPlayerTrack = (track: CollectionTrack, collectionName: string) => ({
   discNumber: track.discNumber,
   youtubeVideoId: track.youtubeVideoId,
   youtubeUrl: track.youtubeUrl,
+  explicit: track.explicit,
 });
 
 const normalizeSearchValue = (value: string) =>
@@ -180,6 +181,7 @@ const toDownloadInput = (
   track: CollectionTrack,
   collectionName: string
 ): DownloadTrackInput => ({
+  explicit: track.explicit,
   spotifyId: track.id,
   title: track.title,
   artistName: track.subtitle,

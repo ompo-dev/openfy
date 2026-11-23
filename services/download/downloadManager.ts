@@ -44,6 +44,7 @@ export type DownloadStatus = 'idle' | 'downloading' | 'completed' | 'error';
 
 export type TrackCatalogMetadata = {
   isrc?: string;
+  explicit?: boolean;
   artistCreditsVersion?: number;
   albumId?: string;
   albumAssociations?: TrackAlbumRef[];
@@ -1546,6 +1547,7 @@ const downloadTrackInternal = async (
 
     const downloadedTrack: DownloadedTrack = {
       artistCreditsVersion: effectiveTrack.artistCreditsVersion,
+      explicit: effectiveTrack.explicit,
       albumId: effectiveTrack.albumId,
       albumAssociations: effectiveTrack.albumAssociations,
       artists: effectiveTrack.artists,
