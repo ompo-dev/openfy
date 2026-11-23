@@ -66,7 +66,7 @@ import {
 import { prefetchTrackAlbumData } from '../services/library/playerAlbum';
 import { isSameRecording } from '../services/library/trackIdentity';
 import { hydrateTrackAvailability, isTrackUnavailable, markTrackUnavailable, clearTrackUnavailable } from './useTrackAvailabilityStore';
-import { getTrackYouTubeVideoId } from '../services/spotify/linkParser';
+import { getTrackYouTubeVideoId, getLinkedYouTubeVideoId } from '../services/spotify/linkParser';
 import { getCatalogMapping, isCurrentCatalogMapping } from '../services/audio/catalogMappingCache';
 import { resolveTrackCredits } from '../services/search/trackCredits';
 
@@ -228,6 +228,16 @@ const resolveNativeYouTubeSource = async (
   if (manualMapping && isCurrentCatalogMapping(manualMapping) &&
       (manualMapping.source === 'user_direct' || !exactVideoId || manualMapping.videoId === exactVideoId)) {
     return toNativeYouTubePlaybackUri(manualMapping.videoId);
+  }
+
+  // The user-facing YouTube link on a Spotify recording is an actual source,
+  // not a search suggestion. Avoid a slow canonical search that can label this
+  // already-linked recording unavailable before even trying AVPlayer.
+  // yt_* catalog items still require matching (their original video can be an
+  // entire film with several different songs).
+  const linkedVideoId = getLinkedYouTubeVideoId(track);
+  if (linkedVideoId && !track.spotifyId.startsWith('yt_')) {
+    return toNativeYouTubePlaybackUri(linkedVideoId);
   }
 
   if (exactVideoId && /^[A-Za-z0-9_-]{11}$/.test(exactVideoId)) {
@@ -901,6 +911,18 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
           return source;
         }
         return null;
+      }
+
+      const explicitVideoId = getLinkedYouTubeVideoId(track);
+      if (explicitVideoId && !track.spotifyId.startsWith('yt_')) {
+        const linked = await resolveAudioUrl('', '', `yt_${explicitVideoId}`, 0,
+          undefined, false, quality);
+        if (linked?.url) {
+          sourceRoute = 'linked-youtube';
+          const source = linked.headers ? { uri: linked.url, headers: linked.headers } : linked.url;
+          cacheAudioSource(track, source, quality);
+          return source;
+        }
       }
 
       const resolved = await resolveAudioUrl(

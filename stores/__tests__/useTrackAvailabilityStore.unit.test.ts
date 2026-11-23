@@ -1,9 +1,9 @@
 import { useTrackAvailabilityStore, markTrackUnavailable, isTrackUnavailable,
   clearTrackUnavailableMany } from '../useTrackAvailabilityStore';
-import { hasUserDirectCatalogMapping } from '../../services/audio/catalogMappingCache';
+import { hasConfirmedCatalogMapping } from '../../services/audio/catalogMappingCache';
 
 jest.mock('../../services/audio/catalogMappingCache', () => ({
-  hasUserDirectCatalogMapping: jest.fn().mockReturnValue(false),
+  hasConfirmedCatalogMapping: jest.fn().mockReturnValue(false),
   hydrateCatalogMappings: jest.fn().mockResolvedValue(undefined),
 }));
 
@@ -12,15 +12,21 @@ const track = { spotifyId: 'spotify_123', title: 'Música corrigida', youtubeVid
 describe('availability with explicit audio links', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.mocked(hasUserDirectCatalogMapping).mockReturnValue(false);
+    jest.mocked(hasConfirmedCatalogMapping).mockReturnValue(false);
     useTrackAvailabilityStore.setState({ failures: {} });
   });
 
   it('does not hide a user-mapped audio link because of a previous canonical failure', () => {
     markTrackUnavailable(track, 'no-canonical-match');
     expect(isTrackUnavailable(track)).toBe(true);
-    jest.mocked(hasUserDirectCatalogMapping).mockReturnValue(true);
+    jest.mocked(hasConfirmedCatalogMapping).mockReturnValue(true);
     expect(isTrackUnavailable(track)).toBe(false);
+  });
+
+  it('does not mark an existing YouTube URL unavailable when it is already linked', () => {
+    const linked = { ...track, youtubeUrl: 'https://www.youtube.com/watch?v=abcdefghijk' };
+    markTrackUnavailable(linked, 'no-canonical-match');
+    expect(isTrackUnavailable(linked)).toBe(false);
   });
 
   it('accepts a direct stored audio URL even when an old failure flag remains', () => {

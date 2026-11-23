@@ -234,6 +234,25 @@ describe('queue preload window', () => {
     expect(getDownloadedTrack).not.toHaveBeenCalled();
   });
 
+  it('plays a linked YouTube video without asking to confirm the same link again', async () => {
+    Platform.OS = 'ios';
+    jest.mocked(hasNativeYouTubePlayback).mockReturnValue(true);
+    const linked = { ...tracks[0], youtubeUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
+      youtubeVideoId: 'abcdefghijk' };
+    markTrackUnavailable(linked, 'no-canonical-match');
+    jest.mocked(resolveCatalogYouTubeVideoId).mockResolvedValueOnce({
+      status: 'not_found', reason: 'no_canonical_match',
+    });
+    expect(isTrackUnavailable(linked)).toBe(false);
+    await usePlayerStore.getState().playWithQueue([linked, tracks[1]], 0);
+    expect(usePlayerStore.getState().queue[0]).toMatchObject({ spotifyId: linked.spotifyId });
+    expect(loadAndPlay).toHaveBeenCalledWith(
+      'openfy-youtube://video/abcdefghijk', expect.any(Function), expect.any(Object),
+      0, linked, { trackChangeAlreadyBegun: true }
+    );
+    expect(resolveCatalogYouTubeVideoId).not.toHaveBeenCalled();
+  });
+
   it('plays an offline download by registry even when the remote recording was marked unavailable', async () => {
     Platform.OS = 'ios';
     useConnectivityStore.setState({ status: 'offline', isOnline: false });

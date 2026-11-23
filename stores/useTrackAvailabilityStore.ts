@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
-import { getTrackYouTubeVideoId, type YouTubeTrackReference } from '../services/spotify/linkParser';
-import { hasUserDirectCatalogMapping, hydrateCatalogMappings } from '../services/audio/catalogMappingCache';
+import { getTrackYouTubeVideoId, getLinkedYouTubeVideoId, type YouTubeTrackReference } from '../services/spotify/linkParser';
+import { hasConfirmedCatalogMapping, hydrateCatalogMappings } from '../services/audio/catalogMappingCache';
 
 export type AvailabilityTrack = YouTubeTrackReference & { title: string;
   localAudioPath?: string; isDownloaded?: boolean; audioUrl?: string; streamUrl?: string };
@@ -35,9 +35,11 @@ export const hydrateTrackAvailability = () => hydration ||= Promise.all([
 /** Queue cooldowns include transport failures; repair UI only uses confirmed missing recordings. */
 export const isTrackUnavailable = (track: AvailabilityTrack, failures = useTrackAvailabilityStore.getState().failures, includeTransient = true) => {
   if (track.isDownloaded || track.localAudioPath?.startsWith('file:')) return false;
-  // A user-selected link overrides stale canonical-match errors. Native audio
-  // still reports real transport failures when attempting that chosen source.
-  if (hasUserDirectCatalogMapping(track.spotifyId || track.id)) return false;
+  // A concrete YouTube URL and a confirmed catalog mapping are candidates for
+  // playback. Old canonical-search misses must never hide those recordings.
+  // Actual HTTP/decoder failures are still reported by the player.
+  if (getLinkedYouTubeVideoId(track) && !(track.spotifyId || track.id || '').startsWith('yt_')) return false;
+  if (hasConfirmedCatalogMapping(track.spotifyId || track.id)) return false;
   if (/^https?:\/\//i.test(track.streamUrl || track.audioUrl || '')) return false;
   const failure = failures[keyFor(track)];
   return Boolean(failure && failure.videoId === getTrackYouTubeVideoId(track) &&

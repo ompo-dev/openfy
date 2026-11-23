@@ -1,5 +1,16 @@
 # Reprodução e downloads em segundo plano
 
+## Correção de links associados e capas de downloads (novembro de 2026)
+
+- Faixas do Spotify com uma URL específica do YouTube já associada não devem ser rejeitadas por um antigo resultado `no-canonical-match`. O player iOS tenta o vídeo indicado diretamente sem exigir que a pessoa abra **Editar link do YouTube** e confirme outra vez. As entradas `yt_*` provenientes de catálogos de filmes continuam passando pela verificação de correspondência, para não tocar a música errada.
+- A disponibilidade distingue uma falha antiga de correspondência da existência de uma fonte explícita; um mapeamento confirmado também cancela o efeito visual do aviso antigo. Falhas reais do servidor ou do decodificador continuam aparecendo no estado de reprodução.
+- O mesmo restabelecimento do sandbox usado para `openfy_downloads` agora trata `openfy_covers`. Listagens do diretório conferem se os arquivos continuam presentes; um caminho absoluto de capa inexistente deixa de ser encaminhado à interface, permitindo usar a URL remota quando houver conexão.
+- O reparador de capas reconhece os arquivos de áudio que mudaram apenas de raiz no iOS, sem excluir ou baixar o áudio novamente. O armazenamento persiste o caminho atualizado após o reparo.
+- Faixas baixadas sem imagem de álbum usam como alternativa a miniatura pública do vídeo vinculado (`i.ytimg.com`) e procuram baixá-la para leitura offline. Se a imagem original falhar, o reparador tenta a miniatura como segunda fonte. Uma transferência de capa interrompida não deve deixar um arquivo parcial aceito como capa válida.
+- As playlists locais passam tanto a URL original, usada no compartilhamento JSON, quanto o caminho da capa baixada, usado no mosaico e na apresentação offline. A exportação recupera URLs públicas diretamente dos metadados das faixas, sem incluir caminhos `file://` do aparelho.
+
+**Validação no aparelho:** abrir uma faixa que antes mostrava “Áudio indisponível” mas já tinha link, sem tocar no botão verde de confirmação; verificar primeiro áudio e lista sem alerta; repetir em playlist e após reiniciar o app. Baixar músicas com e sem imagem de álbum, entrar em modo avião e confirmar as capas em Home, Biblioteca, playlists e player. Testar novamente após instalar uma atualização que preserve os downloads. Em faixas cujo servidor de imagem não entrega os bytes, a capa offline só aparecerá depois de um download bem-sucedido.
+
 ## Correção da biblioteca offline e início rápido (novembro de 2026)
 
 - Downloads concluídos são indexados a partir de `openfy_downloads` e confirmados por listagem do diretório local antes de receber o indicador de arquivo baixado. Um registro antigo sem arquivo não deve aparecer como reproduzível offline.

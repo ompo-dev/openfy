@@ -54,3 +54,18 @@ it('preserves membership and reports storage failures', async () => {
   expect(mockCollectionProps.tracks.map((track: any) => track.id)).toEqual(['one', 'two']);
   expect(mockRefresh).not.toHaveBeenCalled();
 });
+
+it('passes a downloaded cover to the local playlist without replacing its portable URL', async () => {
+  jest.mocked(getLibraryTracks).mockResolvedValue([{
+    ...tracks[0], imageURL: 'https://images.test/album.jpg',
+    localImagePath: 'file:///current/Documents/openfy_covers/track_one.jpg',
+    isDownloaded: true,
+  }] as any);
+  await render(<LocalPlaylist playlistId="local" />);
+  await waitFor(() => expect(mockCollectionProps.tracks).toHaveLength(1));
+  expect(mockCollectionProps.tracks[0]).toEqual(expect.objectContaining({
+    imageURL: 'https://images.test/album.jpg',
+    localImagePath: 'file:///current/Documents/openfy_covers/track_one.jpg',
+  }));
+  expect(mockCollectionProps.imageURL).toBe('file:///current/Documents/openfy_covers/track_one.jpg');
+});

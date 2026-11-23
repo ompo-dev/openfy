@@ -92,9 +92,18 @@ export type YouTubeTrackReference = {
   youtubeVideoId?: string; videoId?: string; youtubeUrl?: string; spotifyId?: string; id?: string;
 };
 
+/** A URL explicitly attached to a track is not just an automatic search hint. */
+export const getLinkedYouTubeVideoId = (track: YouTubeTrackReference): string | undefined => {
+  if (!track.youtubeUrl) return undefined;
+  const parsed = parseSpotifyLink(track.youtubeUrl);
+  return parsed?.platform === 'youtube' && parsed.type === 'track' ? parsed.id : undefined;
+};
+
 /** Resolve the same recording reference for availability, playback and downloads. */
 export const getTrackYouTubeVideoId = (track: YouTubeTrackReference): string | undefined => {
-  for (const value of [track.youtubeVideoId, track.videoId, track.youtubeUrl]) {
+  const linked = getLinkedYouTubeVideoId(track);
+  if (linked) return linked;
+  for (const value of [track.youtubeVideoId, track.videoId]) {
     if (!value) continue;
     const candidate = value.trim();
     if (/^[A-Za-z0-9_-]{11}$/.test(candidate)) return candidate;

@@ -209,7 +209,11 @@ export const exportPlaylistJson = async (input: PlaylistTransferInput): Promise<
       title: stringValue(input.title, 512),
       description: stringValue(input.description, 10_000) || undefined,
       createdAt: stringValue(input.createdAt, 60) || undefined,
-      coverImageURLs: [...new Set([input.imageURL, ...(input.imageURLs || [])].map(portableUrl)
+      // Collection artwork may be a file:// URL on the source device. Derive
+      // portable cover URLs from track metadata as well so another phone can
+      // reconstruct its playlist mosaic without inheriting private paths.
+      coverImageURLs: [...new Set([input.imageURL, ...(input.imageURLs || []),
+        ...input.tracks.map((track) => track.imageURL)].map(portableUrl)
         .filter((value): value is string => Boolean(value)))].slice(0, 4),
     },
     tracks: mapped,

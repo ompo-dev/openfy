@@ -56,6 +56,17 @@ describe('playlist JSON exchange', () => {
     jest.mocked(getCatalogMapping).mockResolvedValue(null);
   });
 
+  it('restores remote mosaic covers when the exporting phone displays local artwork', async () => {
+    const input = { ...makeInput(),
+      imageURL: 'file:///private/sandbox/openfy_covers/cover.jpg',
+      imageURLs: ['file:///private/sandbox/openfy_covers/cover.jpg'],
+    };
+    const json = await exportPlaylistJson(input);
+    const exported = parsePlaylistJson(json);
+    expect(exported.playlist.coverImageURLs).toContain('https://images.example/track.jpg');
+    expect(json).not.toContain('file:///private');
+  });
+
   it('copies ordered metadata and playable stable source references, never local files or signed URLs', async () => {
     jest.mocked(getCatalogMapping).mockResolvedValueOnce({
       videoId: 'abcdefghijk', source: 'user_direct', confidence: 100, confirmedAt: Date.now(),

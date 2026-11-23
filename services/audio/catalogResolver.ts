@@ -1,4 +1,4 @@
-﻿import {
+import {
   hasCanonicalTitleMatch,
   hasUnwantedForbiddenWords,
   normalizeString,
@@ -9,7 +9,7 @@ import { createAsyncResourceCache } from '../../src/application/asyncResourceCac
 import { parseYouTubeCount, rankYouTubeCandidate, type YouTubeCandidate } from './youtubeCandidateRanking';
 import { recordDownloadDiagnostic } from '../download/downloadDiagnostics';
 import { retryNetworkOperation } from './networkRetry';
-import { markTrackUnavailable } from '../../stores/useTrackAvailabilityStore';
+import { markTrackUnavailable, clearTrackUnavailable } from '../../stores/useTrackAvailabilityStore';
 import { getYouTubeDiscoveryClient, getYouTubeVideoMetadata, resetYouTubeDiscoveryForTests } from '../youtubeDiscoveryClient';
 import { log } from '../../utils/appLogger';
 import {
@@ -281,11 +281,15 @@ export const resolveSpotifyTrackVideoId = async (
   // Fast path: cached mapping
   const cached = await getCatalogMapping(spotifyId);
   if (cached && isCurrentCatalogMapping(cached)) {
+    clearTrackUnavailable({ spotifyId, title });
     return { status: 'resolved', videoId: cached.videoId, confidence: cached.confidence };
   }
 
   const key = JSON.stringify([spotifyId, title, artists, durationMs]);
-  return spotifyMatchCache.getOrLoad(key, () => searchSpotifyTrackVideoId(spotifyId, title, artists, durationMs), 30 * 60_000);
+  const result = await spotifyMatchCache.getOrLoad(key,
+    () => searchSpotifyTrackVideoId(spotifyId, title, artists, durationMs), 30 * 60_000);
+  if (result.status === 'resolved') clearTrackUnavailable({ spotifyId, title });
+  return result;
 };
 
 const searchSpotifyTrackVideoId = async (

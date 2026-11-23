@@ -14,6 +14,7 @@ import {
   setCatalogMapping,
   _resetCatalogMappingCacheForTests,
 } from '../catalogMappingCache';
+import { markTrackUnavailable, useTrackAvailabilityStore } from '../../../stores/useTrackAvailabilityStore';
 
 describe('parseYouTubeVideoId', () => {
   it('parses bare 11-char videoId', () => {
@@ -239,6 +240,18 @@ describe('resolveSpotifyTrackVideoId', () => {
     const cached = await getCatalogMapping('spotify_gang_789');
     expect(cached?.videoId).toBe('aj5_Cvp9je0');
     expect(cached?.confidence).toBeGreaterThanOrEqual(90);
+  });
+
+  it('clears an obsolete unavailable badge when an existing mapping resolves', async () => {
+    const id = 'spotify_old_failure';
+    markTrackUnavailable({ spotifyId: id, title: 'Bandoleira' }, 'no-canonical-match');
+    expect(Object.keys(useTrackAvailabilityStore.getState().failures)).toHaveLength(1);
+    await setCatalogMapping(id, {
+      videoId: 'abcdefghijk', confidence: 100, source: 'youtube_search',
+      policyVersion: 2, confirmedAt: Date.now(),
+    });
+    await resolveSpotifyTrackVideoId(id, 'Bandoleira', ['MC Ryan SP'], 180000);
+    expect(useTrackAvailabilityStore.getState().failures).toEqual({});
   });
 
   it('returns not_found when no candidate matches', async () => {

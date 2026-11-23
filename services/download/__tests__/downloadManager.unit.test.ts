@@ -148,6 +148,60 @@ describe('queueDownloads', () => {
     expect(resolveAudioUrlMock).not.toHaveBeenCalled();
   });
 
+  it('rebases cover art along with audio after iOS changes its sandbox', async () => {
+    await AsyncStorage.setItem('openfy_downloads', JSON.stringify([{
+      spotifyId: 'saved-art', id: 'track_saved-art', title: 'Com capa', artistName: 'Artista',
+      albumName: 'Álbum', duration_ms: 120000,
+      imageURL: 'https://images.test/cover.jpg',
+      localAudioPath: 'file:///old-app/openfy_downloads/track_saved-art.m4a',
+      localImagePath: 'file:///old-app/openfy_covers/track_saved-art_hq_v3.jpg',
+    }]));
+    fileSystemMock.readDirectoryAsync.mockResolvedValueOnce(['track_saved-art.m4a'])
+      .mockResolvedValueOnce(['track_saved-art_hq_v3.jpg']);
+    expect(await getDownloadedTracks()).toEqual([expect.objectContaining({
+      localAudioPath: 'file:///mock_dir/openfy_downloads/track_saved-art.m4a',
+      localImagePath: 'file:///mock_dir/openfy_covers/track_saved-art_hq_v3.jpg',
+    })]);
+    expect(fileSystemMock.getInfoAsync).not.toHaveBeenCalled();
+  });
+
+  it('never displays a stale missing cover file when remote artwork is available', async () => {
+    await AsyncStorage.setItem('openfy_downloads', JSON.stringify([{
+      spotifyId: 'missing-art', id: 'track_missing-art', title: 'Com capa remota', artistName: 'Artista',
+      albumName: 'Álbum', duration_ms: 120000,
+      imageURL: 'https://images.test/cover.jpg',
+      localAudioPath: 'file:///old-app/openfy_downloads/track_missing-art.m4a',
+      localImagePath: 'file:///old-app/openfy_covers/track_missing-art_hq_v3.jpg',
+    }]));
+    fileSystemMock.readDirectoryAsync.mockResolvedValueOnce(['track_missing-art.m4a'])
+      .mockResolvedValueOnce([]);
+    expect(await getDownloadedTracks()).toEqual([expect.objectContaining({
+      spotifyId: 'missing-art', imageURL: 'https://images.test/cover.jpg',
+      localImagePath: '',
+    })]);
+  });
+
+  it('repairs artwork even when the stored audio path has an old iPhone sandbox', async () => {
+    await AsyncStorage.setItem('openfy_downloads', JSON.stringify([{
+      spotifyId: 'rebase-repair', id: 'track_rebase-repair', title: 'Song', artistName: 'Artist',
+      albumName: 'Album', duration_ms: 180000, imageURL: 'https://images.test/art.jpg',
+      localAudioPath: 'file:///old-app/openfy_downloads/track_rebase-repair.m4a',
+      localImagePath: 'file:///old-app/openfy_covers/missing.jpg', metadataVersion: 3,
+    }]));
+    fileSystemMock.readDirectoryAsync.mockResolvedValueOnce(['track_rebase-repair.m4a'])
+      .mockResolvedValueOnce([]);
+    fileSystemMock.downloadAsync.mockResolvedValue({ uri: 'file:///mock_dir/cover.jpg', status: 200 });
+    await repairDownloadedTrackMetadata();
+    const stored = JSON.parse((await AsyncStorage.getItem('openfy_downloads')) || '[]');
+    expect(stored).toEqual([expect.objectContaining({
+      spotifyId: 'rebase-repair',
+      localAudioPath: 'file:///mock_dir/openfy_downloads/track_rebase-repair.m4a',
+      localImagePath: 'file:///mock_dir/cover.jpg',
+    })]);
+    expect(fileSystemMock.downloadAsync).toHaveBeenCalledWith('https://images.test/art.jpg',
+      expect.stringContaining('openfy_covers'), expect.any(Object));
+  });
+
   it('does not start remote download resolution while offline', async () => {
 
     useConnectivityStore.setState({ status: 'offline', isOnline: false });
@@ -384,7 +438,32 @@ describe('queueDownloads', () => {
       1024 * 1024
     );
     expect(fileSystemMock.createDownloadResumable).not.toHaveBeenCalled();
-    expect(fileSystemMock.downloadAsync).toHaveBeenCalledTimes(0);
+    expect(fileSystemMock.downloadAsync).toHaveBeenCalledWith(
+      'https://i.ytimg.com/vi/V1M1hYxmRvA/hqdefault.jpg',
+      expect.stringContaining('openfy_covers'), expect.any(Object)
+    );
+  });
+
+  it('uses a YouTube thumbnail if the original artwork URL refuses the download', async () => {
+    mockNativePlayerAndDownload.mockResolvedValue({
+      uri: 'file:///mock_dir/openfy_downloads/track_yt_abcdefghijk.m4a',
+      status: 206, mimeType: 'audio/mp4', totalBytes: 100000,
+    });
+    fileSystemMock.downloadAsync.mockImplementation(async (url) =>
+      String(url).includes('broken.jpg')
+        ? { uri: 'file:///mock_dir/broken.jpg', status: 403, headers: {} }
+        : { uri: 'file:///mock_dir/recovered.jpg', status: 200, headers: { 'content-type': 'image/jpeg' } }
+    );
+    const result = await downloadTrack({
+      spotifyId: 'yt_abcdefghijk', title: 'Faixa', artistName: 'Artista',
+      albumName: 'YouTube', imageURL: 'https://images.test/broken.jpg',
+      duration_ms: 180000, youtubeVideoId: 'abcdefghijk',
+    });
+    expect(result).toMatchObject({
+      imageURL: 'https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg',
+      localImagePath: 'file:///mock_dir/recovered.jpg',
+    });
+    expect(fileSystemMock.downloadAsync).toHaveBeenCalledTimes(2);
   });
 
   it('downloads and persists the individual song instead of the combined film', async () => {

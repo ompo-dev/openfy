@@ -1,6 +1,7 @@
-﻿import AsyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getCatalogMapping,
+  hasConfirmedCatalogMapping,
   hasUserDirectCatalogMapping,
   setCatalogMapping,
   invalidateCatalogMapping,
@@ -77,5 +78,16 @@ describe('catalogMappingCache', () => {
     await invalidateCatalogMapping('spotify_del');
     const mapping = await getCatalogMapping('spotify_del');
     expect(mapping).toBeNull();
+  });
+
+  it('recognizes confirmed automatic mappings as playable despite older not-found flags', async () => {
+    await setCatalogMapping('spotify-confirmed', {
+      videoId: 'abcdefghijk', confirmedAt: Date.now(), confidence: 100,
+      source: 'youtube_search', policyVersion: 2,
+    });
+    expect(hasConfirmedCatalogMapping('spotify-confirmed')).toBe(true);
+    _resetCatalogMappingCacheForTests();
+    await getCatalogMapping('spotify-confirmed');
+    expect(hasConfirmedCatalogMapping('spotify-confirmed')).toBe(true);
   });
 });

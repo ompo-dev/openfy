@@ -48,6 +48,8 @@ describe('track availability', () => {
     const linked = { ...track, youtubeUrl: 'https://youtu.be/abcdefghijk' };
     markTrackUnavailable(linked, 'no-canonical-match');
     expect(isTrackUnavailable({ ...track, youtubeVideoId: 'abcdefghijk' })).toBe(true);
+    // The user-supplied URL is a source to try, not a missing recording.
+    expect(isTrackUnavailable(linked)).toBe(false);
     expect(isTrackUnavailable({ ...track, youtubeUrl: 'https://youtu.be/zyxwvutsrqp' })).toBe(false);
   });
 });

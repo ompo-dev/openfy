@@ -34,7 +34,10 @@ import {
 } from './downloadDiagnostics';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
 import { getAppSettings, type AudioQuality } from '../settings/appSettings';
-import { currentManagedAudioPath, getExistingLocalAudioPath, managedDownloadFilename } from './localAudioPaths';
+import {
+  currentManagedAudioPath, getExistingLocalAudioPath, managedDownloadFilename,
+  currentManagedCoverPath, getExistingLocalCoverPath, managedCoverFilename,
+} from './localAudioPaths';
 import type { TrackAlbumRef } from '../../models/Track/TrackModel';
 
 export type DownloadStatus = 'idle' | 'downloading' | 'completed' | 'error';
@@ -151,6 +154,12 @@ const diagnosticsIdFromTrackId = (trackId: string) =>
 const youtubeVideoIdFromTrackId = (trackId?: string): string | undefined => {
   const match = trackId?.match(/^yt_([A-Za-z0-9_-]{11})$/);
   return match?.[1];
+};
+
+const youtubeThumbnailForTrack = (track: { youtubeVideoId?: string; youtubeUrl?: string; spotifyId?: string }): string => {
+  const videoId = getTrackYouTubeVideoId(track);
+  return videoId && /^[A-Za-z0-9_-]{11}$/.test(videoId)
+    ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : '';
 };
 
 const selectResponseHeaders = (headers?: Record<string, string>) => {
@@ -332,18 +341,36 @@ export const getDownloadedTracks = (): Promise<DownloadedTrack[]> => {
   const request = (async () => {
     const tracks = await readStoredDownloadedTracks();
     if (Platform.OS === 'web') return tracks;
-    const filenames = typeof FileSystem.readDirectoryAsync === 'function'
-      ? await FileSystem.readDirectoryAsync(DOWNLOADS_DIR)
-          .then((names) => new Set(names)).catch(() => null)
-      : null;
+    const [filenames, coverFilenames] = typeof FileSystem.readDirectoryAsync === 'function'
+      ? await Promise.all([
+          FileSystem.readDirectoryAsync(DOWNLOADS_DIR).then((names) => new Set(names)).catch(() => null),
+          FileSystem.readDirectoryAsync(COVERS_DIR).then((names) => new Set(names)).catch(() => null),
+        ]) : [null, null];
     const verified = await Promise.all(tracks.map(async (track) => {
       const normalized = currentManagedAudioPath(track.localAudioPath);
       const filename = managedDownloadFilename(track.localAudioPath);
-      if (filenames && normalized && filename) {
-        return filenames.has(filename) ? { ...track, localAudioPath: normalized } : null;
-      }
-      const existing = await getExistingLocalAudioPath(track.localAudioPath);
-      return existing ? { ...track, localAudioPath: existing } : null;
+      const existing = filenames && normalized && filename
+        ? filenames.has(filename) ? normalized : null
+        : await getExistingLocalAudioPath(track.localAudioPath);
+      if (!existing) return null;
+
+      // A sandbox migration can keep the music file while invalidating its
+      // absolute artwork URL. Rebase the cover too, and never send a missing
+      // file:// URL to Image/AVPlayer when the original HTTP artwork exists.
+      const coverPath = currentManagedCoverPath(track.localImagePath);
+      const coverFilename = managedCoverFilename(track.localImagePath);
+      const localImagePath = coverFilenames && coverPath && coverFilename
+        ? coverFilenames.has(coverFilename) ? coverPath : ''
+        : track.localImagePath?.startsWith('file:')
+          ? await getExistingLocalCoverPath(track.localImagePath) || ''
+          : track.localImagePath || '';
+      return {
+        ...track,
+        localAudioPath: existing,
+        localImagePath,
+        imageURL: /^https?:\/\//i.test(track.imageURL)
+          ? track.imageURL : youtubeThumbnailForTrack(track) || track.imageURL || '',
+      };
     }));
     return verified.filter((track): track is DownloadedTrack => Boolean(track));
   })();
@@ -380,6 +407,7 @@ const updateDownloadedTracks = async (
 export const repairDownloadedTrackMetadata = async (
   onUpdated?: () => void
 ): Promise<void> => {
+  if (useConnectivityStore.getState().status === 'offline') return;
   if (metadataRepair) return metadataRepair;
   metadataRepair = (async () => {
     const savedTracks = await getDownloadedTracks();
@@ -404,22 +432,39 @@ export const repairDownloadedTrackMetadata = async (
       await Promise.all(tracks.slice(offset, offset + 2).map(async (track) => {
         metadataRepairAttempts.set(track.spotifyId, Date.now());
         try {
-          const metadata = await fetchSpotifyTrackMetadata(track.spotifyId);
+          // Replacing a lost local cover should not wait for Spotify metadata
+          // when the current catalog already has its remote image reference.
+          const metadata = track.metadataVersion === METADATA_VERSION &&
+            /^https?:\/\//i.test(track.imageURL)
+            ? null : await fetchSpotifyTrackMetadata(track.spotifyId);
           const mapping = !track.youtubeVideoId
             ? await getCatalogMapping(track.spotifyId) : null;
           const youtubeVideoId = track.youtubeVideoId || mapping?.videoId ||
             youtubeVideoIdFromTrackId(track.spotifyId);
-          const coverSource = metadata?.imageURL ||
-            (/^https?:\/\//i.test(track.imageURL) ? track.imageURL : '') ||
-            (/^https?:\/\//i.test(track.localImagePath) ? track.localImagePath : '');
-          const cover = coverSource
-            ? await downloadCover(coverSource, `${track.id}_hq_v3`) : null;
+          const coverSources = [...new Set([
+            metadata?.imageURL,
+            /^https?:\/\//i.test(track.imageURL) ? track.imageURL : '',
+            /^https?:\/\//i.test(track.localImagePath) ? track.localImagePath : '',
+            youtubeThumbnailForTrack({ ...track, youtubeVideoId }),
+          ].filter((url): url is string => Boolean(url)))];
+          let cover: string | null = null;
+          let coverSource = coverSources[0] || '';
+          for (const candidate of coverSources) {
+            cover = await downloadCover(candidate, `${track.id}_hq_v3`);
+            if (cover) { coverSource = candidate; break; }
+          }
           if (!metadata && !youtubeVideoId && !coverSource) return;
           await updateDownloadedTracks((current) => current.map((saved) =>
-            saved.spotifyId === track.spotifyId && saved.localAudioPath === track.localAudioPath
+            saved.spotifyId === track.spotifyId &&
+            (saved.localAudioPath === track.localAudioPath ||
+              (managedDownloadFilename(saved.localAudioPath) != null &&
+               managedDownloadFilename(saved.localAudioPath) === managedDownloadFilename(track.localAudioPath)))
               ? {
                   ...mergeCatalogMetadata(saved, metadata),
-                  localImagePath: cover || saved.localImagePath,
+                  localAudioPath: track.localAudioPath,
+                  imageURL: cover ? coverSource : metadata?.imageURL || track.imageURL || saved.imageURL || coverSource,
+                  localImagePath: cover || track.localImagePath ||
+                    (/^https?:\/\//i.test(saved.localImagePath) ? saved.localImagePath : ''),
                   youtubeVideoId,
                   youtubeUrl: youtubeVideoId
                     ? `https://www.youtube.com/watch?v=${youtubeVideoId}` : saved.youtubeUrl,
@@ -1193,9 +1238,9 @@ export const downloadCover = async (
   if (!imageUrl) return null;
   if (Platform.OS === 'web') return imageUrl;
 
+  const localPath = `${COVERS_DIR}${trackId}.jpg`;
   try {
     await ensureDirectories();
-    const localPath = `${COVERS_DIR}${trackId}.jpg`;
     const existing = await FileSystem.getInfoAsync(localPath).catch(() => null);
     if (existing?.exists && (existing.size === undefined || existing.size > 0)) {
       return existing.uri || localPath;
@@ -1218,6 +1263,9 @@ export const downloadCover = async (
     return result.uri;
   } catch (error) {
     console.error('[DownloadManager] Cover download failed:', error);
+    // Remove any partial response, otherwise the next attempt may mistake it
+    // for a valid cached image just because it contains some bytes.
+    await FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
     return null;
   }
 };
@@ -1476,15 +1524,21 @@ const downloadTrackInternal = async (
 
     onProgress?.(0.75);
 
-    // Download cover art
-    let localImagePath = effectiveTrack.imageURL;
-    if (effectiveTrack.imageURL && effectiveTrack.imageURL.startsWith('http')) {
-      const downloadedCoverUri = await downloadCover(
-        effectiveTrack.imageURL,
-        `${trackId}_hq_v3`
-      );
+    // Even a YouTube-only recording needs a real cover on the device. When
+    // catalog metadata has no image, the video's public thumbnail is a safe
+    // fallback and is stored just like any other artwork for offline use.
+    const coverSources = [...new Set([
+      /^https?:\/\//i.test(effectiveTrack.imageURL) ? effectiveTrack.imageURL : '',
+      youtubeThumbnailForTrack({ ...effectiveTrack, youtubeVideoId }),
+    ].filter(Boolean))];
+    let coverSource = coverSources[0] || '';
+    let localImagePath = coverSource;
+    for (const candidate of coverSources) {
+      const downloadedCoverUri = await downloadCover(candidate, `${trackId}_hq_v3`);
       if (downloadedCoverUri) {
+        coverSource = candidate;
         localImagePath = downloadedCoverUri;
+        break;
       }
     }
 
@@ -1508,9 +1562,9 @@ const downloadTrackInternal = async (
       title: effectiveTrack.title,
       artistName: effectiveTrack.artistName,
       albumName: effectiveTrack.albumName,
-      imageURL: effectiveTrack.imageURL,
+      imageURL: coverSource || effectiveTrack.imageURL,
       localAudioPath,
-      localImagePath: localImagePath || track.imageURL,
+      localImagePath: localImagePath || coverSource || '',
       downloadedAt: new Date().toISOString(),
       duration_ms: effectiveTrack.duration_ms,
       audioUrl: resolvedUrl,

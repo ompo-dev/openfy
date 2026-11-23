@@ -1,4 +1,4 @@
-﻿import AsyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
  * Persistent cache for Spotify → YouTube videoId mappings.
@@ -69,6 +69,15 @@ export const hasUserDirectCatalogMapping = (trackId?: string): boolean => {
   if (!trackId) return false;
   const mapping = memoryCache.get(trackId);
   return Boolean(mapping?.source === 'user_direct' && /^[A-Za-z0-9_-]{11}$/.test(mapping.videoId));
+};
+
+export const hasConfirmedCatalogMapping = (trackId?: string): boolean => {
+  if (!trackId) return false;
+  const mapping = memoryCache.get(trackId);
+  return Boolean(mapping && mapping.confidence >= MIN_CONFIDENCE_TO_CACHE &&
+    /^[A-Za-z0-9_-]{11}$/.test(mapping.videoId) &&
+    isCurrentCatalogMapping(mapping) &&
+    (mapping.source === 'user_direct' || Date.now() - mapping.confirmedAt < MAPPING_MAX_AGE_MS));
 };
 
 const persist = async (): Promise<void> => {

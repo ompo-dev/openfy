@@ -210,7 +210,13 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
       jest.mocked(resolveCatalogYouTubeVideoId).mockResolvedValue({ status: 'resolved', videoId: 'abcdefghijk', confidence: 100 });
       jest.mocked(loadAndPlay).mockResolvedValue(true);
       await usePlayerStore.getState().playWithQueue([track], 0);
-      expect(resolveCatalogYouTubeVideoId).toHaveBeenCalledWith(expect.objectContaining({ videoId: 'abcdefghijk', title: track.title }));
+      if ('youtubeUrl' in reference) {
+        // A linked video is already the user's chosen source; do not perform
+        // another slow title/duration validation before trying to play it.
+        expect(resolveCatalogYouTubeVideoId).not.toHaveBeenCalled();
+      } else {
+        expect(resolveCatalogYouTubeVideoId).toHaveBeenCalledWith(expect.objectContaining({ videoId: 'abcdefghijk', title: track.title }));
+      }
       expect(resolveSpotifyTrackVideoId).not.toHaveBeenCalled();
       expect(loadAndPlay).toHaveBeenCalledWith('openfy-youtube://video/abcdefghijk', expect.any(Function), expect.any(Object), 0, track, expect.any(Object));
     });
@@ -226,7 +232,7 @@ describe('usePlayerStore — Stream Recovery Integration', () => {
   });
 
   it.each([
-    { source: 'youtube_search' as const, cachedId: 'oldvideo123', expectedId: 'abcdefghijk', validate: true },
+    { source: 'youtube_search' as const, cachedId: 'oldvideo123', expectedId: 'abcdefghijk', validate: false },
     { source: 'youtube_search' as const, cachedId: 'abcdefghijk', expectedId: 'abcdefghijk', validate: false },
     { source: 'user_direct' as const, cachedId: 'manualvid01', expectedId: 'manualvid01', validate: false },
   ])('honors corrected links without losing the matching cache or manual override: %o', async ({ source, cachedId, expectedId, validate }) => {

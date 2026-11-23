@@ -150,6 +150,7 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
     // Keep remote cover metadata for JSON sharing. The renderer still prefers
     // localImagePath so downloaded artwork works offline.
     imageURL: track.imageURL,
+    localImagePath: track.localImagePath,
     durationMs: track.duration_ms,
     isrc: track.isrc,
     artistCreditsVersion: track.artistCreditsVersion,
@@ -173,7 +174,7 @@ export const LocalPlaylist = ({ playlistId }: { playlistId: string }) => {
     localAudioPath: track.localAudioPath,
   }));
   const imageURLs = [
-    ...collectionTracks.map((track) => track.imageURL),
+    ...collectionTracks.map((track) => track.localImagePath || track.imageURL),
     ...(playlist.coverImageURLs || []),
     ...(loadingTracks ? getDetailPreview('playlist', playlistId)?.imageURLs || [] : []),
   ].filter((url): url is string => Boolean(url));
