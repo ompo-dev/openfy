@@ -67,6 +67,12 @@ O JSON não inclui bytes dos downloads, caminhos privados do aparelho, cookies, 
 
 As marcações antigas de “Áudio indisponível” não devem bloquear faixas com vínculo manual de vídeo ou link de áudio já persistido. O player continua relatando falhas reais do provedor de áudio.
 
+## Mixes e edição de áudio
+
+Os mixes guardam clipes não destrutivos (início, fim, ordem e volume) e usam as fontes baixadas para composição nativa. O editor e a listagem reutilizam capas locais, duração e selo de conteúdo explícito do catálogo. A prévia solicita fontes ausentes e reutiliza a composição existente quando os arquivos e cortes não mudaram. A reprodução de um mix pronto funciona offline; fontes ausentes precisam ser baixadas primeiro.
+
+**Compartilhar mix** copia um JSON `openfy.mix` versão 1, incluindo metadados, vínculos conhecidos, cortes e volumes. Em **Configurações > Playlists > Importar mix por JSON**, cole o conteúdo. O projeto é restaurado como um mix editável, sem busca de metadados; a importação repetida não sobrescreve as edições locais. Áudio e capas baixadas não são transferidos pelo JSON. Consulte [validação dos mixes](docs/mixes.md).
+
 ## Diagnósticos e testes
 
 O painel de desenvolvedor em Configurações expõe logs, estatísticas e inspeção de áudio. Procure eventos `time to first audio`, `audio source resolution`, `audio buffering`, `native startup stage`, `queue neighbor warmup` e `collection queue expanded`.

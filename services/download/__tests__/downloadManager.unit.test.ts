@@ -343,6 +343,17 @@ describe('queueDownloads', () => {
     expect(mockNativePlayerAndDownload).toHaveBeenCalledWith('abcdefghijk', expect.any(String), 1024 * 1024);
   });
 
+  it('retains the linked recording for a saved mix without rerunning canonical matching', async () => {
+    mockNativePlayerAndDownload.mockResolvedValue({ uri: 'file:///mock_dir/mix-linked.m4a', status: 206,
+      mimeType: 'audio/mp4', totalBytes: 100000 });
+    jest.mocked(resolveCatalogYouTubeVideoId).mockResolvedValue({ status: 'not_found', reason: 'no_canonical_match' });
+    await expect(downloadTrack({ spotifyId: 'AAAAAAAAAAAAAAAAAAAAAA', title: 'Linked song', artistName: 'Artist',
+      albumName: 'Album', imageURL: '', duration_ms: 180000, preferLinkedSource: true,
+      youtubeUrl: 'https://youtu.be/abcdefghijk' })).resolves.toMatchObject({ youtubeVideoId: 'abcdefghijk' });
+    expect(resolveCatalogYouTubeVideoId).not.toHaveBeenCalled();
+    expect(mockNativePlayerAndDownload).toHaveBeenCalledWith('abcdefghijk', expect.any(String), 1024 * 1024);
+  });
+
   it('repairs existing metadata, high-resolution artwork and video links without replacing audio', async () => {
     const saved = { id: 'track_repair', spotifyId: 'repair-metadata', title: 'Song',
       artistName: 'Artist, Guest', albumName: 'Spotify', imageURL: 'file:///old.jpg',

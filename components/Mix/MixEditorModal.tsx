@@ -1,7 +1,6 @@
 import * as React from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Slider from '@react-native-community/slider';
-import { Image } from 'expo-image';
 import ReorderableList, { useReorderableDrag } from 'react-native-reorderable-list';
 import { Gesture } from 'react-native-gesture-handler';
 import Scissors from 'lucide-react-native/icons/scissors';
@@ -24,6 +23,9 @@ import { clipDuration, formatMixTime, MIN_CLIP_MS, mixDuration, mixTimeline, mov
   validateMixClips, type MixClip, type MixProject } from '../../services/mix/mixTimeline';
 import { log } from '../../utils/appLogger';
 import { useMixPreview } from './useMixPreview';
+import { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
+import type { LibraryTrack } from '../../services/library/catalogLibrary';
+import { SkeletonImage } from '../common/SkeletonImage';
 
 const COLORS = ['#CF3276', '#2977B7', '#5D56C7', '#21866B', '#B87928'];
 
@@ -37,13 +39,14 @@ function Tool({ label, icon: Icon, onPress, disabled = false, selected = false }
 }
 
 function ClipRow({ clip, track, selected, index, onSelect, onMove }: {
-  clip: MixClip; track: MixProject['tracks'][number]; selected: boolean; index: number; onSelect: () => void;
+  clip: MixClip; track: ReturnType<typeof mergeMixTrack>; selected: boolean; index: number; onSelect: () => void;
   onMove: (direction: number) => void;
 }) {
   const drag = useReorderableDrag();
-  return <TrackRow title={track.title} subtitle={`${formatMixTime(clip.sourceStartMs)} – ${formatMixTime(clip.sourceEndMs)} · ${track.artistName}`}
-    imageURL={track.imageURL} active={selected} playing={false} onPress={onSelect}
-    onDownload={() => {}} downloadState="idle" repairUnavailableOnPress={false}
+  return <TrackRow track={{ ...track, duration_ms: clipDuration(clip) }} title={track.title} subtitle={track.artistName}
+    imageURL={track.localImagePath || track.imageURL} active={selected} selected={selected} playing={false} onPress={onSelect}
+    accessibilityLabel={`Selecionar faixa do clipe ${index + 1}: ${track.title}`}
+    onDownload={() => {}} downloadState="idle" repairUnavailableOnPress={false} showAvailability={false}
     trailingAction={<Pressable accessibilityRole="adjustable" accessibilityLabel={`Reordenar ${track.title}`}
       accessibilityValue={{ text: `Clipe ${index + 1}` }} accessibilityActions={[
         { name: 'increment', label: 'Mover depois' }, { name: 'decrement', label: 'Mover antes' },
@@ -51,9 +54,9 @@ function ClipRow({ clip, track, selected, index, onSelect, onMove }: {
       onLongPress={drag} delayLongPress={250} style={S.tool}><GripVertical size={22} color="#A5A5AA" /></Pressable>} />;
 }
 
-export function MixEditorModal({ project, visible, onClose, onSaved, onAddTracks, nested }: {
+export function MixEditorModal({ project, library, visible, onClose, onSaved, onAddTracks, nested }: {
   project: MixProject; visible: boolean; onClose: () => void; onSaved: (mix: MixProject) => void;
-  onAddTracks: () => void; nested?: React.ReactNode;
+  onAddTracks: () => void; nested?: React.ReactNode; library?: LibraryTrack[];
 }) {
   const [clips, setClips] = React.useState(project.clips);
   const [past, setPast] = React.useState<MixClip[][]>([]);
@@ -68,11 +71,14 @@ export function MixEditorModal({ project, visible, onClose, onSaved, onAddTracks
   const [volume, setVolume] = React.useState(1);
   const preview = useMixPreview();
   const { width } = useWindowDimensions();
-  const timeline = mixTimeline(clips);
-  const total = mixDuration(clips);
+  const timeline = React.useMemo(() => mixTimeline(clips), [clips]);
+  const total = React.useMemo(() => mixDuration(clips), [clips]);
   const selected = timeline.find((clip) => clip.id === selectedId);
-  const track = project.tracks.find((item) => item.spotifyId === selected?.trackId);
-  const tracks = new Map(project.tracks.map((item) => [item.spotifyId, item]));
+  const tracks = React.useMemo(() => {
+    const byId = new Map((library || []).map((item) => [item.spotifyId, item]));
+    return new Map(project.tracks.map((item) => [item.spotifyId, mergeMixTrack(item, byId.get(item.spotifyId))]));
+  }, [project.tracks, library]);
+  const track = selected ? tracks.get(selected.trackId) : undefined;
   const pan = React.useMemo(() => Gesture.Pan().activateAfterLongPress(300), []);
   const scroll = React.useRef<ScrollView>(null);
   const scale = (width - 64) * zoom / Math.max(total, 60000);
@@ -140,7 +146,7 @@ export function MixEditorModal({ project, visible, onClose, onSaved, onAddTracks
           accessibilityLabel={`Selecionar clipe ${index + 1}: ${tracks.get(clip.trackId)?.title}`}
           style={[S.clip, { left: clip.startMs * scale, width: Math.max(1, clipDuration(clip) * scale),
             backgroundColor: COLORS[index % COLORS.length], borderColor: clip.id === selectedId ? '#FFFFFF' : 'transparent' }]}>
-          {clipDuration(clip) * scale > 80 ? <Image source={{ uri: tracks.get(clip.trackId)?.imageURL }} style={S.clipCover} /> : null}
+          {clipDuration(clip) * scale > 80 ? <SkeletonImage source={{ uri: tracks.get(clip.trackId)?.localImagePath || tracks.get(clip.trackId)?.imageURL }} style={S.clipCover} /> : null}
           <Text numberOfLines={1} style={S.clipTitle}>{tracks.get(clip.trackId)?.title}</Text>
         </LoggedPressable>)}
         <View pointerEvents="none" style={[S.playhead, { left: Math.min(total, preview.position) * scale }]} />
@@ -151,6 +157,7 @@ export function MixEditorModal({ project, visible, onClose, onSaved, onAddTracks
       onSlidingStart={preview.stop} onValueChange={preview.setPosition} disabled={saving || !clips.length} />
     {selected && track ? <View style={S.inspector}>
       <Text style={S.heading} numberOfLines={1}>{track.title}</Text>
+      <Text style={S.secondary} numberOfLines={1}>{track.artistName} • {formatMixTime(clipDuration(selected))}</Text>
       <View style={S.rangeLabel}><Text style={S.secondary}>Início</Text><Text style={S.value}>{(trim[0] / 1000).toFixed(2)} s</Text></View>
       <Slider accessibilityLabel="Início do recorte" value={trim[0]} minimumValue={0} maximumValue={Math.max(0, trim[1] - MIN_CLIP_MS)} step={10}
         minimumTrackTintColor="#2E9BFF" maximumTrackTintColor="#545459" thumbTintColor="#FFFFFF" disabled={saving}
@@ -200,7 +207,7 @@ const S = StyleSheet.create({
   timelineScroll: { height: 140, backgroundColor: '#19191B', borderRadius: 8 }, timeline: { height: 140 },
   ruler: { position: 'absolute', top: 10, left: 0, right: 32 }, tick: { position: 'absolute', fontSize: 10, color: '#A5A5AA' },
   clip: { position: 'absolute', top: 44, height: 74, borderRadius: 6, borderWidth: 2, flexDirection: 'row', alignItems: 'center', gap: 6, overflow: 'hidden' },
-  clipCover: { width: 38, height: 38, borderRadius: 4, marginLeft: 6 }, clipTitle: { color: '#FFFFFF', fontSize: 12, fontFamily: 'SF-Semibold', flex: 1, minWidth: 0 },
+  clipCover: { width: 38, height: 38, borderRadius: 8, marginLeft: 6 }, clipTitle: { color: '#FFFFFF', fontSize: 12, fontFamily: 'SF-Semibold', flex: 1, minWidth: 0 },
   playhead: { position: 'absolute', top: 32, bottom: 4, width: 2, backgroundColor: '#FFFFFF' },
   inspector: { borderTopWidth: StyleSheet.hairlineWidth, borderColor: '#444449', paddingTop: 12, gap: 4 },
   rangeLabel: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 8 },

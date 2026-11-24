@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { getLibraryTracks } from '../../library/catalogLibrary';
 import { downloadMixSources, renderMixAudio } from '../mixAudio';
+import { prepareLocalAudioForPlayback } from '../../audio/localAudioRepair';
 import type { MixProject } from '../mixTimeline';
 const mockEnsure = jest.fn().mockResolvedValue(undefined);
 jest.mock('../../../stores/useDownloadStore', () => ({ useDownloadStore: { getState: () => ({ ensureDownloads: mockEnsure }) } }));
@@ -44,9 +45,19 @@ it('queues missing sources automatically, but reuses valid downloaded files', as
   expect(mockEnsure).toHaveBeenLastCalledWith([expect.objectContaining(mix.tracks[0])]);
 });
 it('uses a corrected catalog YouTube source when a mix needs to re-download an original', async () => {
-  jest.mocked(getLibraryTracks).mockResolvedValue([{ spotifyId: 'one', youtubeVideoId: 'corrected', youtubeUrl: 'https://youtube.com/watch?v=corrected' }] as never);
+  jest.mocked(getLibraryTracks).mockResolvedValue([{ spotifyId: 'one', youtubeVideoId: 'zyxwvutsrqp', youtubeUrl: 'https://youtube.com/watch?v=zyxwvutsrqp' }] as never);
   await downloadMixSources(project('corrected'));
-  expect(mockEnsure).toHaveBeenCalledWith([expect.objectContaining({ spotifyId: 'one', youtubeVideoId: 'corrected' })]);
+  expect(mockEnsure).toHaveBeenCalledWith([expect.objectContaining({ spotifyId: 'one', youtubeVideoId: 'zyxwvutsrqp' })]);
+});
+
+it('queues a stable direct audio link instead of discarding the known source', async () => {
+  const mix = project('direct-source');
+  mix.tracks[0].audioUrl = 'https://media.example/track.m4a';
+  jest.mocked(getLibraryTracks).mockResolvedValue([]);
+  await downloadMixSources(mix);
+  expect(mockEnsure).toHaveBeenCalledWith([expect.objectContaining({
+    spotifyId: 'one', audioUrl: 'https://media.example/track.m4a', audioFormat: 'm4a', preferLinkedSource: true,
+  })]);
 });
 it('reports old native builds and cleans up failed output files', async () => {
   jest.mocked(requireOptionalNativeModule).mockReturnValue(null);
@@ -59,4 +70,15 @@ it('reports old native builds and cleans up failed output files', async () => {
 it('coalesces concurrent renders of the same edit', async () => {
   await Promise.all([renderMixAudio(project('coalesce')), renderMixAudio(project('coalesce'))]);
   expect(mockRender).toHaveBeenCalledTimes(1);
+});
+
+it('prepares each audio source only once and skips repair for an unchanged cached render', async () => {
+  const mix = project('repeated-source');
+  mix.clips.push({ ...mix.clips[0], id: 'second', sourceStartMs: 20000, sourceEndMs: 30000 });
+  await renderMixAudio(mix);
+  expect(prepareLocalAudioForPlayback).toHaveBeenCalledTimes(1);
+  expect(mockRender.mock.calls[0][0]).toHaveLength(2);
+  await renderMixAudio(mix);
+  expect(mockRender).toHaveBeenCalledTimes(1);
+  expect(prepareLocalAudioForPlayback).toHaveBeenCalledTimes(1);
 });

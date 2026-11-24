@@ -46,14 +46,14 @@ export const getExistingLocalCoverPath = async (uri?: string): Promise<string | 
 };
 
 /** Never treat remote links or a zero-byte file as an offline recording. */
-export const getExistingLocalAudioPath = async (uri?: string): Promise<string | null> => {
+export const getExistingLocalAudioPath = async (uri?: string, minBytes = 5_000): Promise<string | null> => {
   if (Platform.OS === 'web' || !uri?.startsWith('file:') || uri.endsWith('.m3u8')) return null;
   const candidates = [currentManagedAudioPath(uri), uri];
   for (const candidate of new Set(candidates)) {
     if (!candidate) continue;
     try {
       const info = await FileSystem.getInfoAsync(candidate);
-      if (info.exists && (info.size === undefined || info.size > 5_000)) return candidate;
+      if (info.exists && !info.isDirectory && (info.size === undefined || info.size > minBytes)) return candidate;
     } catch { /* The old sandbox path may no longer exist after an update. */ }
   }
   return null;

@@ -29,6 +29,8 @@ type TrackRowProps = {
   accessibilityLabel?: string;
   disabled?: boolean;
   repairUnavailableOnPress?: boolean;
+  showAvailability?: boolean;
+  selected?: boolean;
 };
 
 const formatDuration = (durationMs?: number): string | null => {
@@ -42,6 +44,7 @@ export const TrackRow = React.memo(function TrackRow({
   title, subtitle, imageURL, trackNumber, active, playing, downloadState,
   onPress, onDownload, artists, onArtistPress, trailingAction,
   accessibilityLabel, disabled = false, track, repairUnavailableOnPress = true,
+  showAvailability = true, selected = false,
 }: TrackRowProps) {
   const { playTrack } = usePlayer((state) => ({ playTrack: state.playTrack }));
   // Native swipe cancellation can arrive after RN's press release; movement is never a tap.
@@ -50,7 +53,7 @@ export const TrackRow = React.memo(function TrackRow({
     const point = event?.nativeEvent;
     if (point && touch.current && Math.hypot(point.pageX - touch.current.x, point.pageY - touch.current.y) > 8) touch.current.moved = true;
   };
-  const unavailable = useTrackAvailabilityStore((state) => track ? isTrackUnavailable(track, state.failures, false) : false);
+  const unavailable = useTrackAvailabilityStore((state) => showAvailability && track ? isTrackUnavailable(track, state.failures, false) : false);
   const duration = formatDuration(track?.duration_ms || track?.durationMs);
   const artistSubtitle = track?.artistName || track?.subtitle;
   const showsArtistSubtitle = Boolean(artistSubtitle && subtitle.trim() === artistSubtitle.trim());
@@ -72,7 +75,7 @@ export const TrackRow = React.memo(function TrackRow({
       onTouchMove={trackMovement}
       onTouchCancel={() => { if (touch.current) touch.current.moved = true; }}
       onPress={handlePress}
-      style={[styles.row, active && playing && styles.rowActive, disabled && styles.rowDisabled]}
+      style={[styles.row, (selected || (active && playing)) && styles.rowActive, disabled && styles.rowDisabled]}
     >
       {trackNumber !== undefined ? (
         <Text style={styles.trackNumber}>{trackNumber}</Text>

@@ -2,7 +2,7 @@ import * as React from 'react';
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import { AppState } from 'react-native';
 import type { AudioPlayer } from 'expo-audio/build/AudioModule.types';
-import { renderMixAudio } from '../../services/mix/mixAudio';
+import { downloadMixSources, renderMixAudio } from '../../services/mix/mixAudio';
 import type { MixProject } from '../../services/mix/mixTimeline';
 import { usePlayerStore } from '../../stores/usePlayerStore';
 import { log } from '../../utils/appLogger';
@@ -30,10 +30,13 @@ export function useMixPreview() {
     stop(); setError(''); setBusy(true);
     const request = generation.current;
     try {
+      await downloadMixSources(project);
+      if (request !== generation.current) return;
       const output = await renderMixAudio(project);
       if (request !== generation.current) return;
       const main = usePlayerStore.getState();
       if (main.playerState.isPlaying) await main.togglePlayPause('mix-preview');
+      if (request !== generation.current) return;
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldPlayInBackground: true, interruptionMode: 'doNotMix' });
       if (request !== generation.current) return;
       const audio = createAudioPlayer({ uri: output.uri }, { updateInterval: 50 });

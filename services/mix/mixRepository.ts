@@ -83,3 +83,21 @@ export const saveMixProject = (project: MixProject, clips: MixClip[], title = pr
   });
 
 export const deleteMixProject = (id: string) => mutate('delete', id, (items) => ({ items: items.filter((mix) => mix.id !== id), result: undefined }));
+
+/** Import a new editable copy; repeated imports never replace local edits. */
+export const importMixProject = (source: Pick<MixProject, 'id' | 'title' | 'description' | 'tracks' | 'clips'>) => {
+  let hash = 2166136261;
+  for (let i = 0; i < source.id.length; i++) hash = Math.imul(hash ^ source.id.charCodeAt(i), 16777619);
+  const id = `local_mix_shared_${(hash >>> 0).toString(36)}`;
+  return mutate('import', id, (items) => {
+    const existing = items.find((item) => item.id === id);
+    if (existing) return { items, result: existing };
+    validateMixClips(source.clips, source.tracks);
+    const now = new Date().toISOString();
+    const result: MixProject = { version: 1, id, title: source.title.trim().slice(0, 80),
+      description: source.description.trim().slice(0, 240), tracks: source.tracks, clips: source.clips,
+      revision: 1, createdAt: now, updatedAt: now };
+    if (!validProject(result)) throw new Error('Mix inválido.');
+    return { items: [...items, result], result };
+  });
+};

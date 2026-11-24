@@ -18,7 +18,8 @@ import {
   resolveDirectYouTubeAudio,
 } from '../audio/directYouTubeResolver';
 import { resolveCatalogYouTubeVideoId, resolveSpotifyTrackVideoId } from '../audio/catalogResolver';
-import { getTrackYouTubeVideoId } from '../spotify/linkParser';
+import { getTrackYouTubeVideoId, getLinkedYouTubeVideoId } from '../spotify/linkParser';
+import { stableDirectAudioUrl } from '../audio/stableAudioUrl';
 import { getCatalogMapping, isCurrentCatalogMapping } from '../audio/catalogMappingCache';
 import { repairLocalAudioFile } from '../audio/localAudioRepair';
 import { retryNetworkOperation } from '../audio/networkRetry';
@@ -88,6 +89,8 @@ export type DownloadTrackInput = TrackCatalogMetadata & {
   duration_ms: number;
   audioUrl?: string;
   audioFormat?: string;
+  /** A saved mix must retain the recording associated with its source cuts. */
+  preferLinkedSource?: boolean;
 };
 
 export type PendingDownload = {
@@ -1295,7 +1298,7 @@ const downloadTrackInternal = async (
       audioFormat || track.audioFormat || 'mp3'
     );
     const trackId = `track_${track.spotifyId}`;
-    const metadata = track.albumId && track.artists?.length
+    const metadata = (track.preferLinkedSource && (getTrackYouTubeVideoId(track) || stableDirectAudioUrl(audioUrl || track.audioUrl))) || (track.albumId && track.artists?.length)
       ? null : await fetchSpotifyTrackMetadata(track.spotifyId).catch(() => null);
     let effectiveTrack = mergeCatalogMetadata(track, metadata);
     track = effectiveTrack;
@@ -1307,7 +1310,8 @@ const downloadTrackInternal = async (
     const manualMapping = await getCatalogMapping(track.spotifyId);
     if (manualMapping?.source === 'user_direct') youtubeVideoId = manualMapping.videoId;
     let sourceChanged = false;
-    if (youtubeVideoId && manualMapping?.source !== 'user_direct') {
+    const useLinkedSource = track.preferLinkedSource && !track.spotifyId.startsWith('yt_') && getLinkedYouTubeVideoId(track);
+    if (youtubeVideoId && manualMapping?.source !== 'user_direct' && !useLinkedSource) {
       const source = await resolveCatalogYouTubeVideoId({
         videoId: youtubeVideoId, title: track.title,
         artists: track.artists?.map((artist) => artist.name) || [track.artistName],
@@ -1321,11 +1325,12 @@ const downloadTrackInternal = async (
         youtubeUrl: `https://www.youtube.com/watch?v=${youtubeVideoId}`,
       };
     }
-    let resolvedUrl = Platform.OS === 'web' && !sourceChanged && !youtubeVideoId ? suppliedAudioUrl : undefined;
+    const directSource = track.preferLinkedSource && !youtubeVideoId ? stableDirectAudioUrl(suppliedAudioUrl) : null;
+    let resolvedUrl = directSource?.url || (Platform.OS === 'web' && !sourceChanged && !youtubeVideoId ? suppliedAudioUrl : undefined);
     let format =
       Platform.OS === 'web'
         ? audioFormat || track.audioFormat || 'mp3'
-        : track.audioFormat || (youtubeVideoId ? 'm4a' : 'mp3');
+        : directSource?.format || track.audioFormat || (youtubeVideoId ? 'm4a' : 'mp3');
     let localAudioPath: string | null = null;
     let nativeDownloadAttempted = false;
     const nativeDownloadAvailable = hasNativeYouTubeDownload();
@@ -1333,7 +1338,7 @@ const downloadTrackInternal = async (
       available: nativeDownloadAvailable,
     });
 
-    if (nativeDownloadAvailable) {
+    if (nativeDownloadAvailable && !directSource) {
       if (!youtubeVideoId) {
         const catalog = await resolveSpotifyTrackVideoId(
           track.spotifyId,

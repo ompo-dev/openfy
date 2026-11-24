@@ -6,6 +6,9 @@ import { useDownloadStore } from '../../stores/useDownloadStore';
 import { log } from '../../utils/appLogger';
 import { validateMixClips, type MixProject } from './mixTimeline';
 import { prepareLocalAudioForPlayback } from '../audio/localAudioRepair';
+import { currentManagedAudioPath } from '../download/localAudioPaths';
+import { mergeMixTrack } from './mixTrackMetadata';
+import { stableDirectAudioUrl } from '../audio/stableAudioUrl';
 
 export type MixAudioClip = { uri: string; startMs: number; endMs: number; volume: number };
 type MixRender = { uri: string; durationMs: number };
@@ -16,8 +19,18 @@ const cached = new Map<string, { signature: string; result: MixRender }>();
 export const hasMixRenderer = () => typeof requireOptionalNativeModule<MixModule>('OpenfyLocalAudio')?.renderMixAsync === 'function';
 export const existingMixFile = async (uri?: string) => {
   if (!uri?.startsWith('file://')) return false;
-  const info = await FileSystem.getInfoAsync(uri);
-  return info.exists && !info.isDirectory && info.size > 0;
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    return info.exists && !info.isDirectory && info.size > 0;
+  } catch { return false; }
+};
+
+const localSource = async (uri?: string) => {
+  const rebased = currentManagedAudioPath(uri);
+  for (const path of new Set([rebased, uri])) {
+    if (path && await existingMixFile(path)) return path;
+  }
+  return null;
 };
 
 export const downloadMixSources = async (project: MixProject, library?: LibraryTrack[]) => {
@@ -26,8 +39,11 @@ export const downloadMixSources = async (project: MixProject, library?: LibraryT
   const sourceIds = new Set(project.clips.map((clip) => clip.trackId));
   const missing = [];
   for (const track of project.tracks) {
-    if (sourceIds.has(track.spotifyId) && !await existingMixFile(byId.get(track.spotifyId)?.localAudioPath)) {
-      missing.push(toDownloadTrackInput({ ...track, ...byId.get(track.spotifyId) }));
+    if (sourceIds.has(track.spotifyId) && !await localSource(byId.get(track.spotifyId)?.localAudioPath)) {
+      const source = mergeMixTrack(track, byId.get(track.spotifyId));
+      const direct = stableDirectAudioUrl(source.audioUrl) || stableDirectAudioUrl(source.streamUrl);
+      missing.push({ ...toDownloadTrackInput(source), preferLinkedSource: true,
+        ...(direct ? { audioUrl: direct.url, audioFormat: direct.format } : {}) });
     }
   }
   log.download('mix source downloads requested', { mixId: project.id, missing: missing.length });
@@ -42,14 +58,18 @@ export const renderMixAudio = async (project: MixProject): Promise<MixRender> =>
   const tracks = new Map((await getLibraryTracks()).map((track) => [track.spotifyId, track]));
   const clips: MixAudioClip[] = [];
   const identities: unknown[] = [];
+  const prepared = new Map<string, { uri: string; identity: unknown }>();
   for (const clip of project.clips) {
-    let uri = tracks.get(clip.trackId)?.localAudioPath;
-    if (!await existingMixFile(uri)) throw new Error('Baixe todas as músicas do mix antes de reproduzir.');
-    const repaired = await prepareLocalAudioForPlayback(uri!);
-    uri = repaired?.uri || uri!;
-    const info = await FileSystem.getInfoAsync(uri);
-    identities.push(info.exists ? [uri, info.size, info.modificationTime] : [uri]);
-    clips.push({ uri, startMs: clip.sourceStartMs, endMs: clip.sourceEndMs, volume: clip.volume });
+    let source = prepared.get(clip.trackId);
+    if (!source) {
+      const local = await localSource(tracks.get(clip.trackId)?.localAudioPath);
+      if (!local) throw new Error('Baixe todas as músicas do mix antes de reproduzir.');
+      const info = await FileSystem.getInfoAsync(local);
+      source = { uri: local, identity: info.exists ? [local, info.size, info.modificationTime] : [local] };
+      prepared.set(clip.trackId, source);
+    }
+    identities.push(source.identity);
+    clips.push({ uri: source.uri, startMs: clip.sourceStartMs, endMs: clip.sourceEndMs, volume: clip.volume });
   }
   const signature = JSON.stringify([clips, identities]);
   const storageKey = `openfy_mix_render_${project.id}`;
@@ -67,7 +87,15 @@ export const renderMixAudio = async (project: MixProject): Promise<MixRender> =>
     await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
     const uri = `${directory}${Date.now()}_${Math.random().toString(36).slice(2)}.m4a`;
     try {
-      const result = await native.renderMixAsync(clips, uri);
+      // Repair each distinct source only on a cache miss, not for each clip.
+      const repairedSources = new Map<string, string>();
+      for (const clip of clips) {
+        if (!repairedSources.has(clip.uri)) {
+          const repair = await prepareLocalAudioForPlayback(clip.uri);
+          repairedSources.set(clip.uri, repair?.uri || clip.uri);
+        }
+      }
+      const result = await native.renderMixAsync(clips.map((clip) => ({ ...clip, uri: repairedSources.get(clip.uri)! })), uri);
       if (!Number.isFinite(result.durationMs) || result.durationMs <= 0 || result.uri !== uri || !await existingMixFile(uri)) {
         throw new Error('A composição de áudio não foi concluída.');
       }

@@ -826,8 +826,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
     let trustedLocalDownload = false;
     const resolveAudioPromise = (async (): Promise<AudioSourceInput | null> => {
       if (track.localOnly) {
-        const local = await getExistingLocalAudioPath(track.localAudioPath);
-        if (local) sourceRoute = 'local-only';
+        const local = await getExistingLocalAudioPath(track.localAudioPath, 0);
+        if (local) { sourceRoute = 'local-only'; trustedLocalDownload = true; }
         return local?.startsWith('file:') ? local : null;
       }
       // Offline files always win over stream caches, network availability flags,

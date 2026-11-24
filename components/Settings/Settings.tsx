@@ -48,6 +48,7 @@ import { SettingIcon } from '../gym/SettingIcon';
 import { useTransientNotice } from '../../hooks/useTransientNotice';
 import type { AppModalAnchor } from '../gym/appModals';
 import { importPlaylistJson, parsePlaylistJson } from '../../services/library/playlistJsonTransfer';
+import { importMixJson, parseMixJson } from '../../services/mix/mixJsonTransfer';
 
 type LibrarySummary = {
   downloads: number;
@@ -152,8 +153,10 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
     setPlaylistImportStatus('');
     const raw = value.trim();
     if (!raw || !raw.endsWith('}')) return;
+    let isMix = false;
     try {
-      parsePlaylistJson(raw);
+      isMix = JSON.parse(raw)?.format === 'openfy.mix';
+      if (isMix) parseMixJson(raw); else parsePlaylistJson(raw);
     } catch (error) {
       setPlaylistImportStatus(error instanceof Error ? error.message : 'JSON inválido.');
       return;
@@ -163,7 +166,14 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
     importRunning.current = true;
     setPlaylistImportBusy(true);
     setPlaylistImportStatus('Importando músicas e fontes conhecidas…');
-    void importPlaylistJson(raw).then(({ playlist, trackCount }) => {
+    const importing = isMix
+      ? importMixJson(raw).then(({ mix, trackCount }) => ({ playlist: mix, trackCount }))
+      : importPlaylistJson(raw);
+    void importing.then(({ playlist, trackCount }) => {
+      if (isMix) {
+        setPlaylistImportStatus('Mix "' + playlist.title + '" importado: ' + trackCount + ' músicas. Abra a Biblioteca para editar.');
+        return;
+      }
       setPlaylistImportStatus('Playlist "' + playlist.title + '" importada: ' +
         trackCount + ' músicas. Abra a Biblioteca para escutar.');
       setSummary((previous) => ({
@@ -401,11 +411,11 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
           }} />
         <AudioSettingsSheet visible={audioVisible} onClose={() => setAudioVisible(false)} />
         <LyricsSettingsSheet visible={lyricsVisible} onClose={() => setLyricsVisible(false)} />
-        <SheetFrame visible={playlistImportVisible} title="Importar playlist JSON" size="full"
+        <SheetFrame visible={playlistImportVisible} title="Importar playlist ou mix JSON" size="full"
           onClose={() => setPlaylistImportVisible(false)}>
           <View style={styles.playlistImportContent}>
             <Text style={styles.settingDescription}>
-              Cole o JSON compartilhado por outra playlist do Openfy. Quando válido, a importação inicia automaticamente, sem buscar novamente as músicas.
+              Cole o JSON compartilhado por uma playlist ou mix do Openfy. A importação começa automaticamente, sem pesquisar novamente as músicas. Mixes preservam cortes, ordem e volume.
             </Text>
             <LoggedPressable accessibilityRole="button"
               accessibilityLabel="Colar JSON da área de transferência"
@@ -424,7 +434,7 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
               editable={!playlistImportBusy}
               multiline
               onChangeText={onPastePlaylistJson}
-              placeholder="Cole o JSON completo da playlist aqui"
+              placeholder="Cole o JSON completo da playlist ou do mix"
               placeholderTextColor="#888888"
               style={styles.playlistImportInput}
               textAlignVertical="top"
@@ -513,6 +523,8 @@ export const Settings = ({ onClose }: { onClose?: () => void } = {}) => {
         <Section title="PLAYLISTS">
           <ActionRow icon="document-text-outline" label="Importar playlist por JSON"
             detail="Cole ou use a área de transferência" onPress={openPlaylistImport} />
+          <ActionRow icon="document-text-outline" label="Importar mix por JSON"
+            detail="Preserva os clipes e cortes" onPress={openPlaylistImport} />
           <Text style={styles.statusText}>Músicas, artistas, capas, ordem e links conhecidos são restaurados sem pesquisa de metadados. Arquivos de áudio baixados não fazem parte do JSON.</Text>
         </Section>
 

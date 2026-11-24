@@ -46,3 +46,10 @@ it('does not lose unsaved edits when closing or adding another source', async ()
   expect(close).not.toHaveBeenCalled();
   expect(Alert.alert).toHaveBeenLastCalledWith('Descartar alterações?', expect.any(String), expect.any(Array));
 });
+
+it('shows the actual clip duration and explicit badge in the editor list', async () => {
+  const mix = { ...project, tracks: [{ ...project.tracks[0], explicit: true }] };
+  const view = await render(<MixEditorModal project={mix} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  expect(view.getAllByText('Artist • 0:30').length).toBeGreaterThan(0);
+  expect(view.getByTestId('track-explicit-badge')).toBeTruthy();
+});

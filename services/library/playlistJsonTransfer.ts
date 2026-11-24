@@ -231,8 +231,8 @@ const fingerprint = (input: string): string => {
   return (hash >>> 0).toString(36);
 };
 
-export const importPlaylistJson = async (raw: string): Promise<{ playlist: LocalPlaylist; trackCount: number }> => {
-  const doc = parseDocument(raw); // Validate before touching storage.
+/** Restore validated portable tracks without creating a playlist (also used by mixes). */
+export const restorePortableTracks = async (doc: PortablePlaylist): Promise<CatalogTrackInput[]> => {
   const tracks = doc.tracks.map(({ sourceMapping, ...track }) => track);
   await upsertCatalogTracks(tracks);
   const now = Date.now();
@@ -249,6 +249,12 @@ export const importPlaylistJson = async (raw: string): Promise<{ playlist: Local
   });
   await setCatalogMappingsBatch(mappings);
   clearTrackUnavailableMany(tracks);
+  return tracks;
+};
+
+export const importPlaylistJson = async (raw: string): Promise<{ playlist: LocalPlaylist; trackCount: number }> => {
+  const doc = parseDocument(raw); // Validate before touching storage.
+  const tracks = await restorePortableTracks(doc);
   const playlist = await upsertLocalPlaylist({
     sourcePlatform: 'local',
     sourceId: 'shared_' + fingerprint(doc.playlist.id),

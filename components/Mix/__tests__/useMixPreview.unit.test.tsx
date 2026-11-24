@@ -7,7 +7,7 @@ const mockPauseMain = jest.fn().mockResolvedValue(undefined);
 jest.mock('../../../stores/usePlayerStore', () => ({ usePlayerStore: { getState: () => ({
   playerState: { isPlaying: true }, togglePlayPause: mockPauseMain,
 }) } }));
-jest.mock('../../../services/mix/mixAudio', () => ({ renderMixAudio: jest.fn() }));
+jest.mock('../../../services/mix/mixAudio', () => ({ renderMixAudio: jest.fn(), downloadMixSources: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('expo-audio', () => ({ createAudioPlayer: jest.fn(), setAudioModeAsync: jest.fn().mockResolvedValue(undefined) }));
 const project = { id: 'local_mix_preview', clips: [] } as any;
 const output = { uri: 'file:///mix.m4a', durationMs: 30000 };

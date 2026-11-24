@@ -80,6 +80,7 @@ export type CollectionDetailProps = {
   onEditPress?: () => void | Promise<void>;
   onRemoveTrack?: (trackId: string) => void | Promise<void>;
   onPlayMix?: (trackId?: string) => Promise<void>;
+  onShareMix?: () => Promise<void>;
   onOpenMixEditor?: () => void;
   playbackSourceId?: string;
   onEndReached?: () => void;
@@ -217,6 +218,7 @@ export const CollectionDetail = ({
   onEditPress,
   onRemoveTrack,
   onPlayMix,
+  onShareMix,
   onOpenMixEditor,
   playbackSourceId,
   onEndReached,
@@ -250,6 +252,7 @@ export const CollectionDetail = ({
     if (kind !== 'playlist' || sharingPlaylist) return;
     setSharingPlaylist(true);
     try {
+      if (onShareMix) { await onShareMix(); return; }
       // Remote playlists load every page only for this explicit export action.
       const allTracks = resolveTracksForPlayback ? await resolveTracksForPlayback() : tracks;
       const json = await exportPlaylistJson({
@@ -729,6 +732,8 @@ export const CollectionDetail = ({
       const row = (
         <TrackRow
           track={item}
+          repairUnavailableOnPress={!onPlayMix}
+          showAvailability={!onPlayMix}
           title={item.title}
           subtitle={item.subtitle}
           imageURL={item.localImagePath || item.imageURL}
@@ -757,6 +762,7 @@ export const CollectionDetail = ({
       handleDownloadTrack,
       onArtistPress,
       onRemoveTrack,
+      onPlayMix,
       playTrackList,
       isPlaying,
     ]
@@ -950,7 +956,7 @@ export const CollectionDetail = ({
                 {kind === 'playlist' ? <>
                   <LoggedPressable
                     accessibilityRole="button"
-                    accessibilityLabel="Compartilhar playlist (copiar JSON)"
+                    accessibilityLabel={onPlayMix ? 'Compartilhar mix (copiar JSON)' : 'Compartilhar playlist (copiar JSON)'}
                     accessibilityState={{ busy: sharingPlaylist }}
                     disabled={sharingPlaylist || loadingTracks}
                     onPress={() => void handleSharePlaylist()}
