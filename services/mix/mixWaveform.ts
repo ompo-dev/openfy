@@ -2,15 +2,30 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { getExistingLocalAudioPath } from '../download/localAudioPaths';
 import { prepareLocalAudioForPlayback } from '../audio/localAudioRepair';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { log } from '../../utils/appLogger';
 
 type WaveformModule = { waveformAsync(uri: string, bins: number): Promise<number[]> };
 const cache = new Map<string, number[]>();
 const pending = new Map<string, Promise<number[]>>();
 let queue = Promise.resolve();
+const STORAGE_KEY = 'openfy_mix_waveforms_v1';
+let restored = false;
+const restore = async () => {
+  if (restored) return;
+  restored = true;
+  try {
+    const entries = JSON.parse(await AsyncStorage.getItem(STORAGE_KEY) || '[]') as [string, number[]][];
+    if (Array.isArray(entries)) for (const [key, peaks] of entries.slice(-64)) {
+      if (typeof key === 'string' && Array.isArray(peaks) && peaks.length === 1024 &&
+        peaks.every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) cache.set(key, peaks);
+    }
+  } catch { /* Rebuild corrupt cache from the downloaded audio. */ }
+};
 
 export const loadMixWaveform = async (uri?: string): Promise<number[]> => {
   const native = requireOptionalNativeModule<WaveformModule>('OpenfyLocalAudio');
-  if (!native?.waveformAsync || !uri) return [];
+  if (!uri) return [];
   const local = await getExistingLocalAudioPath(uri, 0);
   if (!local) return [];
   const info = await FileSystem.getInfoAsync(local);
@@ -19,14 +34,21 @@ export const loadMixWaveform = async (uri?: string): Promise<number[]> => {
   if (cache.has(key)) return cache.get(key)!;
   if (pending.has(key)) return pending.get(key)!;
   const operation = queue.then(async () => {
+    await restore();
+    if (cache.has(key)) return cache.get(key)!;
+    if (!native?.waveformAsync) return [];
     const repaired = await prepareLocalAudioForPlayback(local);
     const values = await native.waveformAsync(repaired?.uri || local, 1024);
     if (!Array.isArray(values) || !values.length || !values.every(Number.isFinite)) return [];
-    const peaks = values.map((v) => Math.max(0, Math.min(1, v)));
+    const peaks = values.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 10000) / 10000);
     cache.set(key, peaks);
     if (cache.size > 64) cache.delete(cache.keys().next().value!);
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([...cache])).catch(() => {});
     return peaks;
-  }).catch(() => []).finally(() => pending.delete(key));
+  }).catch((error) => {
+    log.error('mix waveform decode failed', { error });
+    return [];
+  }).finally(() => pending.delete(key));
   pending.set(key, operation);
   queue = operation.then(() => {});
   return operation;

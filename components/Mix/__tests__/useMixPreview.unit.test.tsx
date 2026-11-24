@@ -4,9 +4,7 @@ import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import { renderMixAudio } from '../../../services/mix/mixAudio';
 import { useMixPreview } from '../useMixPreview';
 const mockPauseMain = jest.fn().mockResolvedValue(undefined);
-jest.mock('../../../stores/usePlayerStore', () => ({ usePlayerStore: { getState: () => ({
-  playerState: { isPlaying: true }, togglePlayPause: mockPauseMain,
-}) } }));
+jest.mock('../../../services/audio/playerService', () => ({ pause: (...args: unknown[]) => mockPauseMain(...args) }));
 jest.mock('../../../services/mix/mixAudio', () => ({ renderMixAudio: jest.fn(), downloadMixSources: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('expo-audio', () => ({ createAudioPlayer: jest.fn(), setAudioModeAsync: jest.fn().mockResolvedValue(undefined) }));
 const project = { id: 'local_mix_preview', clips: [] } as any;
@@ -61,4 +59,20 @@ it('never starts stale audio when the editor stops before composition completes'
   await act(async () => { finish(output); await pending; });
   expect(createAudioPlayer).not.toHaveBeenCalled();
   expect(mockPauseMain).not.toHaveBeenCalled();
+});
+it('pauses on the next transport tap even if a stale status says the player is not playing', async () => {
+  let status!: (value: any) => void;
+  const native = { isLoaded: true, seekTo: jest.fn().mockResolvedValue(undefined), play: jest.fn(), pause: jest.fn(), remove: jest.fn(),
+    addListener: jest.fn((_event, listener) => { status = listener; return { remove: jest.fn() }; }) };
+  jest.mocked(createAudioPlayer).mockReturnValue(native as any);
+  const { result } = await renderHook(useMixPreview);
+  await act(async () => { await result.current.toggle(project, 0); });
+  await act(async () => { status({ isLoaded: true, currentTime: 2, playing: false }); });
+  expect(result.current.playing).toBe(true);
+  await act(async () => { await result.current.toggle(project, 2000); });
+  expect(native.pause).toHaveBeenCalledTimes(1);
+  expect(native.remove).toHaveBeenCalledTimes(1);
+  expect(result.current.playing).toBe(false);
+  expect(result.current.position).toBe(2000);
+  expect(createAudioPlayer).toHaveBeenCalledTimes(1);
 });

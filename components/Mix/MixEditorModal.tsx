@@ -1,31 +1,28 @@
 import * as React from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Slider from '@react-native-community/slider';
-import ReorderableList, { useReorderableDrag } from 'react-native-reorderable-list';
-import { Gesture } from 'react-native-gesture-handler';
 import Scissors from 'lucide-react-native/icons/scissors';
 import Trash2 from 'lucide-react-native/icons/trash-2';
 import Undo2 from 'lucide-react-native/icons/undo-2';
 import Redo2 from 'lucide-react-native/icons/redo-2';
 import Play from 'lucide-react-native/icons/play';
 import Pause from 'lucide-react-native/icons/pause';
-import GripVertical from 'lucide-react-native/icons/grip-vertical';
-import Plus from 'lucide-react-native/icons/plus';
+import ChevronLeft from 'lucide-react-native/icons/chevron-left';
+import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import Volume2 from 'lucide-react-native/icons/volume-2';
 import { SheetFrame, LoggedPressable } from '../native';
 import { HeaderIconButton } from '../gym';
 import { PlaylistSheetAction } from '../LocalPlaylist/PlaylistForm';
 import { PlaylistTrackPickerModal } from '../LocalPlaylist/PlaylistTrackPickerModal';
-import { TrackRow } from '../common/TrackRow';
 import { saveMixProject } from '../../services/mix/mixRepository';
-import { clipDuration, createMixId, formatMixTime, MAX_MIX_LANES, MIN_CLIP_MS, mixDuration, mixTimeline, moveMixClip, splitMixClip, trimMixClip,
+import { createMixId, formatMixTime, MIN_CLIP_MS, mixDuration, mixTimeline, moveMixClip, splitMixClip, trimMixClip,
   validateMixClips, type MixClip, type MixProject } from '../../services/mix/mixTimeline';
 import { log } from '../../utils/appLogger';
 import { useMixPreview } from './useMixPreview';
 import { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
 import type { LibraryTrack } from '../../services/library/catalogLibrary';
 import { MixTimelineEditor } from './MixTimelineEditor';
-import { downloadMixSources } from '../../services/mix/mixAudio';
+import { getExistingLocalAudioPath } from '../../services/download/localAudioPaths';
 
 function Tool({ label, caption, icon: Icon, onPress, disabled = false, selected = false }: {
   label: string; caption?: string; icon: typeof Play; onPress: () => void; disabled?: boolean; selected?: boolean;
@@ -35,22 +32,6 @@ function Tool({ label, caption, icon: Icon, onPress, disabled = false, selected 
     <Icon size={22} color={selected ? '#1ED760' : '#FFFFFF'} />
     {caption ? <Text style={S.toolCaption}>{caption}</Text> : null}
   </LoggedPressable>;
-}
-
-function ClipRow({ clip, track, selected, index, onSelect, onMove }: {
-  clip: MixClip; track: ReturnType<typeof mergeMixTrack>; selected: boolean; index: number; onSelect: () => void;
-  onMove: (direction: number) => void;
-}) {
-  const drag = useReorderableDrag();
-  return <TrackRow track={{ ...track, duration_ms: clipDuration(clip) }} title={track.title} subtitle={track.artistName}
-    imageURL={track.localImagePath || track.imageURL} active={selected} selected={selected} compact playing={false} onPress={onSelect}
-    accessibilityLabel={`Selecionar faixa do clipe ${index + 1}: ${track.title}`}
-    onDownload={() => {}} downloadState="idle" repairUnavailableOnPress={false} showAvailability={false}
-    trailingAction={<Pressable accessibilityRole="adjustable" accessibilityLabel={`Reordenar ${track.title}`}
-      accessibilityValue={{ text: `Clipe ${index + 1}` }} accessibilityActions={[
-        { name: 'increment', label: 'Mover depois' }, { name: 'decrement', label: 'Mover antes' },
-      ]} onAccessibilityAction={({ nativeEvent }) => onMove(nativeEvent.actionName === 'increment' ? 1 : -1)}
-      onLongPress={drag} delayLongPress={250} style={S.dragHandle}><GripVertical size={20} color="#A5A5AA" /></Pressable>} />;
 }
 
 export function MixEditorModal({ project, library, visible, onClose, onSaved, nested }: {
@@ -64,6 +45,7 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
   const [sources, setSources] = React.useState(project.tracks);
   const [pickerLane, setPickerLane] = React.useState<number | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const [trimActive, setTrimActive] = React.useState(false);
   const savingRef = React.useRef(false);
   const [panel, setPanel] = React.useState<'volume' | null>(null);
   const [volume, setVolume] = React.useState(1);
@@ -76,7 +58,7 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
     return new Map(sources.map((item) => [item.spotifyId, mergeMixTrack(item, byId.get(item.spotifyId))]));
   }, [sources, library]);
   const track = selected ? tracks.get(selected.trackId) : undefined;
-  const pan = React.useMemo(() => Gesture.Pan().activateAfterLongPress(300), []);
+  const downloaded = React.useMemo(() => (library || []).filter((item) => item.isDownloaded && item.localAudioPath), [library]);
   const dirty = JSON.stringify(clips) !== JSON.stringify(project.clips);
 
   React.useEffect(() => {
@@ -126,9 +108,9 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
     if (!future.length || saving) return;
     preview.stop(); setPast([...past, clips]); setClips(future[0]); setFuture(future.slice(1));
   };
-  const addSources = (ids: string[]) => {
+  const addSources = async (ids: string[]) => {
     if (pickerLane === null) return;
-    const available = new Map((library || []).map((item) => [item.spotifyId, item]));
+    const available = new Map(downloaded.map((item) => [item.spotifyId, item]));
     const additions = ids.map((id) => available.get(id)).filter((item): item is LibraryTrack => Boolean(item));
     const merged = new Map(sources.map((item) => [item.spotifyId, item]));
     for (const item of additions) if (!merged.has(item.spotifyId)) merged.set(item.spotifyId, item);
@@ -136,20 +118,21 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
     const added = additions.map((item) => ({ id: createMixId(), trackId: item.spotifyId,
       sourceStartMs: 0, sourceEndMs: Math.floor(item.duration_ms), volume: 1, lane: pickerLane }));
     if (!added.length) return;
+    const files = await Promise.all(additions.map((item) => getExistingLocalAudioPath(item.localAudioPath, 0)));
+    if (files.some((path) => !path)) {
+      Alert.alert('Mix', 'Baixe as músicas antes de adicioná-las ao mix.'); return;
+    }
     const next = [...clips, ...added];
     try { validateMixClips(next, nextSources); }
     catch (error) { Alert.alert('Mix', String(error)); return; }
     commit(next, 'add-tracks', nextSources);
     select(added[0].id);
-    void downloadMixSources({ ...project, tracks: nextSources, clips: next }, library).catch((error) =>
-      log.error('mix editor source preparation failed', { error }));
   };
   const openPicker = (lane: number) => { preview.stop(); setPickerLane(lane); };
   const header = <View style={S.headerContent}>
     <View style={S.transport}>
       <Tool label={preview.playing || preview.busy ? 'Parar prévia' : 'Ouvir mix'} icon={preview.playing ? Pause : Play}
-        disabled={!clips.length || saving} onPress={() => preview.playing || preview.busy ? preview.stop()
-          : void preview.play({ ...project, tracks: sources, clips }, preview.position >= total ? 0 : preview.position)} selected={preview.playing} />
+        disabled={!clips.length || saving} onPress={() => void preview.toggle({ ...project, tracks: sources, clips }, preview.position >= total ? 0 : preview.position)} selected={preview.playing} />
       <View style={S.clockGroup}>
         <Text style={S.clock}>{formatMixTime(Math.min(preview.position, total))}</Text>
         <Text style={S.clockTotal}>{formatMixTime(total)}</Text>
@@ -164,26 +147,34 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
     <MixTimelineEditor timeline={timeline} total={total} tracks={tracks} selectedId={selectedId} position={preview.position}
       playing={preview.playing} disabled={saving} onSelect={pick} onSeek={preview.setPosition} onScrub={preview.stop}
       onTrim={(id, range) => commit(trimMixClip(clips, id, range[0], range[1]), 'trim-handle')}
-      onAddTrack={openPicker} />
+      onAddTrack={openPicker} onTrimActive={setTrimActive} />
     {selected && track ? <View style={S.inspector}>
       <View style={S.editTools}>
         <Tool label="Dividir no cursor" caption="Dividir" icon={Scissors} disabled={saving || preview.position - selected.startMs < MIN_CLIP_MS || selected.endMs - preview.position < MIN_CLIP_MS}
           onPress={() => commit(splitMixClip(clips, selected.id, preview.position), 'split')} />
         <Tool label="Volume do clipe" caption="Volume" icon={Volume2} disabled={saving} onPress={() => { preview.stop(); setVolume(selected.volume); setPanel('volume'); }} />
         <Tool label="Remover clipe" caption="Excluir" icon={Trash2} disabled={saving} onPress={() => { commit(clips.filter((clip) => clip.id !== selected.id), 'remove'); select(''); }} />
+        <Tool label="Mover clipe antes" icon={ChevronLeft} disabled={saving || !timeline.some((c) => c.lane === selected.lane && c.startMs < selected.startMs)}
+          onPress={() => {
+            const index = timeline.findIndex((c) => c.id === selected.id);
+            const previous = timeline.slice(0, index).map((c) => c.lane).lastIndexOf(selected.lane);
+            if (previous >= 0) commit(moveMixClip(clips, index, previous), 'reorder');
+          }} />
+        <Tool label="Mover clipe depois" icon={ChevronRight} disabled={saving || !timeline.some((c) => c.lane === selected.lane && c.startMs > selected.startMs)}
+          onPress={() => {
+            const index = timeline.findIndex((c) => c.id === selected.id);
+            const next = timeline.findIndex((c, i) => i > index && c.lane === selected.lane);
+            if (next >= 0) commit(moveMixClip(clips, index, next), 'reorder');
+          }} />
       </View>
     </View> : null}
-    <View style={S.sectionHeader}><Text style={S.heading}>Clipes · {clips.length}</Text>
-      <Tool label="Adicionar músicas ao mix" icon={Plus} disabled={saving} onPress={() => openPicker(selected?.lane ?? 0)} />
-      <Tool label="Adicionar faixa de áudio" caption="Faixa" icon={Plus} disabled={saving || Math.max(0, ...timeline.map((c) => c.lane)) >= MAX_MIX_LANES - 1}
-        onPress={() => openPicker(timeline.length ? Math.max(...timeline.map((c) => c.lane)) + 1 : 0)} /></View>
   </View>;
 
-  return <SheetFrame visible={visible} title="Editar mix" onClose={close} onDismiss={preview.stop} scroll={false} size="full"
+  return <SheetFrame visible={visible} title="Editar mix" onClose={close} onDismiss={preview.stop} size="full"
     allowSwipeDismissal={!dirty && !saving} hideDefaultClose
     headerLeading={<HeaderIconButton icon="x" label="Fechar" onPress={close} />}
-    nested={<>{nested}{pickerLane !== null ? <PlaylistTrackPickerModal visible tracks={library || []} existingTrackIds={[]}
-      onClose={() => setPickerLane(null)} onConfirm={addSources} /> : null}{panel === 'volume' && selected ? <SheetFrame visible title="Volume" size="sheet"
+    nested={<>{nested}{pickerLane !== null ? <PlaylistTrackPickerModal visible tracks={downloaded} existingTrackIds={[]}
+      onClose={() => setPickerLane(null)} onConfirm={(ids) => void addSources(ids)} /> : null}{panel === 'volume' && selected ? <SheetFrame visible title="Volume" size="sheet"
       onClose={() => setPanel(null)} hideDefaultClose headerLeading={<HeaderIconButton icon="x" label="Cancelar volume" onPress={() => setPanel(null)} />}
       headerTrailing={<PlaylistSheetAction label="Aplicar volume" onPress={() => {
         commit(clips.map((clip) => clip.id === selected.id ? { ...clip, volume } : clip), 'volume'); setPanel(null);
@@ -193,18 +184,15 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
         minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFFFFF" onValueChange={setVolume} />
     </SheetFrame> : null}</>}
     headerTrailing={<PlaylistSheetAction label="Salvar mix" disabled={!dirty} busy={saving} onPress={() => void save()} />}
-    renderScrollContent={(pageProps) => <ReorderableList {...pageProps} testID="mix-editor-clips" data={clips} panGesture={pan}
-      dragEnabled={!saving} keyExtractor={(clip) => clip.id} contentContainerStyle={[pageProps.contentContainerStyle, { gap: 0 }]}
-      ListHeaderComponent={header} onReorder={({ from, to }) => commit(moveMixClip(clips, from, to), 'reorder')}
-      renderItem={({ item, index }) => <ClipRow clip={item} track={tracks.get(item.trackId)!} index={index} selected={item.id === selectedId}
-        onSelect={() => pick(timeline[index])} onMove={(direction) => commit(moveMixClip(clips, index, index + direction), 'reorder')} />}
-      ListEmptyComponent={<Text style={S.empty}>Nenhum clipe no mix.</Text>} />}><View /></SheetFrame>;
+    renderScrollContent={(pageProps) => <ScrollView {...pageProps} testID="mix-editor-scroll" scrollEnabled={!trimActive}
+      showsVerticalScrollIndicator={false}>{header}</ScrollView>}>
+    <View />
+  </SheetFrame>;
 }
 
 const S = StyleSheet.create({
   headerContent: { gap: 8 }, transport: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
   tool: { minWidth: 40, minHeight: 40, gap: 3, alignItems: 'center', justifyContent: 'center' },
-  dragHandle: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   toolCaption: { fontSize: 11, color: '#ABABB2', fontFamily: 'SF-Regular' },
   clockGroup: { position: 'absolute', left: '35%', right: '35%', alignItems: 'center' },
   history: { flexDirection: 'row', gap: 4 },
@@ -214,8 +202,6 @@ const S = StyleSheet.create({
   rangeLabel: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 8 },
   secondary: { color: '#ABABB2', fontSize: 13, fontFamily: 'SF-Regular' },
   value: { color: '#FFFFFF', fontSize: 13, fontVariant: ['tabular-nums'], marginLeft: 'auto' },
-  heading: { color: '#FFFFFF', fontSize: 16, fontFamily: 'SF-Semibold', flexShrink: 1 },
   editTools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingVertical: 4 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  empty: { color: '#ABABB2', paddingVertical: 24, textAlign: 'center' }, error: { color: '#FF9F9F', fontSize: 13 },
+  error: { color: '#FF9F9F', fontSize: 13 },
 });

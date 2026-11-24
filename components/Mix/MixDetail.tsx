@@ -17,6 +17,7 @@ import { log } from '../../utils/appLogger';
 import { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
 import { exportMixJson } from '../../services/mix/mixJsonTransfer';
 import { pause } from '../../services/audio/playerService';
+import { getExistingLocalAudioPath } from '../../services/download/localAudioPaths';
 
 export function MixDetail({ mixId }: { mixId: string }) {
   const router = useRouter();
@@ -55,10 +56,12 @@ export function MixDetail({ mixId }: { mixId: string }) {
   const add = async (ids: string[]) => {
     try {
       const byId = new Map(library.map((track) => [track.spotifyId, track]));
-      const selected = ids.map((id) => byId.get(id)).filter((track): track is LibraryTrack => Boolean(track));
+      const selected = ids.map((id) => byId.get(id)).filter((track): track is LibraryTrack => Boolean(track?.isDownloaded && track.localAudioPath));
+      if (selected.length !== ids.length || (await Promise.all(selected.map((track) => getExistingLocalAudioPath(track.localAudioPath, 0)))).some((path) => !path)) {
+        throw new Error('Baixe as músicas antes de adicioná-las ao mix.');
+      }
       const saved = await addTracksToMix(mixId, selected);
       setProject(saved); refresh();
-      void downloadMixSources(saved, library).catch((reason) => log.error('mix download queue failed', { mixId, error: reason }));
     } catch (reason) { Alert.alert('Mix', reason instanceof Error ? reason.message : 'Não foi possível adicionar as músicas.'); }
   };
   const play = async (trackId?: string) => {
@@ -80,6 +83,12 @@ export function MixDetail({ mixId }: { mixId: string }) {
         explicit: project.tracks.some((track) => (byId.get(track.spotifyId)?.explicit ?? track.explicit) === true),
         localAudioPath: output.uri, localOnly: true, duration_ms: output.durationMs,
       }], 0, `playlist:${mixId}:revision:${project.revision}`);
+      if (request !== playbackGeneration.current) {
+        if (usePlayerStore.getState().queueSourceId === `playlist:${mixId}:revision:${project.revision}`) {
+          await pause('mix-editor-interrupted-start');
+        }
+        return;
+      }
       const offset = trackId ? mixTimeline(project.clips).find((clip) => clip.trackId === trackId)?.startMs : 0;
       if (offset && request === playbackGeneration.current) await usePlayerStore.getState().seekToPosition(offset);
     } catch (reason) {
@@ -98,9 +107,15 @@ export function MixDetail({ mixId }: { mixId: string }) {
     durationMs: track.duration_ms,
   }));
   const covers = tracks.map((track) => track.localImagePath || track.imageURL).filter(Boolean).slice(0, 4);
-  const pickerModal = <PlaylistTrackPickerModal visible={picker} tracks={library} existingTrackIds={sourceIds}
+  const pickerModal = <PlaylistTrackPickerModal visible={picker} tracks={library.filter((track) => track.isDownloaded && track.localAudioPath)} existingTrackIds={sourceIds}
     onClose={() => setPicker(false)} onConfirm={(ids) => void add(ids)} />;
-  const openEditor = () => { playbackGeneration.current++; setEditor(true); };
+  const openEditor = () => {
+    playbackGeneration.current++;
+    if (usePlayerStore.getState().queueSourceId?.startsWith(`playlist:${mixId}:revision:`)) {
+      void pause('mix-editor-open').catch((error) => log.error('mix editor open pause failed', { mixId, error }));
+    }
+    setEditor(true);
+  };
   const closeEditor = () => {
     playbackGeneration.current++;
     setEditor(false); setPicker(false);

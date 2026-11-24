@@ -26,7 +26,7 @@ import { PlaylistCreateModal } from './PlaylistCreateModal';
 import { PlaylistSheetAction } from './PlaylistForm';
 import { log } from '../../utils/appLogger';
 import { addTracksToMix, getMixProjects } from '../../services/mix/mixRepository';
-import { downloadMixSources } from '../../services/mix/mixAudio';
+import { getExistingLocalAudioPath } from '../../services/download/localAudioPaths';
 import type { MixProject } from '../../services/mix/mixTimeline';
 import { MixCreateModal } from '../Mix/MixCreateModal';
 import { useLibraryStore } from '../../stores/useLibraryStore';
@@ -117,14 +117,19 @@ export function TrackPlaylistPickerModal({
       playlistIds: [...selectedIds],
     });
     try {
+      if ([...selectedIds].some((id) => id.startsWith('local_mix_'))) {
+        const source = tracksById.get(track.spotifyId);
+        if (!source?.isDownloaded || !await getExistingLocalAudioPath(source.localAudioPath, 0)) {
+          Alert.alert('Mix', 'Baixe a música antes de adicioná-la ao mix.');
+          return;
+        }
+      }
       // A Home discovery can be streamed before it exists in the library.
       // Persist its metadata first so playlist rows never become orphan IDs.
       await upsertCatalogTracks([track]);
       await Promise.all(
         [...selectedIds].map((playlistId) => playlistId.startsWith('local_mix_')
-          ? addTracksToMix(playlistId, [track]).then((saved) => {
-            void downloadMixSources(saved).catch((error) => log.error('mix downloads failed', { mixId: saved.id, error }));
-          })
+          ? addTracksToMix(playlistId, [track])
           : addTracksToLocalPlaylist(playlistId, [track.spotifyId]).then((saved) => {
             if (saved === null) throw new Error('Playlist removida');
           })
@@ -147,7 +152,7 @@ export function TrackPlaylistPickerModal({
       savePending.current = false;
       setIsSaving(false);
     }
-  }, [onAdded, onClose, selectedIds, track]);
+  }, [onAdded, onClose, selectedIds, track, tracksById]);
 
   const selectedCount = selectedIds.size;
 

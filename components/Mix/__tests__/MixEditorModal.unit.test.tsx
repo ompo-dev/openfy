@@ -7,9 +7,17 @@ import type { MixProject } from '../../../services/mix/mixTimeline';
 const mockStop = jest.fn();
 const mockPosition = jest.fn();
 const mockHandleGestures = new Map<string, any>();
-jest.mock('../useMixPreview', () => ({ useMixPreview: () => ({ stop: mockStop, play: jest.fn(), position: 15000,
+jest.mock('../useMixPreview', () => ({ useMixPreview: () => ({ stop: mockStop, play: jest.fn(), toggle: jest.fn(), position: 15000,
   playing: false, busy: false, error: '', setPosition: mockPosition }) }));
 jest.mock('../../../services/mix/mixRepository', () => ({ saveMixProject: jest.fn() }));
+jest.mock('../../../services/download/localAudioPaths', () => ({
+  ...jest.requireActual('../../../services/download/localAudioPaths'),
+  getExistingLocalAudioPath: jest.fn(async (path?: string) => path || null),
+}));
+jest.mock('../../../services/mix/mixWaveform', () => ({
+  ...jest.requireActual('../../../services/mix/mixWaveform'),
+  loadMixWaveform: jest.fn().mockResolvedValue([0.2, 0.8, 0.4, 0.6]),
+}));
 jest.mock('react-native-reorderable-list', () => ({ __esModule: true, default: jest.requireActual('react-native').FlatList,
   useReorderableDrag: () => jest.fn() }));
 jest.mock('react-native-gesture-handler', () => ({
@@ -34,12 +42,12 @@ it('splits, undoes, redoes and saves actual source cuts in the shared glass shee
   expect(view.getByTestId('mix-fixed-playhead')).toBeTruthy();
   expect(view.queryByLabelText('Aumentar zoom')).toBeNull();
   expect(view.queryByLabelText('Diminuir zoom')).toBeNull();
-  await fireEvent.scroll(view.getByTestId('mix-editor-clips'), { nativeEvent: { contentOffset: { y: 50 } } });
+  await fireEvent.scroll(view.getByTestId('mix-editor-scroll'), { nativeEvent: { contentOffset: { y: 50 } } });
   expect(view.getByTestId('gym-sheet-header-glass')).toBeTruthy();
   await fireEvent.press(view.getByLabelText('Dividir no cursor'));
-  expect(view.getByText('Clipes · 2')).toBeTruthy();
+  expect(view.getByLabelText('Selecionar clipe 2: One')).toBeTruthy();
   await fireEvent.press(view.getByLabelText('Desfazer'));
-  expect(view.getByText('Clipes · 1')).toBeTruthy();
+  expect(view.queryByLabelText('Selecionar clipe 2: One')).toBeNull();
   await fireEvent.press(view.getByLabelText('Refazer'));
   await fireEvent.press(view.getByLabelText('Salvar mix'));
   await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
@@ -60,7 +68,7 @@ it('keeps unsaved edits while opening the source picker', async () => {
   const add = jest.fn();
   const view = await render(<MixEditorModal project={project} visible onClose={close} onSaved={jest.fn()} onAddTracks={add} />);
   await fireEvent.press(view.getByLabelText('Remover clipe'));
-  await fireEvent.press(view.getByLabelText('Adicionar músicas ao mix'));
+  await fireEvent.press(view.getByLabelText('Adicionar música à faixa 1'));
   expect(add).not.toHaveBeenCalled();
   expect(view.getByLabelText('Buscar na biblioteca')).toBeTruthy();
   await fireEvent.press(view.getAllByLabelText('Fechar').at(-1)!);
@@ -70,15 +78,18 @@ it('keeps unsaved edits while opening the source picker', async () => {
 });
 
 it('adds another music in a new lane without requiring a prior save', async () => {
-  const library = [{ ...project.tracks[0], spotifyId: 'two', title: 'Two', duration_ms: 20000 }] as any;
+  const library = [{ ...project.tracks[0], spotifyId: 'two', title: 'Two', duration_ms: 20000, isDownloaded: true, localAudioPath: 'file:///two.m4a' },
+    { ...project.tracks[0], spotifyId: 'stream', title: 'Stream', isDownloaded: false }] as any;
   jest.mocked(saveMixProject).mockResolvedValue(project);
   const view = await render(<MixEditorModal project={project} library={library} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
   await fireEvent.press(view.getByLabelText('Dividir no cursor'));
-  await fireEvent.press(view.getByLabelText('Adicionar faixa de áudio'));
+  await fireEvent.press(view.getByLabelText('Adicionar música à faixa 2'));
+  expect(view.queryByLabelText('Selecionar Stream')).toBeNull();
   await fireEvent.press(view.getByLabelText('Selecionar Two'));
   await fireEvent.press(view.getByLabelText('Adicionar 1 música'));
-  expect(view.getByText('Clipes · 3')).toBeTruthy();
-  expect(view.getByLabelText('Adicionar música à faixa 2')).toBeTruthy();
+  await waitFor(() => expect(view.getByLabelText('Selecionar clipe 3: Two')).toBeTruthy());
+  expect(view.getByLabelText('Adicionar música à faixa 3')).toBeTruthy();
+  expect(view.queryByText(/Clipes ·/)).toBeNull();
   expect(view.queryByLabelText('Nome do mix')).toBeNull();
   expect(view.queryByLabelText('Descrição do mix')).toBeNull();
   await fireEvent.press(view.getByLabelText('Salvar mix'));
@@ -111,10 +122,24 @@ it('retains the drag translation across timeline rerenders and commits on gestur
   await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
   expect(jest.mocked(saveMixProject).mock.calls[0][1][0].sourceEndMs).toBe(29000);
 });
+it('uses the absolute finger location and preserves the last trim if another gesture cancels it', async () => {
+  jest.mocked(saveMixProject).mockResolvedValue(project);
+  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const handle = mockHandleGestures.get('Arrastar fim do clipe');
+  await act(async () => { handle.handlers.onStart({ absoluteX: 200, translationX: 0 }); });
+  await act(async () => { handle.handlers.onUpdate({ absoluteX: 110, translationX: 0 }); });
+  await act(async () => { handle.handlers.onEnd({ absoluteX: 200, translationX: 0 }, false); handle.handlers.onFinalize({}, false); });
+  await fireEvent.press(view.getByLabelText('Salvar mix'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
+  expect(jest.mocked(saveMixProject).mock.calls[0][1][0].sourceEndMs).toBe(29000);
+});
 
-it('shows the actual clip duration and explicit badge in the editor list', async () => {
-  const mix = { ...project, tracks: [{ ...project.tracks[0], explicit: true }] };
-  const view = await render(<MixEditorModal project={mix} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+it('shows artwork, real waveform, clip duration and explicit marker inside the timeline', async () => {
+  const mix = { ...project, tracks: [{ ...project.tracks[0], explicit: true, imageURL: 'https://example.com/cover.jpg' }] };
+  const library = [{ ...mix.tracks[0], isDownloaded: true, localAudioPath: 'file:///one.m4a', localImagePath: 'file:///cover.jpg' }] as any;
+  const view = await render(<MixEditorModal project={mix} library={library} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
   expect(view.getAllByText('Artist • 0:30').length).toBeGreaterThan(0);
-  expect(view.getByTestId('track-explicit-badge')).toBeTruthy();
+  expect(view.getByText('One ▪ E')).toBeTruthy();
+  expect(view.getByTestId('mix-clip-cover')).toBeTruthy();
+  await waitFor(() => expect(view.getByTestId('mix-clip-waveform')).toBeTruthy());
 });

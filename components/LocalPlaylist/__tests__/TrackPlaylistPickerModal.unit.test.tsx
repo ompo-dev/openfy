@@ -9,9 +9,12 @@ import {
 } from '@services';
 import { TrackPlaylistPickerModal } from '../TrackPlaylistPickerModal';
 import { addTracksToMix, getMixProjects } from '../../../services/mix/mixRepository';
-import { downloadMixSources } from '../../../services/mix/mixAudio';
+import { getExistingLocalAudioPath } from '../../../services/download/localAudioPaths';
 jest.mock('../../../services/mix/mixRepository', () => ({ getMixProjects: jest.fn().mockResolvedValue([]), addTracksToMix: jest.fn() }));
-jest.mock('../../../services/mix/mixAudio', () => ({ downloadMixSources: jest.fn().mockResolvedValue(undefined) }));
+jest.mock('../../../services/download/localAudioPaths', () => ({
+  ...jest.requireActual('../../../services/download/localAudioPaths'),
+  getExistingLocalAudioPath: jest.fn().mockResolvedValue('file:///track.m4a'),
+}));
 jest.mock('../../gym', () => {
   const actual = jest.requireActual('../../gym');
   const { Pressable, Text, View } = jest.requireActual('react-native');
@@ -137,10 +140,11 @@ describe('TrackPlaylistPickerModal', () => {
     });
   });
 
-  it('adds to Mix and queues local sources while keeping playlist and mix selections across tabs', async () => {
+  it('adds downloaded music to Mix while keeping playlist and mix selections across tabs', async () => {
     const mix = { id: 'local_mix_test', title: 'Treino', clips: [], tracks: [], createdAt: '', updatedAt: '' };
     jest.mocked(getMixProjects).mockResolvedValue([mix as never]);
     jest.mocked(addTracksToMix).mockResolvedValue(mix as never);
+    mockGetLibraryTracks.mockResolvedValue([{ ...track, isDownloaded: true, localAudioPath: 'file:///track.m4a' } as never]);
     const view = await render(<TrackPlaylistPickerModal track={track} visible onClose={jest.fn()} />);
     await fireEvent.press(await view.findByLabelText('Adicionar em Favoritas'));
     await fireEvent.press(view.getByLabelText('Mix'));
@@ -148,6 +152,6 @@ describe('TrackPlaylistPickerModal', () => {
     await fireEvent.press(view.getByLabelText('Adicionar em 2 destinos'));
     await waitFor(() => expect(addTracksToMix).toHaveBeenCalledWith('local_mix_test', [track]));
     expect(addTracksToLocalPlaylist).toHaveBeenCalledWith('playlist-1', [track.spotifyId]);
-    expect(downloadMixSources).toHaveBeenCalledWith(mix);
+    expect(getExistingLocalAudioPath).toHaveBeenCalledWith('file:///track.m4a', 0);
   });
 });

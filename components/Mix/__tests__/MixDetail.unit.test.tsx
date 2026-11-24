@@ -39,6 +39,7 @@ it.each([true, false])('pauses only this mix when closing the editor (same sourc
   await waitFor(() => expect(mockProps?.title).toBe('Treino'));
   mockSourceId = sameSource ? 'playlist:local_mix_flow:revision:2' : 'playlist:another';
   await act(async () => { mockProps.onOpenMixEditor(); });
+  if (sameSource) expect(mockPause).toHaveBeenCalledWith('mix-editor-open');
   await act(async () => { mockEditorProps.onClose(); });
   if (sameSource) {
     expect(mockPause).toHaveBeenCalledWith('mix-editor-close');

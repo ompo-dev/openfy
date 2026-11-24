@@ -2,21 +2,23 @@ import * as React from 'react';
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import { AppState } from 'react-native';
 import type { AudioPlayer } from 'expo-audio/build/AudioModule.types';
-import { downloadMixSources, renderMixAudio } from '../../services/mix/mixAudio';
+import { renderMixAudio } from '../../services/mix/mixAudio';
 import type { MixProject } from '../../services/mix/mixTimeline';
-import { usePlayerStore } from '../../stores/usePlayerStore';
+import { pause } from '../../services/audio/playerService';
 import { log } from '../../utils/appLogger';
 
 export function useMixPreview() {
   const player = React.useRef<AudioPlayer | null>(null);
   const cleanup = React.useRef<(() => void) | null>(null);
   const generation = React.useRef(0);
+  const requested = React.useRef(false);
   const [playing, setPlaying] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [position, setPosition] = React.useState(0);
   const [error, setError] = React.useState('');
   const release = React.useCallback(() => {
     generation.current++;
+    requested.current = false;
     const dispose = cleanup.current; cleanup.current = null;
     const audio = player.current; player.current = null;
     try { dispose?.(); } catch (error) { log.error('mix preview listener cleanup failed', { error }); }
@@ -36,14 +38,13 @@ export function useMixPreview() {
   }, [stop]);
   const play = async (project: MixProject, startMs: number) => {
     stop(); setError(''); setBusy(true);
+    requested.current = true;
     const request = generation.current;
     try {
-      await downloadMixSources(project);
-      if (request !== generation.current) return;
       const output = await renderMixAudio(project);
       if (request !== generation.current) return;
-      const main = usePlayerStore.getState();
-      if (main.playerState.isPlaying) await main.togglePlayPause('mix-preview');
+      // Never toggle: a stale store can resume the main player instead of pausing.
+      await pause('mix-preview');
       if (request !== generation.current) return;
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldPlayInBackground: true, interruptionMode: 'doNotMix' });
       if (request !== generation.current) return;
@@ -69,7 +70,8 @@ export function useMixPreview() {
         if (request !== generation.current) return;
         if (status.isLoaded) void start();
         setPosition(status.currentTime * 1000);
-        if (started) setPlaying(status.playing);
+        // Status can report paused during an outstanding native play/seek.
+        // Keep transport intent authoritative until explicit stop or completion.
         if (status.didJustFinish) stop();
       });
       timer = setTimeout(() => fail(new Error('O áudio demorou para abrir. Tente novamente.')), 15000);
@@ -79,5 +81,9 @@ export function useMixPreview() {
       if (request === generation.current) { stop(); setError(reason instanceof Error ? reason.message : 'Não foi possível tocar o mix.'); }
     }
   };
-  return { play, stop, playing, busy, position, error, setPosition };
+  const toggle = (project: MixProject, startMs: number) => {
+    if (requested.current) { stop(); return; }
+    return play(project, startMs);
+  };
+  return { play, toggle, stop, playing, busy, position, error, setPosition };
 }
