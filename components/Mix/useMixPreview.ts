@@ -15,13 +15,21 @@ export function useMixPreview() {
   const [busy, setBusy] = React.useState(false);
   const [position, setPosition] = React.useState(0);
   const [error, setError] = React.useState('');
-  const stop = React.useCallback(() => {
+  const release = React.useCallback(() => {
     generation.current++;
-    cleanup.current?.(); cleanup.current = null;
-    player.current?.remove(); player.current = null;
-    setPlaying(false); setBusy(false);
+    const dispose = cleanup.current; cleanup.current = null;
+    const audio = player.current; player.current = null;
+    try { dispose?.(); } catch (error) { log.error('mix preview listener cleanup failed', { error }); }
+    // Explicitly pause before releasing: remove alone may leave playback active
+    // while the native shared object is being disposed.
+    try { audio?.pause(); } catch (error) { log.error('mix preview pause failed', { error }); }
+    try { audio?.remove(); } catch (error) { log.error('mix preview release failed', { error }); }
   }, []);
-  React.useEffect(() => () => { generation.current++; cleanup.current?.(); player.current?.remove(); }, []);
+  const stop = React.useCallback(() => {
+    release();
+    setPlaying(false); setBusy(false);
+  }, [release]);
+  React.useEffect(() => release, [release]);
   React.useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => { if (state !== 'active') stop(); });
     return () => subscription.remove();
@@ -62,7 +70,7 @@ export function useMixPreview() {
         if (status.isLoaded) void start();
         setPosition(status.currentTime * 1000);
         if (started) setPlaying(status.playing);
-        if (status.didJustFinish) { setPlaying(false); setBusy(false); }
+        if (status.didJustFinish) stop();
       });
       timer = setTimeout(() => fail(new Error('O áudio demorou para abrir. Tente novamente.')), 15000);
       cleanup.current = () => { clearTimeout(timer); subscription.remove(); };

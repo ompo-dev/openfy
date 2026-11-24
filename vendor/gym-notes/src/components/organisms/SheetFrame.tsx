@@ -35,6 +35,8 @@ interface SheetFrameProps {
   onClose: () => void;
   onDismiss?: () => void;
   onShow?: ModalProps['onShow'];
+  allowSwipeDismissal?: boolean;
+  persistentHeaderGlass?: boolean;
   children: ReactNode;
   headerLeading?: ReactNode;
   headerTrailing?: ReactNode;
@@ -70,6 +72,8 @@ export function SheetFrame({
   onClose,
   onDismiss,
   onShow,
+  allowSwipeDismissal = true,
+  persistentHeaderGlass = false,
   children,
   headerLeading,
   headerTrailing,
@@ -234,7 +238,7 @@ export function SheetFrame({
             }
           >
             {/* Glass only once content is behind it; keep the header tintless. */}
-            {scrolled ? (
+            {scrolled || persistentHeaderGlass ? (
               <GlassSurface
                 testID="gym-sheet-header-glass"
                 glass="regular"
@@ -255,7 +259,7 @@ export function SheetFrame({
         animationType={transition ? 'none' : 'slide'}
         presentationStyle={transition ? 'overFullScreen' : 'pageSheet'}
         transparent={Boolean(transition)}
-        allowSwipeDismissal={!transition}
+        allowSwipeDismissal={!transition && allowSwipeDismissal}
         testID={testID}
         onRequestClose={onClose}
         onDismiss={onDismiss}

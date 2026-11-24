@@ -16,6 +16,7 @@ import { usePlayerStore } from '../../stores/usePlayerStore';
 import { log } from '../../utils/appLogger';
 import { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
 import { exportMixJson } from '../../services/mix/mixJsonTransfer';
+import { pause } from '../../services/audio/playerService';
 
 export function MixDetail({ mixId }: { mixId: string }) {
   const router = useRouter();
@@ -26,6 +27,7 @@ export function MixDetail({ mixId }: { mixId: string }) {
   const [picker, setPicker] = React.useState(false);
   const [preparing, setPreparing] = React.useState(false);
   const pending = React.useRef(false);
+  const playbackGeneration = React.useRef(0);
   const generation = React.useRef(0);
   const sourceRequest = React.useRef(false);
   const focused = React.useRef(true);
@@ -62,11 +64,12 @@ export function MixDetail({ mixId }: { mixId: string }) {
   const play = async (trackId?: string) => {
     if (!project || pending.current) return;
     pending.current = true; setPreparing(true);
+    const request = ++playbackGeneration.current;
     const expectedRevision = project.revision;
     try {
       await downloadMixSources(project);
       const output = await renderMixAudio(project);
-      if (!focused.current || projectRef.current?.revision !== expectedRevision) return;
+      if (request !== playbackGeneration.current || !focused.current || projectRef.current?.revision !== expectedRevision) return;
       const byId = new Map(library.map((track) => [track.spotifyId, track]));
       const cover = project.tracks.find((track) => track.spotifyId === project.clips[0]?.trackId);
       const player = usePlayerStore.getState();
@@ -78,7 +81,7 @@ export function MixDetail({ mixId }: { mixId: string }) {
         localAudioPath: output.uri, localOnly: true, duration_ms: output.durationMs,
       }], 0, `playlist:${mixId}:revision:${project.revision}`);
       const offset = trackId ? mixTimeline(project.clips).find((clip) => clip.trackId === trackId)?.startMs : 0;
-      if (offset) await usePlayerStore.getState().seekToPosition(offset);
+      if (offset && request === playbackGeneration.current) await usePlayerStore.getState().seekToPosition(offset);
     } catch (reason) {
       log.error('mix playback failed', { mixId, error: reason });
       Alert.alert('Mix', reason instanceof Error ? reason.message : 'Não foi possível tocar o mix.');
@@ -97,13 +100,28 @@ export function MixDetail({ mixId }: { mixId: string }) {
   const covers = tracks.map((track) => track.localImagePath || track.imageURL).filter(Boolean).slice(0, 4);
   const pickerModal = <PlaylistTrackPickerModal visible={picker} tracks={library} existingTrackIds={sourceIds}
     onClose={() => setPicker(false)} onConfirm={(ids) => void add(ids)} />;
+  const openEditor = () => { playbackGeneration.current++; setEditor(true); };
+  const closeEditor = () => {
+    playbackGeneration.current++;
+    setEditor(false); setPicker(false);
+    const player = usePlayerStore.getState();
+    // Do not stop unrelated music when dismissing the editor.
+    if (player.queueSourceId?.startsWith(`playlist:${mixId}:revision:`)) {
+      const sourceId = player.queueSourceId;
+      void pause('mix-editor-close').then(() => {
+        if (usePlayerStore.getState().queueSourceId === sourceId) {
+          usePlayerStore.setState((state) => ({ playerState: { ...state.playerState, isPlaying: false } }));
+        }
+      }).catch((reason) => log.error('mix editor pause failed', { mixId, error: reason }));
+    }
+  };
   return <>
     <CollectionDetail kind="playlist" collectionId={mixId} title={project.title} description={project.description}
       playbackSourceId={`playlist:${mixId}:revision:${project.revision}`}
       imageURL={covers[0] || ''} imageURLs={covers}
       metadata={`Mix · ${project.clips.length} clipes · ${formatMixTime(mixDuration(project.clips))}`}
       trackCount={tracks.length} totalDurationMs={mixDuration(project.clips)} tracks={tracks} disableTrackArtistLinks
-      onPlayMix={play} onOpenMixEditor={() => setEditor(true)} onEditPress={() => setEditor(true)}
+      onPlayMix={play} onOpenMixEditor={openEditor} onEditPress={openEditor}
       onShareMix={async () => {
         await Clipboard.setStringAsync(await exportMixJson({ ...project, tracks: sources }));
         Alert.alert('Mix copiado', 'Músicas, cortes, ordem e volumes copiados. Importe o JSON nas Configurações.');
@@ -121,7 +139,7 @@ export function MixDetail({ mixId }: { mixId: string }) {
         } },
       ])}
       footer={preparing ? <View style={S.status}><Text style={S.text}>Preparando mix…</Text></View> : undefined} />
-    {editor ? <MixEditorModal visible project={project} library={library} onClose={() => { setEditor(false); setPicker(false); }}
+    {editor ? <MixEditorModal visible project={project} library={library} onClose={closeEditor}
       onSaved={(mix) => { setProject(mix); refresh(); }} onAddTracks={() => setPicker(true)} nested={pickerModal} /> : pickerModal}
   </>;
 }

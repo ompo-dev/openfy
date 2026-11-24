@@ -18,7 +18,7 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 it('uses the silent-mode audio session and seeks before starting the preview, then releases it when backgrounded', async () => {
-  const native = { isLoaded: true, seekTo: jest.fn().mockResolvedValue(undefined), play: jest.fn(), remove: jest.fn(),
+  const native = { isLoaded: true, seekTo: jest.fn().mockResolvedValue(undefined), play: jest.fn(), pause: jest.fn(), remove: jest.fn(),
     addListener: jest.fn().mockReturnValue({ remove: jest.fn() }) };
   jest.mocked(createAudioPlayer).mockReturnValue(native as any);
   let background!: (state: any) => void;
@@ -33,8 +33,23 @@ it('uses the silent-mode audio session and seeks before starting the preview, th
   expect(native.seekTo.mock.invocationCallOrder[0]).toBeLessThan(native.play.mock.invocationCallOrder[0]);
   await act(async () => background('background'));
   expect(native.remove).toHaveBeenCalledTimes(1);
+  expect(native.pause).toHaveBeenCalledTimes(1);
+  expect(native.pause.mock.invocationCallOrder[0]).toBeLessThan(native.remove.mock.invocationCallOrder[0]);
   expect(result.current.playing).toBe(false);
   await unmount(); spy.mockRestore();
+});
+it('pauses and releases exactly once on unmount, including a late seek completion', async () => {
+  let finishSeek!: () => void;
+  const native = { isLoaded: true, seekTo: jest.fn(() => new Promise<void>((resolve) => { finishSeek = resolve; })),
+    play: jest.fn(), pause: jest.fn(), remove: jest.fn(), addListener: jest.fn().mockReturnValue({ remove: jest.fn() }) };
+  jest.mocked(createAudioPlayer).mockReturnValue(native as any);
+  const { result, unmount } = await renderHook(useMixPreview);
+  await act(async () => { await result.current.play(project, 0); });
+  await unmount();
+  await act(async () => { finishSeek(); });
+  expect(native.pause).toHaveBeenCalledTimes(1);
+  expect(native.remove).toHaveBeenCalledTimes(1);
+  expect(native.play).not.toHaveBeenCalled();
 });
 it('never starts stale audio when the editor stops before composition completes', async () => {
   let finish!: (value: typeof output) => void;

@@ -4,6 +4,8 @@ Mix é um projeto local editável, independente das playlists importadas. O flux
 
 O editor oferece timeline horizontal, zoom, seleção, recorte, divisão, reordenação por arraste, volume, remoção e desfazer/refazer. Os clipes são concatenados. Sobreposição, gravação, efeitos, crossfade e compartilhamento do arquivo de áudio não fazem parte desta etapa.
 
+A tela Editar mix usa o page sheet e os botões de cabeçalho padrão do Openfy, com Liquid Glass permanente no cabeçalho. A régua tem escala adaptativa, cursor branco fixo no centro, navegação por arraste horizontal e zoom por pinça; as alças amarelas ajustam os limites do clipe selecionado. A altura dos blocos é 42 px e as linhas da lista são compactas. Volume abre um sheet de edição separado. As alças também oferecem ações de acessibilidade em passos de 100 ms. A prévia é pausada e liberada ao fechar, salvar, desmontar o editor ou sair do app; o fechamento também pausa a reprodução principal se ela pertencer ao mesmo mix. Requisições antigas de composição não devem iniciar a reprodução após abrir ou sair do editor.
+
 AVFoundation no iOS e Media3 Transformer 1.9.0 no Android compõem arquivos locais em AAC. Alterações nativas exigem IPA/APK. A persistência possui chave e versão próprias, mutações serializadas e verificação de revisão para impedir sobrescrita por um editor antigo. Falhas de leitura preservam os projetos. Downloads usam a fila persistente, inclusive offline; excluir o mix não exclui músicas da biblioteca.
 
 ## Fluxos e garantias

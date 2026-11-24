@@ -11,6 +11,10 @@ jest.mock('../useMixPreview', () => ({ useMixPreview: () => ({ stop: mockStop, p
 jest.mock('../../../services/mix/mixRepository', () => ({ saveMixProject: jest.fn() }));
 jest.mock('react-native-reorderable-list', () => ({ __esModule: true, default: jest.requireActual('react-native').FlatList,
   useReorderableDrag: () => jest.fn() }));
+jest.mock('react-native-gesture-handler', () => ({
+  ...jest.requireActual('react-native-gesture-handler'),
+  GestureDetector: ({ children }: { children: React.ReactNode }) => children,
+}));
 const project: MixProject = { version: 1, id: 'local_mix_edit', title: 'Treino', description: '', revision: 1,
   createdAt: '', updatedAt: '', tracks: [{ spotifyId: 'one', title: 'One', artistName: 'Artist', imageURL: '', albumName: '', duration_ms: 60000 }],
   clips: [{ id: 'clip', trackId: 'one', sourceStartMs: 1000, sourceEndMs: 31000, volume: 1 }] };
@@ -22,6 +26,10 @@ it('splits, undoes, redoes and saves actual source cuts in the shared glass shee
   const saved = jest.fn();
   const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={saved} onAddTracks={jest.fn()} />);
   expect(view.queryByTestId('gym-sheet-custom-content')).toBeNull();
+  expect(view.getByTestId('gym-sheet-header-glass')).toBeTruthy();
+  expect(view.getByTestId('mix-fixed-playhead')).toBeTruthy();
+  expect(view.queryByLabelText('Aumentar zoom')).toBeNull();
+  expect(view.queryByLabelText('Diminuir zoom')).toBeNull();
   await fireEvent.scroll(view.getByTestId('mix-editor-clips'), { nativeEvent: { contentOffset: { y: 50 } } });
   expect(view.getByTestId('gym-sheet-header-glass')).toBeTruthy();
   await fireEvent.press(view.getByLabelText('Dividir no cursor'));
@@ -34,6 +42,14 @@ it('splits, undoes, redoes and saves actual source cuts in the shared glass shee
   const clips = jest.mocked(saveMixProject).mock.calls[0][1];
   expect(clips.map(({ sourceStartMs, sourceEndMs }) => [sourceStartMs, sourceEndMs])).toEqual([[1000, 16000], [16000, 31000]]);
   expect(saved).toHaveBeenCalledWith(project);
+});
+it('stops preview on the standard header close button', async () => {
+  const close = jest.fn();
+  const view = await render(<MixEditorModal project={project} visible onClose={close} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  mockStop.mockClear();
+  await fireEvent.press(view.getByLabelText('Fechar'));
+  expect(mockStop).toHaveBeenCalled();
+  expect(close).toHaveBeenCalled();
 });
 it('does not lose unsaved edits when closing or adding another source', async () => {
   const close = jest.fn();

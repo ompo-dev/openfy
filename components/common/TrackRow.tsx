@@ -31,6 +31,7 @@ type TrackRowProps = {
   repairUnavailableOnPress?: boolean;
   showAvailability?: boolean;
   selected?: boolean;
+  compact?: boolean;
 };
 
 const formatDuration = (durationMs?: number): string | null => {
@@ -44,7 +45,7 @@ export const TrackRow = React.memo(function TrackRow({
   title, subtitle, imageURL, trackNumber, active, playing, downloadState,
   onPress, onDownload, artists, onArtistPress, trailingAction,
   accessibilityLabel, disabled = false, track, repairUnavailableOnPress = true,
-  showAvailability = true, selected = false,
+  showAvailability = true, selected = false, compact = false,
 }: TrackRowProps) {
   const { playTrack } = usePlayer((state) => ({ playTrack: state.playTrack }));
   // Native swipe cancellation can arrive after RN's press release; movement is never a tap.
@@ -75,7 +76,7 @@ export const TrackRow = React.memo(function TrackRow({
       onTouchMove={trackMovement}
       onTouchCancel={() => { if (touch.current) touch.current.moved = true; }}
       onPress={handlePress}
-      style={[styles.row, (selected || (active && playing)) && styles.rowActive, disabled && styles.rowDisabled]}
+      style={[styles.row, compact && styles.compactRow, (selected || (active && playing)) && styles.rowActive, disabled && styles.rowDisabled]}
     >
       {trackNumber !== undefined ? (
         <Text style={styles.trackNumber}>{trackNumber}</Text>
@@ -84,11 +85,11 @@ export const TrackRow = React.memo(function TrackRow({
           cachePolicy="memory-disk"
           priority="high"
           source={{ uri: imageURL }}
-          style={styles.artwork}
+          style={[styles.artwork, compact && styles.compactArtwork]}
           testID="track-row-artwork"
         />
       ) : (
-        <View testID="track-row-artwork" style={[styles.artwork, styles.artworkFallback]}>
+        <View testID="track-row-artwork" style={[styles.artwork, compact && styles.compactArtwork, styles.artworkFallback]}>
           <Ionicons name="musical-note" size={18} color="#9A9A9A" />
         </View>
       )}
@@ -165,6 +166,8 @@ const styles = StyleSheet.create({
   rowActive: { backgroundColor: 'rgba(255,255,255,0.085)', borderRadius: 0 },
   rowDisabled: { opacity: 0.58 },
   artwork: { borderRadius: 8, height: 42, width: 42 },
+  compactRow: { minHeight: 44, paddingVertical: 3, paddingHorizontal: 8 },
+  compactArtwork: { height: 34, width: 34 },
   artworkFallback: { alignItems: 'center', backgroundColor: '#292929', justifyContent: 'center' },
   trackNumber: { color: 'rgba(255,255,255,0.68)', fontFamily: 'SF-Regular', fontSize: 13, textAlign: 'center', width: 22 },
   copy: { flex: 1, minWidth: 0, gap: 3 },
