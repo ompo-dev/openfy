@@ -72,13 +72,13 @@ export const addTracksToMix = (id: string, tracks: CatalogTrackInput[]) => mutat
 });
 
 export const saveMixProject = (project: MixProject, clips: MixClip[], title = project.title, description = project.description) =>
-  mutate('save', `${project.id}:${project.revision}:${JSON.stringify([clips, title, description])}`, (items) => {
+  mutate('save', `${project.id}:${project.revision}:${JSON.stringify([clips, title, description, project.tracks])}`, (items) => {
     const current = items.find((mix) => mix.id === project.id);
     if (!current) throw new Error('Mix não encontrado.');
     if (current.revision !== project.revision) throw new Error('O mix mudou. Feche e abra o editor para carregar a versão mais recente.');
     if (!title.trim()) throw new Error('Informe o nome do mix.');
     const used = new Set(clips.map((clip) => clip.trackId));
-    return replaceMix(items, current, { clips, tracks: current.tracks.filter((track) => used.has(track.spotifyId)),
+    return replaceMix(items, current, { clips, tracks: project.tracks.filter((track) => used.has(track.spotifyId)),
       title: title.trim().slice(0, 80), description: description.trim().slice(0, 240) });
   });
 

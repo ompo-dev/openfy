@@ -72,6 +72,16 @@ it('coalesces concurrent renders of the same edit', async () => {
   expect(mockRender).toHaveBeenCalledTimes(1);
 });
 
+it('passes lane identity to a compatible renderer and refuses silently concatenating on old builds', async () => {
+  const mix = project('lanes');
+  mix.clips.push({ ...mix.clips[0], id: 'layer', lane: 1 });
+  await expect(renderMixAudio(mix)).rejects.toThrow('Atualize o IPA ou APK');
+  jest.mocked(requireOptionalNativeModule).mockReturnValue({ renderMixAsync: mockRender, supportsMixLanes: true } as never);
+  const result = await renderMixAudio(mix);
+  expect(mockRender).toHaveBeenCalledWith([expect.objectContaining({ startMs: 10000 }),
+    expect.objectContaining({ lane: 1 })], result.uri);
+});
+
 it('prepares each audio source only once and skips repair for an unchanged cached render', async () => {
   const mix = project('repeated-source');
   mix.clips.push({ ...mix.clips[0], id: 'second', sourceStartMs: 20000, sourceEndMs: 30000 });

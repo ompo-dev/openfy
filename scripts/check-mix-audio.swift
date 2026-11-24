@@ -66,6 +66,34 @@ struct CheckMixAudio {
     try check(firstTone.rms > 0.1 && abs(secondTone.rms / firstTone.rms - 0.25) < 0.08,
       "Clip gain was not applied: first=\(firstTone.rms), second=\(secondTone.rms), ratio=\(secondTone.rms / firstTone.rms)")
     try check(abs(secondEarly.rms - secondLate.rms) < 0.01, "A constant clip gain must not fade between cuts")
+    let peaks = try MixAudioRenderer.waveform(uri: first.absoluteString, bins: 128)
+    try check(peaks.count == 128 && peaks.allSatisfy { $0 > 0.35 && $0 <= 0.41 }, "Waveform must reflect the actual tone amplitude")
+    let layered = cache.appendingPathComponent("layered-\(UUID().uuidString).m4a")
+    defer { try? files.removeItem(at: layered) }
+    let layeredClips: [[String: Any]] = [
+      ["uri": first.absoluteString, "startMs": 1000.0, "endMs": 2000.0, "volume": 1.0, "lane": 0],
+      ["uri": second.absoluteString, "startMs": 1000.0, "endMs": 1500.0, "volume": 1.0, "lane": 1],
+    ]
+    let layeredResult = try await MixAudioRenderer.render(clips: layeredClips, outputURI: layered.absoluteString)
+    try check(abs((layeredResult["durationMs"] as? Double ?? 0) - 1000) < 50, "Parallel tracks must not be concatenated")
+    let mixed = try AVAudioFile(forReading: layered)
+    let mixedRate = mixed.processingFormat.sampleRate
+    let mixedPCM = AVAudioPCMBuffer(pcmFormat: mixed.processingFormat, frameCapacity: AVAudioFrameCount(mixed.length))!
+    try mixed.read(into: mixedPCM)
+    let mixedSamples = mixedPCM.floatChannelData![0]
+    func amplitude(_ frequency: Double) -> Double {
+      var real = 0.0
+      var imaginary = 0.0
+      let start = Int(mixedRate * 0.1), count = Int(mixedRate * 0.2)
+      for index in start..<(start + count) {
+        let phase = Double(index) / mixedRate * frequency * 2 * .pi
+        real += Double(mixedSamples[index]) * cos(phase)
+        imaginary += Double(mixedSamples[index]) * sin(phase)
+      }
+      return 2 * hypot(real, imaginary) / Double(count)
+    }
+    try check(amplitude(440) > 0.1 && amplitude(880) > 0.1, "Both overlapping tones must be present")
+    print("Mix audio: real waveform and simultaneous lanes verified")
     do {
       _ = try await MixAudioRenderer.render(clips: [["uri": "https://example.com/audio", "startMs": 0.0, "endMs": 1000.0, "volume": 1.0]],
         outputURI: cache.appendingPathComponent("rejected-\(UUID().uuidString).m4a").absoluteString)

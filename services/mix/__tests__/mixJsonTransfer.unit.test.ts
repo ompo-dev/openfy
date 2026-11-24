@@ -12,7 +12,7 @@ const project: MixProject = { version: 1, id: 'local_mix_transfer', title: 'Trei
   createdAt: '', updatedAt: '', tracks: [{ spotifyId: 'one', title: 'One', artistName: 'Artist', albumName: 'Album',
     imageURL: 'https://images.example/cover.jpg', duration_ms: 120000, explicit: true, youtubeVideoId: 'abcdefghijk' }],
   clips: [{ id: 'first', trackId: 'one', sourceStartMs: 1000, sourceEndMs: 31000, volume: 0.5 },
-    { id: 'second', trackId: 'one', sourceStartMs: 45000, sourceEndMs: 60000, volume: 1 }] };
+    { id: 'second', trackId: 'one', sourceStartMs: 45000, sourceEndMs: 60000, volume: 1, lane: 1 }] };
 
 beforeEach(async () => { jest.clearAllMocks(); await AsyncStorage.clear(); });
 
@@ -21,6 +21,7 @@ it('preserves ordered cuts, volume, metadata and known sources without copying p
     localAudioPath: 'file:///private/audio.m4a', localImagePath: 'file:///private/cover.jpg' } as any] });
   expect(json).not.toContain('file:///private');
   expect(parseMixJson(json).clips).toEqual(project.clips);
+  expect(parseMixJson(json).version).toBe(2);
   const { mix } = await importMixJson(json);
   expect(mix.clips).toEqual(project.clips);
   expect(mix.tracks[0]).toMatchObject({ explicit: true, youtubeVideoId: 'abcdefghijk' });
@@ -28,6 +29,10 @@ it('preserves ordered cuts, volume, metadata and known sources without copying p
   await saveMixProject(mix, [mix.clips[0]], 'Minha edição');
   await importMixJson(json);
   expect(await getMixProjects()).toEqual([expect.objectContaining({ title: 'Minha edição', clips: [mix.clips[0]] })]);
+});
+it('keeps the original JSON version for single-lane mixes', async () => {
+  const single = { ...project, clips: [project.clips[0]] };
+  expect(parseMixJson(await exportMixJson(single))).toMatchObject({ version: 1, clips: single.clips });
 });
 
 it('rejects invalid ranges and unknown clip sources before changing storage', async () => {

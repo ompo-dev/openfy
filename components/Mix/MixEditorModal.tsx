@@ -14,16 +14,18 @@ import Plus from 'lucide-react-native/icons/plus';
 import Volume2 from 'lucide-react-native/icons/volume-2';
 import { SheetFrame, LoggedPressable } from '../native';
 import { HeaderIconButton } from '../gym';
-import { PlaylistForm, PlaylistSheetAction } from '../LocalPlaylist/PlaylistForm';
+import { PlaylistSheetAction } from '../LocalPlaylist/PlaylistForm';
+import { PlaylistTrackPickerModal } from '../LocalPlaylist/PlaylistTrackPickerModal';
 import { TrackRow } from '../common/TrackRow';
 import { saveMixProject } from '../../services/mix/mixRepository';
-import { clipDuration, formatMixTime, MIN_CLIP_MS, mixDuration, mixTimeline, moveMixClip, splitMixClip, trimMixClip,
+import { clipDuration, createMixId, formatMixTime, MAX_MIX_LANES, MIN_CLIP_MS, mixDuration, mixTimeline, moveMixClip, splitMixClip, trimMixClip,
   validateMixClips, type MixClip, type MixProject } from '../../services/mix/mixTimeline';
 import { log } from '../../utils/appLogger';
 import { useMixPreview } from './useMixPreview';
 import { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
 import type { LibraryTrack } from '../../services/library/catalogLibrary';
 import { MixTimelineEditor } from './MixTimelineEditor';
+import { downloadMixSources } from '../../services/mix/mixAudio';
 
 function Tool({ label, caption, icon: Icon, onPress, disabled = false, selected = false }: {
   label: string; caption?: string; icon: typeof Play; onPress: () => void; disabled?: boolean; selected?: boolean;
@@ -51,7 +53,7 @@ function ClipRow({ clip, track, selected, index, onSelect, onMove }: {
       onLongPress={drag} delayLongPress={250} style={S.dragHandle}><GripVertical size={20} color="#A5A5AA" /></Pressable>} />;
 }
 
-export function MixEditorModal({ project, library, visible, onClose, onSaved, onAddTracks, nested }: {
+export function MixEditorModal({ project, library, visible, onClose, onSaved, nested }: {
   project: MixProject; visible: boolean; onClose: () => void; onSaved: (mix: MixProject) => void;
   onAddTracks: () => void; nested?: React.ReactNode; library?: LibraryTrack[];
 }) {
@@ -59,8 +61,8 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, on
   const [past, setPast] = React.useState<MixClip[][]>([]);
   const [future, setFuture] = React.useState<MixClip[][]>([]);
   const [selectedId, select] = React.useState(project.clips[0]?.id || '');
-  const [title, setTitle] = React.useState(project.title);
-  const [description, setDescription] = React.useState(project.description);
+  const [sources, setSources] = React.useState(project.tracks);
+  const [pickerLane, setPickerLane] = React.useState<number | null>(null);
   const [saving, setSaving] = React.useState(false);
   const savingRef = React.useRef(false);
   const [panel, setPanel] = React.useState<'volume' | null>(null);
@@ -71,29 +73,30 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, on
   const selected = timeline.find((clip) => clip.id === selectedId);
   const tracks = React.useMemo(() => {
     const byId = new Map((library || []).map((item) => [item.spotifyId, item]));
-    return new Map(project.tracks.map((item) => [item.spotifyId, mergeMixTrack(item, byId.get(item.spotifyId))]));
-  }, [project.tracks, library]);
+    return new Map(sources.map((item) => [item.spotifyId, mergeMixTrack(item, byId.get(item.spotifyId))]));
+  }, [sources, library]);
   const track = selected ? tracks.get(selected.trackId) : undefined;
   const pan = React.useMemo(() => Gesture.Pan().activateAfterLongPress(300), []);
-  const dirty = title !== project.title || description !== project.description || JSON.stringify(clips) !== JSON.stringify(project.clips);
+  const dirty = JSON.stringify(clips) !== JSON.stringify(project.clips);
 
   React.useEffect(() => {
     preview.stop();
     setPanel(null);
     if (!visible) return;
     setClips(project.clips); setPast([]); setFuture([]); select(project.clips[0]?.id || '');
-    setTitle(project.title); setDescription(project.description); preview.setPosition(0);
+    setSources(project.tracks); setPickerLane(null); preview.setPosition(0);
     // A new revision starts a fresh editing session after adding source tracks.
   }, [visible, project.id, project.revision, preview.stop]);
   React.useEffect(() => {
     if (selected) setVolume(selected.volume);
   }, [selected?.id, selected?.sourceStartMs, selected?.sourceEndMs, selected?.volume]);
 
-  const commit = (next: MixClip[], action: string) => {
+  const commit = (next: MixClip[], action: string, nextSources = sources) => {
     if (savingRef.current || next === clips || JSON.stringify(next) === JSON.stringify(clips)) return;
-    try { validateMixClips(next, project.tracks); }
+    try { validateMixClips(next, nextSources); }
     catch (error) { Alert.alert('Mix', String(error)); return; }
     preview.stop(); setPast((items) => [...items.slice(-49), clips]); setFuture([]); setClips(next);
+    setSources(nextSources);
     log.ui('mix edit', { mixId: project.id, action, clips: next.length });
   };
   const close = () => {
@@ -107,7 +110,7 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, on
   const save = async () => {
     if (savingRef.current) return;
     savingRef.current = true; setSaving(true); preview.stop();
-    try { const saved = await saveMixProject(project, clips, title, description); onSaved(saved); onClose(); }
+    try { const saved = await saveMixProject({ ...project, tracks: sources }, clips); onSaved(saved); onClose(); }
     catch (error) { Alert.alert('Mix', error instanceof Error ? error.message : 'Não foi possível salvar.'); }
     finally { savingRef.current = false; setSaving(false); }
   };
@@ -123,11 +126,30 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, on
     if (!future.length || saving) return;
     preview.stop(); setPast([...past, clips]); setClips(future[0]); setFuture(future.slice(1));
   };
+  const addSources = (ids: string[]) => {
+    if (pickerLane === null) return;
+    const available = new Map((library || []).map((item) => [item.spotifyId, item]));
+    const additions = ids.map((id) => available.get(id)).filter((item): item is LibraryTrack => Boolean(item));
+    const merged = new Map(sources.map((item) => [item.spotifyId, item]));
+    for (const item of additions) if (!merged.has(item.spotifyId)) merged.set(item.spotifyId, item);
+    const nextSources = [...merged.values()];
+    const added = additions.map((item) => ({ id: createMixId(), trackId: item.spotifyId,
+      sourceStartMs: 0, sourceEndMs: Math.floor(item.duration_ms), volume: 1, lane: pickerLane }));
+    if (!added.length) return;
+    const next = [...clips, ...added];
+    try { validateMixClips(next, nextSources); }
+    catch (error) { Alert.alert('Mix', String(error)); return; }
+    commit(next, 'add-tracks', nextSources);
+    select(added[0].id);
+    void downloadMixSources({ ...project, tracks: nextSources, clips: next }, library).catch((error) =>
+      log.error('mix editor source preparation failed', { error }));
+  };
+  const openPicker = (lane: number) => { preview.stop(); setPickerLane(lane); };
   const header = <View style={S.headerContent}>
     <View style={S.transport}>
       <Tool label={preview.playing || preview.busy ? 'Parar prévia' : 'Ouvir mix'} icon={preview.playing ? Pause : Play}
         disabled={!clips.length || saving} onPress={() => preview.playing || preview.busy ? preview.stop()
-          : void preview.play({ ...project, clips }, preview.position >= total ? 0 : preview.position)} selected={preview.playing} />
+          : void preview.play({ ...project, tracks: sources, clips }, preview.position >= total ? 0 : preview.position)} selected={preview.playing} />
       <View style={S.clockGroup}>
         <Text style={S.clock}>{formatMixTime(Math.min(preview.position, total))}</Text>
         <Text style={S.clockTotal}>{formatMixTime(total)}</Text>
@@ -141,11 +163,9 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, on
     {preview.error ? <Text accessibilityRole="alert" style={S.error}>{preview.error}</Text> : null}
     <MixTimelineEditor timeline={timeline} total={total} tracks={tracks} selectedId={selectedId} position={preview.position}
       playing={preview.playing} disabled={saving} onSelect={pick} onSeek={preview.setPosition} onScrub={preview.stop}
-      onTrim={(id, range) => commit(trimMixClip(clips, id, range[0], range[1]), 'trim-handle')} />
+      onTrim={(id, range) => commit(trimMixClip(clips, id, range[0], range[1]), 'trim-handle')}
+      onAddTrack={openPicker} />
     {selected && track ? <View style={S.inspector}>
-      <Text style={S.heading} numberOfLines={1}>{track.title}</Text>
-      <Text style={S.secondary} numberOfLines={1}>{track.artistName} • {formatMixTime(clipDuration(selected))}</Text>
-      <Text style={S.secondary}>{(selected.sourceStartMs / 1000).toFixed(2)} s – {(selected.sourceEndMs / 1000).toFixed(2)} s</Text>
       <View style={S.editTools}>
         <Tool label="Dividir no cursor" caption="Dividir" icon={Scissors} disabled={saving || preview.position - selected.startMs < MIN_CLIP_MS || selected.endMs - preview.position < MIN_CLIP_MS}
           onPress={() => commit(splitMixClip(clips, selected.id, preview.position), 'split')} />
@@ -154,16 +174,16 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, on
       </View>
     </View> : null}
     <View style={S.sectionHeader}><Text style={S.heading}>Clipes · {clips.length}</Text>
-      <Tool label="Adicionar músicas ao mix" icon={Plus} disabled={saving} onPress={() => {
-        preview.stop();
-        if (dirty) Alert.alert('Salve as edições', 'Salve o mix antes de adicionar novas músicas.'); else onAddTracks();
-      }} /></View>
+      <Tool label="Adicionar músicas ao mix" icon={Plus} disabled={saving} onPress={() => openPicker(selected?.lane ?? 0)} />
+      <Tool label="Adicionar faixa de áudio" caption="Faixa" icon={Plus} disabled={saving || Math.max(0, ...timeline.map((c) => c.lane)) >= MAX_MIX_LANES - 1}
+        onPress={() => openPicker(timeline.length ? Math.max(...timeline.map((c) => c.lane)) + 1 : 0)} /></View>
   </View>;
 
   return <SheetFrame visible={visible} title="Editar mix" onClose={close} onDismiss={preview.stop} scroll={false} size="full"
-    persistentHeaderGlass allowSwipeDismissal={!dirty && !saving} hideDefaultClose
+    allowSwipeDismissal={!dirty && !saving} hideDefaultClose
     headerLeading={<HeaderIconButton icon="x" label="Fechar" onPress={close} />}
-    nested={<>{nested}{panel === 'volume' && selected ? <SheetFrame visible title="Volume" size="sheet"
+    nested={<>{nested}{pickerLane !== null ? <PlaylistTrackPickerModal visible tracks={library || []} existingTrackIds={[]}
+      onClose={() => setPickerLane(null)} onConfirm={addSources} /> : null}{panel === 'volume' && selected ? <SheetFrame visible title="Volume" size="sheet"
       onClose={() => setPanel(null)} hideDefaultClose headerLeading={<HeaderIconButton icon="x" label="Cancelar volume" onPress={() => setPanel(null)} />}
       headerTrailing={<PlaylistSheetAction label="Aplicar volume" onPress={() => {
         commit(clips.map((clip) => clip.id === selected.id ? { ...clip, volume } : clip), 'volume'); setPanel(null);
@@ -172,15 +192,13 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, on
       <Slider accessibilityLabel="Ajustar volume do clipe" value={volume} minimumValue={0} maximumValue={1} step={0.01}
         minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFFFFF" onValueChange={setVolume} />
     </SheetFrame> : null}</>}
-    headerTrailing={<PlaylistSheetAction label="Salvar mix" disabled={!title.trim() || !dirty} busy={saving} onPress={() => void save()} />}
+    headerTrailing={<PlaylistSheetAction label="Salvar mix" disabled={!dirty} busy={saving} onPress={() => void save()} />}
     renderScrollContent={(pageProps) => <ReorderableList {...pageProps} testID="mix-editor-clips" data={clips} panGesture={pan}
       dragEnabled={!saving} keyExtractor={(clip) => clip.id} contentContainerStyle={[pageProps.contentContainerStyle, { gap: 0 }]}
       ListHeaderComponent={header} onReorder={({ from, to }) => commit(moveMixClip(clips, from, to), 'reorder')}
       renderItem={({ item, index }) => <ClipRow clip={item} track={tracks.get(item.trackId)!} index={index} selected={item.id === selectedId}
         onSelect={() => pick(timeline[index])} onMove={(direction) => commit(moveMixClip(clips, index, index + direction), 'reorder')} />}
-      ListEmptyComponent={<Text style={S.empty}>Nenhum clipe no mix.</Text>}
-      ListFooterComponent={<View style={{ marginTop: 16 }}><PlaylistForm kind="mix" title={title} description={description}
-        onTitleChange={setTitle} onDescriptionChange={setDescription} disabled={saving} /></View>} />}><View /></SheetFrame>;
+      ListEmptyComponent={<Text style={S.empty}>Nenhum clipe no mix.</Text>} />}><View /></SheetFrame>;
 }
 
 const S = StyleSheet.create({

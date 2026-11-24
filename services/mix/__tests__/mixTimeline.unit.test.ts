@@ -34,3 +34,12 @@ it('rejects duplicate clip identities while allowing multiple cuts from a source
   expect(() => validateMixClips([clips[0], clips[0]], tracks)).toThrow();
   expect(() => validateMixClips([clips[0], { ...clips[0], id: 'copy' }], tracks)).not.toThrow();
 });
+
+it('overlaps lanes while concatenating cuts within each lane, including legacy clips', () => {
+  const layered = [...clips, { ...clips[0], id: 'layer', lane: 1 }];
+  expect(mixTimeline(layered).map(({ lane, startMs, endMs }) => [lane, startMs, endMs]))
+    .toEqual([[0, 0, 30000], [0, 30000, 40000], [1, 0, 30000]]);
+  expect(mixDuration(layered)).toBe(40000);
+  expect(mixTimeline(trimMixClip(layered, 'a', 5000, 15000))[2].startMs).toBe(0);
+  expect(() => validateMixClips([{ ...clips[0], lane: 8 }], tracks)).toThrow();
+});

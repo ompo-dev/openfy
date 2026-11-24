@@ -1,6 +1,7 @@
 import type { CatalogTrackInput } from '../library/catalogLibrary';
 
-export type MixClip = { id: string; trackId: string; sourceStartMs: number; sourceEndMs: number; volume: number };
+export type MixClip = { id: string; trackId: string; sourceStartMs: number; sourceEndMs: number; volume: number; lane?: number };
+export const MAX_MIX_LANES = 8;
 export type MixProject = {
   version: 1; id: string; title: string; description: string; revision: number;
   tracks: CatalogTrackInput[]; clips: MixClip[]; createdAt: string; updatedAt: string;
@@ -8,12 +9,14 @@ export type MixProject = {
 export const MIN_CLIP_MS = 100;
 export const createMixId = () => `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 export const clipDuration = (clip: MixClip) => clip.sourceEndMs - clip.sourceStartMs;
-export const mixDuration = (clips: MixClip[]) => clips.reduce((total, clip) => total + clipDuration(clip), 0);
+export const mixDuration = (clips: MixClip[]) => mixTimeline(clips).reduce((total, clip) => Math.max(total, clip.endMs), 0);
 export const mixTimeline = (clips: MixClip[]) => {
-  let startMs = 0;
+  const cursors = new Map<number, number>();
   return clips.map((clip) => {
-    const entry = { ...clip, startMs, endMs: startMs + clipDuration(clip) };
-    startMs = entry.endMs;
+    const lane = clip.lane ?? 0;
+    const startMs = cursors.get(lane) ?? 0;
+    const entry = { ...clip, lane, startMs, endMs: startMs + clipDuration(clip) };
+    cursors.set(lane, entry.endMs);
     return entry;
   });
 };
@@ -24,7 +27,8 @@ export const validateMixClips = (clips: MixClip[], tracks: CatalogTrackInput[]) 
   if (clips.length > 200) throw new Error('O mix aceita até 200 clipes.');
   for (const clip of clips) {
     const track = byId.get(clip.trackId);
-    if (!track || !clip.id || ids.has(clip.id) ||
+    if (!track || !clip.id || ids.has(clip.id) || !Number.isInteger(clip.lane ?? 0) ||
+      (clip.lane ?? 0) < 0 || (clip.lane ?? 0) >= MAX_MIX_LANES ||
       ![clip.sourceStartMs, clip.sourceEndMs, clip.volume].every(Number.isFinite) ||
       clip.sourceStartMs < 0 || clipDuration(clip) < MIN_CLIP_MS ||
       clip.sourceEndMs > track.duration_ms || clip.volume < 0 || clip.volume > 1) {

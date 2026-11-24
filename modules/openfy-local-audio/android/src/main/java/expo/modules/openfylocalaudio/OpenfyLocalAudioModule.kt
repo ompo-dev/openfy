@@ -29,6 +29,10 @@ class OpenfyLocalAudioModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("OpenfyLocalAudio")
+    Constant("supportsMixLanes") { true }
+    AsyncFunction("waveformAsync") { uri: String, bins: Int ->
+      MixWaveform.read(uri, bins)
+    }
     AsyncFunction("renderMixAsync") { clips: List<Map<String, Any>>, outputURI: String, promise: Promise ->
       handler.post {
         var output: File? = null
@@ -41,7 +45,9 @@ class OpenfyLocalAudioModule : Module() {
           require(candidate.parentFile == File(context.cacheDir, "openfy-mixes").canonicalFile && !candidate.exists())
           output = candidate
           require(clips.isNotEmpty() && clips.size <= 200)
-          val items = clips.map { clip ->
+          val lanes = clips.groupBy { (it["lane"] as? Number)?.toInt() ?: 0 }
+          require(lanes.keys.all { it in 0..7 })
+          val sequences = lanes.toSortedMap().values.map { lane -> EditedMediaItemSequence.withAudioFrom(lane.map { clip ->
             val uri = Uri.parse(clip["uri"] as String)
             val start = (clip["startMs"] as Number).toDouble()
             val end = (clip["endMs"] as Number).toDouble()
@@ -52,15 +58,15 @@ class OpenfyLocalAudioModule : Module() {
               MediaItem.ClippingConfiguration.Builder().setStartPositionMs(start.toLong()).setEndPositionMs(end.toLong()).build()
             ).build()
             val channels = ChannelMixingAudioProcessor().apply {
-              putChannelMixingMatrix(ChannelMixingMatrix.create(1, 2).scaleBy(volume.toFloat()))
-              putChannelMixingMatrix(ChannelMixingMatrix.create(2, 2).scaleBy(volume.toFloat()))
+              putChannelMixingMatrix(ChannelMixingMatrix.create(1, 2).scaleBy(volume.toFloat() / lanes.size))
+              putChannelMixingMatrix(ChannelMixingMatrix.create(2, 2).scaleBy(volume.toFloat() / lanes.size))
             }
             val resample = SonicAudioProcessor().apply { setOutputSampleRateHz(44100) }
             EditedMediaItem.Builder(media).setRemoveVideo(true)
               .setEffects(Effects(listOf(ToInt16PcmAudioProcessor(), channels, resample), emptyList())).build()
-          }
+          }) }
           val target = output
-          val composition = Composition.Builder(EditedMediaItemSequence.withAudioFrom(items)).build()
+          val composition = Composition.Builder(sequences).build()
           transformer = Transformer.Builder(context).setAudioMimeType(MimeTypes.AUDIO_AAC)
             .addListener(object : Transformer.Listener {
               override fun onCompleted(composition: Composition, result: ExportResult) {
