@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { ScrollView } from 'react-native-gesture-handler';
+import { HorizontalFadeScrollView } from '../common/HorizontalFadeScrollView';
 // import { useRouter } from 'expo-router';
 
 import { Card } from '../Card';
@@ -46,7 +46,7 @@ export const Slider = ({
           </Pressable>
         )}
       </View>
-      <ScrollView
+      <HorizontalFadeScrollView kind="gesture"
         style={styles.scrollView}
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -79,7 +79,7 @@ export const Slider = ({
             </ProgressiveList>
           )}
         </View>
-      </ScrollView>
+      </HorizontalFadeScrollView>
     </View>
   );
 };

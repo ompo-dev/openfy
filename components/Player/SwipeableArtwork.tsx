@@ -18,6 +18,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { AppIcon as Ionicons } from "../native/AppIcon";
+import { HorizontalFadeMask } from '../common/HorizontalFadeScrollView';
 import {
   clampArtworkDrag,
   createSwipeCallbackGate,
@@ -279,6 +280,9 @@ export const SwipeableArtwork = ({
       ]}
       testID={testID}
     >
+      <HorizontalFadeMask left={canGoPrevious} right={canGoNext}
+        width={Math.max(0, Math.min(18, (viewportWidth - size) / 2))}
+        style={{ width: viewportWidth, height: size }}>
       <GestureDetector gesture={panGesture}>
         <Animated.View
           collapsable={false}
@@ -325,6 +329,7 @@ export const SwipeableArtwork = ({
           />
         </Animated.View>
       </GestureDetector>
+      </HorizontalFadeMask>
 
       {loading ? (
         <View

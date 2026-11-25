@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { HorizontalFadeScrollView } from '../common/HorizontalFadeScrollView';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 import { usePlayer, useDownloads } from '@context';
 import { useDetailNavigation } from '@hooks';
@@ -48,9 +49,9 @@ function Section({ title, icon, onShowAll, children }: {
 }
 
 function Rail({ children }: { children: React.ReactNode }) {
-  return <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
+  return <HorizontalFadeScrollView fadeWidth={18} contentContainerStyle={styles.rail}>
     <ProgressiveList>{children}</ProgressiveList>
-  </ScrollView>;
+  </HorizontalFadeScrollView>;
 }
 
 export function ListeningHome({ home, loading }: { home: PersonalizedHomeSnapshot; loading: boolean }) {

@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { HorizontalFadeMask } from '../../common/HorizontalFadeScrollView';
 
 type ResizeHandler = (deltaMs: number) => number;
 
@@ -285,6 +286,9 @@ export function MusicWaveformReel({
       style={styles.container}
       {...panResponder.panHandlers}
     >
+      <HorizontalFadeMask left={reelPadding - getScrollForStart(selectionStartMs) < 0}
+        right={reelPadding + waveformWidth - getScrollForStart(selectionStartMs) > containerWidth}
+        width={Math.min(16, frameLeft)} style={styles.waveformViewport}>
       <Animated.View
         pointerEvents="none"
         style={[
@@ -300,6 +304,7 @@ export function MusicWaveformReel({
           <View key={index} style={[styles.waveformBar, { height }]} />
         ))}
       </Animated.View>
+      </HorizontalFadeMask>
       <View
         pointerEvents="none"
         style={[
@@ -381,6 +386,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: BAR_GAP,
   },
+  waveformViewport: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, justifyContent: 'center' },
   waveformBar: {
     width: BAR_WIDTH,
     borderRadius: BAR_WIDTH / 2,

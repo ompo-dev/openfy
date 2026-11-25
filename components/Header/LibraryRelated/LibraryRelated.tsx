@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { View, StyleSheet, useColorScheme } from 'react-native';
-import { ScrollView } from 'react-native-gesture-handler';
+import { HorizontalFadeScrollView } from '../../common/HorizontalFadeScrollView';
 
 import { CategoryPressable } from './CategoryPressable';
 import { useLibrarySelectedCategory } from '@context';
@@ -52,7 +52,7 @@ export const LibraryRelated = () => {
   }
 
   return (
-    <ScrollView
+    <HorizontalFadeScrollView kind="gesture" fadeWidth={12}
       style={styles.scrollView}
       horizontal
       showsHorizontalScrollIndicator={false}
@@ -65,7 +65,7 @@ export const LibraryRelated = () => {
           />
         ))}
       </View>
-    </ScrollView>
+    </HorizontalFadeScrollView>
   );
 };
 

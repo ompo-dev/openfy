@@ -5,6 +5,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { loadMixWaveform } from '../../services/mix/mixWaveform';
 import { clipDuration, slipSourceStart, type MixClip } from '../../services/mix/mixTimeline';
 import { MixWaveTiles } from './MixWaveTiles';
+import { HorizontalFadeEdges } from '../common/HorizontalFadeScrollView';
 
 /** A fixed timeline window over a moving, full-source waveform. */
 export function MixSlipLane({ clip, sourceDuration, uri, sourceStart, scale, left, top, width, onChange, onBegin, onEnd }: {
@@ -50,6 +51,7 @@ export function MixSlipLane({ clip, sourceDuration, uri, sourceStart, scale, lef
         <View style={{ position: 'absolute', left: waveLeft - windowLeft, width: fullWidth, height: 42 }}>{wave('#FFFFFF')}</View>
       </View> : null}
       {windowWidth > 0 ? <View pointerEvents="none" style={[S.outline, { left: windowLeft, width: windowWidth }]} /> : null}
+      <HorizontalFadeEdges left={waveLeft < 0} right={waveLeft + fullWidth > width} width={12} color={COLORS.PRIMARY} />
     </View>
   </GestureDetector>;
 }

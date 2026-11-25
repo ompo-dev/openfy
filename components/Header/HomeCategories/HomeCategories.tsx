@@ -4,7 +4,8 @@
  */
 
 import * as React from 'react';
-import { ScrollView, StyleSheet, Text, View, useColorScheme } from 'react-native';
+import { StyleSheet, Text, View, useColorScheme } from 'react-native';
+import { HorizontalFadeScrollView } from '../../common/HorizontalFadeScrollView';
 import {
   IOS_NATIVE_ENABLED,
   SwiftHost,
@@ -61,8 +62,7 @@ export const HomeCategories = ({
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        horizontal
+      <HorizontalFadeScrollView fadeWidth={12}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
@@ -90,7 +90,7 @@ export const HomeCategories = ({
             </LoggedPressable>
           );
         })}
-      </ScrollView>
+      </HorizontalFadeScrollView>
     </View>
   );
 };

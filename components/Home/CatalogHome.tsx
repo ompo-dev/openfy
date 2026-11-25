@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { HorizontalFadeScrollView } from '../common/HorizontalFadeScrollView';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 
 import { getYouTubeMusicArtistImage } from '@api';
@@ -59,8 +60,7 @@ export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
   return (
     <View style={styles.section}>
       <Text style={styles.title}>Artistas para descobrir</Text>
-      <ScrollView
-        horizontal
+      <HorizontalFadeScrollView
         onScroll={(event) => {
           const { contentOffset, layoutMeasurement } = event.nativeEvent;
           const visibleLimit = Math.min(
@@ -95,7 +95,7 @@ export const CatalogHome = ({ home }: { home: PersonalizedHomeSnapshot }) => {
             <Text numberOfLines={1} style={styles.artistName}>{artist.title}</Text>
           </LoggedPressable>
         ))}
-      </ScrollView>
+      </HorizontalFadeScrollView>
     </View>
   );
 };

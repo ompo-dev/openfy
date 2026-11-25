@@ -26,6 +26,7 @@ import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePlayer } from '@context';
 import { MarqueeText } from '../../common/MarqueeText';
+import { HorizontalFadeScrollView } from '../../common/HorizontalFadeScrollView';
 import { getNoteColorTheme } from '../../../utils/colorContrast';
 import { NativeIconButton } from '../../native/NativeButtons';
 import { SheetFrame } from '../../native';
@@ -601,7 +602,7 @@ export const MyNoteModal = ({
             {/* Color Swatches: Full-Bleed Paged Section Swiper (SQUARE 1:1 swatches) */}
             {activeBottomSection === 'colorPicker' && (
               <View style={S.colorPickerSection}>
-                <ScrollView
+                  <HorizontalFadeScrollView fadeMode="mask" fadeWidth={16}
                   ref={colorScrollRef}
                   horizontal
                   pagingEnabled
@@ -635,7 +636,7 @@ export const MyNoteModal = ({
                       </View>
                     </View>
                   ))}
-                </ScrollView>
+                </HorizontalFadeScrollView>
 
                 {/* Page Indicator Dots */}
                 <View style={S.pageDotsRow}>

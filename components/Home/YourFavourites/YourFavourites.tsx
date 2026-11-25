@@ -5,7 +5,8 @@
  */
 
 import * as React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { HorizontalFadeScrollView } from '../../common/HorizontalFadeScrollView';
 import { Image } from 'expo-image';
 import { usePlayer } from '@context';
 import type { PersonalizedHomeTrack } from '@services';
@@ -49,8 +50,7 @@ export const YourFavourites = ({
     <View style={styles.container}>
       <Text style={styles.sectionTitle}>{title}</Text>
 
-      <ScrollView
-        horizontal
+      <HorizontalFadeScrollView
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         bounces={true}
@@ -87,7 +87,7 @@ export const YourFavourites = ({
             </LoggedPressable>
           );
         })}
-      </ScrollView>
+      </HorizontalFadeScrollView>
     </View>
   );
 };

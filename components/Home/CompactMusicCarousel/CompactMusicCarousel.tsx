@@ -8,7 +8,6 @@
 import * as React from 'react';
 import {
   Animated,
-  Platform,
   StyleSheet,
   Text,
   View,
@@ -20,6 +19,7 @@ import { usePlayer } from '@context';
 import { LoggedPressable } from '../../native';
 import { MarqueeText } from '../../common/MarqueeText';
 import { SkeletonImage } from '../../common/SkeletonImage';
+import { HorizontalFadeScrollView } from '../../common/HorizontalFadeScrollView';
 import { getHomeCardScale, type HomeCardSize } from '../homeCardSizing';
 
 export interface CompactTrackItem {
@@ -120,18 +120,13 @@ export const CompactMusicCards = ({
   };
 
   return (
-    <Animated.ScrollView
-      horizontal
+    <HorizontalFadeScrollView kind="animated" animatedOffset={scrollX}
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.scrollContent}
       scrollEventThrottle={16}
       bounces={true}
       alwaysBounceHorizontal={true}
       overScrollMode="always"
-      onScroll={Animated.event(
-        [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-        { useNativeDriver: Platform.OS !== 'web' }
-      )}
     >
       {tracks.map((item, index) => {
           const isPlaying =
@@ -233,7 +228,7 @@ export const CompactMusicCards = ({
             </Animated.View>
           );
       })}
-    </Animated.ScrollView>
+    </HorizontalFadeScrollView>
   );
 };
 

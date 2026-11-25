@@ -6,6 +6,7 @@ import Plus from 'lucide-react-native/icons/plus';
 import Volume2 from 'lucide-react-native/icons/volume-2';
 import VolumeX from 'lucide-react-native/icons/volume-x';
 import { LinearGradient } from 'expo-linear-gradient';
+import { HorizontalFadeEdges } from '../common/HorizontalFadeScrollView';
 import { LoggedPressable } from '../native';
 import { formatMixTime, MAX_MIX_LANES, MAX_MIX_DURATION_MS, MIN_CLIP_MS, moveMixGroup, placeMixClip, snapMixPosition, trimMixGroup, trimMixClipAtPosition, type MixClip, mixTimeline } from '../../services/mix/mixTimeline';
 import type { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
@@ -333,6 +334,16 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, selecte
         </View>
       </View>
     </GestureDetector>
+    {!slip ? laneEnds.map((end, lane) => {
+      const start = Math.min(Infinity, ...displayed.filter((clip) => clip.lane === lane).map((clip) => clip.startMs));
+      return <View key={lane} pointerEvents="none" style={{ position: 'absolute', top: 36 + lane * LANE_HEIGHT, left: onToggleLaneMute && lane < occupiedLanes ? 40 : 0, right: 0, height: 42, zIndex: 6 }}>
+        <HorizontalFadeEdges left={start * scale < offset - width / 2 + (onToggleLaneMute ? 40 : 0)}
+          right={end * scale > offset + width / 2} color={mutedLanes?.has(lane) ? '#202020' : APP_COLORS.SECONDARY} width={12} />
+      </View>;
+    }) : null}
+    <View pointerEvents="none" style={{ position: 'absolute', top: 0, right: 0, left: 0, height: 30, zIndex: 2 }}>
+      <HorizontalFadeEdges left={false} right={true} width={12} color={APP_COLORS.PRIMARY} />
+    </View>
     {onToggleLaneMute ? laneEnds.map((_, lane) => {
       const muted = !!mutedLanes?.has(lane);
       return lane < occupiedLanes ? <LoggedPressable key={lane} testID={`mix-lane-mute-${lane}`}

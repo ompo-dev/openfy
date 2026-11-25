@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   Animated,
   Dimensions,
-  Platform,
   StyleSheet,
   Text,
   View,
@@ -23,6 +22,7 @@ import { upsertCatalogTracks } from '@services';
 import { GlassSurface, LoggedPressable } from '../../native';
 import { GlassBackdrop, GlassBackdropScope } from '../../native/GlassBackdrop';
 import { SkeletonImage } from '../../common/SkeletonImage';
+import { HorizontalFadeScrollView } from '../../common/HorizontalFadeScrollView';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = Math.min(SCREEN_WIDTH - 52, 335); // Less wide, nicely centered
@@ -145,8 +145,7 @@ export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] })
 
   return (
     <View style={styles.container}>
-      <Animated.ScrollView
-        horizontal
+      <HorizontalFadeScrollView kind="animated" animatedOffset={scrollX} fadeWidth={24}
         showsHorizontalScrollIndicator={false}
         snapToInterval={SNAP_INTERVAL}
         snapToAlignment="center"
@@ -159,10 +158,6 @@ export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] })
           { paddingHorizontal: SIDE_PADDING },
         ]}
         scrollEventThrottle={16}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-          { useNativeDriver: Platform.OS !== 'web' }
-        )}
       >
         {featuredItems.map((item, index) => {
           const isCurrentPlaying =
@@ -276,7 +271,7 @@ export const HeroBanner = ({ featuredItems }: { featuredItems: FeaturedItem[] })
             </Animated.View>
           );
         })}
-      </Animated.ScrollView>
+      </HorizontalFadeScrollView>
 
       {/* Smooth animated slide indicators */}
       <View style={styles.indicatorContainer}>

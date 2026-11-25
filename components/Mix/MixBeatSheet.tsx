@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { HorizontalFadeEdges, HorizontalFadeScrollView } from '../common/HorizontalFadeScrollView';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Svg, { Line, Circle } from 'react-native-svg';
 import Play from 'lucide-react-native/icons/play';
@@ -133,12 +134,12 @@ export function MixBeatSheet({ targets, initialId, position, playing, onSeek, on
         <LoggedPressable disabled={busy} accessibilityLabel="Limpar batidas" onPress={() => void generate('off')} style={S.reset}><RotateCcw size={19} color="#FFF" /></LoggedPressable>
       </View>
     </View>
-    {targets.length > 1 ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.targets}>
+    {targets.length > 1 ? <HorizontalFadeScrollView fadeMode="mask" fadeWidth={12} contentContainerStyle={S.targets}>
       {targets.map(({ clip: item, title }, index) => <LoggedPressable key={item.id} accessibilityRole="tab"
         accessibilityLabel={`Ver batidas do clipe ${index + 1}: ${title}`} accessibilityState={{ selected: item.id === clip.id }}
         onPress={() => { setFocusId(item.id); onSeek(Math.max(item.startMs, Math.min(item.endMs - 1, position))); }}
         style={[S.target, item.id === clip.id && S.targetActive]}><Text numberOfLines={1} style={S.tabText}>{index + 1}. {title}</Text></LoggedPressable>)}
-    </ScrollView> : null}
+    </HorizontalFadeScrollView> : null}
     <View style={S.waveHeader}><Text style={S.secondary}>{targets.length > 1 ? `${targets.length} clipes selecionados` : ''}</Text>
       <Text style={S.text}>{formatMixTime(sourcePosition - clip.sourceStartMs)} / {formatMixTime(clip.sourceEndMs - clip.sourceStartMs)}</Text></View>
     <View style={S.wave} testID="mix-beat-wave">
@@ -159,6 +160,7 @@ export function MixBeatSheet({ targets, initialId, position, playing, onSeek, on
           <Line x1={160} y1={2} x2={160} y2={96} stroke="#FFF" strokeWidth={2.5} strokeLinecap="round" />
         </Svg>
       </View></GestureDetector>
+      <HorizontalFadeEdges left={start > 0} right={end < duration} width={12} color={COLORS.SECONDARY} />
       <LoggedPressable style={S.markerButton} disabled={busy} accessibilityLabel={near === undefined ? 'Adicionar batida' : 'Remover batida'} onPress={editMarker}>
         {near === undefined ? <Plus size={22} color="#FFF" /> : <Minus size={22} color="#FFF" />}
       </LoggedPressable>
@@ -173,7 +175,7 @@ const S = StyleSheet.create({
   wave: { backgroundColor: COLORS.SECONDARY, borderRadius: 8, overflow: 'hidden' },
   text: { color: '#FFF', fontSize: 14, fontWeight: '600' },
   secondary: { color: '#AAAEB5', fontSize: 12 },
-  markerButton: { position: 'absolute', right: 6, top: 6, width: 34, height: 34, borderRadius: 8, backgroundColor: '#121212D9', alignItems: 'center', justifyContent: 'center' },
+  markerButton: { position: 'absolute', right: 6, top: 6, width: 34, height: 34, borderRadius: 8, backgroundColor: '#121212D9', alignItems: 'center', justifyContent: 'center', zIndex: 11 },
   tabs: { flex: 1, flexDirection: 'row', gap: 2, backgroundColor: COLORS.SECONDARY, borderRadius: 10, padding: 3 },
   tab: { flex: 1, minHeight: 34, paddingHorizontal: 2, justifyContent: 'center', alignItems: 'center', borderRadius: 7 },
   tabText: { color: '#FFF', fontSize: 12, fontWeight: '600' },

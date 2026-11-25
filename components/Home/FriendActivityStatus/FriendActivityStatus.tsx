@@ -13,11 +13,11 @@ import * as React from 'react';
 import {
   Animated,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { HorizontalFadeScrollView } from '../../common/HorizontalFadeScrollView';
 import { AppIcon as Ionicons } from "../../native/AppIcon";
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -244,8 +244,7 @@ export const FriendActivityStatus = ({
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        horizontal
+      <HorizontalFadeScrollView
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         scrollEventThrottle={8}
@@ -343,7 +342,7 @@ export const FriendActivityStatus = ({
             </View>
           );
         })}
-      </ScrollView>
+      </HorizontalFadeScrollView>
 
       <MyNoteModal
         visible={isNoteModalVisible}

@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
+import { HorizontalFadeScrollView } from '../common/HorizontalFadeScrollView';
 import { COLORS } from '@config';
 import Slider from '@react-native-community/slider';
 import Scissors from 'lucide-react-native/icons/scissors';
@@ -320,7 +321,7 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
       <Tool label="Aplicar deslizar" icon={Check} onPress={applySlip} />
     </View> : <View testID="mix-editor-toolbar" style={S.inspector}>
       {multi ? <Text style={[S.secondary, { paddingHorizontal: 8 }]}>{selection.length} clipes selecionados</Text> : null}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.editTools}>
+      <HorizontalFadeScrollView fadeWidth={16} contentContainerStyle={S.editTools}>
         <Tool label="Dividir no cursor" caption="Dividir" icon={Scissors} disabled={!splittable.length}
           onPress={() => commit(splittable.reduce((next, clip) => splitMixClip(next, clip.id, preview.position), clips), 'split')} />
         <Tool label="Volume do clipe" caption="Volume" icon={Volume2} hasIndicator={hasAudioMods} disabled={!selected || !track} onPress={() => {
@@ -355,7 +356,7 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
             const next = timeline.findIndex((c, i) => i > index && c.lane === selected.lane);
             if (next >= 0) commit(moveMixClip(clips, index, next), 'reorder');
           }} />
-      </ScrollView>
+      </HorizontalFadeScrollView>
     </View>}
   </View>;
 

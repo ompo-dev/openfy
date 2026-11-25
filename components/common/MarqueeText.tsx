@@ -21,6 +21,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { useAppIsActive } from '../../hooks/useAppIsActive';
+import { HorizontalFadeEdges, HorizontalFadeMask, horizontalScrollEdges } from './HorizontalFadeScrollView';
 
 interface MarqueeTextProps {
   // Plain text measures width; optional inline children retain links and styling.
@@ -34,7 +35,7 @@ interface MarqueeTextProps {
   delay?: number; // ms delay before starting
   endDelay?: number; // ms pause at the end of a left-scrolling loop
   fadeWidth?: number;
-  fadeColor?: string; // Kept for callers; native fade is now an alpha mask.
+  fadeColor?: string; // Match a solid surface; otherwise use an alpha mask.
   align?: 'left' | 'center';
   scrollMode?: 'alternate' | 'left';
   active?: boolean;
@@ -51,13 +52,11 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
   delay = 1400,
   endDelay = 400,
   fadeWidth = 10,
-  fadeColor: _fadeColor,
+  fadeColor,
   align = 'left',
   scrollMode = 'alternate',
   active = true,
 }) => {
-  void _fadeColor;
-  void fadeWidth;
   const [containerWidth, setContainerWidth] = React.useState(0);
   const [measuredTextWidth, setMeasuredTextWidth] = React.useState(0);
   const isAppActive = useAppIsActive();
@@ -65,6 +64,20 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
 
   const isOverflowing = measuredTextWidth > containerWidth + 2 && containerWidth > 0;
   const shouldAnimate = active && isAppActive && isOverflowing;
+  const [edges, setEdges] = React.useState({ left: false, right: false });
+  React.useEffect(() => {
+    let previous = horizontalScrollEdges(0, containerWidth, measuredTextWidth);
+    setEdges(previous);
+    if (!shouldAnimate) return;
+    const listener = scrollAnim.addListener(({ value }) => {
+      const next = horizontalScrollEdges(-value, containerWidth, measuredTextWidth);
+      if (next.left !== previous.left || next.right !== previous.right) {
+        previous = next;
+        setEdges(next);
+      }
+    });
+    return () => scrollAnim.removeListener(listener);
+  }, [containerWidth, measuredTextWidth, scrollAnim, shouldAnimate, text]);
 
   React.useEffect(() => {
     scrollAnim.setValue(0);
@@ -209,7 +222,10 @@ export const MarqueeText: React.FC<MarqueeTextProps> = ({
         </Text>}
       </View>
 
-      {animatedText}
+      {isOverflowing && !fadeColor ? <HorizontalFadeMask {...edges} width={fadeWidth} style={{ width: containerWidth, overflow: 'hidden' }}>
+        {animatedText}
+      </HorizontalFadeMask> : animatedText}
+      {isOverflowing && fadeColor ? <HorizontalFadeEdges {...edges} color={fadeColor} width={fadeWidth} /> : null}
     </View>
   );
 };
