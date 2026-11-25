@@ -9,7 +9,7 @@ import {
   Text,
   TextInput,
   View,
-  ScrollView,
+  FlatList,
 } from 'react-native';
 import { AppIcon as Ionicons } from "../native/AppIcon";
 import { LinearGradient } from 'expo-linear-gradient';
@@ -1110,9 +1110,11 @@ export const CollectionDetail = ({
         onClose={() => setIsArtistListVisible(false)}
         visible={isArtistListVisible}
       >
-            {isLoadingAllArtists ? <Text style={styles.artistModalLoading}>Carregando créditos da playlist…</Text> : null}
-            <ScrollView
-              contentContainerStyle={{ paddingBottom: 4 }}
+            <FlatList
+              data={collectionArtists}
+              keyExtractor={(artist) => `${artist.id}-${artist.name}`}
+              ListHeaderComponent={isLoadingAllArtists ? <Text style={styles.artistModalLoading}>Carregando créditos da playlist…</Text> : null}
+              ListEmptyComponent={!isLoadingAllArtists ? <Text style={styles.empty}>Nenhum artista encontrado.</Text> : null}
               keyboardShouldPersistTaps="handled"
               onScroll={(event) => {
                 const { contentOffset, layoutMeasurement } = event.nativeEvent;
@@ -1124,15 +1126,11 @@ export const CollectionDetail = ({
               }}
               scrollEventThrottle={200}
               showsVerticalScrollIndicator={false}
-              style={styles.artistModalScroll}
               testID="collection-artists-scroll-view"
-            >
-              <ProgressiveList listKey={collectionId}>
-              {collectionArtists.map((artist) => {
+              renderItem={({ item: artist }) => {
                 const uri = artist.imageURL || artistImages[artist.id || artist.name];
                 return (
                   <ArtistSearchRow
-                    key={`artist-modal-${artist.id}-${artist.name}`}
                     artist={{ type: 'artist', id: artist.id || `local_artist_${encodeURIComponent(artist.name)}`, name: artist.name, imageURL: uri || '' }}
                     onPress={() => {
                       setIsArtistListVisible(false);
@@ -1140,9 +1138,8 @@ export const CollectionDetail = ({
                     }}
                   />
                 );
-              })}
-              </ProgressiveList>
-            </ScrollView>
+              }}
+            />
       </SheetFrame>
     </View>
   );
@@ -1190,6 +1187,5 @@ const styles = StyleSheet.create({
   listFooter: { paddingTop: 18 },
   showMoreTracks: { alignSelf: 'center', paddingHorizontal: 20, paddingVertical: 14 },
   showMoreTracksText: { color: '#1ED760', fontFamily: 'SF-Semibold', fontSize: 15 },
-  artistModalScroll: { flexGrow: 0, flexShrink: 1, minHeight: 0 },
   artistModalLoading: { color: 'rgba(255,255,255,0.62)', fontFamily: 'SF-Regular', fontSize: 12, paddingBottom: 8 },
 });

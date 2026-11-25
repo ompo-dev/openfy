@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, waitFor, within } from '@testing-library/react-native';
 
 import { Keyboard, StyleSheet, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
@@ -406,9 +406,14 @@ describe('CollectionDetail', () => {
     expect(screen.queryByLabelText('Adicionar músicas à playlist')).toBeNull();
     expect(screen.queryByLabelText('Mais opções')).toBeNull();
     fireEvent.press(screen.getByLabelText('Ver 3 artistas'));
-    expect(screen.getAllByText('Principal').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Participação').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Outra participação').length).toBeGreaterThan(0);
+    const list = await screen.findByTestId('collection-artists-scroll-view');
+    expect(StyleSheet.flatten(list.props.style)).toMatchObject({ flex: 1, minHeight: 0 });
+    expect(screen.queryByTestId('gym-sheet-custom-content')).toBeNull();
+    expect(list.props.data).toHaveLength(3);
+    const modal = within(list);
+    expect(modal.getByLabelText('Abrir artista Principal')).toBeTruthy();
+    expect(modal.getByLabelText('Abrir artista Participação')).toBeTruthy();
+    expect(modal.getByLabelText('Abrir artista Outra participação')).toBeTruthy();
   });
 
   it('does not render collection tracks without a valid artist credit', async () => {
@@ -588,11 +593,13 @@ describe('CollectionDetail', () => {
     });
 
     fireEvent.press(screen.getByLabelText('Ver 2 artistas'));
+    const list = await screen.findByTestId('collection-artists-scroll-view');
+    expect(within(list).getByLabelText('Abrir artista Artista sem id')).toBeTruthy();
     await waitFor(() => expect(resolveTracksForPlayback).toHaveBeenCalledTimes(1));
     await waitFor(() =>
       expect(
-        screen.getAllByLabelText('Abrir artista Artista da página seguinte')
-      ).toHaveLength(2)
+        within(screen.getByTestId('collection-artists-scroll-view')).getByLabelText('Abrir artista Artista da página seguinte')
+      ).toBeTruthy()
     );
   });
 });
