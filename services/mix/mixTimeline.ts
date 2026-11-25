@@ -178,6 +178,102 @@ export const formatMixTime = (ms: number) => {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 };
 
+/** Translate a selection as a rigid group. Reject collisions rather than silently
+ * changing the relative timing of selected clips or moving unselected ones. */
+export function moveMixGroup(clips: MixClip[], ids: ReadonlySet<string>, anchorId: string, lane: number, ms: number): MixClip[] {
+  const entries = mixTimeline(clips);
+  const anchor = entries.find((clip) => clip.id === anchorId);
+  if (!anchor || !ids.has(anchorId) || !Number.isFinite(ms) || !Number.isInteger(lane)) return clips;
+  const group = entries.filter((clip) => ids.has(clip.id));
+  const laneDelta = lane - anchor.lane;
+  const delta = Math.max(-Math.min(...group.map((clip) => clip.startMs)), Math.round(ms - anchor.startMs));
+  const positions = entries.map((clip) => ids.has(clip.id) ? { ...clip, lane: clip.lane + laneDelta,
+    startMs: clip.startMs + delta, endMs: clip.endMs + delta } : clip);
+  const ordered = positions.sort((a,b) => a.lane - b.lane || a.startMs - b.startMs);
+  const ends = new Map<number, number>();
+  const next: MixClip[] = [];
+  for (const { startMs, endMs, ...clip } of ordered) {
+    const previous = ends.get(clip.lane) ?? 0;
+    if (clip.lane < 0 || clip.lane >= MAX_MIX_LANES || startMs < previous || endMs > MAX_MIX_DURATION_MS) return clips;
+    next.push({ ...clip, gapBeforeMs: startMs - previous });
+    ends.set(clip.lane, endMs);
+  }
+  return delta || laneDelta ? next : clips;
+}
+
+/** Find a common forward offset for all copies, preserving lane and timing. */
+export function insertMixGroupCopy(clips: MixClip[], group: ReturnType<typeof mixTimeline>, ids: string[], requestedMs: number): MixClip[] {
+  if (!group.length || ids.length !== group.length || clips.length + group.length > 200) return clips;
+  const first = Math.min(...group.map((clip) => clip.startMs));
+  const occupied = mixTimeline(clips);
+  let base = Math.max(0, Math.round(requestedMs));
+  // Each conflict advances to the end of one existing clip; the search is finite.
+  while (base + Math.max(...group.map((clip) => clip.endMs - first)) <= MAX_MIX_DURATION_MS) {
+    let nextBase = base;
+    for (const clip of group) for (const other of occupied) {
+      if (clip.lane !== other.lane) continue;
+      const start = base + clip.startMs - first, end = start + clipDuration(clip);
+      if (start < other.endMs && end > other.startMs) nextBase = Math.max(nextBase, other.endMs - (clip.startMs - first));
+    }
+    if (nextBase === base) {
+      const positions = [...occupied, ...group.map((clip, i) => ({ ...clip, id: ids[i], startMs: base + clip.startMs - first, endMs: base + clip.endMs - first }))];
+      const ends = new Map<number, number>();
+      return positions.sort((a,b) => a.lane - b.lane || a.startMs - b.startMs).map(({ startMs, endMs, ...clip }) => {
+        const gapBeforeMs = startMs - (ends.get(clip.lane) ?? 0);
+        ends.set(clip.lane, endMs);
+        return { ...clip, gapBeforeMs };
+      });
+    }
+    base = nextBase;
+  }
+  return clips;
+}
+
+/** Apply the same requested effect, preserving unrelated settings per clip. */
+export function applyMixGroupEffects(clips: MixClip[], ids: ReadonlySet<string>, changes: Pick<MixClip, 'fadeInMs' | 'fadeOutMs' | 'duckAmount'> & { volume?: number }): MixClip[] {
+  return clips.map((clip) => {
+    if (!ids.has(clip.id)) return clip;
+    const next = { ...clip, ...changes };
+    const duration = clipDuration(clip);
+    if (changes.fadeOutMs !== undefined && changes.fadeInMs === undefined) {
+      next.fadeOutMs = Math.min(changes.fadeOutMs, Math.max(0, duration - (clip.fadeInMs || 0)));
+    } else if (changes.fadeInMs !== undefined) {
+      next.fadeInMs = Math.min(changes.fadeInMs, Math.max(0, duration - (changes.fadeOutMs === undefined ? clip.fadeOutMs || 0 : 0)));
+      if (changes.fadeOutMs !== undefined) next.fadeOutMs = Math.min(changes.fadeOutMs, duration - next.fadeInMs);
+    }
+    return next;
+  });
+}
+
+/** Slip all selected sources by the same feasible offset without changing timing. */
+export function slipMixGroup(clips: MixClip[], ids: ReadonlySet<string>, anchorId: string, start: number, durationFor: (id: string) => number): MixClip[] {
+  const group = clips.filter((clip) => ids.has(clip.id));
+  const anchor = group.find((clip) => clip.id === anchorId);
+  if (!anchor || !Number.isFinite(start)) return clips;
+  const min = Math.max(...group.map((clip) => -clip.sourceStartMs));
+  const max = Math.min(...group.map((clip) => Math.floor(durationFor(clip.trackId) - clip.sourceEndMs)));
+  if (!Number.isFinite(max) || min > max) return clips;
+  const delta = Math.max(min, Math.min(max, Math.round(start - anchor.sourceStartMs)));
+  if (!delta) return clips;
+  return clips.map((clip) => ids.has(clip.id) ? fitEffects(clip, clip.sourceStartMs + delta, clip.sourceEndMs + delta) : clip);
+}
+
+/** Trim the same edge of every selected clip by a common valid delta. */
+export function trimMixGroup(clips: MixClip[], ids: ReadonlySet<string>, anchorId: string, range: [number, number], durationFor: (id: string) => number): MixClip[] {
+  const group = clips.filter((clip) => ids.has(clip.id));
+  const anchor = group.find((clip) => clip.id === anchorId);
+  if (!anchor) return clips;
+  const left = range[0] !== anchor.sourceStartMs;
+  const requested = left ? range[0] - anchor.sourceStartMs : range[1] - anchor.sourceEndMs;
+  const min = Math.max(...group.map((clip) => left ? -clip.sourceStartMs : MIN_CLIP_MS - clipDuration(clip)));
+  const max = Math.min(...group.map((clip) => left ? clipDuration(clip) - MIN_CLIP_MS : Math.floor(durationFor(clip.trackId) - clip.sourceEndMs)));
+  if (![min,max,requested].every(Number.isFinite) || min > max) return clips;
+  const delta = Math.max(min, Math.min(max, Math.round(requested)));
+  if (!delta) return clips;
+  return group.reduce((next, clip) => trimMixClipAtPosition(next, clip.id,
+    clip.sourceStartMs + (left ? delta : 0), clip.sourceEndMs + (left ? 0 : delta)), clips);
+}
+
 /** Pixel-based magnetic alignment of either edge to the cursor or another clip. */
 export function snapMixPosition(entries: ReturnType<typeof mixTimeline>, id: string, ms: number, cursor: number, scale: number, edge?: 'start' | 'end') {
   const clip = entries.find((item) => item.id === id);

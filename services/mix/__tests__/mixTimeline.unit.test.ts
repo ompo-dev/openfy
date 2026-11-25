@@ -1,9 +1,37 @@
-import { clipDuration, compactMixLanes, insertMixClipCopy, mixDuration, mixTimeline, moveMixClip, placeMixClip, replaceMixClipSource, slipMixClip, splitMixClip, trimMixClip, validateMixClips, type MixClip } from '../mixTimeline';
+import { applyMixGroupEffects, insertMixGroupCopy, moveMixGroup, slipMixGroup, trimMixGroup, clipDuration, compactMixLanes, insertMixClipCopy, mixDuration, mixTimeline, moveMixClip, placeMixClip, replaceMixClipSource, slipMixClip, splitMixClip, trimMixClip, validateMixClips, type MixClip } from '../mixTimeline';
 const clips: MixClip[] = [
   { id: 'a', trackId: 'one', sourceStartMs: 5000, sourceEndMs: 35000, volume: 1 },
   { id: 'b', trackId: 'two', sourceStartMs: 10000, sourceEndMs: 20000, volume: 0.5 },
 ];
 const tracks = [{ spotifyId: 'one', duration_ms: 60000 }, { spotifyId: 'two', duration_ms: 30000 }] as any;
+
+it('slips and trims selected sources by a common offset limited by every source', () => {
+  const ids = new Set(['a','b']);
+  const durations = (id: string) => id === 'one' ? 60000 : 30000;
+  const slipped = slipMixGroup(clips, ids, 'a', 25000, durations);
+  expect(slipped.map(c => [c.sourceStartMs,c.sourceEndMs])).toEqual([[15000,45000],[20000,30000]]);
+  expect(mixDuration(slipped)).toBe(mixDuration(clips));
+  const trimmed = trimMixGroup(clips, ids, 'a', [5000,50000], durations);
+  expect(trimmed.map(c => c.sourceEndMs)).toEqual([45000,30000]);
+  validateMixClips(trimmed, tracks);
+});
+
+it('moves and copies a group without changing relative placement or unrelated clips', () => {
+  const layered = [clips[0], { ...clips[1], lane: 1, gapBeforeMs: 5000 }, { ...clips[0], id: 'c', lane: 2 }];
+  const ids = new Set(['a','b']);
+  const moved = moveMixGroup(layered, ids, 'a', 0, 2000);
+  expect(mixTimeline(moved).map(c => [c.id,c.lane,c.startMs])).toEqual([['a',0,2000],['b',1,7000],['c',2,0]]);
+  expect(moveMixGroup(layered, ids, 'a', 1, 0)).toBe(layered);
+  const copied = insertMixGroupCopy(layered, mixTimeline(layered).filter(c => ids.has(c.id)), ['d','e'], 0);
+  expect(mixTimeline(copied).filter(c => ['d','e'].includes(c.id)).map(c => [c.id,c.lane,c.startMs])).toEqual([['d',0,30000],['e',1,35000]]);
+  validateMixClips(copied, tracks);
+});
+it('clamps shared fades per clip without changing other effect values', () => {
+  const result = applyMixGroupEffects([{ ...clips[0], fadeOutMs: 5000 }, clips[1]], new Set(['a','b']), { fadeInMs: 28000 });
+  expect(result.map(c => c.fadeInMs)).toEqual([25000,10000]);
+  expect(result[0].fadeOutMs).toBe(5000);
+  validateMixClips(result, tracks);
+});
 
 it('joins cuts without carrying removed source time into the composition', () => {
   expect(mixDuration(clips)).toBe(40000);

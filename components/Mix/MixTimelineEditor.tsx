@@ -4,7 +4,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Plus from 'lucide-react-native/icons/plus';
 import { LinearGradient } from 'expo-linear-gradient';
 import { LoggedPressable } from '../native';
-import { formatMixTime, MAX_MIX_LANES, MAX_MIX_DURATION_MS, MIN_CLIP_MS, placeMixClip, snapMixPosition, trimMixClipAtPosition, type MixClip, mixTimeline } from '../../services/mix/mixTimeline';
+import { formatMixTime, MAX_MIX_LANES, MAX_MIX_DURATION_MS, MIN_CLIP_MS, moveMixGroup, placeMixClip, snapMixPosition, trimMixGroup, trimMixClipAtPosition, type MixClip, mixTimeline } from '../../services/mix/mixTimeline';
 import type { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
 import { loadMixWaveform } from '../../services/mix/mixWaveform';
 import { darkenWaveColor, visibleBeatMarkers } from '../../services/mix/mixWaveformGeometry';
@@ -139,8 +139,9 @@ function MovableClip({ clip, scale, lanes, navigation, disabled, onBegin, onMove
     testID={`mix-drag-${clip.id}`}>{children}</View></GestureDetector>;
 }
 
-export function MixTimelineEditor({ timeline, total, tracks, selectedId, position, disabled, onSelect, onSeek, onScrub, onTrim, onAddTrack, onTrimActive, onMoveClip, onDragSelect, onDeselect, slip }: {
+export function MixTimelineEditor({ timeline, total, tracks, selectedId, selectedIds, position, disabled, onSelect, onSeek, onScrub, onTrim, onAddTrack, onTrimActive, onMoveClip, onDragSelect, onDeselect, slip }: {
   timeline: Entry[]; total: number; tracks: Map<string, Source>; selectedId: string; position: number;
+  selectedIds?: ReadonlySet<string>;
   playing: boolean; disabled: boolean; onSelect: (clip: Entry) => void; onSeek: (ms: number) => void;
   onScrub: () => void; onTrim: (id: string, range: [number, number]) => void;
   onAddTrack: (lane: number) => void;
@@ -230,9 +231,13 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
   const occupiedLanes = Math.max(0, ...timeline.map((clip) => clip.lane + 1));
   const lanes = Math.min(MAX_MIX_LANES, occupiedLanes + 1);
   const laneEnds = Array.from({ length: lanes }, (_, lane) => timeline.reduce((end, clip) => clip.lane === lane ? Math.max(end, clip.endMs) : end, 0));
-  const snap = (id: string, ms: number) => snapMixPosition(timeline, id, ms,
+  const snap = (id: string, ms: number) => snapMixPosition(selectedIds?.has(id) && selectedIds.size > 1
+    ? timeline.filter((clip) => clip.id === id || !selectedIds.has(clip.id)) : timeline, id, ms,
     dragScroll.current.active ? dragScroll.current.x / scale : position, scale);
-  const moved = moving ? mixTimeline(placeMixClip(timeline, moving.id, moving.lane, snap(moving.id, moving.ms).ms)) : null;
+  const grouped = (selectedIds?.size ?? 0) > 1;
+  const moved = moving ? mixTimeline(grouped && selectedIds?.has(moving.id)
+    ? moveMixGroup(timeline, selectedIds, moving.id, moving.lane, snap(moving.id, moving.ms).ms)
+    : placeMixClip(timeline, moving.id, moving.lane, snap(moving.id, moving.ms).ms)) : null;
   const snapped = moving ? snap(moving.id, moving.ms) : null;
   const activeGuide = moving ? (moved?.find((clip) => clip.id === moving.id)?.startMs === Math.round(snapped!.ms) ? snapped!.guide : null) : guide;
   const snapTrim = (clip: Entry, edge: 'start' | 'end', range: [number, number], duration: number): [number, number] => {
@@ -245,7 +250,8 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
     setGuide(aligned.guide); return next;
   };
   const displayed = moved ? timeline.map((clip) => moved.find((item) => item.id === clip.id) || clip) :
-    draft ? mixTimeline(trimMixClipAtPosition(timeline, draft.id, draft.range[0], draft.range[1])) : timeline;
+    draft ? mixTimeline(grouped && selectedIds?.has(draft.id) ? trimMixGroup(timeline, selectedIds, draft.id, draft.range, (id) => tracks.get(id)?.duration_ms ?? NaN)
+      : trimMixClipAtPosition(timeline, draft.id, draft.range[0], draft.range[1])) : timeline;
   const height = 44 + lanes * 46;
   const slipClip = slip ? timeline.find((clip) => clip.id === slip.id) : undefined;
   const slipSource = slipClip ? tracks.get(slipClip.trackId) : undefined;
@@ -264,14 +270,15 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
           {displayed.map((clip, index) => {
             const original = timeline[index];
             const source = tracks.get(clip.trackId);
-            const selected = clip.id === selectedId;
-            const range = draft?.id === clip.id ? draft.range : [clip.sourceStartMs, clip.sourceEndMs];
+            const selected = selectedIds ? selectedIds.has(clip.id) : clip.id === selectedId;
+            const handles = selected && (!grouped || clip.id === selectedId);
+            const range = draft?.id === clip.id && !grouped ? draft.range : [clip.sourceStartMs, clip.sourceEndMs];
             const clipWidth = Math.max(1, (range[1] - range[0]) * scale);
             const left = width / 2 + clip.startMs * scale - offset;
             if (!selected && (left + clipWidth < -width || left > width * 2)) return null;
             const visibleStart = Math.max(0, Math.min(clipWidth, -left));
             const visibleEnd = Math.max(visibleStart, Math.min(clipWidth, width - left));
-            return <View key={clip.id} testID={`mix-clip-${clip.id}`} style={[S.clip, { top: 36 + clip.lane * LANE_HEIGHT - (selected ? 2 : 0), left: selected ? left - 18 : left, width: selected ? clipWidth + 36 : clipWidth }, selected && S.selected, moving?.id === clip.id && S.moving]}>
+            return <View key={clip.id} testID={`mix-clip-${clip.id}`} style={[S.clip, { top: 36 + clip.lane * LANE_HEIGHT - (selected ? 2 : 0), left: handles ? left - 18 : selected ? left - 2 : left, width: handles ? clipWidth + 36 : selected ? clipWidth + 4 : clipWidth }, selected && S.selected, (moving?.id === clip.id || !!moving && grouped && selected) && S.moving]}>
               <MovableClip clip={original} scale={scale} lanes={lanes} navigation={navigate} disabled={disabled}
                 onBegin={() => {
                   trimActive.current = true; dragging.current = false; onScrub(); onDragSelect(clip.id);
@@ -289,8 +296,8 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
                   if (drag.extra) onSeek(positionAtOffset(drag.x, scale, MAX_MIX_DURATION_MS));
                   setMoving(null); trimActive.current = false; setTrimming(false); onTrimActive?.(false);
                 }}>
-              <LoggedPressable disabled={disabled} accessibilityLabel={`Selecionar clipe ${index + 1}: ${source?.title}`}
-                onPress={() => onSelect(original)} style={[S.clipBody, { backgroundColor: clipColor(clip.trackId) }, selected && S.selectedBody]}>
+              <LoggedPressable disabled={disabled} accessibilityLabel={`Selecionar clipe ${index + 1}: ${source?.title}`} accessibilityState={{ selected }}
+                onPress={() => onSelect(original)} style={[S.clipBody, { backgroundColor: clipColor(clip.trackId) }, handles ? S.selectedBody : selected && { margin: 2 }]}>
                 <ClipWaveform source={source} range={range} scale={scale} color={clipColor(clip.trackId)}
                   fadeIn={clip.fadeInMs} fadeOut={clip.fadeOutMs} left={visibleStart} width={visibleEnd - visibleStart} />
                 {clip.beatsMs && visibleBeatMarkers(clip.beatsMs, range[0], range[1], scale, visibleStart, visibleEnd)
@@ -305,7 +312,7 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
                 </View>
               </LoggedPressable>
               </MovableClip>
-              {selected && source && !disabled && !moving ? (['start', 'end'] as const).map((edge) => <TrimHandle key={edge} edge={edge}
+              {handles && source && !disabled && !moving ? (['start', 'end'] as const).map((edge) => <TrimHandle key={edge} edge={edge}
                 clip={original} sourceDuration={source.duration_ms} scale={scale} scrollGesture={navigate} onBegin={() => {
                   trimActive.current = true; dragging.current = false; onScrub(); setTrimming(true); onTrimActive?.(true);
                 }} onChange={(next) => setDraft({ id: clip.id, edge, range: snapTrim(original, edge, next, source.duration_ms) })} onEnd={(next) => {

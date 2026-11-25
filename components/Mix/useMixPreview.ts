@@ -42,10 +42,12 @@ export function useMixPreview() {
     const subscription = AppState.addEventListener('change', (state) => { if (state !== 'active') stop(); });
     return () => subscription.remove();
   }, [stop]);
-  const play = async (project: MixProject, startMs: number, selectedId?: string) => {
+  const play = async (project: MixProject, startMs: number, selection?: string | readonly string[]) => {
     stop(); setError(''); setBusy(true); requested.current = true;
     const request = generation.current;
-    const entries = mixTimeline(project.clips).filter((clip) => !selectedId || clip.id === selectedId);
+    const selectedId = typeof selection === 'string' ? selection : undefined;
+    const selectedIds = selection ? new Set(typeof selection === 'string' ? [selection] : selection) : null;
+    const entries = mixTimeline(project.clips).filter((clip) => !selectedIds || selectedIds.has(clip.id));
     const active = () => request === generation.current;
     const fail = (reason: unknown) => {
       if (!active()) return;
@@ -55,7 +57,8 @@ export function useMixPreview() {
     try {
       if (!entries.length) throw new Error('Adicione músicas ao mix.');
       const total = Math.max(...entries.map((clip) => clip.endMs));
-      const initial = Math.max(selectedId ? entries[0].startMs : 0, startMs < total ? startMs : (selectedId ? entries[0].startMs : 0));
+      const firstStart = selectedIds ? Math.min(...entries.map((clip) => clip.startMs)) : 0;
+      const initial = Math.max(firstStart, startMs < total ? startMs : firstStart);
       const downloaded = new Map((await getDownloadedTracks()).map((track) => [track.spotifyId, track.localAudioPath]));
       if (!active()) return;
       const paths = new Map<string, string>();
@@ -164,7 +167,7 @@ export function useMixPreview() {
       tick();
     } catch (reason) { fail(reason); }
   };
-  const toggle = (project: MixProject, startMs: number, selectedId?: string) => {
+  const toggle = (project: MixProject, startMs: number, selectedId?: string | readonly string[]) => {
     if (requested.current) { stop(); return; }
     return play(project, startMs, selectedId);
   };

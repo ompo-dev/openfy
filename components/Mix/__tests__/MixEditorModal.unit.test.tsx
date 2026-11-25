@@ -122,12 +122,41 @@ it('keeps preparation silent and exposes functional top-bar controls', async () 
   expect(view.getByLabelText('Parar prévia')).toBeTruthy();
   expect(view.getByTestId('mix-transport-time')).toBeTruthy();
   await fireEvent.press(view.getByLabelText('Adicionar batida no cursor'));
-  await fireEvent.press(view.getByLabelText('Alternar seleção do clipe'));
+  await fireEvent.press(view.getByLabelText('Seleção múltipla'));
+  await fireEvent.press(view.getByLabelText('Selecionar clipe 1: One'));
   expect(view.getByLabelText('Dividir no cursor')).toBeDisabled();
-  await fireEvent.press(view.getByLabelText('Alternar seleção do clipe'));
+  await fireEvent.press(view.getByLabelText('Selecionar clipe 1: One'));
+  await fireEvent.press(view.getByLabelText('Seleção múltipla'));
   expect(view.getByLabelText('Dividir no cursor')).toBeTruthy();
   await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
   expect(jest.mocked(saveMixProject).mock.calls.at(-1)![1][0].beatsMs).toEqual([16000]);
+});
+it('selects several clips, changes only their requested effect and undoes the whole operation', async () => {
+  const mix = { ...project, clips: [
+    { ...project.clips[0], fadeInMs: 1000 },
+    { ...project.clips[0], id: 'second', lane: 1, fadeOutMs: 3000 },
+    { ...project.clips[0], id: 'third', lane: 2, volume: 0.3 },
+  ] };
+  const view = await render(<MixEditor project={mix} onClose={jest.fn()} onSaved={jest.fn()} />);
+  await fireEvent.press(view.getByLabelText('Seleção múltipla'));
+  await fireEvent.press(view.getByLabelText('Selecionar clipe 2: One'));
+  expect(view.getByText('2 clipes selecionados')).toBeTruthy();
+  expect(view.getByLabelText('Selecionar clipe 1: One').props.accessibilityState.selected).toBe(true);
+  expect(view.getByLabelText('Selecionar clipe 2: One').props.accessibilityState.selected).toBe(true);
+  await fireEvent.press(view.getByLabelText('Volume do clipe'));
+  await fireEvent(view.getByLabelText('Ajustar volume do clipe'), 'valueChange', 0.6);
+  await fireEvent.press(view.getByLabelText('Aplicar volume'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalledTimes(1));
+  expect(jest.mocked(saveMixProject).mock.calls[0][1]).toEqual([
+    { ...mix.clips[0], volume: 0.6 }, { ...mix.clips[1], volume: 0.6 }, mix.clips[2],
+  ]);
+  await fireEvent.press(view.getByLabelText('Desfazer'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalledTimes(2));
+  expect(jest.mocked(saveMixProject).mock.calls[1][1]).toEqual(mix.clips);
+  await fireEvent.press(view.getByLabelText('Refazer'));
+  await fireEvent.press(view.getByLabelText('Dividir no cursor'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalledTimes(4));
+  expect(jest.mocked(saveMixProject).mock.calls[3][1]).toHaveLength(5);
 });
 it('slides the source waveform within a fixed 30-second window, previews the draft and commits only on apply', async () => {
   const view = await render(<MixEditor project={project} onClose={jest.fn()} onSaved={jest.fn()} />);

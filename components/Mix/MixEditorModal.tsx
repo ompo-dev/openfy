@@ -25,7 +25,7 @@ import { HeaderIconButton } from '../gym';
 import { PlaylistSheetAction } from '../LocalPlaylist/PlaylistForm';
 import { PlaylistTrackPickerModal } from '../LocalPlaylist/PlaylistTrackPickerModal';
 import { saveMixProject } from '../../services/mix/mixRepository';
-import { compactMixLanes, createMixId, MIN_CLIP_MS, clipDuration, formatMixTime, insertMixClipCopy, mixDuration, mixTimeline, moveMixClip, placeMixClip, replaceMixClipSource, slipMixClip, splitMixClip, trimMixClipAtPosition,
+import { applyMixGroupEffects, insertMixGroupCopy, moveMixGroup, slipMixGroup, trimMixGroup, compactMixLanes, createMixId, MIN_CLIP_MS, clipDuration, formatMixTime, insertMixClipCopy, mixDuration, mixTimeline, moveMixClip, placeMixClip, replaceMixClipSource, slipMixClip, splitMixClip, trimMixClipAtPosition,
   validateMixClips, type MixClip, type MixProject } from '../../services/mix/mixTimeline';
 import { log } from '../../utils/appLogger';
 import { useMixPreview } from './useMixPreview';
@@ -33,14 +33,16 @@ import { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
 import type { LibraryTrack } from '../../services/library/catalogLibrary';
 import { MixTimelineEditor } from './MixTimelineEditor';
 import { MixBeatSheet } from './MixBeatSheet';
+import { loadMixRhythm, loadMixWaveform } from '../../services/mix/mixWaveform';
+import { detectMixBeats, trackMixRhythm, type BeatDensity } from '../../services/mix/mixBeats';
 import { getExistingLocalAudioPath } from '../../services/download/localAudioPaths';
 
 function Tool({ label, caption, icon: Icon, onPress, disabled = false, selected = false, transport = false, filled = false }: {
   label: string; caption?: string; icon: typeof Play; onPress: () => void; disabled?: boolean; selected?: boolean; transport?: boolean; filled?: boolean;
 }) {
-  return <LoggedPressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress}
+  return <LoggedPressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected }} disabled={disabled} onPress={onPress}
     style={[S.tool, transport && S.transportTool, disabled && { opacity: 0.42 }]}>
-    <Icon size={transport ? 24 : 22} color={disabled && transport ? '#8994A3' : selected && !transport ? '#1ED760' : '#FFFFFF'}
+    <Icon size={transport ? 24 : 22} color={disabled && transport ? '#8994A3' : selected ? '#FFCF20' : '#FFFFFF'}
       fill={filled ? '#FFFFFF' : 'none'} />
     {caption ? <Text style={S.toolCaption}>{caption}</Text> : null}
   </LoggedPressable>;
@@ -57,10 +59,12 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
   const [past, setPast] = React.useState<MixClip[][]>([]);
   const [future, setFuture] = React.useState<MixClip[][]>([]);
   const [selectedId, select] = React.useState(project.clips[0]?.id || '');
+  const [multi, setMulti] = React.useState(false);
+  const [groupIds, setGroupIds] = React.useState<string[]>([]);
   const [sources, setSources] = React.useState(project.tracks);
   const [pickerLane, setPickerLane] = React.useState<number | null>(null);
-  const [replaceId, setReplaceId] = React.useState<string | null>(null);
-  const [clipboard, setClipboard] = React.useState<MixClip | null>(null);
+  const [replaceId, setReplaceId] = React.useState<string[] | null>(null);
+  const [clipboard, setClipboard] = React.useState<ReturnType<typeof mixTimeline>>([]);
   const [slip, setSlip] = React.useState<{ id: string; sourceStart: number } | null>(null);
   const session = React.useRef(0);
   const editVersion = React.useRef(0);
@@ -70,20 +74,31 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
   const failedWrite = React.useRef(false);
   const [saveError, setSaveError] = React.useState('');
   const [panel, setPanel] = React.useState<'volume' | 'beats' | null>(null);
+  const [batchDensity, setBatchDensity] = React.useState<BeatDensity>('less');
+  const [batchBusy, setBatchBusy] = React.useState(false);
   const [audioTab, setAudioTab] = React.useState<'volume' | 'duck' | 'fade'>('volume');
   const [volume, setVolume] = React.useState(1);
   const [duckAmount, setDuckAmount] = React.useState(0);
   const [fadeInMs, setFadeInMs] = React.useState(0);
   const [fadeOutMs, setFadeOutMs] = React.useState(0);
+  const effectChanges = React.useRef<Partial<Pick<MixClip, 'volume' | 'duckAmount' | 'fadeInMs' | 'fadeOutMs'>>>({});
   const preview = useMixPreview();
   const timeline = React.useMemo(() => mixTimeline(clips), [clips]);
   const total = React.useMemo(() => mixDuration(clips), [clips]);
-  const selected = timeline.find((clip) => clip.id === selectedId);
+  const selection = timeline.filter((clip) => multi ? groupIds.includes(clip.id) : clip.id === selectedId);
+  const selectionIds = new Set(selection.map((clip) => clip.id));
+  const selected = selection.find((clip) => clip.id === selectedId) || selection[0];
+  const grouped = selection.length > 1;
+  const atCursor = selection.filter((clip) => preview.position >= clip.startMs && preview.position < clip.endMs);
+  const splittable = selection.filter((clip) => preview.position - clip.startMs >= MIN_CLIP_MS && clip.endMs - preview.position >= MIN_CLIP_MS);
   const tracks = React.useMemo(() => {
     const byId = new Map((library || []).map((item) => [item.spotifyId, item]));
     return new Map(sources.map((item) => [item.spotifyId, mergeMixTrack(item, byId.get(item.spotifyId))]));
   }, [sources, library]);
   const track = selected ? tracks.get(selected.trackId) : undefined;
+  const sourceDuration = (id: string) => tracks.get(id)?.duration_ms ?? NaN;
+  const slipChanges = (start: number) => grouped && selected ? slipMixGroup(clips, selectionIds, selected.id, start, sourceDuration)
+    : selected && track ? slipMixClip(clips, selected.id, start, track.duration_ms) : clips;
   const downloaded = React.useMemo(() => (library || []).filter((item) => item.isDownloaded && item.localAudioPath), [library]);
   React.useEffect(() => {
     if (savedBase.current.id === project.id && project.revision <= savedBase.current.revision) return;
@@ -92,7 +107,7 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
     preview.stop();
     setPanel(null);
     session.current++;
-    setSlip(null); setReplaceId(null); setClipboard(null);
+    setSlip(null); setReplaceId(null); setClipboard([]); setMulti(false); setGroupIds([]);
     setClips(compactMixLanes(project.clips)); setPast([]); setFuture([]); select(project.clips[0]?.id || '');
     setSources(project.tracks); setPickerLane(null); preview.setPosition(0);
     // A new revision starts a fresh editing session after adding source tracks.
@@ -152,7 +167,13 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
   }));
   React.useEffect(() => () => onGestureActive?.(false), [onGestureActive]);
   const pick = (clip: (typeof timeline)[number]) => {
-    preview.stop(); select(clip.id);
+    preview.stop();
+    if (multi) {
+      setGroupIds((ids) => ids.includes(clip.id) ? ids.filter((id) => id !== clip.id) : [...ids, clip.id]);
+      select(clip.id);
+      return;
+    }
+    select(clip.id);
     if (preview.position < clip.startMs || preview.position >= clip.endMs) preview.setPosition(clip.startMs);
   };
   const undo = () => {
@@ -193,32 +214,47 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
   };
   const openPicker = (lane: number) => { preview.stop(); setPickerLane(lane); };
   const replaceSource = async (ids: string[]) => {
-    const id = replaceId;
+    const idsToReplace = replaceId;
     const request = session.current;
     const version = editVersion.current;
     const item = downloaded.find((track) => track.spotifyId === ids[0]);
-    if (!id || !item) return;
+    if (!idsToReplace?.length || !item) return;
     try {
       if (!await getExistingLocalAudioPath(item.localAudioPath, 0)) throw new Error('Baixe a música antes de substituí-la.');
       if (request !== session.current) return;
       if (version !== editVersion.current) { Alert.alert('Mix', 'O mix mudou. Escolha a substituição novamente.'); return; }
       const source = sources.find((track) => track.spotifyId === item.spotifyId) || item;
       const nextSources = sources.includes(source) ? sources : [...sources, source];
-      if (commit(replaceMixClipSource(clips, id, source), 'replace-source', nextSources)) select(id);
+      commit(idsToReplace.reduce((next, id) => replaceMixClipSource(next, id, source), clips), 'replace-source', nextSources);
     } catch (error) { if (request === session.current) Alert.alert('Mix', String(error)); }
   };
   const copyClip = () => {
-    const clip = clips.find((item) => item.id === selectedId);
-    if (clip) setClipboard({ ...clip, ...(clip.beatsMs ? { beatsMs: [...clip.beatsMs] } : {}) });
+    if (selection.length) setClipboard(selection.map((clip) => ({ ...clip, ...(clip.beatsMs ? { beatsMs: [...clip.beatsMs] } : {}) })));
   };
   const insertCopy = (duplicate: boolean) => {
-    const clip = duplicate ? clips.find((item) => item.id === selectedId) : clipboard;
-    if (!clip || (duplicate && !selected)) return;
-    const id = createMixId();
-    const next = insertMixClipCopy(clips, clip, id, selected?.lane ?? clip.lane ?? 0,
-      duplicate ? selected!.endMs : preview.position, duplicate);
-    if (next === clips) { Alert.alert('Mix', 'Não há espaço disponível para outro clipe.'); return; }
-    if (commit(next, duplicate ? 'duplicate' : 'paste')) select(id);
+    const items = duplicate ? selection : clipboard;
+    if (!items.length) return;
+    if (items.length > 1) {
+      const ids = items.map(() => createMixId());
+      const base = duplicate ? Math.max(...items.map((clip) => clip.endMs)) : preview.position;
+      const next = insertMixGroupCopy(clips, items, ids, base);
+      if (next === clips) { Alert.alert('Mix', 'Não há espaço disponível para copiar a seleção.'); return; }
+      if (commit(next, duplicate ? 'duplicate' : 'paste')) { setMulti(true); setGroupIds(ids); select(ids[0]); }
+      return;
+    }
+    const first = Math.min(...items.map((clip) => clip.startMs));
+    const base = duplicate ? Math.max(...items.map((clip) => clip.endMs)) : preview.position;
+    const ids: string[] = [];
+    let next = clips;
+    for (const clip of items) {
+      const id = createMixId();
+      const { startMs, endMs: _end, ...source } = clip;
+      const result = insertMixClipCopy(next, source, id, items.length === 1 ? selected?.lane ?? clip.lane : clip.lane,
+        base + startMs - first, duplicate || items.length > 1);
+      if (!result.some((item) => item.id === id)) { Alert.alert('Mix', 'Não há espaço disponível para copiar a seleção.'); return; }
+      next = result; ids.push(id);
+    }
+    if (commit(next, duplicate ? 'duplicate' : 'paste')) { select(ids[0]); if (multi) setGroupIds(ids); }
   };
   const openSlip = () => {
     if (!selected || !track || track.duration_ms <= clipDuration(selected)) return;
@@ -228,78 +264,102 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
   };
   const cancelSlip = () => { preview.stop(); setSlip(null); onGestureActive?.(false); };
   const applySlip = () => {
-    if (slip && track) commit(slipMixClip(clips, slip.id, slip.sourceStart, track.duration_ms), 'slip');
+    if (slip && track) commit(slipChanges(slip.sourceStart), 'slip');
     cancelSlip();
   };
-  const playbackClips = slip && track ? slipMixClip(clips, slip.id, slip.sourceStart, track.duration_ms) : clips;
-  const cursorClip = selected || timeline.find((clip) => preview.position >= clip.startMs && preview.position < clip.endMs);
+  const playbackClips = slip && track ? slipChanges(slip.sourceStart) : clips;
   const toggleCursorSelection = () => {
-    if (selected) { preview.stop(); select(''); }
-    else if (cursorClip) pick(cursorClip);
+    preview.stop();
+    if (multi) { setMulti(false); setGroupIds([]); select(selected?.id || ''); }
+    else { setMulti(true); setGroupIds(selected ? [selected.id] : []); }
   };
   const addBeatAtCursor = () => {
-    if (!selected || preview.position < selected.startMs || preview.position >= selected.endMs) return;
-    const ms = Math.round(selected.sourceStartMs + preview.position - selected.startMs);
-    const beatsMs = [...new Set([...(selected.beatsMs || []), ms])].sort((a,b) => a-b);
-    commit(clips.map((clip) => clip.id === selected.id ? { ...clip, beatsMs } : clip), 'beat-at-cursor');
+    const times = new Map(atCursor.map((clip) => [clip.id, Math.round(clip.sourceStartMs + preview.position - clip.startMs)]));
+    commit(clips.map((clip) => times.has(clip.id) ? { ...clip, beatsMs: [...new Set([...(clip.beatsMs || []), times.get(clip.id)!])].sort((a,b) => a-b) } : clip), 'beat-at-cursor');
+  };
+  const applyBatchBeats = async () => {
+    if (batchBusy) return;
+    const request = session.current, version = editVersion.current;
+    setBatchBusy(true);
+    try {
+      const marks = new Map<string, number[]>();
+      for (const clip of selection) {
+        if (batchDensity === 'off') { marks.set(clip.id, []); continue; }
+        const source = tracks.get(clip.trackId);
+        if (!source) throw new Error('Fonte de áudio indisponível.');
+        const rhythm = await loadMixRhythm(source.localAudioPath, clip.trackId);
+        const peaks = rhythm ? [] : await loadMixWaveform(source.localAudioPath, clip.trackId, true);
+        if (!rhythm && !peaks.length) throw new Error('Não foi possível analisar todas as músicas.');
+        marks.set(clip.id, rhythm ? trackMixRhythm(rhythm, clip.sourceStartMs, clip.sourceEndMs, batchDensity)
+          : detectMixBeats(peaks, source.duration_ms, clip.sourceStartMs, clip.sourceEndMs, batchDensity));
+      }
+      if (request !== session.current || version !== editVersion.current) return;
+      commit(clips.map((clip) => marks.has(clip.id) ? { ...clip, beatsMs: marks.get(clip.id)! } : clip), 'batch-beats');
+      setPanel(null);
+    } catch (error) { if (request === session.current) Alert.alert('Batidas', String(error)); }
+    finally { if (request === session.current) setBatchBusy(false); }
   };
   const header = <View testID="mix-editor-panel" style={S.headerContent}>
     <View style={S.transport}>
       <View style={S.transportSide}>
-        <Tool transport label="Adicionar batida no cursor" icon={TagPlus} disabled={!!slip || !selected || preview.position < selected.startMs || preview.position >= selected.endMs} onPress={addBeatAtCursor} />
-        <Tool transport label="Alternar seleção do clipe" icon={CopyCheck} disabled={!!slip || !cursorClip} onPress={toggleCursorSelection} />
+        <Tool transport label="Adicionar batida no cursor" icon={TagPlus} disabled={!!slip || !atCursor.length} onPress={addBeatAtCursor} />
+        <Tool transport label="Seleção múltipla" icon={CopyCheck} selected={multi} disabled={!!slip} onPress={toggleCursorSelection} />
       </View>
       <View style={S.centerTransport}><Tool transport filled label={preview.playing || preview.busy ? 'Parar prévia' : 'Ouvir mix'} icon={preview.playing || preview.busy ? Pause : Play}
         disabled={!clips.length} onPress={() => { if (!preview.playing && !preview.busy) onPreviewStart?.(); void preview.toggle({ ...project, tracks: sources, clips: playbackClips },
-          selected ? (preview.position >= selected.startMs && preview.position < selected.endMs ? preview.position : selected.startMs)
-            : preview.position >= total ? 0 : preview.position, selected?.id); }} selected={preview.playing} /></View>
+          selected && !grouped ? (preview.position >= selected.startMs && preview.position < selected.endMs ? preview.position : selected.startMs)
+            : preview.position >= total ? 0 : preview.position, grouped ? selection.map((clip) => clip.id) : selected?.id); }} selected={preview.playing} /></View>
       <View style={[S.transportSide, S.history]}>
         <Tool transport label="Desfazer" icon={Undo2} disabled={!past.length || !!slip} onPress={undo} />
         <Tool transport label="Refazer" icon={Redo2} disabled={!future.length || !!slip} onPress={redo} />
       </View>
     </View>
     {preview.error ? <Text accessibilityRole="alert" style={S.error}>{preview.error}</Text> : null}
-    <MixTimelineEditor timeline={timeline} total={total} tracks={tracks} selectedId={selectedId} position={preview.position}
+    <MixTimelineEditor timeline={timeline} total={total} tracks={tracks} selectedId={selected?.id || ''} selectedIds={selectionIds} position={preview.position}
       playing={preview.playing} disabled={false} onSelect={pick} onSeek={preview.setPosition} onScrub={preview.stop}
-      onTrim={(id, range) => commit(trimMixClipAtPosition(clips, id, range[0], range[1]), 'trim-handle')}
-      onDragSelect={select} onMoveClip={(id, lane, ms) => commit(placeMixClip(clips, id, lane, ms), 'drag-clip')}
-      onDeselect={() => { preview.stop(); select(''); }}
+      onTrim={(id, range) => commit(grouped && selectionIds.has(id) ? trimMixGroup(clips, selectionIds, id, range, sourceDuration) : trimMixClipAtPosition(clips, id, range[0], range[1]), 'trim-handle')}
+      onDragSelect={(id) => { select(id); if (multi && !selectionIds.has(id)) setGroupIds([id]); }}
+      onMoveClip={(id, lane, ms) => commit(grouped && selectionIds.has(id) ? moveMixGroup(clips, selectionIds, id, lane, ms) : placeMixClip(clips, id, lane, ms), 'drag-clip')}
+      onDeselect={() => { preview.stop(); select(''); setGroupIds([]); }}
       onAddTrack={openPicker} onTrimActive={onGestureActive}
-      slip={slip ? { ...slip, onChange: (sourceStart) => { preview.stop(); setSlip((old) => old ? { ...old, sourceStart } : old); } } : undefined} />
+      slip={slip ? { ...slip, onChange: (sourceStart) => { preview.stop(); const bounded = slipChanges(sourceStart).find((clip) => clip.id === slip.id)?.sourceStartMs ?? sourceStart; setSlip((old) => old ? { ...old, sourceStart: bounded } : old); } } : undefined} />
     {slip && selected ? <View style={S.slipTools}>
       <Tool label="Cancelar deslizar" icon={X} onPress={cancelSlip} />
       <View style={S.slipText}><Text style={S.secondary}>Arraste para selecionar o trecho do áudio que você quer incluir</Text>
         <Text style={S.slipRange}>{formatMixTime(slip.sourceStart)} – {formatMixTime(slip.sourceStart + clipDuration(selected))} · {formatMixTime(clipDuration(selected))}</Text></View>
       <Tool label="Aplicar deslizar" icon={Check} onPress={applySlip} />
     </View> : <View testID="mix-editor-toolbar" style={S.inspector}>
+      {multi ? <Text style={[S.secondary, { paddingHorizontal: 8 }]}>{selection.length} clipes selecionados</Text> : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.editTools}>
-        <Tool label="Dividir no cursor" caption="Dividir" icon={Scissors} disabled={!selected || preview.position - selected.startMs < MIN_CLIP_MS || selected.endMs - preview.position < MIN_CLIP_MS}
-          onPress={() => { if (selected) commit(splitMixClip(clips, selected.id, preview.position), 'split'); }} />
+        <Tool label="Dividir no cursor" caption="Dividir" icon={Scissors} disabled={!splittable.length}
+          onPress={() => commit(splittable.reduce((next, clip) => splitMixClip(next, clip.id, preview.position), clips), 'split')} />
         <Tool label="Volume do clipe" caption="Volume" icon={Volume2} disabled={!selected || !track} onPress={() => {
           if (!selected) return;
+          effectChanges.current = {};
           preview.stop(); setVolume(selected.volume); setDuckAmount(selected.duckAmount || 0);
           setFadeInMs(selected.fadeInMs || 0); setFadeOutMs(selected.fadeOutMs || 0);
           setAudioTab('volume'); setPanel('volume');
         }} />
         <Tool label="Batidas do clipe" caption="Batidas" icon={AudioLines} disabled={!selected || !track} onPress={() => {
           if (!selected) return;
+          setBatchDensity('less');
           preview.stop(); if (preview.position < selected.startMs || preview.position >= selected.endMs) preview.setPosition(selected.startMs);
           setPanel('beats');
         }} />
-        <Tool label="Substituir clipe" caption="Substituir" icon={ArrowLeftRight} disabled={!selected} onPress={() => { if (selected) { preview.stop(); setReplaceId(selected.id); } }} />
+        <Tool label="Substituir clipe" caption="Substituir" icon={ArrowLeftRight} disabled={!selected} onPress={() => { if (selected) { preview.stop(); setReplaceId(selection.map((clip) => clip.id)); } }} />
         <Tool label="Copiar clipe" caption="Copiar" icon={Copy} disabled={!selected} onPress={copyClip} />
-        <Tool label="Colar clipe" caption="Colar" icon={ClipboardPaste} disabled={!clipboard} onPress={() => insertCopy(false)} />
+        <Tool label="Colar clipe" caption="Colar" icon={ClipboardPaste} disabled={!clipboard.length} onPress={() => insertCopy(false)} />
         <Tool label="Duplicar clipe" caption="Duplicar" icon={CopyPlus} disabled={!selected} onPress={() => insertCopy(true)} />
         <Tool label="Deslizar clipe" caption="Deslizar" icon={MoveHorizontal} disabled={!selected || !track || track.duration_ms <= clipDuration(selected)} onPress={openSlip} />
-        <Tool label="Remover clipe" caption="Excluir" icon={Trash2} disabled={!selected} onPress={() => { if (selected) { commit(clips.filter((clip) => clip.id !== selected.id), 'remove'); select(''); } }} />
-        <Tool label="Mover clipe antes" icon={ChevronLeft} disabled={!selected || !timeline.some((c) => c.lane === selected.lane && c.startMs < selected.startMs)}
+        <Tool label="Remover clipe" caption="Excluir" icon={Trash2} disabled={!selected} onPress={() => { if (selected) { commit(clips.filter((clip) => !selectionIds.has(clip.id)), 'remove'); select(''); setGroupIds([]); } }} />
+        <Tool label="Mover clipe antes" icon={ChevronLeft} disabled={!selected || grouped || !timeline.some((c) => c.lane === selected.lane && c.startMs < selected.startMs)}
           onPress={() => {
             if (!selected) return;
             const index = timeline.findIndex((c) => c.id === selected.id);
             const previous = timeline.slice(0, index).map((c) => c.lane).lastIndexOf(selected.lane);
             if (previous >= 0) commit(moveMixClip(clips, index, previous), 'reorder');
           }} />
-        <Tool label="Mover clipe depois" icon={ChevronRight} disabled={!selected || !timeline.some((c) => c.lane === selected.lane && c.startMs > selected.startMs)}
+        <Tool label="Mover clipe depois" icon={ChevronRight} disabled={!selected || grouped || !timeline.some((c) => c.lane === selected.lane && c.startMs > selected.startMs)}
           onPress={() => {
             if (!selected) return;
             const index = timeline.findIndex((c) => c.id === selected.id);
@@ -321,7 +381,7 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
       onClose={() => setReplaceId(null)} onConfirm={(ids) => void replaceSource(ids)} /> : null}{panel === 'volume' && selected ? <SheetFrame visible title="Áudio" size="sheet" dimBackdrop={false} centerTitle
       onClose={() => setPanel(null)} hideDefaultClose headerLeading={<HeaderIconButton icon="x" label="Cancelar volume" onPress={() => setPanel(null)} />}
       headerTrailing={<PlaylistSheetAction label="Aplicar volume" onPress={() => {
-        commit(clips.map((clip) => clip.id === selected.id ? { ...clip, volume, duckAmount, fadeInMs, fadeOutMs } : clip), 'audio-effects'); setPanel(null);
+        commit(applyMixGroupEffects(clips, selectionIds, effectChanges.current), 'audio-effects'); setPanel(null);
       }} />}>
       <View style={S.audioTabs}>
         {([['volume', 'Volume'], ['duck', 'Redução automática'], ['fade', 'Esmaecer']] as const).map(([tab, label]) =>
@@ -333,21 +393,28 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
       {audioTab === 'volume' ? <>
       <View style={S.rangeLabel}><Text style={S.secondary}>Volume do clipe</Text><Text style={S.value}>{Math.round(volume * 100)}%</Text></View>
       <Slider accessibilityLabel="Ajustar volume do clipe" value={volume} minimumValue={0} maximumValue={1} step={0.01}
-        minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFFFFF" onValueChange={setVolume} />
+        minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFFFFF" onValueChange={(v) => { effectChanges.current.volume = v; setVolume(v); }} />
       </> : audioTab === 'duck' ? <>
         <View style={S.rangeLabel}><Text style={S.secondary}>Reduzir volume na sobreposição</Text><Text style={S.value}>{Math.round(duckAmount * 100)}%</Text></View>
         <Slider accessibilityLabel="Ajustar redução automática" value={duckAmount} minimumValue={0} maximumValue={1} step={0.01}
-          minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFF" onValueChange={setDuckAmount} />
+          minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFF" onValueChange={(v) => { effectChanges.current.duckAmount = v; setDuckAmount(v); }} />
         <Text style={S.secondary}>Reduz o volume deste clipe quando outra faixa de áudio está tocando.</Text>
       </> : <>
         <View style={S.rangeLabel}><Text style={S.secondary}>Aparecimento gradual</Text><Text style={S.value}>{(fadeInMs / 1000).toFixed(1)} s</Text></View>
         <Slider accessibilityLabel="Ajustar aparecimento gradual" value={fadeInMs} minimumValue={0} maximumValue={Math.max(0, Math.min(30000, selected.endMs - selected.startMs - fadeOutMs))} step={100}
-          minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFF" onValueChange={setFadeInMs} />
+          minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFF" onValueChange={(v) => { effectChanges.current.fadeInMs = v; setFadeInMs(v); }} />
         <View style={S.rangeLabel}><Text style={S.secondary}>Desaparecimento gradual</Text><Text style={S.value}>{(fadeOutMs / 1000).toFixed(1)} s</Text></View>
         <Slider accessibilityLabel="Ajustar desaparecimento gradual" value={fadeOutMs} minimumValue={0} maximumValue={Math.max(0, Math.min(30000, selected.endMs - selected.startMs - fadeInMs))} step={100}
-          minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFF" onValueChange={setFadeOutMs} />
+          minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFF" onValueChange={(v) => { effectChanges.current.fadeOutMs = v; setFadeOutMs(v); }} />
       </>}
-    </SheetFrame> : null}{panel === 'beats' && selected && track ? <MixBeatSheet clip={selected} duration={track.duration_ms}
+    </SheetFrame> : null}{panel === 'beats' && grouped ? <SheetFrame visible title="Batidas" size="sheet" dimBackdrop={false}
+      onClose={() => { if (!batchBusy) setPanel(null); }} allowSwipeDismissal={!batchBusy}
+      headerTrailing={<PlaylistSheetAction label="Aplicar batidas" busy={batchBusy} disabled={batchBusy} onPress={() => void applyBatchBeats()} />}>
+      <Text style={S.secondary}>Gerar batidas individualmente para {selection.length} clipes.</Text>
+      <View style={S.audioTabs}>{([['off','Desativado'],['less','Menos'],['more','Mais']] as const).map(([mode,label]) =>
+        <LoggedPressable key={mode} disabled={batchBusy} accessibilityLabel={label} accessibilityState={{ selected: batchDensity === mode }}
+          onPress={() => setBatchDensity(mode)} style={[S.audioTab, batchDensity === mode && S.activeTab]}><Text style={S.tabText}>{label}</Text></LoggedPressable>)}</View>
+    </SheetFrame> : panel === 'beats' && selected && track ? <MixBeatSheet clip={selected} duration={track.duration_ms}
       uri={track.localAudioPath} position={preview.position} playing={preview.playing || preview.busy}
       onSeek={(ms) => { preview.stop(); preview.setPosition(ms); }}
       onPlay={() => { if (!preview.playing && !preview.busy) onPreviewStart?.(); void preview.toggle({ ...project, tracks: sources, clips }, preview.position, selected.id); }}
