@@ -10,18 +10,20 @@ import Pause from 'lucide-react-native/icons/pause';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import Volume2 from 'lucide-react-native/icons/volume-2';
+import AudioLines from 'lucide-react-native/icons/audio-lines';
 import { SheetFrame, LoggedPressable } from '../native';
 import { HeaderIconButton } from '../gym';
 import { PlaylistSheetAction } from '../LocalPlaylist/PlaylistForm';
 import { PlaylistTrackPickerModal } from '../LocalPlaylist/PlaylistTrackPickerModal';
 import { saveMixProject } from '../../services/mix/mixRepository';
-import { compactMixLanes, createMixId, formatMixTime, MIN_CLIP_MS, mixDuration, mixTimeline, moveMixClip, placeMixClip, splitMixClip, trimMixClip,
+import { compactMixLanes, createMixId, formatMixTime, MIN_CLIP_MS, mixDuration, mixTimeline, moveMixClip, placeMixClip, splitMixClip, trimMixClipAtPosition,
   validateMixClips, type MixClip, type MixProject } from '../../services/mix/mixTimeline';
 import { log } from '../../utils/appLogger';
 import { useMixPreview } from './useMixPreview';
 import { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
 import type { LibraryTrack } from '../../services/library/catalogLibrary';
 import { MixTimelineEditor } from './MixTimelineEditor';
+import { MixBeatSheet } from './MixBeatSheet';
 import { getExistingLocalAudioPath } from '../../services/download/localAudioPaths';
 
 function Tool({ label, caption, icon: Icon, onPress, disabled = false, selected = false }: {
@@ -47,8 +49,12 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
   const [saving, setSaving] = React.useState(false);
   const [trimActive, setTrimActive] = React.useState(false);
   const savingRef = React.useRef(false);
-  const [panel, setPanel] = React.useState<'volume' | null>(null);
+  const [panel, setPanel] = React.useState<'volume' | 'beats' | null>(null);
+  const [audioTab, setAudioTab] = React.useState<'volume' | 'duck' | 'fade'>('volume');
   const [volume, setVolume] = React.useState(1);
+  const [duckAmount, setDuckAmount] = React.useState(0);
+  const [fadeInMs, setFadeInMs] = React.useState(0);
+  const [fadeOutMs, setFadeOutMs] = React.useState(0);
   const preview = useMixPreview();
   const timeline = React.useMemo(() => mixTimeline(clips), [clips]);
   const total = React.useMemo(() => mixDuration(clips), [clips]);
@@ -149,7 +155,7 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
     {preview.error ? <Text accessibilityRole="alert" style={S.error}>{preview.error}</Text> : null}
     <MixTimelineEditor timeline={timeline} total={total} tracks={tracks} selectedId={selectedId} position={preview.position}
       playing={preview.playing} disabled={saving} onSelect={pick} onSeek={preview.setPosition} onScrub={preview.stop}
-      onTrim={(id, range) => commit(trimMixClip(clips, id, range[0], range[1]), 'trim-handle')}
+      onTrim={(id, range) => commit(trimMixClipAtPosition(clips, id, range[0], range[1]), 'trim-handle')}
       onDragSelect={select} onMoveClip={(id, lane, ms) => commit(placeMixClip(clips, id, lane, ms), 'drag-clip')}
       onDeselect={() => { preview.stop(); select(''); }}
       onAddTrack={openPicker} onTrimActive={setTrimActive} />
@@ -157,7 +163,15 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
       <View style={S.editTools}>
         <Tool label="Dividir no cursor" caption="Dividir" icon={Scissors} disabled={saving || preview.position - selected.startMs < MIN_CLIP_MS || selected.endMs - preview.position < MIN_CLIP_MS}
           onPress={() => commit(splitMixClip(clips, selected.id, preview.position), 'split')} />
-        <Tool label="Volume do clipe" caption="Volume" icon={Volume2} disabled={saving} onPress={() => { preview.stop(); setVolume(selected.volume); setPanel('volume'); }} />
+        <Tool label="Volume do clipe" caption="Volume" icon={Volume2} disabled={saving} onPress={() => {
+          preview.stop(); setVolume(selected.volume); setDuckAmount(selected.duckAmount || 0);
+          setFadeInMs(selected.fadeInMs || 0); setFadeOutMs(selected.fadeOutMs || 0);
+          setAudioTab('volume'); setPanel('volume');
+        }} />
+        <Tool label="Batidas do clipe" caption="Batidas" icon={AudioLines} disabled={saving} onPress={() => {
+          preview.stop(); if (preview.position < selected.startMs || preview.position >= selected.endMs) preview.setPosition(selected.startMs);
+          setPanel('beats');
+        }} />
         <Tool label="Remover clipe" caption="Excluir" icon={Trash2} disabled={saving} onPress={() => { commit(clips.filter((clip) => clip.id !== selected.id), 'remove'); select(''); }} />
         <Tool label="Mover clipe antes" icon={ChevronLeft} disabled={saving || !timeline.some((c) => c.lane === selected.lane && c.startMs < selected.startMs)}
           onPress={() => {
@@ -179,15 +193,41 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
     allowSwipeDismissal={!dirty && !saving} hideDefaultClose
     headerLeading={<HeaderIconButton icon="x" label="Fechar" onPress={close} />}
     nested={<>{nested}{pickerLane !== null ? <PlaylistTrackPickerModal visible tracks={downloaded} existingTrackIds={[]}
-      onClose={() => setPickerLane(null)} onConfirm={(ids) => void addSources(ids)} /> : null}{panel === 'volume' && selected ? <SheetFrame visible title="Volume" size="sheet"
+      onClose={() => setPickerLane(null)} onConfirm={(ids) => void addSources(ids)} /> : null}{panel === 'volume' && selected ? <SheetFrame visible title="Áudio" size="sheet" dimBackdrop={false} centerTitle
       onClose={() => setPanel(null)} hideDefaultClose headerLeading={<HeaderIconButton icon="x" label="Cancelar volume" onPress={() => setPanel(null)} />}
       headerTrailing={<PlaylistSheetAction label="Aplicar volume" onPress={() => {
-        commit(clips.map((clip) => clip.id === selected.id ? { ...clip, volume } : clip), 'volume'); setPanel(null);
+        commit(clips.map((clip) => clip.id === selected.id ? { ...clip, volume, duckAmount, fadeInMs, fadeOutMs } : clip), 'audio-effects'); setPanel(null);
       }} />}>
+      <View style={S.audioTabs}>
+        {([['volume', 'Volume'], ['duck', 'Redução automática'], ['fade', 'Esmaecer']] as const).map(([tab, label]) =>
+          <LoggedPressable key={tab} accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected: audioTab === tab }}
+            onPress={() => setAudioTab(tab)} style={[S.audioTab, audioTab === tab && S.activeTab]}>
+            <Text style={[S.tabText, audioTab === tab && { color: '#FFF' }]}>{label}</Text>
+          </LoggedPressable>)}
+      </View>
+      {audioTab === 'volume' ? <>
       <View style={S.rangeLabel}><Text style={S.secondary}>Volume do clipe</Text><Text style={S.value}>{Math.round(volume * 100)}%</Text></View>
       <Slider accessibilityLabel="Ajustar volume do clipe" value={volume} minimumValue={0} maximumValue={1} step={0.01}
         minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFFFFF" onValueChange={setVolume} />
-    </SheetFrame> : null}</>}
+      </> : audioTab === 'duck' ? <>
+        <View style={S.rangeLabel}><Text style={S.secondary}>Reduzir volume na sobreposição</Text><Text style={S.value}>{Math.round(duckAmount * 100)}%</Text></View>
+        <Slider accessibilityLabel="Ajustar redução automática" value={duckAmount} minimumValue={0} maximumValue={1} step={0.01}
+          minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFF" onValueChange={setDuckAmount} />
+        <Text style={S.secondary}>Reduz o volume deste clipe quando outra faixa de áudio está tocando.</Text>
+      </> : <>
+        <View style={S.rangeLabel}><Text style={S.secondary}>Aparecimento gradual</Text><Text style={S.value}>{(fadeInMs / 1000).toFixed(1)} s</Text></View>
+        <Slider accessibilityLabel="Ajustar aparecimento gradual" value={fadeInMs} minimumValue={0} maximumValue={Math.max(0, Math.min(30000, selected.endMs - selected.startMs - fadeOutMs))} step={100}
+          minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFF" onValueChange={setFadeInMs} />
+        <View style={S.rangeLabel}><Text style={S.secondary}>Desaparecimento gradual</Text><Text style={S.value}>{(fadeOutMs / 1000).toFixed(1)} s</Text></View>
+        <Slider accessibilityLabel="Ajustar desaparecimento gradual" value={fadeOutMs} minimumValue={0} maximumValue={Math.max(0, Math.min(30000, selected.endMs - selected.startMs - fadeInMs))} step={100}
+          minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFF" onValueChange={setFadeOutMs} />
+      </>}
+    </SheetFrame> : null}{panel === 'beats' && selected && track ? <MixBeatSheet clip={selected} duration={track.duration_ms}
+      uri={track.localAudioPath} position={preview.position} playing={preview.playing || preview.busy}
+      onSeek={(ms) => { preview.stop(); preview.setPosition(ms); }}
+      onPlay={() => void preview.toggle({ ...project, tracks: sources, clips }, preview.position, selected.id)}
+      onClose={() => { preview.stop(); setPanel(null); }}
+      onApply={(beatsMs) => { preview.stop(); commit(clips.map((clip) => clip.id === selected.id ? { ...clip, beatsMs } : clip), 'beats'); setPanel(null); }} /> : null}</>}
     headerTrailing={<PlaylistSheetAction label="Salvar mix" disabled={!dirty} busy={saving} onPress={() => void save()} />}
     renderScrollContent={(pageProps) => <ScrollView {...pageProps} testID="mix-editor-scroll" scrollEnabled={!trimActive}
       showsVerticalScrollIndicator={false}>{header}</ScrollView>}>
@@ -207,6 +247,10 @@ const S = StyleSheet.create({
   rangeLabel: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 8 },
   secondary: { color: '#ABABB2', fontSize: 13, fontFamily: 'SF-Regular' },
   value: { color: '#FFFFFF', fontSize: 13, fontVariant: ['tabular-nums'], marginLeft: 'auto' },
+  audioTabs: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#44474D', gap: 4 },
+  audioTab: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  activeTab: { borderBottomColor: '#FFF' },
+  tabText: { color: '#ABABB2', fontSize: 13, fontFamily: 'SF-Semibold', textAlign: 'center' },
   editTools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingVertical: 4 },
   error: { color: '#FF9F9F', fontSize: 13 },
 });

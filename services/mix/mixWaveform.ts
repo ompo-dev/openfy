@@ -6,7 +6,7 @@ import { prepareLocalAudioForPlayback } from '../audio/localAudioRepair';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { log } from '../../utils/appLogger';
 
-type WaveformModule = { waveformAsync(uri: string, bins: number): Promise<number[]> };
+type WaveformModule = { waveformAsync(uri: string, bins: number): Promise<number[]>; supportsDetailedWaveform?: boolean };
 const cache = new Map<string, number[]>();
 const pending = new Map<string, Promise<number[]>>();
 let queue = Promise.resolve();
@@ -24,7 +24,7 @@ const restore = async () => {
   } catch { /* Rebuild corrupt cache from the downloaded audio. */ }
 };
 
-export const loadMixWaveform = async (uri?: string, trackId?: string): Promise<number[]> => {
+export const loadMixWaveform = async (uri?: string, trackId?: string, detailed = false): Promise<number[]> => {
   let local = await getExistingLocalAudioPath(uri, 0);
   // A library snapshot can be stale immediately after download or a sandbox migration.
   if (!local && trackId) {
@@ -34,7 +34,7 @@ export const loadMixWaveform = async (uri?: string, trackId?: string): Promise<n
   const path = local;
   const info = await FileSystem.getInfoAsync(path);
   if (!info.exists) return [];
-  const key = JSON.stringify([path, info.size, info.modificationTime]);
+  const key = JSON.stringify([path, info.size, info.modificationTime, ...(detailed ? ['detail'] : [])]);
   if (cache.has(key)) return cache.get(key)!;
   if (pending.has(key)) return pending.get(key)!;
   const operation = queue.then(async () => {
@@ -46,16 +46,21 @@ export const loadMixWaveform = async (uri?: string, trackId?: string): Promise<n
       return [];
     }
     let values: number[];
-    try { values = await native.waveformAsync(path, 1024); }
+    const bins = detailed ? (native.supportsDetailedWaveform ? 32768 : 2048) : 1024;
+    try { values = await native.waveformAsync(path, bins); }
     catch {
       const repaired = await prepareLocalAudioForPlayback(path);
-      values = await native.waveformAsync(repaired?.uri || path, 1024);
+      values = await native.waveformAsync(repaired?.uri || path, bins);
     }
     if (!Array.isArray(values) || !values.length || !values.every(Number.isFinite)) return [];
     const peaks = values.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 10000) / 10000);
     cache.set(key, peaks);
+    if (detailed) {
+      const detailedKeys = [...cache.keys()].filter((entry) => entry.endsWith(',"detail"]'));
+      while (detailedKeys.length > 4) cache.delete(detailedKeys.shift()!);
+    }
     if (cache.size > 64) cache.delete(cache.keys().next().value!);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([...cache])).catch(() => {});
+    if (!detailed) await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([...cache].filter(([, values]) => values.length === 1024))).catch(() => {});
     return peaks;
   }).catch((error) => {
     log.error('mix waveform decode failed', { error });

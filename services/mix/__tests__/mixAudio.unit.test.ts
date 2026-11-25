@@ -101,3 +101,19 @@ it('passes timeline gaps to native composition and prevents incorrect playback o
   const result = await renderMixAudio(mix);
   expect(mockRender).toHaveBeenCalledWith([expect.objectContaining({ gapBeforeMs: 3000, startMs: 10000, endMs: 20000, volume: 0.5 })], result.uri);
 });
+
+it('passes the actual fade curve to native and invalidates the cached render when effects change', async () => {
+  const mix = project('effects');
+  mix.clips[0].fadeInMs = 1000;
+  mix.clips[0].fadeOutMs = 2000;
+  await expect(renderMixAudio(mix)).rejects.toThrow('efeitos do mix');
+  jest.mocked(requireOptionalNativeModule).mockReturnValue({ renderMixAsync: mockRender, supportsMixEffects: true } as never);
+  await renderMixAudio(mix);
+  expect(mockRender.mock.calls[0][0][0].envelope).toEqual([
+    { ms: 0, gain: 0 }, { ms: 1000, gain: 0.5 }, { ms: 8000, gain: 0.5 }, { ms: 10000, gain: 0 },
+  ]);
+  await renderMixAudio(mix);
+  expect(mockRender).toHaveBeenCalledTimes(1);
+  await renderMixAudio({ ...mix, clips: [{ ...mix.clips[0], fadeInMs: 1500 }] });
+  expect(mockRender).toHaveBeenCalledTimes(2);
+});

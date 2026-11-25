@@ -55,3 +55,11 @@ it('rejects invalid ranges and unknown clip sources before changing storage', as
   expect(upsertCatalogTracks).not.toHaveBeenCalled();
   expect(await getMixProjects()).toEqual([]);
 });
+it('round-trips version four audio effects and source-relative beat markers', async () => {
+  const edited = { ...project, clips: [{ ...project.clips[0], fadeInMs: 1000, fadeOutMs: 2000, duckAmount: 0.6, beatsMs: [1500, 2000, 2500] }, project.clips[1]] };
+  const raw = await exportMixJson(edited);
+  expect(parseMixJson(raw)).toMatchObject({ version: 4, clips: edited.clips });
+  expect((await importMixJson(raw)).mix.clips).toEqual(edited.clips);
+  const bad = JSON.parse(raw); bad.version = 3;
+  expect(() => parseMixJson(JSON.stringify(bad))).toThrow();
+});

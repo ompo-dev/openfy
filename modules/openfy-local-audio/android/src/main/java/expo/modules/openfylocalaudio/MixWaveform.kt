@@ -8,6 +8,7 @@ import android.net.Uri
 import java.io.File
 import java.nio.ByteOrder
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 internal object MixWaveform {
   fun read(uri: String, bins: Int): List<Float> {
@@ -28,7 +29,10 @@ internal object MixWaveform {
       decoder = codec
       codec.configure(format, null, null, 0)
       codec.start()
-      val peaks = FloatArray(bins.coerceIn(32, 2048))
+      val peaks = FloatArray(bins.coerceIn(32, 32768))
+      val detailed = peaks.size > 2048
+      val energy = DoubleArray(if (detailed) peaks.size else 0)
+      val sampleCounts = IntArray(if (detailed) peaks.size else 0)
       val info = MediaCodec.BufferInfo()
       var inputEnded = false
       var ended = false
@@ -73,7 +77,11 @@ internal object MixWaveform {
               val amplitude = if (bytes == 4) abs(buffer.float) else abs(buffer.short.toInt()) / 32768f
               val time = info.presentationTimeUs + sample / channels * 1000000L / sampleRate
               val bin = (time * peaks.size / duration).toInt().coerceIn(0, peaks.lastIndex)
-              peaks[bin] = maxOf(peaks[bin], amplitude.coerceIn(0f, 1f))
+              val value = amplitude.coerceIn(0f, 1f)
+              if (detailed) {
+                energy[bin] += value.toDouble() * value
+                sampleCounts[bin]++
+              } else peaks[bin] = maxOf(peaks[bin], value)
               sample++
             }
           }
@@ -81,6 +89,7 @@ internal object MixWaveform {
           codec.releaseOutputBuffer(output, false)
         } else if (++idle > 1500) error("Decoder de waveform não respondeu.")
       }
+      if (detailed) for (i in peaks.indices) if (sampleCounts[i] > 0) peaks[i] = sqrt(energy[i] / sampleCounts[i]).toFloat()
       return peaks.toList()
     } finally {
       decoder?.release()

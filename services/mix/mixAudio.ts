@@ -4,15 +4,16 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
 import { getLibraryTracks, toDownloadTrackInput, type LibraryTrack } from '../library/catalogLibrary';
 import { useDownloadStore } from '../../stores/useDownloadStore';
 import { log } from '../../utils/appLogger';
-import { validateMixClips, type MixProject } from './mixTimeline';
+import { mixTimeline, validateMixClips, type MixProject } from './mixTimeline';
+import { gainEnvelope, hasMixEffects, type GainPoint } from './mixEffects';
 import { prepareLocalAudioForPlayback } from '../audio/localAudioRepair';
 import { currentManagedAudioPath } from '../download/localAudioPaths';
 import { mergeMixTrack } from './mixTrackMetadata';
 import { stableDirectAudioUrl } from '../audio/stableAudioUrl';
 
-export type MixAudioClip = { uri: string; startMs: number; endMs: number; volume: number; lane?: number; gapBeforeMs?: number };
+export type MixAudioClip = { uri: string; startMs: number; endMs: number; volume: number; lane?: number; gapBeforeMs?: number; envelope?: GainPoint[] };
 type MixRender = { uri: string; durationMs: number };
-type MixModule = { renderMixAsync(clips: MixAudioClip[], outputUri: string): Promise<MixRender>; supportsMixLanes?: boolean; supportsMixGaps?: boolean };
+type MixModule = { renderMixAsync(clips: MixAudioClip[], outputUri: string): Promise<MixRender>; supportsMixLanes?: boolean; supportsMixGaps?: boolean; supportsMixEffects?: boolean };
 const inFlight = new Map<string, Promise<MixRender>>();
 const cached = new Map<string, { signature: string; result: MixRender }>();
 
@@ -55,6 +56,7 @@ export const renderMixAudio = async (project: MixProject): Promise<MixRender> =>
   if (!project.clips.length) throw new Error('Adicione músicas ao mix.');
   const native = requireOptionalNativeModule<MixModule>('OpenfyLocalAudio');
   if (!native?.renderMixAsync) throw new Error('Instale o novo IPA ou APK para usar o editor de áudio.');
+  if (project.clips.some(hasMixEffects) && !native.supportsMixEffects) throw new Error('Atualize o IPA ou APK para reproduzir os efeitos do mix.');
   if (project.clips.some((clip) => (clip.gapBeforeMs ?? 0) > 0) && !native.supportsMixGaps) {
     throw new Error('Atualize o IPA ou APK para reproduzir mixes com espaços entre clipes.');
   }
@@ -65,7 +67,8 @@ export const renderMixAudio = async (project: MixProject): Promise<MixRender> =>
   const clips: MixAudioClip[] = [];
   const identities: unknown[] = [];
   const prepared = new Map<string, { uri: string; identity: unknown }>();
-  for (const clip of project.clips) {
+  const timeline = mixTimeline(project.clips);
+  for (const clip of timeline) {
     let source = prepared.get(clip.trackId);
     if (!source) {
       const local = await localSource(tracks.get(clip.trackId)?.localAudioPath);
@@ -76,7 +79,8 @@ export const renderMixAudio = async (project: MixProject): Promise<MixRender> =>
     }
     identities.push(source.identity);
     clips.push({ uri: source.uri, startMs: clip.sourceStartMs, endMs: clip.sourceEndMs, volume: clip.volume,
-      ...(clip.lane ? { lane: clip.lane } : {}), ...(clip.gapBeforeMs ? { gapBeforeMs: clip.gapBeforeMs } : {}) });
+      ...(clip.lane ? { lane: clip.lane } : {}), ...(clip.gapBeforeMs ? { gapBeforeMs: clip.gapBeforeMs } : {}),
+      ...(hasMixEffects(clip) ? { envelope: gainEnvelope(clip, timeline) } : {}) });
   }
   const signature = JSON.stringify([clips, identities]);
   const storageKey = `openfy_mix_render_${project.id}`;

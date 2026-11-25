@@ -4,7 +4,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Svg, { Path } from 'react-native-svg';
 import Plus from 'lucide-react-native/icons/plus';
 import { LoggedPressable } from '../native';
-import { formatMixTime, MAX_MIX_LANES, MAX_MIX_DURATION_MS, MIN_CLIP_MS, placeMixClip, type MixClip, mixTimeline } from '../../services/mix/mixTimeline';
+import { formatMixTime, MAX_MIX_LANES, MAX_MIX_DURATION_MS, MIN_CLIP_MS, placeMixClip, snapMixPosition, trimMixClipAtPosition, type MixClip, mixTimeline } from '../../services/mix/mixTimeline';
 import type { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
 import { loadMixWaveform, waveformSlice } from '../../services/mix/mixWaveform';
 import { SkeletonImage } from '../common/SkeletonImage';
@@ -118,7 +118,7 @@ function MovableClip({ clip, scale, lanes, navigation, disabled, onBegin, onMove
   const finger = React.useRef({ x: 0, y: 0 });
   const target = React.useRef<{ lane: number; ms: number } | null>(null);
   const active = React.useRef(false);
-  const gesture = React.useMemo(() => Gesture.Pan().runOnJS(true).enabled(!disabled).activateAfterLongPress(250)
+  const gesture = React.useMemo(() => Gesture.Pan().runOnJS(true).enabled(!disabled).minDistance(3)
     .maxPointers(1).shouldCancelWhenOutside(false).blocksExternalGesture(navigation)
     .onStart((event) => {
       origin.current = latest.current; finger.current = { x: event.absoluteX, y: event.absoluteY };
@@ -160,6 +160,7 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
   const [draft, setDraft] = React.useState<{ id: string; edge: 'start' | 'end'; range: [number, number] } | null>(null);
   const [trimming, setTrimming] = React.useState(false);
   const [moving, setMoving] = React.useState<{ id: string; lane: number; ms: number } | null>(null);
+  const [guide, setGuide] = React.useState<number | null>(null);
   const viewport = React.useRef<View>(null);
   const viewportX = React.useRef(0);
   const dragScroll = React.useRef({ x: 0, extra: 0, finger: 0, active: false });
@@ -228,9 +229,22 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
   const occupiedLanes = Math.max(0, ...timeline.map((clip) => clip.lane + 1));
   const lanes = Math.min(MAX_MIX_LANES, occupiedLanes + 1);
   const laneEnds = Array.from({ length: lanes }, (_, lane) => timeline.reduce((end, clip) => clip.lane === lane ? Math.max(end, clip.endMs) : end, 0));
-  const moved = moving ? mixTimeline(placeMixClip(timeline, moving.id, moving.lane, moving.ms)) : null;
-  const displayed = moved ? timeline.map((clip) => moved.find((item) => item.id === clip.id) || clip) : draft?.edge === 'end' ? mixTimeline(timeline.map((clip) => clip.id === draft.id
-    ? { ...clip, sourceStartMs: draft.range[0], sourceEndMs: draft.range[1] } : clip)) : timeline;
+  const snap = (id: string, ms: number) => snapMixPosition(timeline, id, ms,
+    dragScroll.current.active ? dragScroll.current.x / scale : position, scale);
+  const moved = moving ? mixTimeline(placeMixClip(timeline, moving.id, moving.lane, snap(moving.id, moving.ms).ms)) : null;
+  const snapped = moving ? snap(moving.id, moving.ms) : null;
+  const activeGuide = moving ? (moved?.find((clip) => clip.id === moving.id)?.startMs === Math.round(snapped!.ms) ? snapped!.guide : null) : guide;
+  const snapTrim = (clip: Entry, edge: 'start' | 'end', range: [number, number], duration: number): [number, number] => {
+    const boundary = edge === 'start' ? clip.startMs + range[0] - clip.sourceStartMs : clip.endMs + range[1] - clip.sourceEndMs;
+    const aligned = snapMixPosition(timeline, clip.id, boundary, position, scale, edge);
+    const next = [...range] as [number, number];
+    const index = edge === 'start' ? 0 : 1;
+    next[index] += aligned.ms - boundary;
+    if (next[0] < 0 || next[1] > duration || next[1] - next[0] < MIN_CLIP_MS) { setGuide(null); return range; }
+    setGuide(aligned.guide); return next;
+  };
+  const displayed = moved ? timeline.map((clip) => moved.find((item) => item.id === clip.id) || clip) :
+    draft ? mixTimeline(trimMixClipAtPosition(timeline, draft.id, draft.range[0], draft.range[1])) : timeline;
   const height = 66 + lanes * 46;
   return <View ref={viewport} testID="mix-timeline-viewport" onLayout={({ nativeEvent }) => {
     setWidth(Math.max(1, nativeEvent.layout.width)); viewport.current?.measureInWindow((x) => { viewportX.current = x; });
@@ -250,8 +264,7 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
             const selected = clip.id === selectedId;
             const range = draft?.id === clip.id ? draft.range : [clip.sourceStartMs, clip.sourceEndMs];
             const clipWidth = Math.max(1, (range[1] - range[0]) * scale);
-            const left = width / 2 + clip.startMs * scale - offset + (draft?.id === clip.id && draft.edge === 'start'
-              ? (range[0] - original.sourceStartMs) * scale : 0);
+            const left = width / 2 + clip.startMs * scale - offset;
             if (!selected && (left + clipWidth < -width || left > width * 2)) return null;
             const visibleStart = Math.max(0, Math.min(clipWidth, -left));
             const visibleEnd = Math.max(visibleStart, Math.min(clipWidth, width - left));
@@ -268,8 +281,8 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
                 }}
                 onFinish={(lane, ms) => {
                   const drag = dragScroll.current;
+                  if (lane !== undefined && ms !== undefined) onMoveClip(clip.id, lane, snap(clip.id, Math.max(0, ms + drag.extra / scale)).ms);
                   drag.active = false;
-                  if (lane !== undefined && ms !== undefined) onMoveClip(clip.id, lane, Math.max(0, ms + drag.extra / scale));
                   if (drag.extra) onSeek(positionAtOffset(drag.x, scale, MAX_MIX_DURATION_MS));
                   setMoving(null); trimActive.current = false; setTrimming(false); onTrimActive?.(false);
                 }}>
@@ -277,6 +290,10 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
                 onPress={() => onSelect(original)} style={[S.clipBody, { backgroundColor: clipColor(clip.trackId) }, selected && S.selectedBody]}>
                 <ClipWaveform source={source} range={[range[0] + visibleStart / scale, Math.min(range[1], range[0] + visibleEnd / scale)]}
                   left={visibleStart} width={visibleEnd - visibleStart} />
+                {clip.beatsMs?.filter((beat, i, all) => beat >= range[0] && beat < range[1] &&
+                  (beat - range[0]) * scale >= visibleStart && (beat - range[0]) * scale <= visibleEnd &&
+                  (i === 0 || (beat - all[i - 1]) * scale >= 2))
+                  .map((beat) => <View key={beat} pointerEvents="none" style={[S.beat, { left: (beat - range[0]) * scale }]} />)}
                 <View pointerEvents="none" style={[S.clipInfo, { left: visibleStart, maxWidth: Math.max(0, visibleEnd - visibleStart) }]}>
                 <ClipCover source={source} />
                 <View style={S.clipText}>
@@ -289,8 +306,9 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
               {selected && source && !disabled && !moving ? (['start', 'end'] as const).map((edge) => <TrimHandle key={edge} edge={edge}
                 clip={original} sourceDuration={source.duration_ms} scale={scale} scrollGesture={navigate} onBegin={() => {
                   trimActive.current = true; dragging.current = false; onScrub(); setTrimming(true); onTrimActive?.(true);
-                }} onChange={(next) => setDraft({ id: clip.id, edge, range: next })} onEnd={(next) => {
-                  if (next) onTrim(clip.id, next);
+                }} onChange={(next) => setDraft({ id: clip.id, edge, range: snapTrim(original, edge, next, source.duration_ms) })} onEnd={(next) => {
+                  if (next) onTrim(clip.id, snapTrim(original, edge, next, source.duration_ms));
+                  setGuide(null);
                   trimActive.current = false; setDraft(null); setTrimming(false); onTrimActive?.(false);
                 }} />) : null}
             </View>;
@@ -301,6 +319,7 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
         </View>
       </View>
     </GestureDetector>
+    {activeGuide !== null ? <View pointerEvents="none" testID="mix-snap-guide" style={[S.guide, { left: width / 2 + activeGuide * scale - offset, height: height - 26 }]} /> : null}
     <View pointerEvents="none" testID="mix-fixed-playhead" style={[S.playhead, { left: width / 2 - 1.5, height: height - 26 }]} />
   </View>;
 }
@@ -314,6 +333,8 @@ const S = StyleSheet.create({
   tickMark: { width: 2, height: 7, borderRadius: 1, backgroundColor: '#626A74', marginTop: 3 },
   clip: { position: 'absolute', top: 36, height: 42, borderRadius: 6 },
   selected: { height: 46, borderRadius: 9, backgroundColor: '#FFCF20', zIndex: 2 },
+  beat: { position: 'absolute', bottom: 2, width: 2, height: 5, borderRadius: 1, backgroundColor: '#FFCF20' },
+  guide: { position: 'absolute', top: 4, width: 1, backgroundColor: '#FFCF20', zIndex: 6 },
   moving: { opacity: 0.82, zIndex: 5, elevation: 6 },
   movableBody: { flex: 1, minWidth: 0 },
   clipBody: { flex: 1, minWidth: 0, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 4, overflow: 'hidden' },

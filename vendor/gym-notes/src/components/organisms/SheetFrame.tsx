@@ -37,6 +37,7 @@ interface SheetFrameProps {
   onShow?: ModalProps['onShow'];
   allowSwipeDismissal?: boolean;
   persistentHeaderGlass?: boolean;
+  dimBackdrop?: boolean;
   children: ReactNode;
   headerLeading?: ReactNode;
   headerTrailing?: ReactNode;
@@ -74,6 +75,7 @@ export function SheetFrame({
   onShow,
   allowSwipeDismissal = true,
   persistentHeaderGlass = false,
+  dimBackdrop = true,
   children,
   headerLeading,
   headerTrailing,
@@ -316,7 +318,7 @@ export function SheetFrame({
     >
       <GestureHandlerRootView testID="gym-sheet-gesture-root" style={styles.fill}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.modal, { backgroundColor: colors.overlay }]}>
+        style={[styles.modal, { backgroundColor: dimBackdrop ? colors.overlay : "transparent" }]}>
         <LoggedPressable
           testID="gym-sheet-backdrop"
           style={StyleSheet.absoluteFill}

@@ -1,6 +1,7 @@
 import type { CatalogTrackInput } from '../library/catalogLibrary';
 
-export type MixClip = { id: string; trackId: string; sourceStartMs: number; sourceEndMs: number; volume: number; lane?: number; gapBeforeMs?: number };
+export type MixClip = { id: string; trackId: string; sourceStartMs: number; sourceEndMs: number; volume: number; lane?: number; gapBeforeMs?: number;
+  fadeInMs?: number; fadeOutMs?: number; duckAmount?: number; beatsMs?: number[] };
 export const MAX_MIX_LANES = 8;
 export const MAX_MIX_DURATION_MS = 24 * 60 * 60 * 1000;
 export type MixProject = {
@@ -40,6 +41,13 @@ export const validateMixClips = (clips: MixClip[], tracks: CatalogTrackInput[]) 
       (clip.lane ?? 0) < 0 || (clip.lane ?? 0) >= MAX_MIX_LANES ||
       !Number.isSafeInteger(clip.gapBeforeMs ?? 0) || (clip.gapBeforeMs ?? 0) < 0 ||
       ![clip.sourceStartMs, clip.sourceEndMs, clip.volume].every(Number.isFinite) ||
+      ![clip.fadeInMs ?? 0, clip.fadeOutMs ?? 0, clip.duckAmount ?? 0].every(Number.isFinite) ||
+      (clip.fadeInMs ?? 0) < 0 || (clip.fadeOutMs ?? 0) < 0 ||
+      (clip.fadeInMs ?? 0) + (clip.fadeOutMs ?? 0) > clipDuration(clip) ||
+      (clip.duckAmount ?? 0) < 0 || (clip.duckAmount ?? 0) > 1 ||
+      (clip.beatsMs !== undefined && (!Array.isArray(clip.beatsMs) || clip.beatsMs.length > 10000 ||
+        clip.beatsMs.some((ms, i) => !Number.isSafeInteger(ms) || ms < clip.sourceStartMs || ms >= clip.sourceEndMs ||
+          (i > 0 && ms <= clip.beatsMs![i - 1])))) ||
       clip.sourceStartMs < 0 || clipDuration(clip) < MIN_CLIP_MS ||
       clip.sourceEndMs > track.duration_ms || clip.volume < 0 || clip.volume > 1) {
       throw new Error('Trecho de áudio inválido.');
@@ -49,8 +57,26 @@ export const validateMixClips = (clips: MixClip[], tracks: CatalogTrackInput[]) 
   if (mixDuration(clips) > MAX_MIX_DURATION_MS) throw new Error('O mix aceita até 24 horas.');
 };
 
+const fitEffects = (clip: MixClip, startMs: number, endMs: number): MixClip => {
+  const duration = endMs - startMs;
+  const fadeInMs = Math.min(clip.fadeInMs || 0, duration);
+  return { ...clip, sourceStartMs: startMs, sourceEndMs: endMs,
+    ...(clip.fadeInMs !== undefined ? { fadeInMs } : {}),
+    ...(clip.fadeOutMs !== undefined ? { fadeOutMs: Math.min(clip.fadeOutMs, duration - fadeInMs) } : {}),
+    ...(clip.beatsMs !== undefined ? { beatsMs: clip.beatsMs.filter((ms) => ms >= startMs && ms < endMs) } : {}) };
+};
 export const trimMixClip = (clips: MixClip[], id: string, startMs: number, endMs: number): MixClip[] =>
-  clips.map((clip) => clip.id === id ? { ...clip, sourceStartMs: Math.round(startMs), sourceEndMs: Math.round(endMs) } : clip);
+  clips.map((clip) => clip.id === id ? fitEffects(clip, Math.round(startMs), Math.round(endMs)) : clip);
+
+/** Left-handle trims move the visible left boundary, keeping the right boundary
+ * fixed where the lane has room. Extending beyond the previous clip ripples. */
+export const trimMixClipAtPosition = (clips: MixClip[], id: string, startMs: number, endMs: number): MixClip[] =>
+  clips.map((clip) => {
+    if (clip.id !== id) return clip;
+    const trimmed = fitEffects(clip, Math.round(startMs), Math.round(endMs));
+    const gap = Math.max(0, (clip.gapBeforeMs ?? 0) + trimmed.sourceStartMs - clip.sourceStartMs);
+    return gap === (clip.gapBeforeMs ?? 0) ? trimmed : { ...trimmed, gapBeforeMs: gap };
+  });
 
 export const splitMixClip = (clips: MixClip[], id: string, positionMs: number): MixClip[] => {
   const entry = mixTimeline(clips).find((clip) => clip.id === id);
@@ -58,8 +84,8 @@ export const splitMixClip = (clips: MixClip[], id: string, positionMs: number): 
   const offset = Math.round(positionMs - entry.startMs);
   if (offset < MIN_CLIP_MS || clipDuration(entry) - offset < MIN_CLIP_MS) return clips;
   return clips.flatMap((clip) => clip.id === id ? [
-    { ...clip, sourceEndMs: clip.sourceStartMs + offset },
-    { ...clip, id: createMixId(), sourceStartMs: clip.sourceStartMs + offset, ...(clip.gapBeforeMs !== undefined ? { gapBeforeMs: 0 } : {}) },
+    fitEffects({ ...clip, ...(clip.fadeOutMs !== undefined ? { fadeOutMs: 0 } : {}) }, clip.sourceStartMs, clip.sourceStartMs + offset),
+    { ...fitEffects({ ...clip, ...(clip.fadeInMs !== undefined ? { fadeInMs: 0 } : {}) }, clip.sourceStartMs + offset, clip.sourceEndMs), id: createMixId(), ...(clip.gapBeforeMs !== undefined ? { gapBeforeMs: 0 } : {}) },
   ] : [clip]);
 };
 
@@ -106,3 +132,19 @@ export const formatMixTime = (ms: number) => {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 };
+
+/** Pixel-based magnetic alignment of either edge to the cursor or another clip. */
+export function snapMixPosition(entries: ReturnType<typeof mixTimeline>, id: string, ms: number, cursor: number, scale: number, edge?: 'start' | 'end') {
+  const clip = entries.find((item) => item.id === id);
+  if (!clip || scale <= 0) return { ms, guide: null as number | null };
+  const threshold = Math.min(350, 7 / scale);
+  const targets = [0, cursor, ...entries.filter((item) => item.id !== id).flatMap((item) => [item.startMs, item.endMs])];
+  const offsets = edge ? [0] : [0, clipDuration(clip)];
+  let best = { ms, guide: null as number | null };
+  let distance = threshold;
+  for (const target of targets) for (const offset of offsets) {
+    const candidate = target - offset, delta = Math.abs(candidate - ms);
+    if (candidate >= 0 && delta <= distance) { distance = delta; best = { ms: candidate, guide: target }; }
+  }
+  return best;
+}

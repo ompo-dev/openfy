@@ -5,6 +5,7 @@ import type { AudioPlayer } from 'expo-audio/build/AudioModule.types';
 import { getDownloadedTracks } from '../../services/download/downloadManager';
 import { getExistingLocalAudioPath } from '../../services/download/localAudioPaths';
 import { mixTimeline, type MixProject } from '../../services/mix/mixTimeline';
+import { gainEnvelope, envelopeGain } from '../../services/mix/mixEffects';
 import { pause } from '../../services/audio/playerService';
 import { log } from '../../utils/appLogger';
 
@@ -74,6 +75,7 @@ export function useMixPreview() {
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldPlayInBackground: true, interruptionMode: 'doNotMix' });
       if (!active()) return;
       const laneCount = new Set(entries.map((clip) => clip.lane)).size;
+      const envelopes = new Map(entries.map((clip) => [clip.id, gainEnvelope(clip, entries)]));
       let startedAt: number | null = null;
       const opening = new Set<string>();
       const nowPosition = () => startedAt === null ? initial : Math.min(total, initial + Date.now() - startedAt);
@@ -94,7 +96,7 @@ export function useMixPreview() {
           const uri = await getPath(clip);
           if (!active() || nowPosition() >= clip.endMs) return;
           const audio = createAudioPlayer({ uri }, { updateInterval: TICK_MS });
-          audio.volume = clip.volume / laneCount;
+          audio.volume = envelopeGain(envelopes.get(clip.id)!, Math.max(0, nowPosition() - clip.startMs)) / laneCount;
           const voice: Voice = { audio, dispose: () => {}, ready: false, started: false, preparing: false, seekAt: clip.startMs };
           voices.current.set(clip.id, voice);
           const subscription = audio.addListener('playbackStatusUpdate', (status) => {
@@ -130,6 +132,7 @@ export function useMixPreview() {
         }
         for (const clip of current) {
           const voice = voices.current.get(clip.id);
+          if (voice) voice.audio.volume = envelopeGain(envelopes.get(clip.id)!, ms - clip.startMs) / laneCount;
           if (voice?.ready && !voice.started) {
             if (ms - voice.seekAt > 100) {
               voice.ready = false;

@@ -114,6 +114,25 @@ struct CheckMixAudio {
     let middle = measure(gapSamples, offset: Int(gapRate * 1.15), count: Int(gapRate * 0.2), rate: gapRate)
     let tone = measure(gapSamples, offset: Int(gapRate * 1.65), count: Int(gapRate * 0.2), rate: gapRate)
     try check(silence.rms < 0.02 && middle.rms < 0.02 && abs(tone.hz - 880) < 40, "Gaps must encode as silence, not shifted audio")
+    let effectOutput = cache.appendingPathComponent("effect-\(UUID().uuidString).m4a")
+    defer { try? files.removeItem(at: effectOutput) }
+    let envelope: [[String: Double]] = [
+      ["ms": 0, "gain": 0], ["ms": 300, "gain": 1], ["ms": 700, "gain": 1], ["ms": 1000, "gain": 0],
+    ]
+    _ = try await MixAudioRenderer.render(clips: [["uri": first.absoluteString, "startMs": 1000.0, "endMs": 2000.0,
+      "volume": 1.0, "envelope": envelope]], outputURI: effectOutput.absoluteString)
+    let effectFile = try AVAudioFile(forReading: effectOutput)
+    let effectRate = effectFile.processingFormat.sampleRate
+    let effectPCM = AVAudioPCMBuffer(pcmFormat: effectFile.processingFormat, frameCapacity: AVAudioFrameCount(effectFile.length))!
+    try effectFile.read(into: effectPCM)
+    let effectSamples = effectPCM.floatChannelData![0]
+    let fadeStart = measure(effectSamples, offset: Int(effectRate * 0.02), count: Int(effectRate * 0.06), rate: effectRate)
+    let fadeMiddle = measure(effectSamples, offset: Int(effectRate * 0.4), count: Int(effectRate * 0.15), rate: effectRate)
+    let fadeEnd = measure(effectSamples, offset: Int(effectRate * 0.92), count: Int(effectRate * 0.05), rate: effectRate)
+    try check(fadeMiddle.rms > 0.15 && fadeStart.rms < fadeMiddle.rms * 0.4 && fadeEnd.rms < fadeMiddle.rms * 0.4,
+      "The exported audio must contain the actual fade-in and fade-out")
+    let detailed = try MixAudioRenderer.waveform(uri: first.absoluteString, bins: 32768)
+    try check(detailed.count == 32768, "Beat analysis needs detailed decoded amplitude")
     do {
       _ = try await MixAudioRenderer.render(clips: [["uri": "https://example.com/audio", "startMs": 0.0, "endMs": 1000.0, "volume": 1.0]],
         outputURI: cache.appendingPathComponent("rejected-\(UUID().uuidString).m4a").absoluteString)

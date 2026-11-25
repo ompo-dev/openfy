@@ -65,6 +65,31 @@ it('stops preview on the standard header close button', async () => {
   expect(mockStop).toHaveBeenCalled();
   expect(close).toHaveBeenCalled();
 });
+it('offers three audio tabs and commits the fade, reduction and volume in one edit', async () => {
+  jest.mocked(saveMixProject).mockResolvedValue(project);
+  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  await fireEvent.press(view.getByLabelText('Volume do clipe'));
+  await fireEvent(view.getByLabelText('Ajustar volume do clipe'), 'valueChange', 0.7);
+  await fireEvent.press(view.getByLabelText('Redução automática'));
+  await fireEvent(view.getByLabelText('Ajustar redução automática'), 'valueChange', 0.5);
+  await fireEvent.press(view.getByLabelText('Esmaecer'));
+  await fireEvent(view.getByLabelText('Ajustar aparecimento gradual'), 'valueChange', 1000);
+  await fireEvent(view.getByLabelText('Ajustar desaparecimento gradual'), 'valueChange', 2000);
+  await fireEvent.press(view.getByLabelText('Aplicar volume'));
+  await fireEvent.press(view.getByLabelText('Salvar mix'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
+  expect(jest.mocked(saveMixProject).mock.calls[0][1][0]).toMatchObject({ volume: 0.7, duckAmount: 0.5, fadeInMs: 1000, fadeOutMs: 2000 });
+});
+it('adds and saves a manual beat at the source-relative cursor', async () => {
+  jest.mocked(saveMixProject).mockResolvedValue(project);
+  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  await fireEvent.press(view.getByLabelText('Batidas do clipe'));
+  await fireEvent.press(view.getByLabelText('Adicionar batida'));
+  await fireEvent.press(view.getByLabelText('Aplicar batidas'));
+  await fireEvent.press(view.getByLabelText('Salvar mix'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
+  expect(jest.mocked(saveMixProject).mock.calls[0][1][0].beatsMs).toEqual([16000]);
+});
 it('keeps unsaved edits while opening the source picker', async () => {
   const close = jest.fn();
   const add = jest.fn();
@@ -176,4 +201,22 @@ it('compacts unused lanes, deselects on the background and switches between solo
   expect(view.queryByLabelText('Dividir no cursor')).toBeNull();
   await fireEvent.press(view.getByLabelText('Ouvir mix'));
   expect(mockToggle).toHaveBeenLastCalledWith(expect.any(Object), 15000, undefined);
+});
+
+it('drags an unfocused clip immediately and displays a magnetic edge guide', async () => {
+  const mix = { ...project, clips: [...project.clips, { ...project.clips[0], id: 'second', lane: 1 }] };
+  jest.mocked(saveMixProject).mockResolvedValue(mix);
+  const view = await render(<MixEditorModal project={mix} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const gesture = mockHandleGestures.get('mix-drag-second');
+  expect(gesture).toBeDefined();
+  const start = { absoluteX: 100, absoluteY: 150, translationX: 0, translationY: 0 };
+  const end = { absoluteX: 100 + 14960 * 0.045, absoluteY: 150, translationX: 14960 * 0.045, translationY: 0 };
+  await act(async () => { gesture.handlers.onStart(start); });
+  await act(async () => { gesture.handlers.onUpdate(end); });
+  expect(view.getByTestId('mix-snap-guide')).toBeTruthy();
+  await act(async () => { gesture.handlers.onFinalize(end, true); });
+  expect(view.queryByTestId('mix-snap-guide')).toBeNull();
+  await fireEvent.press(view.getByLabelText('Salvar mix'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
+  expect(jest.mocked(saveMixProject).mock.calls[0][1].find((clip) => clip.id === 'second')).toMatchObject({ gapBeforeMs: 15000, lane: 1 });
 });

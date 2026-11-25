@@ -15,7 +15,7 @@ enum MixAudioRenderer {
     var cursors: [Int: CMTime] = [:]
     let laneCount = Float(Set(clips.map { ($0["lane"] as? NSNumber)?.intValue ?? 0 }).count)
     // Constant-gain lanes avoid AVFoundation interpolating gains across adjacent edits.
-    for clip in clips {
+    for (index, clip) in clips.enumerated() {
       guard let uri = clip["uri"] as? String, let startMs = clip["startMs"] as? Double,
         let endMs = clip["endMs"] as? Double, let volume = clip["volume"] as? Double,
         startMs.isFinite, endMs.isFinite, volume.isFinite, startMs >= 0,
@@ -23,7 +23,9 @@ enum MixAudioRenderer {
       let url = try LocalAudioNormalizer.fileURL(uri)
       let lane = (clip["lane"] as? NSNumber)?.intValue ?? 0
       guard (0..<8).contains(lane) else { throw failure("Faixa inválida.") }
-      let key = "\(lane):\(volume)"
+      let envelope = clip["envelope"] as? [[String: Double]]
+      if clip["envelope"] != nil && envelope == nil { throw failure("Efeito inválido.") }
+      let key = envelope == nil ? "\(lane):\(volume)" : "effect:\(index)"
       let _ = try LocalAudioNormalizer.FileIdentity(url)
       let destination: AVMutableCompositionTrack
       if let existing = tracksByVolume[key] {
@@ -35,7 +37,7 @@ enum MixAudioRenderer {
         destination = created
         tracksByVolume[key] = created
         let gain = AVMutableAudioMixInputParameters(track: created)
-        gain.setVolume(Float(volume) / laneCount, at: .zero)
+        if envelope == nil { gain.setVolume(Float(volume) / laneCount, at: .zero) }
         parameters.append(gain)
       }
       let asset = AVURLAsset(url: url)
@@ -54,6 +56,22 @@ enum MixAudioRenderer {
         destination.insertEmptyTimeRange(CMTimeRange(start: destination.timeRange.end, end: cursor))
       }
       try destination.insertTimeRange(range, of: source, at: cursor)
+      if let envelope = envelope {
+        guard envelope.count >= 2, envelope.count <= 30000 else { throw failure("Efeito inválido.") }
+        let gain = parameters.last!
+        for i in 1..<envelope.count {
+          guard let a = envelope[i-1]["ms"], let b = envelope[i]["ms"],
+            let g0 = envelope[i-1]["gain"], let g1 = envelope[i]["gain"],
+            a.isFinite, b.isFinite, a >= 0, b > a, b <= endMs - startMs + 1,
+            g0.isFinite, g1.isFinite, (0...1).contains(g0), (0...1).contains(g1) else { throw failure("Efeito inválido.") }
+          let from = CMTimeAdd(cursor, CMTime(seconds: a / 1000, preferredTimescale: 48000))
+          let to = CMTimeMinimum(CMTimeAdd(cursor, CMTime(seconds: b / 1000, preferredTimescale: 48000)), CMTimeAdd(cursor, range.duration))
+          if CMTimeCompare(to, from) > 0 {
+            gain.setVolumeRamp(fromStartVolume: Float(g0) / laneCount, toEndVolume: Float(g1) / laneCount,
+              timeRange: CMTimeRange(start: from, end: to))
+          }
+        }
+      }
       cursors[lane] = CMTimeAdd(cursor, range.duration)
     }
     let cursor = cursors.values.reduce(CMTime.zero) { CMTimeMaximum($0, $1) }
@@ -82,12 +100,15 @@ enum MixAudioRenderer {
     let url = try LocalAudioNormalizer.fileURL(uri)
     let _ = try LocalAudioNormalizer.FileIdentity(url)
     let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
-    let count = min(2048, max(32, bins))
+    let count = min(32768, max(32, bins))
     let length = file.length
     guard length > 0, let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 8192) else {
       throw failure("Áudio sem amostras.")
     }
     var peaks = Array(repeating: Float(0), count: count)
+    let detailed = count > 2048
+    var energy = Array(repeating: Double(0), count: detailed ? count : 0)
+    var sampleCounts = Array(repeating: Int(0), count: detailed ? count : 0)
     var offset: AVAudioFramePosition = 0
     while offset < length {
       try file.read(into: buffer, frameCount: AVAudioFrameCount(min(8192, length - offset)))
@@ -95,10 +116,21 @@ enum MixAudioRenderer {
       for frame in 0..<Int(buffer.frameLength) {
         let bin = min(count - 1, Int((offset + Int64(frame)) * Int64(count) / length))
         for channel in 0..<Int(buffer.format.channelCount) {
-          peaks[bin] = max(peaks[bin], min(1, abs(samples[channel][frame])))
+          let sample = min(1, abs(samples[channel][frame]))
+          if detailed {
+            energy[bin] += Double(sample * sample)
+            sampleCounts[bin] += 1
+          } else {
+            peaks[bin] = max(peaks[bin], sample)
+          }
         }
       }
       offset += Int64(buffer.frameLength)
+    }
+    if detailed {
+      for i in 0..<count where sampleCounts[i] > 0 {
+        peaks[i] = Float(sqrt(energy[i] / Double(sampleCounts[i])))
+      }
     }
     return peaks
   }

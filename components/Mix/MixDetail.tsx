@@ -18,6 +18,7 @@ import { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
 import { exportMixJson } from '../../services/mix/mixJsonTransfer';
 import { pause } from '../../services/audio/playerService';
 import { getExistingLocalAudioPath } from '../../services/download/localAudioPaths';
+import { hasMixEffects } from '../../services/mix/mixEffects';
 
 export function MixDetail({ mixId }: { mixId: string }) {
   const router = useRouter();
@@ -57,7 +58,7 @@ export function MixDetail({ mixId }: { mixId: string }) {
     const downloaded = new Set(library.filter((track) => track.isDownloaded && track.localAudioPath).map((track) => track.spotifyId));
     const durations = new Map(project.tracks.map((track) => [track.spotifyId, track.duration_ms]));
     if (!project.clips.every((clip) => downloaded.has(clip.trackId))) return;
-    if (project.clips.every((clip) => !(clip.lane ?? 0) && !(clip.gapBeforeMs ?? 0) && clip.volume === 1 &&
+    if (project.clips.every((clip) => !hasMixEffects(clip) && !(clip.lane ?? 0) && !(clip.gapBeforeMs ?? 0) && clip.volume === 1 &&
       clip.sourceStartMs === 0 && clip.sourceEndMs === durations.get(clip.trackId))) return;
     const timer = setTimeout(() => {
       if (focused.current && !pending.current) void renderMixAudio(project).catch((error) =>
@@ -86,7 +87,7 @@ export function MixDetail({ mixId }: { mixId: string }) {
       const byId = new Map(library.map((track) => [track.spotifyId, track]));
       const metadata = new Map(project.tracks.map((track) => [track.spotifyId, track]));
       const plain = project.clips.length > 0 && project.clips.every((clip) =>
-        !(clip.lane ?? 0) && !(clip.gapBeforeMs ?? 0) && clip.volume === 1 && clip.sourceStartMs === 0 &&
+        !hasMixEffects(clip) && !(clip.lane ?? 0) && !(clip.gapBeforeMs ?? 0) && clip.volume === 1 && clip.sourceStartMs === 0 &&
         clip.sourceEndMs === metadata.get(clip.trackId)?.duration_ms && byId.get(clip.trackId)?.localAudioPath);
       if (plain) {
         const queue = project.clips.map((clip) => ({ ...mergeMixTrack(metadata.get(clip.trackId)!, byId.get(clip.trackId)), localOnly: true }));

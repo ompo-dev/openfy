@@ -32,6 +32,8 @@ class OpenfyLocalAudioModule : Module() {
     Name("OpenfyLocalAudio")
     Constant("supportsMixLanes") { true }
     Constant("supportsMixGaps") { true }
+    Constant("supportsMixEffects") { true }
+    Constant("supportsDetailedWaveform") { true }
     AsyncFunction("waveformAsync") { uri: String, bins: Int ->
       MixWaveform.read(uri, bins)
     }
@@ -67,13 +69,23 @@ class OpenfyLocalAudioModule : Module() {
             val media = MediaItem.Builder().setUri(uri).setClippingConfiguration(
               MediaItem.ClippingConfiguration.Builder().setStartPositionMs(start.toLong()).setEndPositionMs(end.toLong()).build()
             ).build()
+            val envelope = (clip["envelope"] as? List<*>)?.map { entry ->
+              val point = entry as Map<*, *>
+              (point["ms"] as Number).toDouble() to (point["gain"] as Number).toDouble()
+            }
+            if (envelope != null) {
+              require(envelope.size in 2..30000 && envelope.first().first == 0.0 &&
+                envelope.all { it.first.isFinite() && it.first in 0.0..(end - start + 1) && it.second.isFinite() && it.second in 0.0..1.0 } &&
+                envelope.zipWithNext().all { it.first.first < it.second.first })
+            }
+            val staticGain = if (envelope == null) volume.toFloat() else 1f
             val channels = ChannelMixingAudioProcessor().apply {
-              putChannelMixingMatrix(ChannelMixingMatrix.create(1, 2).scaleBy(volume.toFloat() / lanes.size))
-              putChannelMixingMatrix(ChannelMixingMatrix.create(2, 2).scaleBy(volume.toFloat() / lanes.size))
+              putChannelMixingMatrix(ChannelMixingMatrix.create(1, 2).scaleBy(staticGain / lanes.size))
+              putChannelMixingMatrix(ChannelMixingMatrix.create(2, 2).scaleBy(staticGain / lanes.size))
             }
             val resample = SonicAudioProcessor().apply { setOutputSampleRateHz(44100) }
             sequence.addItem(EditedMediaItem.Builder(media).setRemoveVideo(true)
-              .setEffects(Effects(listOf(ToInt16PcmAudioProcessor(), channels, resample), emptyList())).build())
+              .setEffects(Effects(listOf(ToInt16PcmAudioProcessor()) + (if (envelope != null) listOf(MixGainProcessor(envelope)) else emptyList()) + listOf(channels, resample), emptyList())).build())
             }
             sequence.build()
           }
