@@ -24,6 +24,7 @@ jest.mock('react-native-gesture-handler', () => ({
   ...jest.requireActual('react-native-gesture-handler'),
   GestureDetector: ({ children, gesture }: { children: React.ReactElement<any>; gesture: any }) => {
     if (children.props.accessibilityLabel?.startsWith('Arrastar ')) mockHandleGestures.set(children.props.accessibilityLabel, gesture);
+    if (children.props.testID?.startsWith('mix-drag-')) mockHandleGestures.set(children.props.testID, gesture);
     return children;
   },
 }));
@@ -142,4 +143,23 @@ it('shows artwork, real waveform, clip duration and explicit marker inside the t
   expect(view.getByText('One ▪ E')).toBeTruthy();
   expect(view.getByTestId('mix-clip-cover')).toBeTruthy();
   await waitFor(() => expect(view.getByTestId('mix-clip-waveform')).toBeTruthy());
+});
+
+it('drags a clip horizontally and vertically, preserving its effects and allowing undo', async () => {
+  jest.mocked(saveMixProject).mockResolvedValue(project);
+  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  expect(view.queryByText(/Deslize para navegar/)).toBeNull();
+  const gesture = mockHandleGestures.get('mix-drag-clip');
+  const start = { absoluteX: 200, absoluteY: 100, translationX: 0, translationY: 0 };
+  const end = { absoluteX: 290, absoluteY: 146, translationX: 90, translationY: 46 };
+  await act(async () => { gesture.handlers.onStart(start); });
+  await act(async () => { gesture.handlers.onUpdate(end); });
+  await act(async () => { gesture.handlers.onFinalize(end, true); });
+  await fireEvent.press(view.getByLabelText('Desfazer'));
+  await fireEvent.press(view.getByLabelText('Refazer'));
+  await fireEvent.press(view.getByLabelText('Salvar mix'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
+  expect(jest.mocked(saveMixProject).mock.calls[0][1][0]).toMatchObject({
+    id: 'clip', lane: 1, gapBeforeMs: 2000, sourceStartMs: 1000, sourceEndMs: 31000, volume: 1,
+  });
 });

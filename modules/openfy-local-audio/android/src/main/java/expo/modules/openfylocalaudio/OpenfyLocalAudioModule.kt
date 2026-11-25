@@ -3,6 +3,7 @@ package expo.modules.openfylocalaudio
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.ChannelMixingAudioProcessor
@@ -30,6 +31,7 @@ class OpenfyLocalAudioModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("OpenfyLocalAudio")
     Constant("supportsMixLanes") { true }
+    Constant("supportsMixGaps") { true }
     AsyncFunction("waveformAsync") { uri: String, bins: Int ->
       MixWaveform.read(uri, bins)
     }
@@ -47,13 +49,21 @@ class OpenfyLocalAudioModule : Module() {
           require(clips.isNotEmpty() && clips.size <= 200)
           val lanes = clips.groupBy { (it["lane"] as? Number)?.toInt() ?: 0 }
           require(lanes.keys.all { it in 0..7 })
-          val sequences = lanes.toSortedMap().values.map { lane -> EditedMediaItemSequence.withAudioFrom(lane.map { clip ->
+          val sequences = lanes.toSortedMap().values.map { lane ->
+            val sequence = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO))
+            var durationMs = 0.0
+            lane.forEach { clip ->
             val uri = Uri.parse(clip["uri"] as String)
             val start = (clip["startMs"] as Number).toDouble()
             val end = (clip["endMs"] as Number).toDouble()
             val volume = (clip["volume"] as Number).toDouble()
             require(uri.scheme == "file" && File(requireNotNull(uri.path)).isFile)
             require(start.isFinite() && end.isFinite() && volume.isFinite() && start >= 0 && end - start >= 100 && volume in 0.0..1.0)
+            val gap = (clip["gapBeforeMs"] as? Number)?.toDouble() ?: 0.0
+            require(gap.isFinite() && gap in 0.0..86400000.0)
+            durationMs += gap + end - start
+            require(durationMs <= 86400000.0)
+            if (gap > 0) sequence.addGap((gap * 1000).toLong())
             val media = MediaItem.Builder().setUri(uri).setClippingConfiguration(
               MediaItem.ClippingConfiguration.Builder().setStartPositionMs(start.toLong()).setEndPositionMs(end.toLong()).build()
             ).build()
@@ -62,9 +72,11 @@ class OpenfyLocalAudioModule : Module() {
               putChannelMixingMatrix(ChannelMixingMatrix.create(2, 2).scaleBy(volume.toFloat() / lanes.size))
             }
             val resample = SonicAudioProcessor().apply { setOutputSampleRateHz(44100) }
-            EditedMediaItem.Builder(media).setRemoveVideo(true)
-              .setEffects(Effects(listOf(ToInt16PcmAudioProcessor(), channels, resample), emptyList())).build()
-          }) }
+            sequence.addItem(EditedMediaItem.Builder(media).setRemoveVideo(true)
+              .setEffects(Effects(listOf(ToInt16PcmAudioProcessor(), channels, resample), emptyList())).build())
+            }
+            sequence.build()
+          }
           val target = output
           val composition = Composition.Builder(sequences).build()
           transformer = Transformer.Builder(context).setAudioMimeType(MimeTypes.AUDIO_AAC)

@@ -2,15 +2,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { loadMixWaveform, waveformSlice } from '../mixWaveform';
+import { getDownloadedTrack } from '../../download/downloadManager';
+import { prepareLocalAudioForPlayback } from '../../audio/localAudioRepair';
 jest.mock('expo-modules-core', () => ({ ...jest.requireActual('expo-modules-core'), requireOptionalNativeModule: jest.fn() }));
 jest.mock('expo-file-system/legacy', () => ({ getInfoAsync: jest.fn() }));
 jest.mock('../../download/localAudioPaths', () => ({ getExistingLocalAudioPath: jest.fn(async (uri) => uri) }));
 jest.mock('../../audio/localAudioRepair', () => ({ prepareLocalAudioForPlayback: jest.fn().mockResolvedValue(null) }));
+jest.mock('../../download/downloadManager', () => ({ getDownloadedTrack: jest.fn() }));
 it('draws only peaks belonging to the selected source range', () => {
   expect(waveformSlice([0.1, 0.2, 0.8, 0.9], 0, 2000, 4000, 2)).toEqual([0.1, 0.2]);
   expect(waveformSlice([0.1, 0.2, 0.8, 0.9], 2000, 4000, 4000, 2)).toEqual([0.8, 0.9]);
   expect(waveformSlice([], 0, 1000, 4000, 2)).toEqual([]);
 });
+
 it('reuses the real persisted waveform, deduplicates decoding and invalidates changed audio', async () => {
   const uri = 'file:///downloaded.m4a';
   const peaks = Array.from({ length: 1024 }, () => 0.4);
@@ -29,4 +33,16 @@ it('reuses the real persisted waveform, deduplicates decoding and invalidates ch
   expect(JSON.parse((await AsyncStorage.getItem('openfy_mix_waveforms_v1'))!)).toEqual(expect.arrayContaining([
     [JSON.stringify([uri, 20000, 2]), results[0]],
   ]));
+});
+
+it('recovers the downloaded audio from the registry and retries a failed decoder after repair', async () => {
+  const peaks = Array.from({ length: 1024 }, () => 0.6);
+  const decode = jest.fn().mockRejectedValueOnce(new Error('container')).mockResolvedValueOnce(peaks);
+  jest.mocked(getDownloadedTrack).mockResolvedValue({ localAudioPath: 'file:///registry.m4a' } as never);
+  jest.mocked(FileSystem.getInfoAsync).mockResolvedValue({ exists: true, size: 30000, modificationTime: 1 } as never);
+  jest.mocked(prepareLocalAudioForPlayback).mockResolvedValue({ uri: 'file:///repaired.m4a' } as never);
+  jest.mocked(requireOptionalNativeModule).mockReturnValue({ waveformAsync: decode } as never);
+  expect(await loadMixWaveform(undefined, 'downloaded-id')).toEqual(peaks);
+  expect(getDownloadedTrack).toHaveBeenCalledWith('downloaded-id');
+  expect(decode.mock.calls).toEqual([['file:///registry.m4a', 1024], ['file:///repaired.m4a', 1024]]);
 });

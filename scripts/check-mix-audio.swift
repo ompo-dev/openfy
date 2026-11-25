@@ -94,6 +94,26 @@ struct CheckMixAudio {
     }
     try check(amplitude(440) > 0.1 && amplitude(880) > 0.1, "Both overlapping tones must be present")
     print("Mix audio: real waveform and simultaneous lanes verified")
+    let compressedPeaks = try MixAudioRenderer.waveform(uri: output.absoluteString, bins: 128)
+    try check(compressedPeaks.count == 128 && compressedPeaks.prefix(60).max()! > 0.2 &&
+      compressedPeaks.suffix(25).max()! < 0.18, "Waveform must read the actual encoded AAC audio and its gain")
+    let gapOutput = cache.appendingPathComponent("gap-\(UUID().uuidString).m4a")
+    defer { try? files.removeItem(at: gapOutput) }
+    let gapClips: [[String: Any]] = [
+      ["uri": first.absoluteString, "startMs": 1000.0, "endMs": 1500.0, "volume": 1.0, "gapBeforeMs": 500.0],
+      ["uri": second.absoluteString, "startMs": 1000.0, "endMs": 1500.0, "volume": 1.0, "gapBeforeMs": 500.0],
+    ]
+    let gapResult = try await MixAudioRenderer.render(clips: gapClips, outputURI: gapOutput.absoluteString)
+    try check(abs((gapResult["durationMs"] as? Double ?? 0) - 2000) < 50, "Moved clips must retain their start positions")
+    let gapFile = try AVAudioFile(forReading: gapOutput)
+    let gapRate = gapFile.processingFormat.sampleRate
+    let gapPCM = AVAudioPCMBuffer(pcmFormat: gapFile.processingFormat, frameCapacity: AVAudioFrameCount(gapFile.length))!
+    try gapFile.read(into: gapPCM)
+    let gapSamples = gapPCM.floatChannelData![0]
+    let silence = measure(gapSamples, offset: Int(gapRate * 0.15), count: Int(gapRate * 0.2), rate: gapRate)
+    let middle = measure(gapSamples, offset: Int(gapRate * 1.15), count: Int(gapRate * 0.2), rate: gapRate)
+    let tone = measure(gapSamples, offset: Int(gapRate * 1.65), count: Int(gapRate * 0.2), rate: gapRate)
+    try check(silence.rms < 0.02 && middle.rms < 0.02 && abs(tone.hz - 880) < 40, "Gaps must encode as silence, not shifted audio")
     do {
       _ = try await MixAudioRenderer.render(clips: [["uri": "https://example.com/audio", "startMs": 0.0, "endMs": 1000.0, "volume": 1.0]],
         outputURI: cache.appendingPathComponent("rejected-\(UUID().uuidString).m4a").absoluteString)

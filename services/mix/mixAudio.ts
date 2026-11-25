@@ -10,9 +10,9 @@ import { currentManagedAudioPath } from '../download/localAudioPaths';
 import { mergeMixTrack } from './mixTrackMetadata';
 import { stableDirectAudioUrl } from '../audio/stableAudioUrl';
 
-export type MixAudioClip = { uri: string; startMs: number; endMs: number; volume: number; lane?: number };
+export type MixAudioClip = { uri: string; startMs: number; endMs: number; volume: number; lane?: number; gapBeforeMs?: number };
 type MixRender = { uri: string; durationMs: number };
-type MixModule = { renderMixAsync(clips: MixAudioClip[], outputUri: string): Promise<MixRender>; supportsMixLanes?: boolean };
+type MixModule = { renderMixAsync(clips: MixAudioClip[], outputUri: string): Promise<MixRender>; supportsMixLanes?: boolean; supportsMixGaps?: boolean };
 const inFlight = new Map<string, Promise<MixRender>>();
 const cached = new Map<string, { signature: string; result: MixRender }>();
 
@@ -55,6 +55,9 @@ export const renderMixAudio = async (project: MixProject): Promise<MixRender> =>
   if (!project.clips.length) throw new Error('Adicione músicas ao mix.');
   const native = requireOptionalNativeModule<MixModule>('OpenfyLocalAudio');
   if (!native?.renderMixAsync) throw new Error('Instale o novo IPA ou APK para usar o editor de áudio.');
+  if (project.clips.some((clip) => (clip.gapBeforeMs ?? 0) > 0) && !native.supportsMixGaps) {
+    throw new Error('Atualize o IPA ou APK para reproduzir mixes com espaços entre clipes.');
+  }
   if (project.clips.some((clip) => (clip.lane ?? 0) > 0) && !native.supportsMixLanes) {
     throw new Error('Atualize o IPA ou APK para reproduzir mixes com várias faixas de áudio.');
   }
@@ -73,7 +76,7 @@ export const renderMixAudio = async (project: MixProject): Promise<MixRender> =>
     }
     identities.push(source.identity);
     clips.push({ uri: source.uri, startMs: clip.sourceStartMs, endMs: clip.sourceEndMs, volume: clip.volume,
-      ...(clip.lane ? { lane: clip.lane } : {}) });
+      ...(clip.lane ? { lane: clip.lane } : {}), ...(clip.gapBeforeMs ? { gapBeforeMs: clip.gapBeforeMs } : {}) });
   }
   const signature = JSON.stringify([clips, identities]);
   const storageKey = `openfy_mix_render_${project.id}`;

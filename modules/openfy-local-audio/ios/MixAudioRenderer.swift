@@ -46,7 +46,13 @@ enum MixAudioRenderer {
       let end = CMTimeMinimum(CMTime(seconds: endMs / 1000, preferredTimescale: 48000), duration)
       let range = CMTimeRange(start: start, end: end)
       guard range.duration.seconds >= 0.1 else { throw failure("Trecho fora do áudio.") }
-      let cursor = cursors[lane] ?? .zero
+      let gap = (clip["gapBeforeMs"] as? NSNumber)?.doubleValue ?? 0
+      guard gap.isFinite, gap >= 0, gap <= 86400000 else { throw failure("Posição inválida.") }
+      let cursor = CMTimeAdd(cursors[lane] ?? .zero, CMTime(seconds: gap / 1000, preferredTimescale: 48000))
+      guard CMTimeAdd(cursor, range.duration).seconds <= 86400 else { throw failure("Mix muito longo.") }
+      if CMTimeCompare(destination.timeRange.end, cursor) < 0 {
+        destination.insertEmptyTimeRange(CMTimeRange(start: destination.timeRange.end, end: cursor))
+      }
       try destination.insertTimeRange(range, of: source, at: cursor)
       cursors[lane] = CMTimeAdd(cursor, range.duration)
     }

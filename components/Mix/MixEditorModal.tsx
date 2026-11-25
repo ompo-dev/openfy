@@ -15,7 +15,7 @@ import { HeaderIconButton } from '../gym';
 import { PlaylistSheetAction } from '../LocalPlaylist/PlaylistForm';
 import { PlaylistTrackPickerModal } from '../LocalPlaylist/PlaylistTrackPickerModal';
 import { saveMixProject } from '../../services/mix/mixRepository';
-import { createMixId, formatMixTime, MIN_CLIP_MS, mixDuration, mixTimeline, moveMixClip, splitMixClip, trimMixClip,
+import { createMixId, formatMixTime, MIN_CLIP_MS, mixDuration, mixTimeline, moveMixClip, placeMixClip, splitMixClip, trimMixClip,
   validateMixClips, type MixClip, type MixProject } from '../../services/mix/mixTimeline';
 import { log } from '../../utils/appLogger';
 import { useMixPreview } from './useMixPreview';
@@ -147,6 +147,7 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
     <MixTimelineEditor timeline={timeline} total={total} tracks={tracks} selectedId={selectedId} position={preview.position}
       playing={preview.playing} disabled={saving} onSelect={pick} onSeek={preview.setPosition} onScrub={preview.stop}
       onTrim={(id, range) => commit(trimMixClip(clips, id, range[0], range[1]), 'trim-handle')}
+      onDragSelect={select} onMoveClip={(id, lane, ms) => commit(placeMixClip(clips, id, lane, ms), 'drag-clip')}
       onAddTrack={openPicker} onTrimActive={setTrimActive} />
     {selected && track ? <View style={S.inspector}>
       <View style={S.editTools}>

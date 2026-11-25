@@ -35,6 +35,17 @@ it('keeps the original JSON version for single-lane mixes', async () => {
   expect(parseMixJson(await exportMixJson(single))).toMatchObject({ version: 1, clips: single.clips });
 });
 
+it('preserves moved positions and silence in version three without losing the cuts or gain', async () => {
+  const moved = { ...project, clips: [{ ...project.clips[0], gapBeforeMs: 3500 }, { ...project.clips[1], gapBeforeMs: 9000 }] };
+  const raw = await exportMixJson(moved);
+  expect(parseMixJson(raw)).toMatchObject({ version: 3, clips: moved.clips });
+  const { mix } = await importMixJson(raw);
+  expect(mix.clips).toEqual(moved.clips);
+  const older = JSON.parse(raw);
+  older.version = 2;
+  expect(() => parseMixJson(JSON.stringify(older))).toThrow();
+});
+
 it('rejects invalid ranges and unknown clip sources before changing storage', async () => {
   const doc = JSON.parse(await exportMixJson(project));
   doc.clips[0].sourceEndMs = 999999;

@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { getExistingLocalAudioPath } from '../download/localAudioPaths';
+import { getDownloadedTrack } from '../download/downloadManager';
 import { prepareLocalAudioForPlayback } from '../audio/localAudioRepair';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { log } from '../../utils/appLogger';
@@ -23,22 +24,33 @@ const restore = async () => {
   } catch { /* Rebuild corrupt cache from the downloaded audio. */ }
 };
 
-export const loadMixWaveform = async (uri?: string): Promise<number[]> => {
-  const native = requireOptionalNativeModule<WaveformModule>('OpenfyLocalAudio');
-  if (!uri) return [];
-  const local = await getExistingLocalAudioPath(uri, 0);
+export const loadMixWaveform = async (uri?: string, trackId?: string): Promise<number[]> => {
+  let local = await getExistingLocalAudioPath(uri, 0);
+  // A library snapshot can be stale immediately after download or a sandbox migration.
+  if (!local && trackId) {
+    local = await getExistingLocalAudioPath((await getDownloadedTrack(trackId))?.localAudioPath, 0);
+  }
   if (!local) return [];
-  const info = await FileSystem.getInfoAsync(local);
+  const path = local;
+  const info = await FileSystem.getInfoAsync(path);
   if (!info.exists) return [];
-  const key = JSON.stringify([local, info.size, info.modificationTime]);
+  const key = JSON.stringify([path, info.size, info.modificationTime]);
   if (cache.has(key)) return cache.get(key)!;
   if (pending.has(key)) return pending.get(key)!;
   const operation = queue.then(async () => {
     await restore();
     if (cache.has(key)) return cache.get(key)!;
-    if (!native?.waveformAsync) return [];
-    const repaired = await prepareLocalAudioForPlayback(local);
-    const values = await native.waveformAsync(repaired?.uri || local, 1024);
+    const native = requireOptionalNativeModule<WaveformModule>('OpenfyLocalAudio');
+    if (typeof native?.waveformAsync !== 'function') {
+      log.error('mix waveform unavailable in installed native build', {});
+      return [];
+    }
+    let values: number[];
+    try { values = await native.waveformAsync(path, 1024); }
+    catch {
+      const repaired = await prepareLocalAudioForPlayback(path);
+      values = await native.waveformAsync(repaired?.uri || path, 1024);
+    }
     if (!Array.isArray(values) || !values.length || !values.every(Number.isFinite)) return [];
     const peaks = values.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 10000) / 10000);
     cache.set(key, peaks);
@@ -55,7 +67,7 @@ export const loadMixWaveform = async (uri?: string): Promise<number[]> => {
 };
 
 export function waveformSlice(peaks: number[], start: number, end: number, duration: number, count: number): number[] {
-  if (!peaks.length || duration <= 0 || end <= start || count <= 0) return [];
+  if (!peaks.length || ![start, end, duration, count].every(Number.isFinite) || duration <= 0 || end <= start || count <= 0) return [];
   const first = Math.max(0, Math.min(peaks.length - 1, Math.floor(start / duration * peaks.length)));
   const last = Math.min(peaks.length, Math.max(first + 1, Math.ceil(end / duration * peaks.length)));
   return Array.from({ length: Math.min(count, 180) }, (_, i) => {

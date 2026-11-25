@@ -1,4 +1,4 @@
-import { clipDuration, mixDuration, mixTimeline, moveMixClip, splitMixClip, trimMixClip, validateMixClips, type MixClip } from '../mixTimeline';
+import { clipDuration, mixDuration, mixTimeline, moveMixClip, placeMixClip, splitMixClip, trimMixClip, validateMixClips, type MixClip } from '../mixTimeline';
 const clips: MixClip[] = [
   { id: 'a', trackId: 'one', sourceStartMs: 5000, sourceEndMs: 35000, volume: 1 },
   { id: 'b', trackId: 'two', sourceStartMs: 10000, sourceEndMs: 20000, volume: 0.5 },
@@ -42,4 +42,26 @@ it('overlaps lanes while concatenating cuts within each lane, including legacy c
   expect(mixDuration(layered)).toBe(40000);
   expect(mixTimeline(trimMixClip(layered, 'a', 5000, 15000))[2].startMs).toBe(0);
   expect(() => validateMixClips([{ ...clips[0], lane: 8 }], tracks)).toThrow();
+});
+
+it('moves a clip freely in time and to another lane without moving other clips or losing source cuts', () => {
+  const moved = placeMixClip(clips, 'a', 1, 12000);
+  expect(mixTimeline(moved).find((clip) => clip.id === 'a')).toMatchObject({
+    lane: 1, startMs: 12000, endMs: 42000, sourceStartMs: 5000, sourceEndMs: 35000, volume: 1,
+  });
+  expect(mixTimeline(moved).find((clip) => clip.id === 'b')).toMatchObject({ lane: 0, startMs: 30000, endMs: 40000 });
+  const again = placeMixClip(moved, 'a', 0, 50000);
+  expect(mixTimeline(again).find((clip) => clip.id === 'a')).toMatchObject({ startMs: 50000, endMs: 80000, lane: 0 });
+  expect(mixDuration(again)).toBe(80000);
+  expect(() => validateMixClips(again, tracks)).not.toThrow();
+});
+
+it('snaps overlapping drops to the nearest free interval and preserves gaps during splitting', () => {
+  const moved = placeMixClip(clips, 'b', 0, 15000);
+  expect(mixTimeline(moved).find((clip) => clip.id === 'b')?.startMs).toBe(30000);
+  const gapped = placeMixClip(clips, 'b', 0, 40000);
+  expect(mixTimeline(gapped)[1].startMs).toBe(40000);
+  const split = splitMixClip(gapped, 'b', 45000);
+  expect(mixTimeline(split).map((clip) => [clip.startMs, clip.endMs])).toEqual([[0, 30000], [40000, 45000], [45000, 50000]]);
+  expect(() => validateMixClips([{ ...clips[0], gapBeforeMs: -1 }], tracks)).toThrow();
 });

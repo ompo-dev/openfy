@@ -92,3 +92,12 @@ it('prepares each audio source only once and skips repair for an unchanged cache
   expect(mockRender).toHaveBeenCalledTimes(1);
   expect(prepareLocalAudioForPlayback).toHaveBeenCalledTimes(1);
 });
+
+it('passes timeline gaps to native composition and prevents incorrect playback on older binaries', async () => {
+  const mix = project('gap');
+  mix.clips[0].gapBeforeMs = 3000;
+  await expect(renderMixAudio(mix)).rejects.toThrow('espaços entre clipes');
+  jest.mocked(requireOptionalNativeModule).mockReturnValue({ renderMixAsync: mockRender, supportsMixGaps: true } as never);
+  const result = await renderMixAudio(mix);
+  expect(mockRender).toHaveBeenCalledWith([expect.objectContaining({ gapBeforeMs: 3000, startMs: 10000, endMs: 20000, volume: 0.5 })], result.uri);
+});

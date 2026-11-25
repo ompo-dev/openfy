@@ -5,7 +5,7 @@ public final class OpenfyLocalAudioModule: Module {
 
   public func definition() -> ModuleDefinition {
     Name("OpenfyLocalAudio")
-    Constants(["supportsMixLanes": true])
+    Constants(["supportsMixLanes": true, "supportsMixGaps": true])
 
     AsyncFunction("waveformAsync") { (uri: String, bins: Int) async throws -> [Float] in
       try MixAudioRenderer.waveform(uri: uri, bins: bins)
