@@ -15,7 +15,7 @@ import { HeaderIconButton } from '../gym';
 import { PlaylistSheetAction } from '../LocalPlaylist/PlaylistForm';
 import { PlaylistTrackPickerModal } from '../LocalPlaylist/PlaylistTrackPickerModal';
 import { saveMixProject } from '../../services/mix/mixRepository';
-import { createMixId, formatMixTime, MIN_CLIP_MS, mixDuration, mixTimeline, moveMixClip, placeMixClip, splitMixClip, trimMixClip,
+import { compactMixLanes, createMixId, formatMixTime, MIN_CLIP_MS, mixDuration, mixTimeline, moveMixClip, placeMixClip, splitMixClip, trimMixClip,
   validateMixClips, type MixClip, type MixProject } from '../../services/mix/mixTimeline';
 import { log } from '../../utils/appLogger';
 import { useMixPreview } from './useMixPreview';
@@ -38,7 +38,7 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
   project: MixProject; visible: boolean; onClose: () => void; onSaved: (mix: MixProject) => void;
   onAddTracks: () => void; nested?: React.ReactNode; library?: LibraryTrack[];
 }) {
-  const [clips, setClips] = React.useState(project.clips);
+  const [clips, setClips] = React.useState(() => compactMixLanes(project.clips));
   const [past, setPast] = React.useState<MixClip[][]>([]);
   const [future, setFuture] = React.useState<MixClip[][]>([]);
   const [selectedId, select] = React.useState(project.clips[0]?.id || '');
@@ -65,7 +65,7 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
     preview.stop();
     setPanel(null);
     if (!visible) return;
-    setClips(project.clips); setPast([]); setFuture([]); select(project.clips[0]?.id || '');
+    setClips(compactMixLanes(project.clips)); setPast([]); setFuture([]); select(project.clips[0]?.id || '');
     setSources(project.tracks); setPickerLane(null); preview.setPosition(0);
     // A new revision starts a fresh editing session after adding source tracks.
   }, [visible, project.id, project.revision, preview.stop]);
@@ -74,6 +74,7 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
   }, [selected?.id, selected?.sourceStartMs, selected?.sourceEndMs, selected?.volume]);
 
   const commit = (next: MixClip[], action: string, nextSources = sources) => {
+    next = compactMixLanes(next);
     if (savingRef.current || next === clips || JSON.stringify(next) === JSON.stringify(clips)) return;
     try { validateMixClips(next, nextSources); }
     catch (error) { Alert.alert('Mix', String(error)); return; }
@@ -132,9 +133,11 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
   const header = <View style={S.headerContent}>
     <View style={S.transport}>
       <Tool label={preview.playing || preview.busy ? 'Parar prévia' : 'Ouvir mix'} icon={preview.playing ? Pause : Play}
-        disabled={!clips.length || saving} onPress={() => void preview.toggle({ ...project, tracks: sources, clips }, preview.position >= total ? 0 : preview.position)} selected={preview.playing} />
+        disabled={!clips.length || saving} onPress={() => void preview.toggle({ ...project, tracks: sources, clips },
+          selected ? (preview.position >= selected.startMs && preview.position < selected.endMs ? preview.position : selected.startMs)
+            : preview.position >= total ? 0 : preview.position, selected?.id)} selected={preview.playing} />
       <View style={S.clockGroup}>
-        <Text style={S.clock}>{formatMixTime(Math.min(preview.position, total))}</Text>
+        <Text style={S.clock}>{formatMixTime(preview.position)}</Text>
         <Text style={S.clockTotal}>{formatMixTime(total)}</Text>
       </View>
       <View style={S.history}>
@@ -148,6 +151,7 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
       playing={preview.playing} disabled={saving} onSelect={pick} onSeek={preview.setPosition} onScrub={preview.stop}
       onTrim={(id, range) => commit(trimMixClip(clips, id, range[0], range[1]), 'trim-handle')}
       onDragSelect={select} onMoveClip={(id, lane, ms) => commit(placeMixClip(clips, id, lane, ms), 'drag-clip')}
+      onDeselect={() => { preview.stop(); select(''); }}
       onAddTrack={openPicker} onTrimActive={setTrimActive} />
     {selected && track ? <View style={S.inspector}>
       <View style={S.editTools}>

@@ -6,8 +6,9 @@ import { saveMixProject } from '../../../services/mix/mixRepository';
 import type { MixProject } from '../../../services/mix/mixTimeline';
 const mockStop = jest.fn();
 const mockPosition = jest.fn();
+const mockToggle = jest.fn();
 const mockHandleGestures = new Map<string, any>();
-jest.mock('../useMixPreview', () => ({ useMixPreview: () => ({ stop: mockStop, play: jest.fn(), toggle: jest.fn(), position: 15000,
+jest.mock('../useMixPreview', () => ({ useMixPreview: () => ({ stop: mockStop, play: jest.fn(), toggle: mockToggle, position: 15000,
   playing: false, busy: false, error: '', setPosition: mockPosition }) }));
 jest.mock('../../../services/mix/mixRepository', () => ({ saveMixProject: jest.fn() }));
 jest.mock('../../../services/download/localAudioPaths', () => ({
@@ -160,6 +161,19 @@ it('drags a clip horizontally and vertically, preserving its effects and allowin
   await fireEvent.press(view.getByLabelText('Salvar mix'));
   await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
   expect(jest.mocked(saveMixProject).mock.calls[0][1][0]).toMatchObject({
-    id: 'clip', lane: 1, gapBeforeMs: 2000, sourceStartMs: 1000, sourceEndMs: 31000, volume: 1,
+    id: 'clip', lane: 0, gapBeforeMs: 2000, sourceStartMs: 1000, sourceEndMs: 31000, volume: 1,
   });
+});
+
+it('compacts unused lanes, deselects on the background and switches between solo and full playback', async () => {
+  const mix = { ...project, clips: [...project.clips, { ...project.clips[0], id: 'second', lane: 5 }] };
+  const view = await render(<MixEditorModal project={mix} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  expect(view.getByLabelText('Adicionar música à faixa 3')).toBeTruthy();
+  expect(view.queryByLabelText('Adicionar música à faixa 4')).toBeNull();
+  await fireEvent.press(view.getByLabelText('Ouvir mix'));
+  expect(mockToggle).toHaveBeenLastCalledWith(expect.any(Object), 15000, 'clip');
+  await fireEvent.press(view.getByLabelText('Desmarcar clipe'));
+  expect(view.queryByLabelText('Dividir no cursor')).toBeNull();
+  await fireEvent.press(view.getByLabelText('Ouvir mix'));
+  expect(mockToggle).toHaveBeenLastCalledWith(expect.any(Object), 15000, undefined);
 });

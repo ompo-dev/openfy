@@ -1,4 +1,4 @@
-import { clipDuration, mixDuration, mixTimeline, moveMixClip, placeMixClip, splitMixClip, trimMixClip, validateMixClips, type MixClip } from '../mixTimeline';
+import { clipDuration, compactMixLanes, mixDuration, mixTimeline, moveMixClip, placeMixClip, splitMixClip, trimMixClip, validateMixClips, type MixClip } from '../mixTimeline';
 const clips: MixClip[] = [
   { id: 'a', trackId: 'one', sourceStartMs: 5000, sourceEndMs: 35000, volume: 1 },
   { id: 'b', trackId: 'two', sourceStartMs: 10000, sourceEndMs: 20000, volume: 0.5 },
@@ -64,4 +64,12 @@ it('snaps overlapping drops to the nearest free interval and preserves gaps duri
   const split = splitMixClip(gapped, 'b', 45000);
   expect(mixTimeline(split).map((clip) => [clip.startMs, clip.endMs])).toEqual([[0, 30000], [40000, 45000], [45000, 50000]]);
   expect(() => validateMixClips([{ ...clips[0], gapBeforeMs: -1 }], tracks)).toThrow();
+});
+
+it('compacts empty lanes while retaining timing, including placement beyond the former audio end', () => {
+  const moved = placeMixClip(clips, 'a', 5, 90000);
+  const compact = compactMixLanes(moved);
+  expect(mixTimeline(compact).find((clip) => clip.id === 'a')).toMatchObject({ lane: 1, startMs: 90000, endMs: 120000 });
+  expect(mixTimeline(compact).find((clip) => clip.id === 'b')).toMatchObject({ lane: 0, startMs: 30000, endMs: 40000 });
+  expect(mixDuration(compact)).toBe(120000);
 });

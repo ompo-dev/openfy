@@ -10,6 +10,14 @@ export type MixProject = {
 export const MIN_CLIP_MS = 100;
 export const createMixId = () => `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 export const clipDuration = (clip: MixClip) => clip.sourceEndMs - clip.sourceStartMs;
+/** Remove unused audio lanes without touching timing or source edits. */
+export const compactMixLanes = (clips: MixClip[]): MixClip[] => {
+  const used = [...new Set(clips.map((clip) => clip.lane ?? 0))].sort((a, b) => a - b);
+  return clips.map((clip) => {
+    const lane = used.indexOf(clip.lane ?? 0);
+    return lane === (clip.lane ?? 0) ? clip : { ...clip, lane };
+  });
+};
 export const mixDuration = (clips: MixClip[]) => mixTimeline(clips).reduce((total, clip) => Math.max(total, clip.endMs), 0);
 export const mixTimeline = (clips: MixClip[]) => {
   const cursors = new Map<number, number>();
