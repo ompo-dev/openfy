@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { COLORS } from '@config';
 import Slider from '@react-native-community/slider';
 import Scissors from 'lucide-react-native/icons/scissors';
 import Trash2 from 'lucide-react-native/icons/trash-2';
@@ -33,8 +34,6 @@ import { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
 import type { LibraryTrack } from '../../services/library/catalogLibrary';
 import { MixTimelineEditor } from './MixTimelineEditor';
 import { MixBeatSheet } from './MixBeatSheet';
-import { loadMixRhythm, loadMixWaveform } from '../../services/mix/mixWaveform';
-import { detectMixBeats, trackMixRhythm, type BeatDensity } from '../../services/mix/mixBeats';
 import { getExistingLocalAudioPath } from '../../services/download/localAudioPaths';
 
 function Tool({ label, caption, icon: Icon, onPress, disabled = false, selected = false, transport = false, filled = false, hasIndicator = false }: {
@@ -77,8 +76,6 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
   const failedWrite = React.useRef(false);
   const [saveError, setSaveError] = React.useState('');
   const [panel, setPanel] = React.useState<'volume' | 'beats' | null>(null);
-  const [batchDensity, setBatchDensity] = React.useState<BeatDensity>('less');
-  const [batchBusy, setBatchBusy] = React.useState(false);
   const [audioTab, setAudioTab] = React.useState<'volume' | 'duck' | 'fade'>('volume');
   const [volume, setVolume] = React.useState(1);
   const [duckAmount, setDuckAmount] = React.useState(0);
@@ -291,28 +288,6 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
     const times = new Map(atCursor.map((clip) => [clip.id, Math.round(clip.sourceStartMs + preview.position - clip.startMs)]));
     commit(clips.map((clip) => times.has(clip.id) ? { ...clip, beatsMs: [...new Set([...(clip.beatsMs || []), times.get(clip.id)!])].sort((a,b) => a-b) } : clip), 'beat-at-cursor');
   };
-  const applyBatchBeats = async () => {
-    if (batchBusy) return;
-    const request = session.current, version = editVersion.current;
-    setBatchBusy(true);
-    try {
-      const marks = new Map<string, number[]>();
-      for (const clip of selection) {
-        if (batchDensity === 'off') { marks.set(clip.id, []); continue; }
-        const source = tracks.get(clip.trackId);
-        if (!source) throw new Error('Fonte de áudio indisponível.');
-        const rhythm = await loadMixRhythm(source.localAudioPath, clip.trackId);
-        const peaks = rhythm ? [] : await loadMixWaveform(source.localAudioPath, clip.trackId, true);
-        if (!rhythm && !peaks.length) throw new Error('Não foi possível analisar todas as músicas.');
-        marks.set(clip.id, rhythm ? trackMixRhythm(rhythm, clip.sourceStartMs, clip.sourceEndMs, batchDensity)
-          : detectMixBeats(peaks, source.duration_ms, clip.sourceStartMs, clip.sourceEndMs, batchDensity));
-      }
-      if (request !== session.current || version !== editVersion.current) return;
-      commit(clips.map((clip) => marks.has(clip.id) ? { ...clip, beatsMs: marks.get(clip.id)! } : clip), 'batch-beats');
-      setPanel(null);
-    } catch (error) { if (request === session.current) Alert.alert('Batidas', String(error)); }
-    finally { if (request === session.current) setBatchBusy(false); }
-  };
   const header = <View testID="mix-editor-panel" style={S.headerContent}>
     <View style={S.transport}>
       <View style={S.transportSide}>
@@ -357,7 +332,6 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
         }} />
         <Tool label="Batidas do clipe" caption="Batidas" icon={AudioLines} hasIndicator={hasBeatMods} disabled={!selected || !track} onPress={() => {
           if (!selected) return;
-          setBatchDensity('less');
           preview.stop(); if (preview.position < selected.startMs || preview.position >= selected.endMs) preview.setPosition(selected.startMs);
           setPanel('beats');
         }} />
@@ -422,25 +396,19 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
         <Slider accessibilityLabel="Ajustar desaparecimento gradual" value={fadeOutMs} minimumValue={0} maximumValue={Math.max(0, Math.min(30000, selected.endMs - selected.startMs - fadeInMs))} step={100}
           minimumTrackTintColor="#FFCF20" maximumTrackTintColor="#545459" thumbTintColor="#FFF" onValueChange={(v) => { effectChanges.current.fadeOutMs = v; setFadeOutMs(v); }} />
       </>}
-    </SheetFrame> : null}{panel === 'beats' && grouped ? <SheetFrame visible title="Batidas" size="sheet" dimBackdrop={false}
-      onClose={() => { if (!batchBusy) setPanel(null); }} allowSwipeDismissal={!batchBusy}
-      headerTrailing={<PlaylistSheetAction label="Aplicar batidas" busy={batchBusy} disabled={batchBusy} onPress={() => void applyBatchBeats()} />}>
-      <Text style={S.secondary}>Gerar batidas individualmente para {selection.length} clipes.</Text>
-      <View style={S.audioTabs}>{([['off','Desativado'],['less','Menos'],['more','Mais']] as const).map(([mode,label]) =>
-        <LoggedPressable key={mode} disabled={batchBusy} accessibilityLabel={label} accessibilityState={{ selected: batchDensity === mode }}
-          onPress={() => setBatchDensity(mode)} style={[S.audioTab, batchDensity === mode && S.activeTab]}><Text style={S.tabText}>{label}</Text></LoggedPressable>)}</View>
-    </SheetFrame> : panel === 'beats' && selected && track ? <MixBeatSheet clip={selected} duration={track.duration_ms}
-      uri={track.localAudioPath} position={preview.position} playing={preview.playing || preview.busy}
+    </SheetFrame> : null}{panel === 'beats' && selected && track ? <MixBeatSheet initialId={selected.id}
+      targets={selection.map((clip) => { const source = tracks.get(clip.trackId); return { clip, duration: source?.duration_ms ?? clip.sourceEndMs, uri: source?.localAudioPath, title: source?.title || 'Áudio' }; })}
+      position={preview.position} playing={preview.playing || preview.busy}
       onSeek={(ms) => { preview.stop(); preview.setPosition(ms); }}
-      onPlay={() => { if (!preview.playing && !preview.busy) onPreviewStart?.(); void preview.toggle({ ...project, tracks: sources, clips }, preview.position, selected.id); }}
+      onPlay={() => { if (!preview.playing && !preview.busy) onPreviewStart?.(); void preview.toggle({ ...project, tracks: sources, clips }, preview.position, grouped ? selection.map((clip) => clip.id) : selected.id); }}
       onClose={() => { preview.stop(); setPanel(null); }}
-      onApply={(beatsMs) => { preview.stop(); commit(clips.map((clip) => clip.id === selected.id ? { ...clip, beatsMs } : clip), 'beats'); setPanel(null); }} /> : null}
+      onApply={(marks) => { preview.stop(); commit(clips.map((clip) => marks.has(clip.id) && JSON.stringify(marks.get(clip.id)) !== JSON.stringify(clip.beatsMs || []) ? { ...clip, beatsMs: marks.get(clip.id)! } : clip), 'beats'); setPanel(null); }} /> : null}
   </View>;
 }
 
 const S = StyleSheet.create({
   inline: { marginHorizontal: 14, marginBottom: 16 },
-  headerContent: { gap: 0, backgroundColor: '#0D1117', borderRadius: 12, overflow: 'hidden' }, transport: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, backgroundColor: '#0D1117', paddingHorizontal: 8 },
+  headerContent: { gap: 0, backgroundColor: COLORS.PRIMARY, borderRadius: 12, overflow: 'hidden' }, transport: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, backgroundColor: COLORS.PRIMARY, paddingHorizontal: 8 },
   tool: { minWidth: 40, minHeight: 40, gap: 3, alignItems: 'center', justifyContent: 'center' },
   toolCaption: { fontSize: 11, color: '#ABABB2', fontFamily: 'SF-Regular' },
   toolIndicator: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'transparent' },
@@ -458,7 +426,7 @@ const S = StyleSheet.create({
   activeTab: { borderBottomColor: '#FFF' },
   tabText: { color: '#ABABB2', fontSize: 13, fontFamily: 'SF-Semibold', textAlign: 'center' },
   editTools: { flexDirection: 'row', alignItems: 'center', gap: 18, paddingHorizontal: 8, paddingVertical: 6 },
-  slipTools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, backgroundColor: '#0D1117' },
+  slipTools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, backgroundColor: COLORS.PRIMARY },
   slipText: { flex: 1, alignItems: 'center', paddingHorizontal: 6, gap: 4 },
   slipRange: { color: '#FFF', fontSize: 12, fontVariant: ['tabular-nums'] },
   error: { color: '#FF9F9F', fontSize: 13 },

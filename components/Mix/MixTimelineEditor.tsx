@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { COLORS as APP_COLORS } from '@config';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Plus from 'lucide-react-native/icons/plus';
 import Volume2 from 'lucide-react-native/icons/volume-2';
@@ -346,7 +347,7 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, selecte
       left={width / 2 + slipClip.startMs * scale - offset} top={36 + slipClip.lane * LANE_HEIGHT} width={width}
       onChange={slip.onChange} onBegin={() => { onScrub(); onTrimActive?.(true); }} onEnd={() => onTrimActive?.(false)} /> : null}
     <View pointerEvents="none" testID="mix-transport-time" style={[S.timeOverlay, { maxWidth: Math.max(0, width / 2 - 4) }]}>
-      <LinearGradient colors={['#0D1117', '#0D1117', '#0D111700']} locations={[0, 0.8, 1]}
+      <LinearGradient colors={[APP_COLORS.PRIMARY, APP_COLORS.PRIMARY, `${APP_COLORS.PRIMARY}00`]} locations={[0, 0.8, 1]}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
       <Text numberOfLines={1} adjustsFontSizeToFit style={S.clock}>{formatMixTime(position)}<Text style={S.clockTotal}> / {formatMixTime(total)}</Text></Text>
     </View>
@@ -356,11 +357,11 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, selecte
 }
 
 const S = StyleSheet.create({
-  viewport: { height: 108, backgroundColor: '#0D1117', overflow: 'hidden' },
+  viewport: { height: 108, backgroundColor: APP_COLORS.PRIMARY, overflow: 'hidden' },
   content: { height: 86 },
-  lane: { position: 'absolute', top: 36, height: 42, backgroundColor: '#20242A' },
-  laneMute: { position: 'absolute', left: 0, width: 40, height: 42, backgroundColor: '#20242A', alignItems: 'center', justifyContent: 'center', zIndex: 7 },
-  mutedLane: { backgroundColor: '#191D23' },
+  lane: { position: 'absolute', top: 36, height: 42, backgroundColor: APP_COLORS.SECONDARY },
+  laneMute: { position: 'absolute', left: 0, width: 40, height: 42, backgroundColor: APP_COLORS.SECONDARY, alignItems: 'center', justifyContent: 'center', zIndex: 7 },
+  mutedLane: { backgroundColor: '#202020' },
   mutedClip: { opacity: 0.48 },
   tick: { position: 'absolute', top: 0, width: 46, height: 28, alignItems: 'center', justifyContent: 'flex-end' },
   tickLabel: { color: '#7C8795', fontSize: 11, fontVariant: ['tabular-nums'], position: 'absolute', top: 0 },

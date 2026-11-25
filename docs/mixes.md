@@ -39,6 +39,9 @@ AVFoundation no iOS e Media3 Transformer 1.9.0 no Android compõem arquivos loca
 
 ### Efeitos e batidas
 
+- O modal Batidas é compartilhado pela seleção simples e múltipla: Play, Desativado, Menos, Mais e Limpar ficam na mesma linha, sem slider. Arrastar a waveform navega pelo áudio. O botão +/− no canto superior direito da waveform adiciona ou remove marcações próximas ao cursor nos clipes selecionados que cruzam aquele instante. Na seleção múltipla, os chips permitem visualizar cada fonte separadamente; a geração automática e a limpeza atuam sobre todos, com um único registro ao aplicar.
+- O fundo do painel, da régua e do modo Deslizar utiliza a cor primária do aplicativo (#121212); as faixas usam cinza neutro da paleta.
+
 - O modal Áudio mantém o editor visível sem camada de escurecimento e contém três abas: Volume, Redução automática e Esmaecer. A redução afeta o clipe escolhido quando há outro clipe audível em outra faixa, com rampas de até 120 ms; não é detecção de voz. Fade-in e fade-out têm duração ajustável de até 30 s cada, sem ultrapassar a duração combinada do recorte.
 - Os parâmetros de ganho são convertidos em uma curva compartilhada pela prévia local e pelo renderizador. A prévia ajusta ganhos a cada 40 ms; AVFoundation usa rampas e Media3 aplica a curva às amostras PCM. Binários antigos não exportam efeitos silenciosamente. A faixa de áudio sem efeitos conserva a otimização da fila normal.
 - Fade-in e fade-out usam uma curva senoidal em S (cosseno elevado, `(1 - cos(pi * t)) / 2`). A mesma função define a sombra sobre o clipe e os pontos de ganho da prévia e da composição nativa. Cada fade é amostrado em 32 subdivisões, mantendo erro de interpolação inferior a 0,001 do ganho normalizado na curva isolada. A assinatura de cache inclui os pontos de ganho e invalida composições lineares anteriores. Os parâmetros de duração e o JSON existente continuam compatíveis.

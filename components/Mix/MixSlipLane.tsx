@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { StyleSheet, View } from 'react-native';
+import { COLORS } from '@config';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { loadMixWaveform } from '../../services/mix/mixWaveform';
 import { clipDuration, slipSourceStart, type MixClip } from '../../services/mix/mixTimeline';
@@ -53,7 +54,7 @@ export function MixSlipLane({ clip, sourceDuration, uri, sourceStart, scale, lef
   </GestureDetector>;
 }
 const S = StyleSheet.create({
-  lane: { position: 'absolute', left: 0, height: 42, backgroundColor: '#0D1117', overflow: 'hidden', zIndex: 5 },
-  window: { position: 'absolute', top: 0, bottom: 0, backgroundColor: '#24282E', borderRadius: 6, overflow: 'hidden' },
+  lane: { position: 'absolute', left: 0, height: 42, backgroundColor: COLORS.PRIMARY, overflow: 'hidden', zIndex: 5 },
+  window: { position: 'absolute', top: 0, bottom: 0, backgroundColor: COLORS.SECONDARY, borderRadius: 6, overflow: 'hidden' },
   outline: { position: 'absolute', top: 0, bottom: 0, borderColor: '#FFCF20', borderWidth: 2, borderRadius: 6 },
 });

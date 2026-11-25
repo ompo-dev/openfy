@@ -4,6 +4,7 @@ import { act, fireEvent, render, waitFor, within } from '@testing-library/react-
 import { MixEditor, type MixEditorHandle } from '../MixEditorModal';
 import { INITIAL_MIX_ZOOM, timelineScale } from '../MixTimelineEditor';
 import { saveMixProject } from '../../../services/mix/mixRepository';
+import { loadMixRhythm } from '../../../services/mix/mixWaveform';
 import type { MixProject } from '../../../services/mix/mixTimeline';
 const mockStop = jest.fn();
 const mockPosition = jest.fn();
@@ -20,6 +21,7 @@ jest.mock('../../../services/download/localAudioPaths', () => ({
 jest.mock('../../../services/mix/mixWaveform', () => ({
   ...jest.requireActual('../../../services/mix/mixWaveform'),
   loadMixWaveform: jest.fn().mockResolvedValue([0.2, 0.8, 0.4, 0.6]),
+  loadMixRhythm: jest.fn().mockResolvedValue(null),
 }));
 jest.mock('react-native-reorderable-list', () => ({ __esModule: true, default: jest.requireActual('react-native').FlatList,
   useReorderableDrag: () => jest.fn() }));
@@ -259,10 +261,41 @@ it('offers three audio tabs and commits the fade, reduction and volume in one ed
 it('adds and saves a manual beat at the source-relative cursor', async () => {
   const view = await render(<MixEditor project={project} onClose={jest.fn()} onSaved={jest.fn()} />);
   await fireEvent.press(view.getByLabelText('Batidas do clipe'));
-  await fireEvent.press(view.getByLabelText('Adicionar batida'));
+  expect(view.queryByLabelText('Posição da batida')).toBeNull();
+  const transport = within(view.getByTestId('mix-beat-transport'));
+  for (const label of ['Ouvir batidas','Desativado','Menos','Mais','Limpar batidas']) expect(transport.getByLabelText(label)).toBeTruthy();
+  const wave = within(view.getByTestId('mix-beat-wave'));
+  await fireEvent.press(wave.getByLabelText('Adicionar batida'));
+  expect(wave.getByLabelText('Remover batida')).toBeTruthy();
+  await fireEvent.press(wave.getByLabelText('Remover batida'));
+  await fireEvent.press(wave.getByLabelText('Adicionar batida'));
   await fireEvent.press(view.getByLabelText('Aplicar batidas'));
   await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
   expect(jest.mocked(saveMixProject).mock.calls.at(-1)![1][0].beatsMs).toEqual([16000]);
+});
+it('edits overlapping selected beats in one sheet, preserving distinct source offsets and the other clips', async () => {
+  const mix = { ...project, clips: [
+    project.clips[0],
+    { ...project.clips[0], id: 'second', lane: 1, sourceStartMs: 5000, sourceEndMs: 35000 },
+    { ...project.clips[0], id: 'third', lane: 2 },
+  ] };
+  const view = await render(<MixEditor project={mix} onClose={jest.fn()} onSaved={jest.fn()} />);
+  expect(view.getByTestId('mix-editor-panel')).toHaveStyle({ backgroundColor: '#121212' });
+  expect(view.getByTestId('mix-timeline-viewport')).toHaveStyle({ backgroundColor: '#121212' });
+  await fireEvent.press(view.getByLabelText('Seleção múltipla'));
+  await fireEvent.press(view.getByLabelText('Selecionar clipe 2: One'));
+  await fireEvent.press(view.getByLabelText('Batidas do clipe'));
+  expect(view.getByLabelText('Ver batidas do clipe 1: One')).toBeTruthy();
+  expect(view.getByLabelText('Ver batidas do clipe 2: One')).toBeTruthy();
+  await fireEvent.press(view.getByLabelText('Adicionar batida'));
+  await fireEvent.press(view.getByLabelText('Ver batidas do clipe 1: One'));
+  expect(view.getByTestId('mix-beat-dot-16000')).toBeTruthy();
+  await fireEvent.press(view.getByLabelText('Aplicar batidas'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalledTimes(1));
+  expect(jest.mocked(saveMixProject).mock.calls[0][1].map(clip => clip.beatsMs)).toEqual([[16000],[20000],undefined]);
+  await fireEvent.press(view.getByLabelText('Desfazer'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalledTimes(2));
+  expect(jest.mocked(saveMixProject).mock.calls[1][1]).toEqual(mix.clips);
 });
 it('shows the fade inside the clip and colors only passed beat dots yellow', async () => {
   const mix = { ...project, clips: [{ ...project.clips[0], fadeInMs: 15000, beatsMs: [14000, 18000] }] };
@@ -272,6 +305,22 @@ it('shows the fade inside the clip and colors only passed beat dots yellow', asy
   expect(view.getByTestId('mix-beat-clip-18000')).toHaveStyle({ backgroundColor: '#FFFFFF' });
   await fireEvent.press(view.getByLabelText('Batidas do clipe'));
   expect(view.getByTestId('mix-beat-dot-14000').props.fill).toBeDefined();
+});
+it('generates beats separately for every selected source and clears the whole group in one operation', async () => {
+  const mix = { ...project, tracks: [...project.tracks, { ...project.tracks[0], spotifyId: 'two', title: 'Two' }],
+    clips: [{ ...project.clips[0], beatsMs: [16000] }, { ...project.clips[0], id: 'second', trackId: 'two', lane: 1, beatsMs: [16000] }] };
+  const view = await render(<MixEditor project={mix} onClose={jest.fn()} onSaved={jest.fn()} />);
+  await fireEvent.press(view.getByLabelText('Seleção múltipla'));
+  await fireEvent.press(view.getByLabelText('Selecionar clipe 2: Two'));
+  await fireEvent.press(view.getByLabelText('Batidas do clipe'));
+  await fireEvent.press(view.getByLabelText('Menos'));
+  await waitFor(() => expect(view.getByLabelText('Menos').props.accessibilityState.selected).toBe(true));
+  expect(loadMixRhythm).toHaveBeenCalledWith(undefined, 'one');
+  expect(loadMixRhythm).toHaveBeenCalledWith(undefined, 'two');
+  await fireEvent.press(view.getByLabelText('Limpar batidas'));
+  await fireEvent.press(view.getByLabelText('Aplicar batidas'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalledTimes(1));
+  expect(jest.mocked(saveMixProject).mock.calls[0][1].map(clip => clip.beatsMs)).toEqual([[],[]]);
 });
 it('automatically saves removal and keeps the editor accessible while opening the source picker', async () => {
   const close = jest.fn();
