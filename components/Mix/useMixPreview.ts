@@ -14,7 +14,9 @@ type Voice = { audio: AudioPlayer; dispose: () => void; ready: boolean; started:
 const LOOKAHEAD_MS = 1500;
 const TICK_MS = 40;
 
-export function useMixPreview() {
+export function useMixPreview(mutedLanes?: ReadonlySet<number>) {
+  const muteRef = React.useRef(mutedLanes);
+  muteRef.current = mutedLanes;
   const voices = React.useRef(new Map<string, Voice>());
   const timer = React.useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const generation = React.useRef(0);
@@ -78,7 +80,12 @@ export function useMixPreview() {
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldPlayInBackground: true, interruptionMode: 'doNotMix' });
       if (!active()) return;
       const laneCount = new Set(entries.map((clip) => clip.lane)).size;
-      const envelopes = new Map(entries.map((clip) => [clip.id, gainEnvelope(clip, entries)]));
+      let lastMute = muteRef.current;
+      const buildEnvelopes = () => {
+        const audible = entries.filter((clip) => !muteRef.current?.has(clip.lane));
+        return new Map(entries.map((clip) => [clip.id, gainEnvelope(clip, audible)]));
+      };
+      let envelopes = buildEnvelopes();
       let startedAt: number | null = null;
       const opening = new Set<string>();
       let lastSoloPosition = initial;
@@ -111,7 +118,7 @@ export function useMixPreview() {
           const uri = await getPath(clip);
           if (!active() || nowPosition() >= clip.endMs) return;
           const audio = createAudioPlayer({ uri }, { updateInterval: TICK_MS });
-          audio.volume = envelopeGain(envelopes.get(clip.id)!, Math.max(0, nowPosition() - clip.startMs)) / laneCount;
+          audio.volume = muteRef.current?.has(clip.lane) ? 0 : envelopeGain(envelopes.get(clip.id)!, Math.max(0, nowPosition() - clip.startMs)) / laneCount;
           const voice: Voice = { audio, dispose: () => {}, ready: false, started: false, preparing: false, seekAt: clip.startMs };
           voices.current.set(clip.id, voice);
           const subscription = audio.addListener('playbackStatusUpdate', (status) => {
@@ -126,6 +133,10 @@ export function useMixPreview() {
       };
       const tick = () => {
         if (!active()) return;
+        if (lastMute !== muteRef.current) {
+          lastMute = muteRef.current;
+          envelopes = buildEnvelopes();
+        }
         const ms = nowPosition();
         if (ms >= total) { setPosition(total); stop(); return; }
         const current = entries.filter((clip) => clip.startMs <= ms && clip.endMs > ms);
@@ -147,7 +158,7 @@ export function useMixPreview() {
         }
         for (const clip of current) {
           const voice = voices.current.get(clip.id);
-          if (voice) voice.audio.volume = envelopeGain(envelopes.get(clip.id)!, ms - clip.startMs) / laneCount;
+          if (voice) voice.audio.volume = muteRef.current?.has(clip.lane) ? 0 : envelopeGain(envelopes.get(clip.id)!, ms - clip.startMs) / laneCount;
           if (voice?.ready && !voice.started) {
             if (ms - voice.seekAt > 100) {
               voice.ready = false;

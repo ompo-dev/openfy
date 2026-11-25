@@ -38,6 +38,38 @@ const project: MixProject = { version: 1, id: 'local_mix_edit', title: 'Treino',
 beforeEach(() => { jest.clearAllMocks(); jest.mocked(saveMixProject).mockImplementation(async (base, clips) => ({ ...base, revision: base.revision + 1, clips })); mockBusy = false; mockHandleGestures.clear(); jest.spyOn(Alert, 'alert').mockImplementation(() => {}); });
 afterEach(() => jest.restoreAllMocks());
 
+it('extends every lane to the left and independently toggles preview mute without saving edits', async () => {
+  const mix = { ...project, clips: [...project.clips, { ...project.clips[0], id: 'second', lane: 1 }] };
+  const view = await render(<MixEditor project={mix} onClose={jest.fn()} onSaved={jest.fn()} />);
+  expect(view.getByTestId('mix-lane-0')).toHaveStyle({ left: 0, right: 0 });
+  expect(view.getByTestId('mix-lane-1')).toHaveStyle({ left: 0, right: 0 });
+  await fireEvent.press(view.getByLabelText('Mutar faixa 1'));
+  expect(view.getByLabelText('Ativar faixa 1')).toBeTruthy();
+  expect(view.getByLabelText('Mutar faixa 2')).toBeTruthy();
+  await fireEvent.press(view.getByLabelText('Ativar faixa 1'));
+  expect(view.getByLabelText('Mutar faixa 1')).toBeTruthy();
+  expect(saveMixProject).not.toHaveBeenCalled();
+});
+it('shows yellow modification indicators for any selected clip and updates on deselection and undo', async () => {
+  const full = { ...project.clips[0], sourceStartMs: 0, sourceEndMs: 60000 };
+  const mix = { ...project, clips: [full, { ...project.clips[0], id: 'second', lane: 1, volume: 0.6, beatsMs: [2000] }] };
+  const view = await render(<MixEditor project={mix} onClose={jest.fn()} onSaved={jest.fn()} />);
+  expect(view.queryByTestId('mix-tool-indicator-Volume')).toBeNull();
+  expect(view.queryByTestId('mix-tool-indicator-Batidas')).toBeNull();
+  await fireEvent.press(view.getByLabelText('Seleção múltipla'));
+  await fireEvent.press(view.getByLabelText('Selecionar clipe 2: One'));
+  for (const tool of ['Volume','Batidas','Deslizar']) expect(view.getByTestId(`mix-tool-indicator-${tool}`)).toHaveStyle({ backgroundColor: '#FFCF20' });
+  await fireEvent.press(view.getByLabelText('Selecionar clipe 2: One'));
+  expect(view.queryByTestId('mix-tool-indicator-Volume')).toBeNull();
+  expect(view.queryByTestId('mix-tool-indicator-Batidas')).toBeNull();
+  await fireEvent.press(view.getByLabelText('Volume do clipe'));
+  await fireEvent(view.getByLabelText('Ajustar volume do clipe'), 'valueChange', 0.5);
+  await fireEvent.press(view.getByLabelText('Aplicar volume'));
+  expect(view.getByTestId('mix-tool-indicator-Volume')).toBeTruthy();
+  await fireEvent.press(view.getByLabelText('Desfazer'));
+  expect(view.queryByTestId('mix-tool-indicator-Volume')).toBeNull();
+});
+
 it('splits, undoes, redoes and saves actual source cuts inline without closing the editor', async () => {
   const saved = jest.fn();
   const close = jest.fn();

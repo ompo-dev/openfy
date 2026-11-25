@@ -37,14 +37,16 @@ import { loadMixRhythm, loadMixWaveform } from '../../services/mix/mixWaveform';
 import { detectMixBeats, trackMixRhythm, type BeatDensity } from '../../services/mix/mixBeats';
 import { getExistingLocalAudioPath } from '../../services/download/localAudioPaths';
 
-function Tool({ label, caption, icon: Icon, onPress, disabled = false, selected = false, transport = false, filled = false }: {
+function Tool({ label, caption, icon: Icon, onPress, disabled = false, selected = false, transport = false, filled = false, hasIndicator = false }: {
   label: string; caption?: string; icon: typeof Play; onPress: () => void; disabled?: boolean; selected?: boolean; transport?: boolean; filled?: boolean;
+  hasIndicator?: boolean;
 }) {
   return <LoggedPressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected }} disabled={disabled} onPress={onPress}
     style={[S.tool, transport && S.transportTool, disabled && { opacity: 0.42 }]}>
     <Icon size={transport ? 24 : 22} color={disabled && transport ? '#8994A3' : selected ? '#FFCF20' : '#FFFFFF'}
       fill={filled ? '#FFFFFF' : 'none'} />
     {caption ? <Text style={S.toolCaption}>{caption}</Text> : null}
+    {caption ? <View pointerEvents="none" testID={hasIndicator ? `mix-tool-indicator-${caption}` : undefined} style={[S.toolIndicator, hasIndicator && S.toolIndicatorActive]} /> : null}
   </LoggedPressable>;
 }
 
@@ -60,6 +62,7 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
   const [future, setFuture] = React.useState<MixClip[][]>([]);
   const [selectedId, select] = React.useState(project.clips[0]?.id || '');
   const [multi, setMulti] = React.useState(false);
+  const [mutedLanes, setMutedLanes] = React.useState<ReadonlySet<number>>(() => new Set());
   const [groupIds, setGroupIds] = React.useState<string[]>([]);
   const [sources, setSources] = React.useState(project.tracks);
   const [pickerLane, setPickerLane] = React.useState<number | null>(null);
@@ -82,7 +85,7 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
   const [fadeInMs, setFadeInMs] = React.useState(0);
   const [fadeOutMs, setFadeOutMs] = React.useState(0);
   const effectChanges = React.useRef<Partial<Pick<MixClip, 'volume' | 'duckAmount' | 'fadeInMs' | 'fadeOutMs'>>>({});
-  const preview = useMixPreview();
+  const preview = useMixPreview(mutedLanes);
   const timeline = React.useMemo(() => mixTimeline(clips), [clips]);
   const total = React.useMemo(() => mixDuration(clips), [clips]);
   const selection = timeline.filter((clip) => multi ? groupIds.includes(clip.id) : clip.id === selectedId);
@@ -96,6 +99,17 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
     return new Map(sources.map((item) => [item.spotifyId, mergeMixTrack(item, byId.get(item.spotifyId))]));
   }, [sources, library]);
   const track = selected ? tracks.get(selected.trackId) : undefined;
+  const hasAudioMods = selection.some((clip) => clip.volume !== 1 || !!clip.duckAmount || !!clip.fadeInMs || !!clip.fadeOutMs);
+  const hasBeatMods = selection.some((clip) => !!clip.beatsMs?.length);
+  const hasSourceMods = selection.some((clip) => {
+    const source = tracks.get(clip.trackId);
+    return !!source && (clip.sourceStartMs > 0 || clip.sourceEndMs < source.duration_ms);
+  });
+  const toggleLaneMute = (lane: number) => setMutedLanes((previous) => {
+    const next = new Set(previous);
+    if (next.has(lane)) next.delete(lane); else next.add(lane);
+    return next;
+  });
   const sourceDuration = (id: string) => tracks.get(id)?.duration_ms ?? NaN;
   const slipChanges = (start: number) => grouped && selected ? slipMixGroup(clips, selectionIds, selected.id, start, sourceDuration)
     : selected && track ? slipMixClip(clips, selected.id, start, track.duration_ms) : clips;
@@ -107,7 +121,7 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
     preview.stop();
     setPanel(null);
     session.current++;
-    setSlip(null); setReplaceId(null); setClipboard([]); setMulti(false); setGroupIds([]);
+    setSlip(null); setReplaceId(null); setClipboard([]); setMulti(false); setGroupIds([]); setMutedLanes(new Set());
     setClips(compactMixLanes(project.clips)); setPast([]); setFuture([]); select(project.clips[0]?.id || '');
     setSources(project.tracks); setPickerLane(null); preview.setPosition(0);
     // A new revision starts a fresh editing session after adding source tracks.
@@ -316,6 +330,7 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
     </View>
     {preview.error ? <Text accessibilityRole="alert" style={S.error}>{preview.error}</Text> : null}
     <MixTimelineEditor timeline={timeline} total={total} tracks={tracks} selectedId={selected?.id || ''} selectedIds={selectionIds} position={preview.position}
+      mutedLanes={mutedLanes} onToggleLaneMute={toggleLaneMute}
       playing={preview.playing} disabled={false} onSelect={pick} onSeek={preview.setPosition} onScrub={preview.stop}
       onTrim={(id, range) => commit(grouped && selectionIds.has(id) ? trimMixGroup(clips, selectionIds, id, range, sourceDuration) : trimMixClipAtPosition(clips, id, range[0], range[1]), 'trim-handle')}
       onDragSelect={(id) => { select(id); if (multi && !selectionIds.has(id)) setGroupIds([id]); }}
@@ -333,14 +348,14 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.editTools}>
         <Tool label="Dividir no cursor" caption="Dividir" icon={Scissors} disabled={!splittable.length}
           onPress={() => commit(splittable.reduce((next, clip) => splitMixClip(next, clip.id, preview.position), clips), 'split')} />
-        <Tool label="Volume do clipe" caption="Volume" icon={Volume2} disabled={!selected || !track} onPress={() => {
+        <Tool label="Volume do clipe" caption="Volume" icon={Volume2} hasIndicator={hasAudioMods} disabled={!selected || !track} onPress={() => {
           if (!selected) return;
           effectChanges.current = {};
           preview.stop(); setVolume(selected.volume); setDuckAmount(selected.duckAmount || 0);
           setFadeInMs(selected.fadeInMs || 0); setFadeOutMs(selected.fadeOutMs || 0);
           setAudioTab('volume'); setPanel('volume');
         }} />
-        <Tool label="Batidas do clipe" caption="Batidas" icon={AudioLines} disabled={!selected || !track} onPress={() => {
+        <Tool label="Batidas do clipe" caption="Batidas" icon={AudioLines} hasIndicator={hasBeatMods} disabled={!selected || !track} onPress={() => {
           if (!selected) return;
           setBatchDensity('less');
           preview.stop(); if (preview.position < selected.startMs || preview.position >= selected.endMs) preview.setPosition(selected.startMs);
@@ -350,7 +365,7 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
         <Tool label="Copiar clipe" caption="Copiar" icon={Copy} disabled={!selected} onPress={copyClip} />
         <Tool label="Colar clipe" caption="Colar" icon={ClipboardPaste} disabled={!clipboard.length} onPress={() => insertCopy(false)} />
         <Tool label="Duplicar clipe" caption="Duplicar" icon={CopyPlus} disabled={!selected} onPress={() => insertCopy(true)} />
-        <Tool label="Deslizar clipe" caption="Deslizar" icon={MoveHorizontal} disabled={!selected || !track || track.duration_ms <= clipDuration(selected)} onPress={openSlip} />
+        <Tool label="Deslizar clipe" caption="Deslizar" icon={MoveHorizontal} hasIndicator={hasSourceMods} disabled={!selected || !track || track.duration_ms <= clipDuration(selected)} onPress={openSlip} />
         <Tool label="Remover clipe" caption="Excluir" icon={Trash2} disabled={!selected} onPress={() => { if (selected) { commit(clips.filter((clip) => !selectionIds.has(clip.id)), 'remove'); select(''); setGroupIds([]); } }} />
         <Tool label="Mover clipe antes" icon={ChevronLeft} disabled={!selected || grouped || !timeline.some((c) => c.lane === selected.lane && c.startMs < selected.startMs)}
           onPress={() => {
@@ -428,6 +443,8 @@ const S = StyleSheet.create({
   headerContent: { gap: 0, backgroundColor: '#0D1117', borderRadius: 12, overflow: 'hidden' }, transport: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, backgroundColor: '#0D1117', paddingHorizontal: 8 },
   tool: { minWidth: 40, minHeight: 40, gap: 3, alignItems: 'center', justifyContent: 'center' },
   toolCaption: { fontSize: 11, color: '#ABABB2', fontFamily: 'SF-Regular' },
+  toolIndicator: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'transparent' },
+  toolIndicatorActive: { backgroundColor: '#FFCF20' },
   transportTool: { width: 44 },
   transportSide: { flexDirection: 'row', gap: 4, flex: 1 },
   centerTransport: { width: 44, alignItems: 'center' },

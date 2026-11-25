@@ -10,6 +10,9 @@ AVFoundation no iOS e Media3 Transformer 1.9.0 no Android compõem arquivos loca
 
 ### Posicionamento dos clipes
 
+- As faixas ocupam toda a largura do painel. Cada faixa ocupada tem um botão fixo à esquerda para silenciar/restaurar a sua audição na prévia, inclusive durante a reprodução, sem modificar a posição dos clipes nem o mix salvo. O áudio silenciado não ativa a redução automática nas outras faixas.
+- Uma bolinha amarela sob Volume, Batidas ou Deslizar indica, respectivamente, efeitos de áudio, marcações ou um intervalo de origem recortado em pelo menos um clipe da seleção atual. Os indicadores são derivados da edição atual, inclusive após desfazer/refazer.
+
 - O botão de seleção múltipla ao lado da marcação de batidas mantém a seleção atual e permite adicionar ou retirar clipes tocando neles. As molduras amarelas e o contador identificam o grupo; tocar no fundo limpa a seleção. Desativar o modo mantém apenas o clipe de referência.
 - Volume, redução automática e fades aplicam apenas os parâmetros alterados a todos os selecionados, respeitando a duração de cada clipe. Divisão e marcação manual atuam nos clipes selecionados que cruzam o cursor. A geração automática de batidas analisa cada fonte separadamente.
 - Arrastar um clipe selecionado desloca o grupo preservando as distâncias e rejeita colisões; recortar pelas alças do clipe de referência ou deslizar aplica um deslocamento comum limitado pelas fontes. Copiar, colar e duplicar preservam as posições relativas; substituir e excluir também operam sobre o grupo. Cada modificação coletiva gera uma única ação de histórico e um salvamento automático. A prévia toca a seleção nas posições originais; os atalhos de reordenação individual ficam desativados quando há vários clipes.

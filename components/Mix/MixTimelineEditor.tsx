@@ -2,6 +2,8 @@ import * as React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Plus from 'lucide-react-native/icons/plus';
+import Volume2 from 'lucide-react-native/icons/volume-2';
+import VolumeX from 'lucide-react-native/icons/volume-x';
 import { LinearGradient } from 'expo-linear-gradient';
 import { LoggedPressable } from '../native';
 import { formatMixTime, MAX_MIX_LANES, MAX_MIX_DURATION_MS, MIN_CLIP_MS, moveMixGroup, placeMixClip, snapMixPosition, trimMixGroup, trimMixClipAtPosition, type MixClip, mixTimeline } from '../../services/mix/mixTimeline';
@@ -139,9 +141,11 @@ function MovableClip({ clip, scale, lanes, navigation, disabled, onBegin, onMove
     testID={`mix-drag-${clip.id}`}>{children}</View></GestureDetector>;
 }
 
-export function MixTimelineEditor({ timeline, total, tracks, selectedId, selectedIds, position, disabled, onSelect, onSeek, onScrub, onTrim, onAddTrack, onTrimActive, onMoveClip, onDragSelect, onDeselect, slip }: {
+export function MixTimelineEditor({ timeline, total, tracks, selectedId, selectedIds, position, disabled, onSelect, onSeek, onScrub, onTrim, onAddTrack, onTrimActive, onMoveClip, onDragSelect, onDeselect, slip, mutedLanes, onToggleLaneMute }: {
   timeline: Entry[]; total: number; tracks: Map<string, Source>; selectedId: string; position: number;
   selectedIds?: ReadonlySet<string>;
+  mutedLanes?: ReadonlySet<number>;
+  onToggleLaneMute?: (lane: number) => void;
   playing: boolean; disabled: boolean; onSelect: (clip: Entry) => void; onSeek: (ms: number) => void;
   onScrub: () => void; onTrim: (id: string, range: [number, number]) => void;
   onAddTrack: (lane: number) => void;
@@ -262,7 +266,7 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, selecte
       <View testID="mix-timeline-scroll" pointerEvents={slip ? 'none' : 'auto'} style={{ flex: 1, opacity: slip ? 0.35 : 1 }} collapsable={false}>
         <View accessibilityLabel="Timeline do mix" style={[S.content, { height, width }]}>
           <LoggedPressable accessibilityLabel="Desmarcar clipe" testID="mix-timeline-background" onPress={onDeselect} style={StyleSheet.absoluteFill} />
-          {laneEnds.map((_, lane) => <View key={lane} pointerEvents="none" style={[S.lane, { top: 36 + lane * 46, left: Math.max(0, width / 2 - offset), right: 0 }]} />)}
+          {laneEnds.map((_, lane) => <View key={lane} testID={`mix-lane-${lane}`} pointerEvents="none" style={[S.lane, { top: 36 + lane * 46, left: 0, right: 0 }, mutedLanes?.has(lane) && S.mutedLane]} />)}
           {ticks.map(({ time, major, middle }) => <View key={time} pointerEvents="none" style={[S.tick, { left: width / 2 + time * scale - offset - 23 }]}>
             {major ? <Text style={S.tickLabel}>{time < 60000 ? `${Number((time / 1000).toFixed(1))}s` : formatMixTime(time)}</Text> : null}
             <View style={[S.tickMark, major ? S.majorTick : middle ? S.middleTick : S.minorTick]} />
@@ -297,7 +301,7 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, selecte
                   setMoving(null); trimActive.current = false; setTrimming(false); onTrimActive?.(false);
                 }}>
               <LoggedPressable disabled={disabled} accessibilityLabel={`Selecionar clipe ${index + 1}: ${source?.title}`} accessibilityState={{ selected }}
-                onPress={() => onSelect(original)} style={[S.clipBody, { backgroundColor: clipColor(clip.trackId) }, handles ? S.selectedBody : selected && { margin: 2 }]}>
+                onPress={() => onSelect(original)} style={[S.clipBody, { backgroundColor: clipColor(clip.trackId) }, handles ? S.selectedBody : selected && { margin: 2 }, mutedLanes?.has(clip.lane) && S.mutedClip]}>
                 <ClipWaveform source={source} range={range} scale={scale} color={clipColor(clip.trackId)}
                   fadeIn={clip.fadeInMs} fadeOut={clip.fadeOutMs} left={visibleStart} width={visibleEnd - visibleStart} />
                 {clip.beatsMs && visibleBeatMarkers(clip.beatsMs, range[0], range[1], scale, visibleStart, visibleEnd)
@@ -328,6 +332,15 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, selecte
         </View>
       </View>
     </GestureDetector>
+    {onToggleLaneMute ? laneEnds.map((_, lane) => {
+      const muted = !!mutedLanes?.has(lane);
+      return lane < occupiedLanes ? <LoggedPressable key={lane} testID={`mix-lane-mute-${lane}`}
+        accessibilityRole="button" accessibilityState={{ selected: muted }} accessibilityLabel={`${muted ? 'Ativar' : 'Mutar'} faixa ${lane + 1}`}
+        disabled={disabled || !!slip} onPress={() => onToggleLaneMute(lane)}
+        style={[S.laneMute, { top: 36 + lane * LANE_HEIGHT }, muted && S.mutedLane]}>
+        {muted ? <VolumeX size={20} color="#FFCF20" /> : <Volume2 size={20} color="#A0A8B4" />}
+      </LoggedPressable> : null;
+    }) : null}
     {slip && slipClip && slipSource ? <MixSlipLane key={slipClip.id} clip={slipClip} sourceDuration={slipSource.duration_ms}
       uri={slipSource.localAudioPath} sourceStart={slip.sourceStart} scale={scale}
       left={width / 2 + slipClip.startMs * scale - offset} top={36 + slipClip.lane * LANE_HEIGHT} width={width}
@@ -346,6 +359,9 @@ const S = StyleSheet.create({
   viewport: { height: 108, backgroundColor: '#0D1117', overflow: 'hidden' },
   content: { height: 86 },
   lane: { position: 'absolute', top: 36, height: 42, backgroundColor: '#20242A' },
+  laneMute: { position: 'absolute', left: 0, width: 40, height: 42, backgroundColor: '#20242A', alignItems: 'center', justifyContent: 'center', zIndex: 7 },
+  mutedLane: { backgroundColor: '#191D23' },
+  mutedClip: { opacity: 0.48 },
   tick: { position: 'absolute', top: 0, width: 46, height: 28, alignItems: 'center', justifyContent: 'flex-end' },
   tickLabel: { color: '#7C8795', fontSize: 11, fontVariant: ['tabular-nums'], position: 'absolute', top: 0 },
   tickMark: { width: 2, borderRadius: 1, backgroundColor: '#303843' },

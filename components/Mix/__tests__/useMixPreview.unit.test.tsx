@@ -68,6 +68,31 @@ it('does not start a late seek after stopping', async () => {
   expect(native.remove).toHaveBeenCalledTimes(1);
   expect(native.play).not.toHaveBeenCalled();
 });
+it('mutes and restores an individual lane during playback without restarting or shifting audio', async () => {
+  jest.useFakeTimers();
+  try {
+    const first = player(), second = player();
+    jest.mocked(createAudioPlayer).mockReturnValueOnce(first as any).mockReturnValueOnce(second as any);
+    const { result, rerender, unmount } = await renderHook(({ muted }) => useMixPreview(muted), {
+      initialProps: { muted: new Set<number>([1]) },
+    });
+    await act(async () => { await result.current.play(project, 12000); });
+    expect(first.volume).toBe(0.4);
+    expect(second.volume).toBe(0);
+    await rerender({ muted: new Set<number>() });
+    await act(async () => { jest.advanceTimersByTime(40); });
+    expect(second.volume).toBe(0.2);
+    await rerender({ muted: new Set<number>([0]) });
+    await act(async () => { jest.advanceTimersByTime(40); });
+    expect(first.volume).toBe(0);
+    expect(second.volume).toBe(0.2);
+    expect(first.play).toHaveBeenCalledTimes(1);
+    expect(second.play).toHaveBeenCalledTimes(1);
+    expect(first.remove).not.toHaveBeenCalled();
+    expect(result.current.playing).toBe(true);
+    await unmount();
+  } finally { jest.useRealTimers(); }
+});
 it('stops pending local file lookup without starting a player', async () => {
   let finish!: (value: any) => void;
   jest.mocked(getDownloadedTracks).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
