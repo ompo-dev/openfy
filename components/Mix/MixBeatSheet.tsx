@@ -160,7 +160,7 @@ export function MixBeatSheet({ targets, initialId, position, playing, onSeek, on
           <Line x1={160} y1={2} x2={160} y2={96} stroke="#FFF" strokeWidth={2.5} strokeLinecap="round" />
         </Svg>
       </View></GestureDetector>
-      <HorizontalFadeEdges left={start > 0} right={end < duration} width={12} color={COLORS.SECONDARY} />
+      <HorizontalFadeEdges left={start > 0} right={end < duration} width={24} color={COLORS.SECONDARY} />
       <LoggedPressable style={S.markerButton} disabled={busy} accessibilityLabel={near === undefined ? 'Adicionar batida' : 'Remover batida'} onPress={editMarker}>
         {near === undefined ? <Plus size={22} color="#FFF" /> : <Minus size={22} color="#FFF" />}
       </LoggedPressable>

@@ -51,7 +51,7 @@ export function MixSlipLane({ clip, sourceDuration, uri, sourceStart, scale, lef
         <View style={{ position: 'absolute', left: waveLeft - windowLeft, width: fullWidth, height: 42 }}>{wave('#FFFFFF')}</View>
       </View> : null}
       {windowWidth > 0 ? <View pointerEvents="none" style={[S.outline, { left: windowLeft, width: windowWidth }]} /> : null}
-      <HorizontalFadeEdges left={waveLeft < 0} right={waveLeft + fullWidth > width} width={12} color={COLORS.PRIMARY} />
+      <HorizontalFadeEdges left={waveLeft < 0} right={waveLeft + fullWidth > width} width={28} color={COLORS.PRIMARY} />
     </View>
   </GestureDetector>;
 }

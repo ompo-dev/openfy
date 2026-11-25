@@ -321,7 +321,7 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
       <Tool label="Aplicar deslizar" icon={Check} onPress={applySlip} />
     </View> : <View testID="mix-editor-toolbar" style={S.inspector}>
       {multi ? <Text style={[S.secondary, { paddingHorizontal: 8 }]}>{selection.length} clipes selecionados</Text> : null}
-      <HorizontalFadeScrollView fadeWidth={16} contentContainerStyle={S.editTools}>
+      <HorizontalFadeScrollView fadeColor={COLORS.PRIMARY} fadeWidth={30} contentContainerStyle={S.editTools}>
         <Tool label="Dividir no cursor" caption="Dividir" icon={Scissors} disabled={!splittable.length}
           onPress={() => commit(splittable.reduce((next, clip) => splitMixClip(next, clip.id, preview.position), clips), 'split')} />
         <Tool label="Volume do clipe" caption="Volume" icon={Volume2} hasIndicator={hasAudioMods} disabled={!selected || !track} onPress={() => {

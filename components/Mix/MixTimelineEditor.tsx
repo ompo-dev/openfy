@@ -235,6 +235,8 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, selecte
     time: (first + i) * minorStep, major: (first + i) % divisions === 0, middle: (first + i) % (divisions / 2) === 0,
   }));
   const occupiedLanes = Math.max(0, ...timeline.map((clip) => clip.lane + 1));
+  const gutter = onToggleLaneMute && occupiedLanes > 0 ? 40 : 0;
+  const edgeFade = Math.min(30, Math.max(0, (width - gutter) / 4));
   const lanes = Math.min(MAX_MIX_LANES, occupiedLanes + 1);
   const laneEnds = Array.from({ length: lanes }, (_, lane) => timeline.reduce((end, clip) => clip.lane === lane ? Math.max(end, clip.endMs) : end, 0));
   const snap = (id: string, ms: number) => snapMixPosition(selectedIds?.has(id) && selectedIds.size > 1
@@ -273,6 +275,8 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, selecte
             {major ? <Text style={S.tickLabel}>{time < 60000 ? `${Number((time / 1000).toFixed(1))}s` : formatMixTime(time)}</Text> : null}
             <View style={[S.tickMark, major ? S.majorTick : middle ? S.middleTick : S.minorTick]} />
           </View>)}
+          <View testID="mix-clips-viewport" pointerEvents="box-none" style={[S.clipsViewport, { left: gutter }]}>
+          <View pointerEvents="box-none" style={{ position: 'absolute', left: -gutter, top: -32, width, height }}>
           {displayed.map((clip, index) => {
             const original = timeline[index];
             const source = tracks.get(clip.trackId);
@@ -282,8 +286,10 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, selecte
             const clipWidth = Math.max(1, (range[1] - range[0]) * scale);
             const left = width / 2 + clip.startMs * scale - offset;
             if (!selected && (left + clipWidth < -width || left > width * 2)) return null;
-            const visibleStart = Math.max(0, Math.min(clipWidth, -left));
+            const visibleStart = Math.max(0, Math.min(clipWidth, gutter - left));
             const visibleEnd = Math.max(visibleStart, Math.min(clipWidth, width - left));
+            const infoStart = Math.max(0, Math.min(clipWidth, gutter + edgeFade - left));
+            const infoEnd = Math.max(infoStart, Math.min(clipWidth, width - edgeFade - left));
             return <View key={clip.id} testID={`mix-clip-${clip.id}`} style={[S.clip, { top: 36 + clip.lane * LANE_HEIGHT - (selected ? 2 : 0), left: handles ? left - 18 : selected ? left - 2 : left, width: handles ? clipWidth + 36 : selected ? clipWidth + 4 : clipWidth }, selected && S.selected, (moving?.id === clip.id || !!moving && grouped && selected) && S.moving]}>
               <MovableClip clip={original} scale={scale} lanes={lanes} navigation={navigate} disabled={disabled}
                 onBegin={() => {
@@ -309,7 +315,7 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, selecte
                 {clip.beatsMs && visibleBeatMarkers(clip.beatsMs, range[0], range[1], scale, visibleStart, visibleEnd)
                   .map((beat) => <View key={beat} testID={`mix-beat-${clip.id}-${beat}`} pointerEvents="none" style={[S.beat, { left: (beat - range[0]) * scale - 2,
                     backgroundColor: position >= clip.startMs + beat - range[0] ? '#FFCF20' : '#FFFFFF' }]} />)}
-                <View pointerEvents="none" style={[S.clipInfo, { left: visibleStart, maxWidth: Math.max(0, visibleEnd - visibleStart) }]}>
+                <View pointerEvents="none" style={[S.clipInfo, { left: infoStart, maxWidth: Math.max(0, infoEnd - infoStart) }]}>
                 <ClipCover source={source} />
                 <View style={S.clipText}>
                   <Text numberOfLines={1} style={S.clipTitle}>{source?.title}{source?.explicit ? ' ▪ E' : ''}</Text>
@@ -331,39 +337,40 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, selecte
           {laneEnds.map((end, lane) => <LoggedPressable key={lane} disabled={disabled || trimming || pinching}
             accessibilityLabel={`Adicionar música à faixa ${lane + 1}`} onPress={() => onAddTrack(lane)}
             style={[S.add, { top: 43 + lane * 46, left: width / 2 + (lane === occupiedLanes ? 0 : end * scale - offset) + 20 }]}><Plus size={20} color="#171717" /></LoggedPressable>)}
+          </View>
+          </View>
         </View>
       </View>
     </GestureDetector>
-    {!slip ? laneEnds.map((end, lane) => {
-      const start = Math.min(Infinity, ...displayed.filter((clip) => clip.lane === lane).map((clip) => clip.startMs));
-      return <View key={lane} pointerEvents="none" style={{ position: 'absolute', top: 36 + lane * LANE_HEIGHT, left: onToggleLaneMute && lane < occupiedLanes ? 40 : 0, right: 0, height: 42, zIndex: 6 }}>
-        <HorizontalFadeEdges left={start * scale < offset - width / 2 + (onToggleLaneMute ? 40 : 0)}
-          right={end * scale > offset + width / 2} color={mutedLanes?.has(lane) ? '#202020' : APP_COLORS.SECONDARY} width={12} />
-      </View>;
-    }) : null}
+    {!slip ? <View testID="mix-lanes-fade" pointerEvents="none" style={[S.laneFade, { left: gutter }]}>
+      <HorizontalFadeEdges left right color={APP_COLORS.PRIMARY} width={edgeFade} />
+    </View> : null}
     <View pointerEvents="none" style={{ position: 'absolute', top: 0, right: 0, left: 0, height: 30, zIndex: 2 }}>
-      <HorizontalFadeEdges left={false} right={true} width={12} color={APP_COLORS.PRIMARY} />
+      <HorizontalFadeEdges left={false} right={true} width={edgeFade} color={APP_COLORS.PRIMARY} />
     </View>
-    {onToggleLaneMute ? laneEnds.map((_, lane) => {
-      const muted = !!mutedLanes?.has(lane);
-      return lane < occupiedLanes ? <LoggedPressable key={lane} testID={`mix-lane-mute-${lane}`}
-        accessibilityRole="button" accessibilityState={{ selected: muted }} accessibilityLabel={`${muted ? 'Ativar' : 'Mutar'} faixa ${lane + 1}`}
-        disabled={disabled || !!slip} onPress={() => onToggleLaneMute(lane)}
-        style={[S.laneMute, { top: 36 + lane * LANE_HEIGHT }, muted && S.mutedLane]}>
-        {muted ? <VolumeX size={20} color="#FFCF20" /> : <Volume2 size={20} color="#A0A8B4" />}
-      </LoggedPressable> : null;
-    }) : null}
     {slip && slipClip && slipSource ? <MixSlipLane key={slipClip.id} clip={slipClip} sourceDuration={slipSource.duration_ms}
       uri={slipSource.localAudioPath} sourceStart={slip.sourceStart} scale={scale}
       left={width / 2 + slipClip.startMs * scale - offset} top={36 + slipClip.lane * LANE_HEIGHT} width={width}
       onChange={slip.onChange} onBegin={() => { onScrub(); onTrimActive?.(true); }} onEnd={() => onTrimActive?.(false)} /> : null}
+    {onToggleLaneMute && gutter > 0 ? <View testID="mix-fixed-lane-gutter" pointerEvents="box-none" style={[S.fixedGutter, { width: gutter }]}>
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: APP_COLORS.PRIMARY }]} />
+      {laneEnds.slice(0, occupiedLanes).map((_, lane) => {
+        const muted = !!mutedLanes?.has(lane);
+        return <LoggedPressable key={lane} testID={`mix-lane-mute-${lane}`}
+          accessibilityRole="button" accessibilityState={{ selected: muted }} accessibilityLabel={`${muted ? 'Ativar' : 'Mutar'} faixa ${lane + 1}`}
+          disabled={disabled || !!slip} onPress={() => onToggleLaneMute(lane)}
+          style={[S.laneMute, { top: 4 + lane * LANE_HEIGHT }]}>
+          {muted ? <VolumeX size={20} color="#FFCF20" /> : <Volume2 size={20} color="#A0A8B4" />}
+        </LoggedPressable>;
+      })}
+    </View> : null}
     <View pointerEvents="none" testID="mix-transport-time" style={[S.timeOverlay, { maxWidth: Math.max(0, width / 2 - 4) }]}>
       <LinearGradient colors={[APP_COLORS.PRIMARY, APP_COLORS.PRIMARY, `${APP_COLORS.PRIMARY}00`]} locations={[0, 0.8, 1]}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
       <Text numberOfLines={1} adjustsFontSizeToFit style={S.clock}>{formatMixTime(position)}<Text style={S.clockTotal}> / {formatMixTime(total)}</Text></Text>
     </View>
     {activeGuide !== null ? <View pointerEvents="none" testID="mix-snap-guide" style={[S.guide, { left: width / 2 + activeGuide * scale - offset, height: height - 4 }]} /> : null}
-    <View pointerEvents="none" testID="mix-fixed-playhead" style={[S.playhead, { left: width / 2 - 1.5, height: height - 4, zIndex: slip ? 6 : 3 }]} />
+    <View pointerEvents="none" testID="mix-fixed-playhead" style={[S.playhead, { left: width / 2 - 1.5, height: height - 4 }]} />
   </View>;
 }
 
@@ -371,7 +378,10 @@ const S = StyleSheet.create({
   viewport: { height: 108, backgroundColor: APP_COLORS.PRIMARY, overflow: 'hidden' },
   content: { height: 86 },
   lane: { position: 'absolute', top: 36, height: 42, backgroundColor: APP_COLORS.SECONDARY },
-  laneMute: { position: 'absolute', left: 0, width: 40, height: 42, backgroundColor: APP_COLORS.SECONDARY, alignItems: 'center', justifyContent: 'center', zIndex: 7 },
+  clipsViewport: { position: 'absolute', top: 32, right: 0, bottom: 0, overflow: 'hidden' },
+  laneFade: { position: 'absolute', top: 32, right: 0, bottom: 0, zIndex: 6 },
+  fixedGutter: { position: 'absolute', top: 32, bottom: 0, left: 0, zIndex: 12 },
+  laneMute: { position: 'absolute', left: 0, width: 40, height: 42, alignItems: 'center', justifyContent: 'center' },
   mutedLane: { backgroundColor: '#202020' },
   mutedClip: { opacity: 0.48 },
   tick: { position: 'absolute', top: 0, width: 46, height: 28, alignItems: 'center', justifyContent: 'flex-end' },
@@ -386,7 +396,7 @@ const S = StyleSheet.create({
   clip: { position: 'absolute', top: 36, height: 42, borderRadius: 6 },
   selected: { height: 46, borderRadius: 9, backgroundColor: '#FFCF20', zIndex: 2 },
   beat: { position: 'absolute', bottom: 3, width: 4, height: 4, borderRadius: 2 },
-  guide: { position: 'absolute', top: 4, width: 1, backgroundColor: '#FFCF20', zIndex: 6 },
+  guide: { position: 'absolute', top: 4, width: 1, backgroundColor: '#FFCF20', zIndex: 13 },
   moving: { opacity: 0.82, zIndex: 5, elevation: 6 },
   movableBody: { flex: 1, minWidth: 0 },
   clipBody: { flex: 1, minWidth: 0, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 4, overflow: 'hidden' },
@@ -401,5 +411,5 @@ const S = StyleSheet.create({
   handleStart: { left: 0, borderTopLeftRadius: 9, borderBottomLeftRadius: 9 },
   handleEnd: { right: 0, borderTopRightRadius: 9, borderBottomRightRadius: 9 },
   grip: { width: 3, height: 18, borderRadius: 2, backgroundColor: '#151515' },
-  playhead: { position: 'absolute', top: 4, height: 80, width: 3, borderRadius: 2, backgroundColor: '#FFF', zIndex: 3 },
+  playhead: { position: 'absolute', top: 4, height: 80, width: 3, borderRadius: 2, backgroundColor: '#FFF', zIndex: 14 },
 });

@@ -11,35 +11,44 @@ export function horizontalScrollEdges(offset: number, viewport: number, content:
   return { left: offset > 1, right: offset < content - viewport - 1 };
 }
 
-export function transparentColor(color: string): string {
+export function fadeColorAtAlpha(color: string, alpha: number): string {
   const value = processColor(color);
   if (typeof value !== 'number') return 'transparent';
   const rgb = value >>> 0;
-  return `rgba(${rgb >>> 16 & 255},${rgb >>> 8 & 255},${rgb & 255},0)`;
+  return `rgba(${rgb >>> 16 & 255},${rgb >>> 8 & 255},${rgb & 255},${alpha})`;
+}
+export const transparentColor = (color: string) => fadeColorAtAlpha(color, 0);
+// Sample a smoothstep curve: zero slope at both ends avoids visible seams.
+const STOPS = [0, 0.15, 0.3, 0.5, 0.7, 0.85, 1] as const;
+const ALPHAS = [1, 0.93925, 0.784, 0.5, 0.216, 0.06075, 0] as const;
+export function horizontalFadeColors(color: string, reverse = false): [string, string, ...string[]] {
+  const values = ALPHAS.map((alpha) => fadeColorAtAlpha(color, alpha));
+  return (reverse ? values.reverse() : values) as [string, string, ...string[]];
 }
 
 /** Stationary, touch-through edge gradients. Use matching surface colors on opaque backgrounds. */
-export function HorizontalFadeEdges({ left, right, color = COLORS.PRIMARY, width = 18 }: Edges & { color?: string; width?: number }) {
-  const transparent = transparentColor(color);
+export function HorizontalFadeEdges({ left, right, color = COLORS.PRIMARY, width = 28 }: Edges & { color?: string; width?: number }) {
   return <>
-    {left ? <LinearGradient testID="horizontal-fade-left" pointerEvents="none" colors={[color, transparent]} locations={[0, 1]}
+    {left && width > 0 ? <LinearGradient testID="horizontal-fade-left" pointerEvents="none" colors={horizontalFadeColors(color)} locations={STOPS}
       start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[S.edge, { left: 0, width }]} /> : null}
-    {right ? <LinearGradient testID="horizontal-fade-right" pointerEvents="none" colors={[transparent, color]} locations={[0, 1]}
+    {right && width > 0 ? <LinearGradient testID="horizontal-fade-right" pointerEvents="none" colors={horizontalFadeColors(color, true)} locations={STOPS}
       start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[S.edge, { right: 0, width }]} /> : null}
   </>;
 }
 
-export function HorizontalFadeMask({ left, right, width = 18, style, children }: Edges & {
+export function HorizontalFadeMask({ left, right, width = 28, style, children }: Edges & {
   width?: number; style?: StyleProp<ViewStyle>; children: React.ReactNode;
 }) {
   if (Platform.OS === 'web') {
-    const mask = `linear-gradient(to right, ${left ? 'transparent' : 'black'} 0px, black ${width}px, black calc(100% - ${width}px), ${right ? 'transparent' : 'black'} 100%)`;
+    const start = STOPS.map((stop, i) => `rgba(0,0,0,${left ? 1 - ALPHAS[i] : 1}) ${stop * width}px`);
+    const end = STOPS.map((stop, i) => `rgba(0,0,0,${right ? ALPHAS[i] : 1}) calc(100% - ${(1 - stop) * width}px)`);
+    const mask = `linear-gradient(to right, ${[...start, ...end].join(', ')})`;
     return <View style={[style, { maskImage: mask, WebkitMaskImage: mask } as ViewStyle]}>{children}</View>;
   }
   return <MaskedView style={style} androidRenderingMode="software" maskElement={<View style={S.mask}>
-    <LinearGradient colors={[left ? 'transparent' : '#000000', '#000000']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ width }} />
+    <LinearGradient colors={left ? horizontalFadeColors('#000000', true) : ['#000000', '#000000']} locations={left ? STOPS : undefined} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ width }} />
     <View style={S.maskCenter} />
-    <LinearGradient colors={['#000000', right ? 'transparent' : '#000000']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ width }} />
+    <LinearGradient colors={right ? horizontalFadeColors('#000000') : ['#000000', '#000000']} locations={right ? STOPS : undefined} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ width }} />
   </View>}>{children}</MaskedView>;
 }
 
@@ -53,7 +62,7 @@ type Props = ScrollViewProps & {
 };
 
 export const HorizontalFadeScrollView = React.forwardRef<ScrollView, Props>(function HorizontalFadeScrollView({
-  fadeColor = COLORS.PRIMARY, fadeWidth = 18, fadeMode = 'overlay', kind = 'native', animatedOffset,
+  fadeColor = COLORS.PRIMARY, fadeWidth = 28, fadeMode = 'overlay', kind = 'native', animatedOffset,
   style, onLayout, onContentSizeChange, onScroll, scrollEventThrottle = 16, children, ...props
 }, ref) {
   const metrics = React.useRef({ offset: props.contentOffset?.x ?? 0, viewport: 0, content: 0 });
@@ -92,7 +101,7 @@ export const HorizontalFadeScrollView = React.forwardRef<ScrollView, Props>(func
 });
 
 const S = StyleSheet.create({
-  frame: { position: 'relative', flexGrow: 0, alignSelf: 'stretch' },
+  frame: { position: 'relative', flexGrow: 0, alignSelf: 'stretch', overflow: 'hidden' },
   scroll: { flexGrow: 0 },
   edge: { position: 'absolute', top: 0, bottom: 0, zIndex: 10 },
   mask: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row' },

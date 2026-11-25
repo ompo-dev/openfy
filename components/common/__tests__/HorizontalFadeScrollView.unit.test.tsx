@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { ScrollView, Text } from 'react-native';
 import { fireEvent, render } from '@testing-library/react-native';
-import { HorizontalFadeScrollView, horizontalScrollEdges, transparentColor } from '../HorizontalFadeScrollView';
+import { HorizontalFadeScrollView, horizontalScrollEdges, horizontalFadeColors, transparentColor } from '../HorizontalFadeScrollView';
 
 describe('horizontal scroll edge fades', () => {
   it('only fades edges with hidden content, including elastic overscroll and non-overflowing content', () => {
@@ -16,6 +16,11 @@ describe('horizontal scroll edge fades', () => {
   it('uses the actual RGB color at zero alpha rather than a black transparent stop', () => {
     expect(transparentColor('#282828')).toBe('rgba(40,40,40,0)');
     expect(transparentColor('#AC5420')).toBe('rgba(172,84,32,0)');
+  });
+  it('uses a smooth symmetric gradient with the same background RGB throughout', () => {
+    const colors = horizontalFadeColors('#121212');
+    expect(colors).toEqual([1, .93925, .784, .5, .216, .06075, 0].map(alpha => `rgba(18,18,18,${alpha})`));
+    expect(horizontalFadeColors('#121212', true)).toEqual([...colors].reverse());
   });
 
   it('updates each edge and keeps existing scroll events and content sizing callbacks', async () => {

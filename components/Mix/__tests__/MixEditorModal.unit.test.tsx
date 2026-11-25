@@ -45,6 +45,14 @@ it('extends every lane to the left and independently toggles preview mute withou
   const view = await render(<MixEditor project={mix} onClose={jest.fn()} onSaved={jest.fn()} />);
   expect(view.getByTestId('mix-lane-0')).toHaveStyle({ left: 0, right: 0 });
   expect(view.getByTestId('mix-lane-1')).toHaveStyle({ left: 0, right: 0 });
+  const gutter = view.getByTestId('mix-fixed-lane-gutter');
+  expect(gutter).toHaveStyle({ left: 0, top: 32, width: 40, zIndex: 12 });
+  expect(within(gutter).getByLabelText('Mutar faixa 1')).toHaveStyle({ left: 0, top: 4 });
+  expect(within(gutter).getByLabelText('Mutar faixa 2')).toHaveStyle({ left: 0, top: 50 });
+  expect(within(view.getByTestId('mix-timeline-scroll')).queryByLabelText('Mutar faixa 1')).toBeNull();
+  expect(view.getByTestId('mix-clips-viewport')).toHaveStyle({ left: 40, overflow: 'hidden' });
+  expect(view.getByTestId('mix-lanes-fade')).toHaveStyle({ top: 32, left: 40, bottom: 0 });
+  expect(within(view.getByTestId('mix-lanes-fade')).getByTestId('horizontal-fade-right')).toBeTruthy();
   await fireEvent.press(view.getByLabelText('Mutar faixa 1'));
   expect(view.getByLabelText('Ativar faixa 1')).toBeTruthy();
   expect(view.getByLabelText('Mutar faixa 2')).toBeTruthy();
