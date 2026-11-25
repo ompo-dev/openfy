@@ -1,4 +1,4 @@
-import { clipDuration, compactMixLanes, mixDuration, mixTimeline, moveMixClip, placeMixClip, splitMixClip, trimMixClip, validateMixClips, type MixClip } from '../mixTimeline';
+import { clipDuration, compactMixLanes, insertMixClipCopy, mixDuration, mixTimeline, moveMixClip, placeMixClip, replaceMixClipSource, slipMixClip, splitMixClip, trimMixClip, validateMixClips, type MixClip } from '../mixTimeline';
 const clips: MixClip[] = [
   { id: 'a', trackId: 'one', sourceStartMs: 5000, sourceEndMs: 35000, volume: 1 },
   { id: 'b', trackId: 'two', sourceStartMs: 10000, sourceEndMs: 20000, volume: 0.5 },
@@ -72,4 +72,33 @@ it('compacts empty lanes while retaining timing, including placement beyond the 
   expect(mixTimeline(compact).find((clip) => clip.id === 'a')).toMatchObject({ lane: 1, startMs: 90000, endMs: 120000 });
   expect(mixTimeline(compact).find((clip) => clip.id === 'b')).toMatchObject({ lane: 0, startMs: 30000, endMs: 40000 });
   expect(mixDuration(compact)).toBe(120000);
+});
+
+it('slides a 30-second clip inside a 90-second source without moving any timeline boundaries or effects', () => {
+  const original = [{ ...clips[0], volume: 0.6, fadeInMs: 500, fadeOutMs: 1000, duckAmount: 0.4, beatsMs: [10000, 20000, 30000] }, clips[1]];
+  const result = slipMixClip(original, 'a', 25000, 90000);
+  expect(mixTimeline(result)[0]).toMatchObject({ startMs: 0, endMs: 30000, sourceStartMs: 25000, sourceEndMs: 55000, volume: 0.6, fadeInMs: 500, fadeOutMs: 1000, duckAmount: 0.4, beatsMs: [30000] });
+  expect(mixTimeline(result)[1]).toEqual(mixTimeline(original)[1]);
+  expect(slipMixClip(original, 'a', 999999, 90000)[0]).toMatchObject({ sourceStartMs: 60000, sourceEndMs: 90000 });
+  expect(slipMixClip(original, 'a', -10, 90000)[0]).toMatchObject({ sourceStartMs: 0, sourceEndMs: 30000 });
+  expect(slipMixClip(original, 'a', 10000, 20000)[0]).toBe(original[0]);
+});
+it('replaces only the source while retaining timing and fitting effects if the new song is shorter', () => {
+  const original = [{ ...clips[0], fadeInMs: 20000, fadeOutMs: 10000, beatsMs: [10000] }, clips[1]];
+  const replacement = replaceMixClipSource(original, 'a', { spotifyId: 'new', duration_ms: 90000 } as any);
+  expect(mixTimeline(replacement)[0]).toMatchObject({ id: 'a', trackId: 'new', startMs: 0, endMs: 30000, sourceStartMs: 0, sourceEndMs: 30000, fadeInMs: 20000, fadeOutMs: 10000 });
+  expect(replacement[0].beatsMs).toBeUndefined();
+  const shorter = replaceMixClipSource(original, 'a', { spotifyId: 'new', duration_ms: 15000 } as any);
+  expect(shorter[0]).toMatchObject({ sourceEndMs: 15000, fadeInMs: 15000, fadeOutMs: 0 });
+  expect(mixTimeline(shorter)[1].startMs).toBe(30000);
+});
+it('pastes at the cursor and duplicates into the next free interval, preserving effects and existing positions', () => {
+  const source = { ...clips[0], fadeInMs: 2000, beatsMs: [10000] };
+  const original = [source, clips[1]];
+  const pasted = insertMixClipCopy(original, source, 'paste', 1, 12000);
+  expect(mixTimeline(pasted).find((item) => item.id === 'paste')).toMatchObject({ lane: 1, startMs: 12000, endMs: 42000, sourceStartMs: 5000, fadeInMs: 2000, beatsMs: [10000] });
+  expect(pasted.find((item) => item.id === 'paste')?.beatsMs).not.toBe(source.beatsMs);
+  const duplicate = insertMixClipCopy(original, source, 'duplicate', 0, 30000, true);
+  expect(mixTimeline(duplicate).find((item) => item.id === 'duplicate')).toMatchObject({ startMs: 40000, endMs: 70000 });
+  expect(mixTimeline(duplicate).find((item) => item.id === 'b')?.startMs).toBe(30000);
 });

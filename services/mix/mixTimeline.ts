@@ -68,6 +68,33 @@ const fitEffects = (clip: MixClip, startMs: number, endMs: number): MixClip => {
 export const trimMixClip = (clips: MixClip[], id: string, startMs: number, endMs: number): MixClip[] =>
   clips.map((clip) => clip.id === id ? fitEffects(clip, Math.round(startMs), Math.round(endMs)) : clip);
 
+/** Slip edits change source time, never the clip's duration, lane or gap. */
+export const slipSourceStart = (clip: MixClip, requested: number, sourceDuration: number) =>
+  Math.max(0, Math.min(Math.floor(sourceDuration - clipDuration(clip)), Math.round(requested)));
+export const slipMixClip = (clips: MixClip[], id: string, requested: number, sourceDuration: number): MixClip[] =>
+  clips.map((clip) => {
+    if (clip.id !== id || !Number.isFinite(requested) || !Number.isFinite(sourceDuration) || sourceDuration < clipDuration(clip)) return clip;
+    const start = slipSourceStart(clip, requested, sourceDuration);
+    return start === clip.sourceStartMs ? clip : fitEffects(clip, start, start + clipDuration(clip));
+  });
+
+/** Replace the source; a shorter replacement leaves silence instead of shifting later clips. */
+export function replaceMixClipSource(clips: MixClip[], id: string, track: CatalogTrackInput): MixClip[] {
+  const index = clips.findIndex((clip) => clip.id === id);
+  if (index < 0 || !Number.isFinite(track.duration_ms) || track.duration_ms < MIN_CLIP_MS) return clips;
+  const clip = clips[index];
+  if (clip.trackId === track.spotifyId) return clips;
+  const duration = Math.min(clipDuration(clip), Math.floor(track.duration_ms));
+  const replacement = fitEffects({ ...clip, trackId: track.spotifyId, beatsMs: undefined }, 0, duration);
+  const next = [...clips];
+  next[index] = replacement;
+  const following = next.findIndex((item, i) => i > index && (item.lane ?? 0) === (clip.lane ?? 0));
+  if (following >= 0 && duration < clipDuration(clip)) {
+    next[following] = { ...next[following], gapBeforeMs: (next[following].gapBeforeMs ?? 0) + clipDuration(clip) - duration };
+  }
+  return next;
+}
+
 /** Left-handle trims move the visible left boundary, keeping the right boundary
  * fixed where the lane has room. Extending beyond the previous clip ripples. */
 export const trimMixClipAtPosition = (clips: MixClip[], id: string, startMs: number, endMs: number): MixClip[] =>
@@ -127,6 +154,24 @@ export const placeMixClip = (clips: MixClip[], id: string, lane: number, request
     return { ...clip, gapBeforeMs };
   });
 };
+
+/** Copy a clip with a new identity; place it without disturbing existing audio. */
+export function insertMixClipCopy(clips: MixClip[], clip: MixClip, id: string, lane: number, position: number, forwardOnly = false): MixClip[] {
+  if (clips.length >= 200 || clips.some((item) => item.id === id) || !Number.isInteger(lane) || lane < 0 || lane >= MAX_MIX_LANES || !Number.isFinite(position)) return clips;
+  const duration = clipDuration(clip);
+  const occupied = mixTimeline(clips).filter((item) => item.lane === lane);
+  let target = Math.max(0, Math.round(position));
+  if (forwardOnly) {
+    for (const item of occupied) {
+      if (target + duration <= item.startMs) break;
+      if (target < item.endMs) target = item.endMs;
+    }
+    if (target + duration > MAX_MIX_DURATION_MS) return clips;
+  }
+  const copy = { ...clip, id, lane, gapBeforeMs: 0, ...(clip.beatsMs ? { beatsMs: [...clip.beatsMs] } : {}) };
+  const next = placeMixClip([...clips, copy], id, lane, target);
+  return mixDuration(next) > MAX_MIX_DURATION_MS ? clips : next;
+}
 
 export const formatMixTime = (ms: number) => {
   const seconds = Math.max(0, Math.floor(ms / 1000));

@@ -28,6 +28,7 @@ jest.mock('react-native-gesture-handler', () => ({
   GestureDetector: ({ children, gesture }: { children: React.ReactElement<any>; gesture: any }) => {
     if (children.props.accessibilityLabel?.startsWith('Arrastar ')) mockHandleGestures.set(children.props.accessibilityLabel, gesture);
     if (children.props.testID?.startsWith('mix-drag-')) mockHandleGestures.set(children.props.testID, gesture);
+    if (children.props.testID === 'mix-slip-lane') mockHandleGestures.set(children.props.testID, gesture);
     return children;
   },
 }));
@@ -82,6 +83,65 @@ it('keeps preparation silent and exposes functional top-bar controls', async () 
   await fireEvent.press(view.getByLabelText('Salvar mix'));
   await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
   expect(jest.mocked(saveMixProject).mock.calls[0][1][0].beatsMs).toEqual([16000]);
+});
+it('slides the source waveform within a fixed 30-second window, previews the draft and commits only on apply', async () => {
+  jest.mocked(saveMixProject).mockResolvedValue(project);
+  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  await fireEvent.press(view.getByLabelText('Deslizar clipe'));
+  expect(view.getByTestId('mix-slip-window')).toBeTruthy();
+  const gesture = mockHandleGestures.get('mix-slip-lane');
+  await act(async () => { gesture.handlers.onStart({}); });
+  await act(async () => { gesture.handlers.onUpdate({ translationX: -19000 * timelineScale(INITIAL_MIX_ZOOM, 30000) }); gesture.handlers.onFinalize({}); });
+  expect(view.getByText('0:20 – 0:50 · 0:30')).toBeTruthy();
+  await fireEvent.press(view.getByLabelText('Ouvir mix'));
+  expect(mockToggle).toHaveBeenLastCalledWith(expect.objectContaining({ clips: [expect.objectContaining({ sourceStartMs: 20000, sourceEndMs: 50000 })] }), 15000, 'clip');
+  await fireEvent.press(view.getByLabelText('Cancelar deslizar'));
+  expect(view.queryByTestId('mix-slip-window')).toBeNull();
+  await fireEvent.press(view.getByLabelText('Deslizar clipe'));
+  await fireEvent(view.getByLabelText('Deslizar trecho de áudio'), 'accessibilityAction', { nativeEvent: { actionName: 'increment' } });
+  await fireEvent.press(view.getByLabelText('Aplicar deslizar'));
+  await fireEvent.press(view.getByLabelText('Desfazer'));
+  await fireEvent.press(view.getByLabelText('Refazer'));
+  await fireEvent.press(view.getByLabelText('Salvar mix'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
+  expect(jest.mocked(saveMixProject).mock.calls[0][1][0]).toMatchObject({ sourceStartMs: 2000, sourceEndMs: 32000 });
+});
+it('copies, pastes and duplicates with distinct identities and preserves clip settings', async () => {
+  const mix = { ...project, clips: [{ ...project.clips[0], volume: 0.7, fadeInMs: 1000, beatsMs: [5000] }] };
+  jest.mocked(saveMixProject).mockResolvedValue(mix);
+  const view = await render(<MixEditorModal project={mix} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  await fireEvent.press(view.getByLabelText('Copiar clipe'));
+  await fireEvent.press(view.getByLabelText('Colar clipe'));
+  await fireEvent.press(view.getByLabelText('Duplicar clipe'));
+  await fireEvent.press(view.getByLabelText('Salvar mix'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
+  const result = jest.mocked(saveMixProject).mock.calls[0][1];
+  expect(result).toHaveLength(3);
+  expect(new Set(result.map((clip) => clip.id)).size).toBe(3);
+  expect(result.every((clip) => clip.volume === 0.7 && clip.fadeInMs === 1000 && clip.beatsMs?.[0] === 5000)).toBe(true);
+});
+it('replaces the selected source with one downloaded song, supports undo and retains the cut duration', async () => {
+  const library = [{ ...project.tracks[0], spotifyId: 'two', title: 'Two', duration_ms: 90000, isDownloaded: true, localAudioPath: 'file:///two.m4a' },
+    { ...project.tracks[0], spotifyId: 'three', title: 'Three', duration_ms: 90000, isDownloaded: true, localAudioPath: 'file:///three.m4a' },
+    { ...project.tracks[0], spotifyId: 'remote', title: 'Remote', isDownloaded: false }] as any;
+  jest.mocked(saveMixProject).mockResolvedValue(project);
+  const view = await render(<MixEditorModal project={project} library={library} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  await fireEvent.press(view.getByLabelText('Substituir clipe'));
+  expect(view.queryByLabelText('Selecionar Remote')).toBeNull();
+  await fireEvent.changeText(view.getByLabelText('Buscar na biblioteca'), 'Three');
+  await fireEvent.press(await view.findByLabelText('Selecionar Three'));
+  await fireEvent.changeText(view.getByLabelText('Buscar na biblioteca'), 'Two');
+  await fireEvent.press(await view.findByLabelText('Selecionar Two'));
+  await fireEvent.changeText(view.getByLabelText('Buscar na biblioteca'), 'Three');
+  expect(await view.findByLabelText('Selecionar Three')).toBeTruthy();
+  await fireEvent.press(view.getByLabelText('Substituir música'));
+  await waitFor(() => expect(view.getByLabelText('Selecionar clipe 1: Two')).toBeTruthy());
+  await fireEvent.press(view.getByLabelText('Desfazer'));
+  expect(view.getByLabelText('Selecionar clipe 1: One')).toBeTruthy();
+  await fireEvent.press(view.getByLabelText('Refazer'));
+  await fireEvent.press(view.getByLabelText('Salvar mix'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
+  expect(jest.mocked(saveMixProject).mock.calls[0][1]).toEqual([expect.objectContaining({ id: 'clip', trackId: 'two', sourceStartMs: 0, sourceEndMs: 30000 })]);
 });
 it('offers three audio tabs and commits the fade, reduction and volume in one edit', async () => {
   jest.mocked(saveMixProject).mockResolvedValue(project);

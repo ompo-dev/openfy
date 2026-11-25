@@ -9,6 +9,7 @@ import type { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
 import { loadMixWaveform } from '../../services/mix/mixWaveform';
 import { darkenWaveColor, visibleBeatMarkers } from '../../services/mix/mixWaveformGeometry';
 import { MixWaveTiles } from './MixWaveTiles';
+import { MixSlipLane } from './MixSlipLane';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { getExistingLocalCoverPath } from '../../services/download/localAudioPaths';
 
@@ -138,7 +139,7 @@ function MovableClip({ clip, scale, lanes, navigation, disabled, onBegin, onMove
     testID={`mix-drag-${clip.id}`}>{children}</View></GestureDetector>;
 }
 
-export function MixTimelineEditor({ timeline, total, tracks, selectedId, position, disabled, onSelect, onSeek, onScrub, onTrim, onAddTrack, onTrimActive, onMoveClip, onDragSelect, onDeselect }: {
+export function MixTimelineEditor({ timeline, total, tracks, selectedId, position, disabled, onSelect, onSeek, onScrub, onTrim, onAddTrack, onTrimActive, onMoveClip, onDragSelect, onDeselect, slip }: {
   timeline: Entry[]; total: number; tracks: Map<string, Source>; selectedId: string; position: number;
   playing: boolean; disabled: boolean; onSelect: (clip: Entry) => void; onSeek: (ms: number) => void;
   onScrub: () => void; onTrim: (id: string, range: [number, number]) => void;
@@ -147,6 +148,7 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
   onMoveClip: (id: string, lane: number, ms: number) => void;
   onDragSelect: (id: string) => void;
   onDeselect: () => void;
+  slip?: { id: string; sourceStart: number; onChange: (ms: number) => void };
 }) {
   const [width, setWidth] = React.useState(320);
   const [zoom, setZoom] = React.useState(INITIAL_MIX_ZOOM);
@@ -164,8 +166,8 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
   const zoomOrigin = React.useRef(INITIAL_MIX_ZOOM);
   const trimActive = React.useRef(false);
   const scale = timelineScale(zoom, total);
-  const latest = React.useRef({ zoom, onScrub, disabled, scale, onSeek, position, onDeselect });
-  latest.current = { zoom, onScrub, disabled, scale, onSeek, position, onDeselect };
+  const latest = React.useRef({ zoom, onScrub, disabled: disabled || !!slip, scale, onSeek, position, onDeselect });
+  latest.current = { zoom, onScrub, disabled: disabled || !!slip, scale, onSeek, position, onDeselect };
   const panOrigin = React.useRef(0);
   const navigate = React.useMemo(() => Gesture.Pan().runOnJS(true).maxPointers(1)
     .activeOffsetX([-8, 8]).failOffsetY([-12, 12])
@@ -245,11 +247,13 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
   const displayed = moved ? timeline.map((clip) => moved.find((item) => item.id === clip.id) || clip) :
     draft ? mixTimeline(trimMixClipAtPosition(timeline, draft.id, draft.range[0], draft.range[1])) : timeline;
   const height = 66 + lanes * 46;
+  const slipClip = slip ? timeline.find((clip) => clip.id === slip.id) : undefined;
+  const slipSource = slipClip ? tracks.get(slipClip.trackId) : undefined;
   return <View ref={viewport} testID="mix-timeline-viewport" onLayout={({ nativeEvent }) => {
     setWidth(Math.max(1, nativeEvent.layout.width)); viewport.current?.measureInWindow((x) => { viewportX.current = x; });
   }} style={[S.viewport, { height }]}>
     <GestureDetector gesture={gestures}>
-      <View testID="mix-timeline-scroll" style={{ flex: 1 }} collapsable={false}>
+      <View testID="mix-timeline-scroll" pointerEvents={slip ? 'none' : 'auto'} style={{ flex: 1, opacity: slip ? 0.35 : 1 }} collapsable={false}>
         <View accessibilityLabel="Timeline do mix" style={[S.content, { height: height - 22, width }]}>
           <LoggedPressable accessibilityLabel="Desmarcar clipe" testID="mix-timeline-background" onPress={onDeselect} style={StyleSheet.absoluteFill} />
           {laneEnds.map((_, lane) => <View key={lane} pointerEvents="none" style={[S.lane, { top: 36 + lane * 46, left: Math.max(0, width / 2 - offset), right: 0 }]} />)}
@@ -317,13 +321,17 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
         </View>
       </View>
     </GestureDetector>
+    {slip && slipClip && slipSource ? <MixSlipLane key={slipClip.id} clip={slipClip} sourceDuration={slipSource.duration_ms}
+      uri={slipSource.localAudioPath} sourceStart={slip.sourceStart} scale={scale}
+      left={width / 2 + slipClip.startMs * scale - offset} top={36 + slipClip.lane * LANE_HEIGHT} width={width}
+      onChange={slip.onChange} onBegin={() => { onScrub(); onTrimActive?.(true); }} onEnd={() => onTrimActive?.(false)} /> : null}
     <View pointerEvents="none" testID="mix-transport-time" style={[S.timeOverlay, { maxWidth: Math.max(0, width / 2 - 4) }]}>
       <LinearGradient colors={['#0D1117', '#0D1117', '#0D111700']} locations={[0, 0.8, 1]}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
       <Text numberOfLines={1} adjustsFontSizeToFit style={S.clock}>{formatMixTime(position)}<Text style={S.clockTotal}> / {formatMixTime(total)}</Text></Text>
     </View>
     {activeGuide !== null ? <View pointerEvents="none" testID="mix-snap-guide" style={[S.guide, { left: width / 2 + activeGuide * scale - offset, height: height - 26 }]} /> : null}
-    <View pointerEvents="none" testID="mix-fixed-playhead" style={[S.playhead, { left: width / 2 - 1.5, height: height - 26 }]} />
+    <View pointerEvents="none" testID="mix-fixed-playhead" style={[S.playhead, { left: width / 2 - 1.5, height: height - 26, zIndex: slip ? 6 : 3 }]} />
   </View>;
 }
 

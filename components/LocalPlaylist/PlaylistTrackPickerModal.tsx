@@ -19,6 +19,9 @@ type PlaylistTrackPickerModalProps = {
   onConfirm: (trackIds: string[]) => void;
   tracks: LibraryTrack[];
   visible: boolean;
+  singleSelection?: boolean;
+  title?: string;
+  actionLabel?: string;
 };
 
 export const PlaylistTrackPickerModal = ({
@@ -27,6 +30,9 @@ export const PlaylistTrackPickerModal = ({
   onConfirm,
   tracks,
   visible,
+  singleSelection = false,
+  title = 'Adicionar músicas',
+  actionLabel,
 }: PlaylistTrackPickerModalProps) => {
   const [query, setQuery] = React.useState('');
   const [selectedTrackIds, setSelectedTrackIds] = React.useState<Set<string>>(
@@ -57,10 +63,13 @@ export const PlaylistTrackPickerModal = ({
     setSelectedTrackIds((current) => {
       const next = new Set(current);
       if (next.has(trackId)) next.delete(trackId);
-      else next.add(trackId);
+      else {
+        if (singleSelection) next.clear();
+        next.add(trackId);
+      }
       return next;
     });
-  }, []);
+  }, [singleSelection]);
 
   const confirm = React.useCallback(() => {
     if (selectedTrackIds.size === 0) return;
@@ -74,8 +83,8 @@ export const PlaylistTrackPickerModal = ({
   }`;
 
   return (
-    <SheetFrame visible={visible} title="Adicionar músicas" onClose={onClose} scroll={false}
-      headerTrailing={<PlaylistSheetAction label={confirmLabel} disabled={!selectedCount} onPress={confirm} />}>
+    <SheetFrame visible={visible} title={title} onClose={onClose} scroll={false}
+      headerTrailing={<PlaylistSheetAction label={actionLabel || confirmLabel} disabled={!selectedCount} onPress={confirm} />}>
       <ProgressiveFlatList
         testID="playlist-track-picker-list"
         listKey={query}
