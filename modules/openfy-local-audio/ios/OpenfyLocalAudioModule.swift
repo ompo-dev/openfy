@@ -10,6 +10,9 @@ public final class OpenfyLocalAudioModule: Module {
     AsyncFunction("waveformAsync") { (uri: String, bins: Int) async throws -> [Float] in
       try MixAudioRenderer.waveform(uri: uri, bins: bins)
     }
+    AsyncFunction("rhythmAsync") { (uri: String) async throws -> [Float] in
+      try MixAudioRenderer.waveform(uri: uri, bins: 32, rhythm: true)
+    }
 
     AsyncFunction("renderMixAsync") { (clips: [[String: Any]], outputURI: String) async throws -> [String: Any] in
       try await MixAudioRenderer.render(clips: clips, outputURI: outputURI)

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { requireOptionalNativeModule } from 'expo-modules-core';
-import { loadMixWaveform, waveformSlice } from '../mixWaveform';
+import { loadMixWaveform, loadMixRhythm, waveformSlice } from '../mixWaveform';
 import { getDownloadedTrack } from '../../download/downloadManager';
 import { prepareLocalAudioForPlayback } from '../../audio/localAudioRepair';
 jest.mock('expo-modules-core', () => ({ ...jest.requireActual('expo-modules-core'), requireOptionalNativeModule: jest.fn() }));
@@ -45,4 +45,18 @@ it('recovers the downloaded audio from the registry and retries a failed decoder
   expect(await loadMixWaveform(undefined, 'downloaded-id')).toEqual(peaks);
   expect(getDownloadedTrack).toHaveBeenCalledWith('downloaded-id');
   expect(decode.mock.calls).toEqual([['file:///registry.m4a', 1024], ['file:///repaired.m4a', 1024]]);
+});
+it('coalesces native three-band rhythm analysis and invalidates it on file changes', async () => {
+  const uri = 'file:///rhythm.m4a';
+  const bands = [0.1, 0.2, 0.3, 0.5, 0.2, 0.1];
+  const rhythmAsync = jest.fn().mockResolvedValue(bands);
+  jest.mocked(requireOptionalNativeModule).mockReturnValue({ rhythmAsync } as never);
+  jest.mocked(FileSystem.getInfoAsync).mockResolvedValue({ exists: true, size: 30000, modificationTime: 1 } as never);
+  expect(await Promise.all([loadMixRhythm(uri), loadMixRhythm(uri)])).toEqual([{ hopMs: 10, bands }, { hopMs: 10, bands }]);
+  expect(rhythmAsync).toHaveBeenCalledTimes(1);
+  jest.mocked(FileSystem.getInfoAsync).mockResolvedValue({ exists: true, size: 30000, modificationTime: 2 } as never);
+  await loadMixRhythm(uri);
+  expect(rhythmAsync).toHaveBeenCalledTimes(2);
+  jest.mocked(requireOptionalNativeModule).mockReturnValue({} as never);
+  expect(await loadMixRhythm(uri)).toBeNull();
 });

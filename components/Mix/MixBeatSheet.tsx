@@ -2,15 +2,16 @@ import * as React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Svg, { Path, Line, Circle } from 'react-native-svg';
+import Svg, { Line, Circle } from 'react-native-svg';
 import Play from 'lucide-react-native/icons/play';
 import Pause from 'lucide-react-native/icons/pause';
 import RotateCcw from 'lucide-react-native/icons/rotate-ccw';
 import { SheetFrame, LoggedPressable } from '../native';
 import { HeaderIconButton } from '../gym';
 import { PlaylistSheetAction } from '../LocalPlaylist/PlaylistForm';
-import { loadMixWaveform, waveformSlice } from '../../services/mix/mixWaveform';
-import { detectMixBeats, type BeatDensity } from '../../services/mix/mixBeats';
+import { loadMixWaveform, loadMixRhythm } from '../../services/mix/mixWaveform';
+import { detectMixBeats, trackMixRhythm, type RhythmAnalysis, type BeatDensity } from '../../services/mix/mixBeats';
+import { MixWaveTiles } from './MixWaveTiles';
 import { formatMixTime, type mixTimeline } from '../../services/mix/mixTimeline';
 
 type Entry = ReturnType<typeof mixTimeline>[number];
@@ -19,6 +20,7 @@ export function MixBeatSheet({ clip, duration, uri, position, playing, onSeek, o
   onSeek: (ms: number) => void; onPlay: () => void; onClose: () => void; onApply: (beats: number[]) => void;
 }) {
   const [peaks, setPeaks] = React.useState<number[]>([]);
+  const [rhythm, setRhythm] = React.useState<RhythmAnalysis | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [density, setDensity] = React.useState<BeatDensity>('off');
   const [beats, setBeats] = React.useState(clip.beatsMs || []);
@@ -36,22 +38,21 @@ export function MixBeatSheet({ clip, duration, uri, position, playing, onSeek, o
     let active = true;
     void loadMixWaveform(uri, clip.trackId, true).then((values) => {
       if (active) setPeaks(values);
-    }).catch(() => {}).finally(() => { if (active) setLoading(false); });
+    }).catch(() => {});
+    void loadMixRhythm(uri, clip.trackId).then((values) => { if (active) setRhythm(values); })
+      .catch(() => {}).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [uri, clip.trackId]);
   const sourcePosition = Math.max(clip.sourceStartMs, Math.min(clip.sourceEndMs - 1, clip.sourceStartMs + position - clip.startMs));
   const windowMs = 8000;
   const start = sourcePosition - windowMs / 2;
   const end = start + windowMs;
+  const waveScale = width / windowMs;
   const visibleStart = Math.max(0, start), visibleEnd = Math.min(duration, end);
-  const values = waveformSlice(peaks, visibleStart, visibleEnd, duration, 160);
   const x = (ms: number) => (ms - start) / windowMs * 320;
-  const path = values.length ? [
-    `M${x(visibleStart)} 50`,
-    ...values.map((v, i) => `L${x(visibleStart + (visibleEnd - visibleStart) * i / Math.max(1, values.length - 1))} ${50 - v * 44}`),
-    ...values.map((v, i) => `L${x(visibleStart + (visibleEnd - visibleStart) * (values.length - 1 - i) / Math.max(1, values.length - 1))} ${50 + values[values.length - 1 - i] * 44}`), 'Z',
-  ].join(' ') : '';
-  const generate = (mode: BeatDensity) => { setDensity(mode); setBeats(detectMixBeats(peaks, duration, clip.sourceStartMs, clip.sourceEndMs, mode)); };
+  const generate = (mode: BeatDensity) => { setDensity(mode); setBeats(rhythm
+    ? trackMixRhythm(rhythm, clip.sourceStartMs, clip.sourceEndMs, mode)
+    : detectMixBeats(peaks, duration, clip.sourceStartMs, clip.sourceEndMs, mode)); };
   const near = beats.find((beat) => Math.abs(beat - sourcePosition) <= 90);
   return <SheetFrame visible title="Batidas" size="sheet" centerTitle hideDefaultClose dimBackdrop={false}
     onClose={onClose} headerLeading={<HeaderIconButton icon="x" label="Cancelar batidas" onPress={onClose} />}
@@ -64,11 +65,14 @@ export function MixBeatSheet({ clip, duration, uri, position, playing, onSeek, o
     </View>
     <GestureDetector gesture={scrub}><View style={S.wave} collapsable={false}
       onLayout={({ nativeEvent }) => setWidth(Math.max(1, nativeEvent.layout.width))}>
+      <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: -start * waveScale, width: duration * waveScale, height: 100 }}>
+        <MixWaveTiles peaks={peaks} duration={duration} sourceStart={0} sourceEnd={duration} scale={waveScale}
+          visibleStart={visibleStart * waveScale} visibleEnd={visibleEnd * waveScale} height={100} color="#626E7C" symmetric />
+      </View>
       <Svg width="100%" height={110} viewBox="0 0 320 110" preserveAspectRatio="none">
-        <Path d={path} fill="#626E7C" />
         {beats.filter((ms) => ms >= start && ms <= end).map((ms) => <React.Fragment key={ms}>
           <Line x1={x(ms)} y1={3} x2={x(ms)} y2={96} stroke="#BEC4CC" strokeDasharray="2 3" />
-          <Circle cx={x(ms)} cy={104} r={3} fill="#FFF" />
+          <Circle testID={`mix-beat-dot-${ms}`} cx={x(ms)} cy={104} r={3} fill={ms <= sourcePosition ? '#FFCF20' : '#FFF'} />
         </React.Fragment>)}
         <Line x1={160} y1={2} x2={160} y2={96} stroke="#FFF" strokeWidth={2.5} strokeLinecap="round" />
       </Svg>
@@ -80,10 +84,10 @@ export function MixBeatSheet({ clip, duration, uri, position, playing, onSeek, o
       onPress={() => setBeats((old) => near === undefined ? [...old, Math.round(sourcePosition)].sort((a,b) => a-b).slice(0, 10000) : old.filter((ms) => ms !== near))}>
       <Text style={S.text}>{near === undefined ? 'Adicionar' : 'Remover'}</Text>
     </LoggedPressable>
-    <Text style={S.secondary}>{loading ? 'Analisando áudio…' : !peaks.length ? 'Análise automática indisponível. Adicione marcações manualmente.' : 'Gerar batidas'}</Text>
+    <Text style={S.secondary}>{loading ? 'Analisando áudio…' : !peaks.length && !rhythm ? 'Análise automática indisponível. Adicione marcações manualmente.' : rhythm ? 'Gerar batidas' : 'Gerar batidas (análise básica)'}</Text>
     <View style={S.tabs}>
       {([['off', 'Desativado'], ['less', 'Menos'], ['more', 'Mais']] as const).map(([mode, label]) =>
-        <LoggedPressable key={mode} disabled={mode !== 'off' && !peaks.length} accessibilityLabel={label} accessibilityState={{ selected: density === mode }}
+        <LoggedPressable key={mode} disabled={mode !== 'off' && (loading || (!peaks.length && !rhythm))} accessibilityLabel={label} accessibilityState={{ selected: density === mode }}
           onPress={() => generate(mode)} style={[S.tab, density === mode && S.active]}>
           <Text style={[S.text, density === mode && { color: '#111' }]}>{label}</Text>
         </LoggedPressable>)}

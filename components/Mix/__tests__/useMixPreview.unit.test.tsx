@@ -91,3 +91,20 @@ it('stops the transport at the actual end, even with empty timeline after the au
     await unmount();
   } finally { jest.useRealTimers(); }
 });
+it('uses the actual audio clock for solo beat playback, not elapsed wall time', async () => {
+  jest.useFakeTimers();
+  try {
+    const native = { ...player(), currentTime: 13 };
+    jest.mocked(createAudioPlayer).mockReturnValue(native as any);
+    const { result, unmount } = await renderHook(useMixPreview);
+    await act(async () => { await result.current.play(project, 12000, 'one'); });
+    await act(async () => { native.currentTime = 13.125; jest.advanceTimersByTime(400); });
+    expect(result.current.position).toBe(12125);
+    await act(async () => { native.currentTime = 13.1; jest.advanceTimersByTime(40); });
+    expect(result.current.position).toBe(12125);
+    await act(async () => { native.currentTime = 31; jest.advanceTimersByTime(40); });
+    expect(result.current.position).toBe(30000);
+    expect(result.current.playing).toBe(false);
+    await unmount();
+  } finally { jest.useRealTimers(); }
+});

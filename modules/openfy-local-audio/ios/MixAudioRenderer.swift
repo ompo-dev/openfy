@@ -96,28 +96,43 @@ enum MixAudioRenderer {
     return ["uri": output.absoluteString, "durationMs": cursor.seconds * 1000]
   }
 
-  static func waveform(uri: String, bins: Int) throws -> [Float] {
+  static func waveform(uri: String, bins: Int, rhythm: Bool = false) throws -> [Float] {
     let url = try LocalAudioNormalizer.fileURL(uri)
     let _ = try LocalAudioNormalizer.FileIdentity(url)
     let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
-    let count = min(32768, max(32, bins))
     let length = file.length
+    let rate = file.processingFormat.sampleRate
+    let count = rhythm ? max(1, Int(ceil(Double(length) / rate * 100))) : min(32768, max(32, bins))
+    guard count <= 360000 else { throw failure("Áudio longo demais para análise rítmica.") }
     guard length > 0, let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 8192) else {
       throw failure("Áudio sem amostras.")
     }
     var peaks = Array(repeating: Float(0), count: count)
-    let detailed = count > 2048
+    let detailed = !rhythm && count > 2048
     var energy = Array(repeating: Double(0), count: detailed ? count : 0)
     var sampleCounts = Array(repeating: Int(0), count: detailed ? count : 0)
+    var bands = Array(repeating: Double(0), count: rhythm ? count * 3 : 0)
+    var rhythmCounts = Array(repeating: Int(0), count: rhythm ? count : 0)
+    var low = Array(repeating: Double(0), count: Int(file.processingFormat.channelCount))
+    var mid = low
+    let lowAlpha = 1 - exp(-2 * Double.pi * 150 / rate)
+    let midAlpha = 1 - exp(-2 * Double.pi * 1800 / rate)
     var offset: AVAudioFramePosition = 0
     while offset < length {
       try file.read(into: buffer, frameCount: AVAudioFrameCount(min(8192, length - offset)))
       guard buffer.frameLength > 0, let samples = buffer.floatChannelData else { break }
       for frame in 0..<Int(buffer.frameLength) {
-        let bin = min(count - 1, Int((offset + Int64(frame)) * Int64(count) / length))
+        let bin = min(count - 1, rhythm ? Int(Double(offset + Int64(frame)) / rate * 100) : Int((offset + Int64(frame)) * Int64(count) / length))
         for channel in 0..<Int(buffer.format.channelCount) {
           let sample = min(1, abs(samples[channel][frame]))
-          if detailed {
+          if rhythm {
+            let s = Double(samples[channel][frame])
+            low[channel] += lowAlpha * (s - low[channel])
+            mid[channel] += midAlpha * (s - mid[channel])
+            let a = low[channel], b = mid[channel] - a, c = s - mid[channel]
+            bands[bin * 3] += a * a; bands[bin * 3 + 1] += b * b; bands[bin * 3 + 2] += c * c
+            rhythmCounts[bin] += 1
+          } else if detailed {
             energy[bin] += Double(sample * sample)
             sampleCounts[bin] += 1
           } else {
@@ -126,6 +141,9 @@ enum MixAudioRenderer {
         }
       }
       offset += Int64(buffer.frameLength)
+    }
+    if rhythm {
+      return bands.enumerated().map { i, value in Float(sqrt(value / Double(max(1, rhythmCounts[i / 3])))) }
     }
     if detailed {
       for i in 0..<count where sampleCounts[i] > 0 {

@@ -78,7 +78,19 @@ export function useMixPreview() {
       const envelopes = new Map(entries.map((clip) => [clip.id, gainEnvelope(clip, entries)]));
       let startedAt: number | null = null;
       const opening = new Set<string>();
-      const nowPosition = () => startedAt === null ? initial : Math.min(total, initial + Date.now() - startedAt);
+      let lastSoloPosition = initial;
+      const nowPosition = () => {
+        if (startedAt === null) return initial;
+        const solo = selectedId ? voices.current.get(selectedId) : undefined;
+        // Beat markers should follow the decoded audio clock, not wall time.
+        if (solo?.started && Number.isFinite(solo.audio.currentTime)) {
+          const entry = entries[0];
+          const actual = entry.startMs + solo.audio.currentTime * 1000 - entry.sourceStartMs;
+          lastSoloPosition = Math.min(total, Math.max(lastSoloPosition, actual));
+          return lastSoloPosition;
+        }
+        return Math.min(total, initial + Date.now() - startedAt);
+      };
       const startupAt = Date.now();
       const seekVoice = async (clip: Entry, voice: Voice, ms: number) => {
         if (voice.preparing || voice.ready) return;

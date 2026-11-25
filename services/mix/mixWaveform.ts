@@ -5,12 +5,15 @@ import { getDownloadedTrack } from '../download/downloadManager';
 import { prepareLocalAudioForPlayback } from '../audio/localAudioRepair';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { log } from '../../utils/appLogger';
+import type { RhythmAnalysis } from './mixBeats';
 
-type WaveformModule = { waveformAsync(uri: string, bins: number): Promise<number[]>; supportsDetailedWaveform?: boolean };
+type WaveformModule = { waveformAsync(uri: string, bins: number): Promise<number[]>; rhythmAsync?(uri: string): Promise<number[]>; supportsDetailedWaveform?: boolean };
 const cache = new Map<string, number[]>();
 const pending = new Map<string, Promise<number[]>>();
 let queue = Promise.resolve();
 const STORAGE_KEY = 'openfy_mix_waveforms_v1';
+const rhythmCache = new Map<string, RhythmAnalysis>();
+const rhythmPending = new Map<string, Promise<RhythmAnalysis | null>>();
 let restored = false;
 const restore = async () => {
   if (restored) return;
@@ -70,6 +73,36 @@ export const loadMixWaveform = async (uri?: string, trackId?: string, detailed =
   queue = operation.then(() => {});
   return operation;
 };
+
+export async function loadMixRhythm(uri?: string, trackId?: string): Promise<RhythmAnalysis | null> {
+  const native = requireOptionalNativeModule<WaveformModule>('OpenfyLocalAudio');
+  if (!native?.rhythmAsync) return null;
+  let path = await getExistingLocalAudioPath(uri, 0);
+  if (!path && trackId) path = await getExistingLocalAudioPath((await getDownloadedTrack(trackId))?.localAudioPath, 0);
+  if (!path) return null;
+  const local = path;
+  const info = await FileSystem.getInfoAsync(local);
+  if (!info.exists) return null;
+  const key = JSON.stringify([local, info.size, info.modificationTime]);
+  if (rhythmCache.has(key)) return rhythmCache.get(key)!;
+  if (rhythmPending.has(key)) return rhythmPending.get(key)!;
+  const operation = queue.then(async () => {
+    let bands: number[];
+    try { bands = await native.rhythmAsync!(local); }
+    catch {
+      const repaired = await prepareLocalAudioForPlayback(local);
+      bands = await native.rhythmAsync!(repaired?.uri || local);
+    }
+    if (!Array.isArray(bands) || !bands.length || bands.length % 3 || bands.length > 1080000 || !bands.every(Number.isFinite)) return null;
+    const analysis = { hopMs: 10, bands };
+    rhythmCache.set(key, analysis);
+    while (rhythmCache.size > 4) rhythmCache.delete(rhythmCache.keys().next().value!);
+    return analysis;
+  }).catch((error) => { log.error('mix rhythm analysis failed', { error }); return null; }).finally(() => rhythmPending.delete(key));
+  rhythmPending.set(key, operation);
+  queue = operation.then(() => {});
+  return operation;
+}
 
 export function waveformSlice(peaks: number[], start: number, end: number, duration: number, count: number): number[] {
   if (!peaks.length || ![start, end, duration, count].every(Number.isFinite) || duration <= 0 || end <= start || count <= 0) return [];

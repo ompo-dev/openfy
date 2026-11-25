@@ -37,6 +37,9 @@ class OpenfyLocalAudioModule : Module() {
     AsyncFunction("waveformAsync") { uri: String, bins: Int ->
       MixWaveform.read(uri, bins)
     }
+    AsyncFunction("rhythmAsync") { uri: String ->
+      MixWaveform.read(uri, 32, true)
+    }
     AsyncFunction("renderMixAsync") { clips: List<Map<String, Any>>, outputURI: String, promise: Promise ->
       handler.post {
         var output: File? = null

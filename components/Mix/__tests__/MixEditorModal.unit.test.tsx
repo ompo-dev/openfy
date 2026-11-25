@@ -90,6 +90,15 @@ it('adds and saves a manual beat at the source-relative cursor', async () => {
   await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
   expect(jest.mocked(saveMixProject).mock.calls[0][1][0].beatsMs).toEqual([16000]);
 });
+it('shows the fade inside the clip and colors only passed beat dots yellow', async () => {
+  const mix = { ...project, clips: [{ ...project.clips[0], fadeInMs: 15000, beatsMs: [14000, 18000] }] };
+  const view = await render(<MixEditorModal project={mix} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  await waitFor(() => expect(view.getAllByTestId('mix-fade-curve').length).toBeGreaterThan(0));
+  expect(view.getByTestId('mix-beat-clip-14000')).toHaveStyle({ backgroundColor: '#FFCF20' });
+  expect(view.getByTestId('mix-beat-clip-18000')).toHaveStyle({ backgroundColor: '#FFFFFF' });
+  await fireEvent.press(view.getByLabelText('Batidas do clipe'));
+  expect(view.getByTestId('mix-beat-dot-14000').props.fill).toBeDefined();
+});
 it('keeps unsaved edits while opening the source picker', async () => {
   const close = jest.fn();
   const add = jest.fn();

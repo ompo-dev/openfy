@@ -9,9 +9,11 @@ import java.io.File
 import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.sqrt
+import kotlin.math.exp
+import kotlin.math.ceil
 
 internal object MixWaveform {
-  fun read(uri: String, bins: Int): List<Float> {
+  fun read(uri: String, bins: Int, rhythm: Boolean = false): List<Float> {
     val url = Uri.parse(uri)
     require(url.scheme == "file")
     val file = File(requireNotNull(url.path))
@@ -29,8 +31,10 @@ internal object MixWaveform {
       decoder = codec
       codec.configure(format, null, null, 0)
       codec.start()
-      val peaks = FloatArray(bins.coerceIn(32, 32768))
-      val detailed = peaks.size > 2048
+      val count = if (rhythm) ceil(duration / 10000.0).toInt().coerceAtLeast(1) else bins.coerceIn(32, 32768)
+      require(count <= 360000)
+      val peaks = FloatArray(count)
+      val detailed = !rhythm && peaks.size > 2048
       val energy = DoubleArray(if (detailed) peaks.size else 0)
       val sampleCounts = IntArray(if (detailed) peaks.size else 0)
       val info = MediaCodec.BufferInfo()
@@ -38,6 +42,12 @@ internal object MixWaveform {
       var ended = false
       var sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
       var channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+      var low = DoubleArray(channels)
+      var mid = DoubleArray(channels)
+      var lowAlpha = 1 - exp(-2 * Math.PI * 150 / sampleRate)
+      var midAlpha = 1 - exp(-2 * Math.PI * 1800 / sampleRate)
+      val bands = DoubleArray(if (rhythm) count * 3 else 0)
+      val rhythmCounts = IntArray(if (rhythm) count else 0)
       var encoding = AudioFormat.ENCODING_PCM_16BIT
       var idle = 0
       while (!ended) {
@@ -61,6 +71,9 @@ internal object MixWaveform {
           val decoded = codec.outputFormat
           sampleRate = decoded.getInteger(MediaFormat.KEY_SAMPLE_RATE)
           channels = decoded.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+          low = DoubleArray(channels); mid = DoubleArray(channels)
+          lowAlpha = 1 - exp(-2 * Math.PI * 150 / sampleRate)
+          midAlpha = 1 - exp(-2 * Math.PI * 1800 / sampleRate)
           encoding = if (decoded.containsKey(MediaFormat.KEY_PCM_ENCODING)) decoded.getInteger(MediaFormat.KEY_PCM_ENCODING) else AudioFormat.ENCODING_PCM_16BIT
           require(encoding == AudioFormat.ENCODING_PCM_16BIT || encoding == AudioFormat.ENCODING_PCM_FLOAT)
         }
@@ -74,11 +87,20 @@ internal object MixWaveform {
             val bytes = if (encoding == AudioFormat.ENCODING_PCM_FLOAT) 4 else 2
             var sample = 0L
             while (buffer.remaining() >= bytes) {
-              val amplitude = if (bytes == 4) abs(buffer.float) else abs(buffer.short.toInt()) / 32768f
+              val signed = if (bytes == 4) buffer.float else buffer.short.toInt() / 32768f
+              val amplitude = abs(signed)
               val time = info.presentationTimeUs + sample / channels * 1000000L / sampleRate
-              val bin = (time * peaks.size / duration).toInt().coerceIn(0, peaks.lastIndex)
+              val bin = (if (rhythm) time / 10000L else time * peaks.size / duration).toInt().coerceIn(0, peaks.lastIndex)
               val value = amplitude.coerceIn(0f, 1f)
-              if (detailed) {
+              if (rhythm) {
+                val channel = (sample % channels).toInt()
+                val s = signed.toDouble()
+                low[channel] += lowAlpha * (s - low[channel])
+                mid[channel] += midAlpha * (s - mid[channel])
+                val a = low[channel]; val b = mid[channel] - a; val c = s - mid[channel]
+                bands[bin * 3] += a * a; bands[bin * 3 + 1] += b * b; bands[bin * 3 + 2] += c * c
+                rhythmCounts[bin]++
+              } else if (detailed) {
                 energy[bin] += value.toDouble() * value
                 sampleCounts[bin]++
               } else peaks[bin] = maxOf(peaks[bin], value)
@@ -89,6 +111,7 @@ internal object MixWaveform {
           codec.releaseOutputBuffer(output, false)
         } else if (++idle > 1500) error("Decoder de waveform não respondeu.")
       }
+      if (rhythm) return bands.mapIndexed { i, value -> sqrt(value / rhythmCounts[i / 3].coerceAtLeast(1)).toFloat() }
       if (detailed) for (i in peaks.indices) if (sampleCounts[i] > 0) peaks[i] = sqrt(energy[i] / sampleCounts[i]).toFloat()
       return peaks.toList()
     } finally {

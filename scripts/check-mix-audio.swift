@@ -133,6 +133,13 @@ struct CheckMixAudio {
       "The exported audio must contain the actual fade-in and fade-out")
     let detailed = try MixAudioRenderer.waveform(uri: first.absoluteString, bins: 32768)
     try check(detailed.count == 32768, "Beat analysis needs detailed decoded amplitude")
+    let rhythm = try MixAudioRenderer.waveform(uri: first.absoluteString, bins: 32, rhythm: true)
+    try check(rhythm.count == 900 && rhythm.allSatisfy { $0.isFinite && $0 >= 0 }, "Rhythm needs real three-band energy every 10 ms")
+    let bassTone = temporary.appendingPathComponent("bass.wav")
+    try writeTone(bassTone, frequency: 75)
+    let bassRhythm = try MixAudioRenderer.waveform(uri: bassTone.absoluteString, bins: 32, rhythm: true)
+    let low = bassRhythm[150 * 3], high = bassRhythm[150 * 3 + 2]
+    try check(low > 0.1 && low > high * 4, "Rhythm must distinguish low-frequency energy from treble")
     do {
       _ = try await MixAudioRenderer.render(clips: [["uri": "https://example.com/audio", "startMs": 0.0, "endMs": 1000.0, "volume": 1.0]],
         outputURI: cache.appendingPathComponent("rejected-\(UUID().uuidString).m4a").absoluteString)

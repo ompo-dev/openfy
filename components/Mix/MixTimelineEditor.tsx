@@ -1,12 +1,13 @@
 import * as React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Svg, { Path } from 'react-native-svg';
 import Plus from 'lucide-react-native/icons/plus';
 import { LoggedPressable } from '../native';
 import { formatMixTime, MAX_MIX_LANES, MAX_MIX_DURATION_MS, MIN_CLIP_MS, placeMixClip, snapMixPosition, trimMixClipAtPosition, type MixClip, mixTimeline } from '../../services/mix/mixTimeline';
 import type { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
-import { loadMixWaveform, waveformSlice } from '../../services/mix/mixWaveform';
+import { loadMixWaveform } from '../../services/mix/mixWaveform';
+import { darkenWaveColor, visibleBeatMarkers } from '../../services/mix/mixWaveformGeometry';
+import { MixWaveTiles } from './MixWaveTiles';
 import { SkeletonImage } from '../common/SkeletonImage';
 import { getExistingLocalCoverPath } from '../../services/download/localAudioPaths';
 
@@ -87,24 +88,16 @@ function ClipCover({ source }: { source?: Source }) {
     onError={() => { if (uri !== fallback) setUri(fallback); }} style={S.cover} /> : null;
 }
 
-function ClipWaveform({ source, range, left, width }: { source?: Source; range: number[]; left: number; width: number }) {
+function ClipWaveform({ source, range, left, width, scale, color, fadeIn, fadeOut }: { source?: Source; range: number[]; left: number; width: number; scale: number; color: string; fadeIn?: number; fadeOut?: number }) {
   const [peaks, setPeaks] = React.useState<number[]>([]);
   React.useEffect(() => {
     let current = true;
-    setPeaks([]);
     void loadMixWaveform(source?.localAudioPath, source?.spotifyId).then((values) => { if (current) setPeaks(values); }).catch(() => {});
     return () => { current = false; };
   }, [source?.localAudioPath, source?.spotifyId]);
-  const values = waveformSlice(peaks, range[0], range[1], source?.duration_ms || 0, Math.ceil(width / 2));
-  if (!values.length || width <= 0) return null;
-  // Explicit dimensions avoid a zero-height SVG inside the horizontal scroller.
-  const path = values.map((v, i) => {
-    const x = i * width / Math.max(1, values.length - 1);
-    return `${i ? 'L' : 'M'}${x.toFixed(2)} ${(36 - v * 33).toFixed(2)}`;
-  }).join(' ');
-  return <View testID="mix-clip-waveform" pointerEvents="none" style={{ position: 'absolute', top: 0, left, width, height: 38 }}><Svg width={width} height={38} viewBox={`0 0 ${width} 38`}>
-    <Path d={path} fill="none" stroke="#FFFFFF" strokeOpacity={0.75} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
-  </Svg></View>;
+  if ((!peaks.length && !fadeIn && !fadeOut) || width <= 0) return null;
+  return <MixWaveTiles peaks={peaks} duration={source?.duration_ms || 0} sourceStart={range[0]} sourceEnd={range[1]}
+    scale={scale} visibleStart={left} visibleEnd={left + width} height={42} color={darkenWaveColor(color)} fadeIn={fadeIn} fadeOut={fadeOut} />;
 }
 
 function MovableClip({ clip, scale, lanes, navigation, disabled, onBegin, onMove, onFinish, children }: {
@@ -288,12 +281,11 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
                 }}>
               <LoggedPressable disabled={disabled} accessibilityLabel={`Selecionar clipe ${index + 1}: ${source?.title}`}
                 onPress={() => onSelect(original)} style={[S.clipBody, { backgroundColor: clipColor(clip.trackId) }, selected && S.selectedBody]}>
-                <ClipWaveform source={source} range={[range[0] + visibleStart / scale, Math.min(range[1], range[0] + visibleEnd / scale)]}
-                  left={visibleStart} width={visibleEnd - visibleStart} />
-                {clip.beatsMs?.filter((beat, i, all) => beat >= range[0] && beat < range[1] &&
-                  (beat - range[0]) * scale >= visibleStart && (beat - range[0]) * scale <= visibleEnd &&
-                  (i === 0 || (beat - all[i - 1]) * scale >= 2))
-                  .map((beat) => <View key={beat} pointerEvents="none" style={[S.beat, { left: (beat - range[0]) * scale }]} />)}
+                <ClipWaveform source={source} range={range} scale={scale} color={clipColor(clip.trackId)}
+                  fadeIn={clip.fadeInMs} fadeOut={clip.fadeOutMs} left={visibleStart} width={visibleEnd - visibleStart} />
+                {clip.beatsMs && visibleBeatMarkers(clip.beatsMs, range[0], range[1], scale, visibleStart, visibleEnd)
+                  .map((beat) => <View key={beat} testID={`mix-beat-${clip.id}-${beat}`} pointerEvents="none" style={[S.beat, { left: (beat - range[0]) * scale - 2,
+                    backgroundColor: position >= clip.startMs + beat - range[0] ? '#FFCF20' : '#FFFFFF' }]} />)}
                 <View pointerEvents="none" style={[S.clipInfo, { left: visibleStart, maxWidth: Math.max(0, visibleEnd - visibleStart) }]}>
                 <ClipCover source={source} />
                 <View style={S.clipText}>
@@ -333,7 +325,7 @@ const S = StyleSheet.create({
   tickMark: { width: 2, height: 7, borderRadius: 1, backgroundColor: '#626A74', marginTop: 3 },
   clip: { position: 'absolute', top: 36, height: 42, borderRadius: 6 },
   selected: { height: 46, borderRadius: 9, backgroundColor: '#FFCF20', zIndex: 2 },
-  beat: { position: 'absolute', bottom: 2, width: 2, height: 5, borderRadius: 1, backgroundColor: '#FFCF20' },
+  beat: { position: 'absolute', bottom: 3, width: 4, height: 4, borderRadius: 2 },
   guide: { position: 'absolute', top: 4, width: 1, backgroundColor: '#FFCF20', zIndex: 6 },
   moving: { opacity: 0.82, zIndex: 5, elevation: 6 },
   movableBody: { flex: 1, minWidth: 0 },
