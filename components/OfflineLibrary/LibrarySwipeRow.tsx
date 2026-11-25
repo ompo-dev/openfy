@@ -3,6 +3,7 @@ import { StyleSheet } from 'react-native';
 import Swipeable, { type SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import Animated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 import { AppIcon, LoggedPressable } from '../native';
+import { COLORS } from '@config';
 
 const ACTION_WIDTH = 80;
 
@@ -18,7 +19,7 @@ function RemoveAction({ translation, label, onPress, undo, disabled }: {
 }
 
 /** The entire row, including native download icons, moves on the UI thread. */
-export function LibrarySwipeRow({ children, label, onRemove, onWillOpen, disabled = false, undo = false, backgroundColor = '#121212' }: {
+export function LibrarySwipeRow({ children, label, onRemove, onWillOpen, disabled = false, undo = false, backgroundColor = COLORS.PRIMARY }: {
   children: React.ReactNode; label: string; onRemove: () => void; onWillOpen: (close: () => void) => void;
   disabled?: boolean; undo?: boolean; backgroundColor?: string;
 }) {
@@ -35,7 +36,7 @@ export function LibrarySwipeRow({ children, label, onRemove, onWillOpen, disable
 }
 
 const styles = StyleSheet.create({
-  container: { overflow: 'hidden', backgroundColor: '#121212' },
+  container: { overflow: 'hidden', backgroundColor: COLORS.PRIMARY },
   undo: { backgroundColor: '#228B55' },
   action: { width: ACTION_WIDTH, backgroundColor: '#E5484D' },
   button: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 64 },

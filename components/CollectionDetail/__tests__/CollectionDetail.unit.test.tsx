@@ -149,6 +149,10 @@ const renderCollection = (props = {}) =>
   );
 
 describe('CollectionDetail', () => {
+  it.each(['playlist', 'album', 'artist'])('matches the song-list background on %s details', async (kind) => {
+    const screen = await renderCollection({ kind });
+    expect(StyleSheet.flatten(screen.getByTestId('collection-detail-screen').props.style).backgroundColor).toBe('#121212');
+  });
   it('distinguishes the main mix transport from an original source row', async () => {
     const onPlayMix = jest.fn().mockResolvedValue(undefined);
     const screen = await renderCollection({ kind: 'playlist', onPlayMix });

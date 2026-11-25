@@ -18,7 +18,7 @@ import { Href, useRouter, useSegments } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TrackModel } from '@models';
-import { BOTTOM_NAVIGATION_HEIGHT } from '@config';
+import { BOTTOM_NAVIGATION_HEIGHT, COLORS } from '@config';
 import { useDownloads, usePlayer } from '@context';
 import type { DownloadTrackInput } from '@services';
 import { formatCollectionMeta, log } from '@utils';
@@ -758,7 +758,7 @@ export const CollectionDetail = ({
           } : undefined}
         />
       );
-      return kind === 'playlist' && onRemoveTrack ? <LibrarySwipeRow label={`Remover ${item.title} da playlist`}
+      return kind === 'playlist' && onRemoveTrack ? <LibrarySwipeRow backgroundColor={COLORS.PRIMARY} label={`Remover ${item.title} da playlist`}
         onWillOpen={(close) => { if (openSwipeRow.current !== close) openSwipeRow.current?.(); openSwipeRow.current = close; }}
         onRemove={() => void onRemoveTrack(item.id)}>{row}</LibrarySwipeRow> : row;
     },
@@ -786,7 +786,7 @@ export const CollectionDetail = ({
     visibleTracks.length < matchingTracks.length;
 
   return (
-    <View style={styles.screen}>
+    <View testID="collection-detail-screen" style={styles.screen}>
       <ProgressiveFlatList
         listKey={`${collectionId}:${normalizedSearchQuery}:${sortAscending}`}
         testID="collection-track-list"
@@ -831,10 +831,10 @@ export const CollectionDetail = ({
             ) : null}
             <LinearGradient
               colors={[
-                'rgba(16,16,16,0.06)',
-                'rgba(16,16,16,0.22)',
-                'rgba(16,16,16,0.84)',
-                '#101010',
+                'rgba(18,18,18,0.06)',
+                'rgba(18,18,18,0.22)',
+                'rgba(18,18,18,0.84)',
+                COLORS.PRIMARY,
               ]}
               locations={[0, 0.3, 0.74, 1]}
               style={StyleSheet.absoluteFill}
@@ -1147,8 +1147,8 @@ export const CollectionDetail = ({
 };
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#101010' },
-  hero: { backgroundColor: '#101010', minHeight: 426, paddingHorizontal: 14, justifyContent: 'space-between', overflow: 'hidden' },
+  screen: { flex: 1, backgroundColor: COLORS.PRIMARY },
+  hero: { backgroundColor: COLORS.PRIMARY, minHeight: 426, paddingHorizontal: 14, justifyContent: 'space-between', overflow: 'hidden' },
   heroArtwork: { ...(StyleSheet.absoluteFill as any), opacity: 0.9 },
   artistHeroArtwork: { opacity: 1 },
   artistHeroFallback: { ...(StyleSheet.absoluteFill as any), alignItems: 'center', backgroundColor: '#242424', justifyContent: 'center' },

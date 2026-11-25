@@ -3,6 +3,7 @@ import { ActivityIndicator, Text, View } from 'react-native';
 import { CollectionDetail, type CollectionDetailProps } from './CollectionDetail';
 import { getDetailPreview } from '../../services/navigation/detailPreview';
 import { LoggedPressable } from '../native';
+import { COLORS } from '@config';
 
 export function PendingCollectionDetail({ kind, collectionId, error = '', onRetry, resolveTracksForPlayback }: {
   kind: CollectionDetailProps['kind'];
@@ -19,7 +20,7 @@ export function PendingCollectionDetail({ kind, collectionId, error = '', onRetr
     metadata={preview.subtitle} trackCount={preview.trackCount} tracks={preview.tracks || []}
     loadingTracks={!error} loadingError={error} disableTrackArtistLinks footer={retry}
     resolveTracksForPlayback={resolveTracksForPlayback} />;
-  return <View style={{ flex: 1, backgroundColor: '#101010', justifyContent: 'center', alignItems: 'center' }}>
+  return <View style={{ flex: 1, backgroundColor: COLORS.PRIMARY, justifyContent: 'center', alignItems: 'center' }}>
     {error ? <Text style={{ color: '#FFFFFF', padding: 24 }}>{error}</Text> : <ActivityIndicator color="#1ED760" />}
     {retry}
   </View>;
