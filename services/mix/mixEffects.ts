@@ -4,6 +4,9 @@ export type GainPoint = { ms: number; gain: number };
 type Entry = ReturnType<typeof mixTimeline>[number];
 const DUCK_RAMP = 120;
 export const hasMixEffects = (clip: MixClip) => Boolean(clip.fadeInMs || clip.fadeOutMs || clip.duckAmount);
+export const sineEase = (t: number) => (1 - Math.cos(Math.PI * Math.max(0, Math.min(1, t)))) / 2;
+export const fadeGain = (ms: number, duration: number, fadeIn: number, fadeOut: number) =>
+  Math.min(fadeIn ? sineEase(ms / fadeIn) : 1, fadeOut ? sineEase((duration - ms) / fadeOut) : 1);
 
 // Duck this clip only while another lane contains audible material.
 // Ramp inside the overlap to avoid clicks, including overlapping duck windows.
@@ -21,13 +24,19 @@ export function gainEnvelope(clip: Entry, entries: Entry[]): GainPoint[] {
     else windows.push(overlap);
   }
   const points = new Set([0, duration, fadeIn, duration - fadeOut]);
+  // Native renderers interpolate gain points. Sample the raised-cosine curve
+  // at 32 equal subdivisions so preview and export use the same S envelope.
+  for (let i = 1; i < 32; i++) {
+    if (fadeIn) points.add(fadeIn * i / 32);
+    if (fadeOut) points.add(duration - fadeOut * i / 32);
+  }
   for (const [a, b] of windows) {
     const ramp = Math.min(DUCK_RAMP, (b - a) / 2);
     for (const t of [a, a + ramp, b - ramp, b]) points.add(t);
   }
   const times = [...points].filter((t) => t >= 0 && t <= duration).sort((a, b) => a - b);
   const gain = (t: number) => {
-    const fade = Math.min(1, fadeIn ? t / fadeIn : 1, fadeOut ? (duration - t) / fadeOut : 1);
+    const fade = fadeGain(t, duration, fadeIn, fadeOut);
     let reduction = 0;
     for (const [a, b] of windows) if (t >= a && t <= b) {
       const ramp = Math.min(DUCK_RAMP, (b - a) / 2);

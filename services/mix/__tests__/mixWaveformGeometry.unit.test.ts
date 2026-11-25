@@ -22,6 +22,8 @@ it('draws fade-in and fade-out over the correct ends of the actual trimmed clip'
   const first = fadeShadePath(0, 100, 42, 10000, 0.1, 1000, 1000);
   const last = fadeShadePath(900, 100, 42, 10000, 0.1, 1000, 1000);
   expect(first).toMatch(/^M0\.00 42\.00/);
+  expect(first).toContain('L25.00 35.85');
+  expect(first).toContain('L75.00 6.15');
   expect(last).toMatch(/^M0\.00 0\.00/);
   expect(last).toContain('100.00 42.00');
   expect(fadeShadePath(0, 100, 42, 10000, 0.1, 0, 0)).toBe('');

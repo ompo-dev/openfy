@@ -4,6 +4,7 @@ import { getLibraryTracks } from '../../library/catalogLibrary';
 import { downloadMixSources, renderMixAudio } from '../mixAudio';
 import { prepareLocalAudioForPlayback } from '../../audio/localAudioRepair';
 import type { MixProject } from '../mixTimeline';
+import { envelopeGain } from '../mixEffects';
 const mockEnsure = jest.fn().mockResolvedValue(undefined);
 jest.mock('../../../stores/useDownloadStore', () => ({ useDownloadStore: { getState: () => ({ ensureDownloads: mockEnsure }) } }));
 jest.mock('../../library/catalogLibrary', () => ({ getLibraryTracks: jest.fn(), toDownloadTrackInput: (track: unknown) => track }));
@@ -109,9 +110,12 @@ it('passes the actual fade curve to native and invalidates the cached render whe
   await expect(renderMixAudio(mix)).rejects.toThrow('efeitos do mix');
   jest.mocked(requireOptionalNativeModule).mockReturnValue({ renderMixAsync: mockRender, supportsMixEffects: true } as never);
   await renderMixAudio(mix);
-  expect(mockRender.mock.calls[0][0][0].envelope).toEqual([
+  const envelope = mockRender.mock.calls[0][0][0].envelope;
+  expect(envelope).toEqual(expect.arrayContaining([
     { ms: 0, gain: 0 }, { ms: 1000, gain: 0.5 }, { ms: 8000, gain: 0.5 }, { ms: 10000, gain: 0 },
-  ]);
+  ]));
+  expect(envelopeGain(envelope, 250)).toBeCloseTo(0.0732233, 6);
+  expect(envelopeGain(envelope, 8500)).toBeCloseTo(0.4267767, 6);
   await renderMixAudio(mix);
   expect(mockRender).toHaveBeenCalledTimes(1);
   await renderMixAudio({ ...mix, clips: [{ ...mix.clips[0], fadeInMs: 1500 }] });

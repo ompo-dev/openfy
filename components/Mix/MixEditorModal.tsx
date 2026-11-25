@@ -11,12 +11,14 @@ import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import Volume2 from 'lucide-react-native/icons/volume-2';
 import AudioLines from 'lucide-react-native/icons/audio-lines';
+import TagPlus from 'lucide-react-native/icons/tag-plus';
+import CopyCheck from 'lucide-react-native/icons/copy-check';
 import { SheetFrame, LoggedPressable } from '../native';
 import { HeaderIconButton } from '../gym';
 import { PlaylistSheetAction } from '../LocalPlaylist/PlaylistForm';
 import { PlaylistTrackPickerModal } from '../LocalPlaylist/PlaylistTrackPickerModal';
 import { saveMixProject } from '../../services/mix/mixRepository';
-import { compactMixLanes, createMixId, formatMixTime, MIN_CLIP_MS, mixDuration, mixTimeline, moveMixClip, placeMixClip, splitMixClip, trimMixClipAtPosition,
+import { compactMixLanes, createMixId, MIN_CLIP_MS, mixDuration, mixTimeline, moveMixClip, placeMixClip, splitMixClip, trimMixClipAtPosition,
   validateMixClips, type MixClip, type MixProject } from '../../services/mix/mixTimeline';
 import { log } from '../../utils/appLogger';
 import { useMixPreview } from './useMixPreview';
@@ -26,12 +28,13 @@ import { MixTimelineEditor } from './MixTimelineEditor';
 import { MixBeatSheet } from './MixBeatSheet';
 import { getExistingLocalAudioPath } from '../../services/download/localAudioPaths';
 
-function Tool({ label, caption, icon: Icon, onPress, disabled = false, selected = false }: {
-  label: string; caption?: string; icon: typeof Play; onPress: () => void; disabled?: boolean; selected?: boolean;
+function Tool({ label, caption, icon: Icon, onPress, disabled = false, selected = false, transport = false, filled = false }: {
+  label: string; caption?: string; icon: typeof Play; onPress: () => void; disabled?: boolean; selected?: boolean; transport?: boolean; filled?: boolean;
 }) {
   return <LoggedPressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress}
-    style={[S.tool, disabled && { opacity: 0.3 }]}>
-    <Icon size={22} color={selected ? '#1ED760' : '#FFFFFF'} />
+    style={[S.tool, transport && S.transportTool, disabled && { opacity: 0.42 }]}>
+    <Icon size={transport ? 24 : 22} color={disabled && transport ? '#8994A3' : selected && !transport ? '#1ED760' : '#FFFFFF'}
+      fill={filled ? '#FFFFFF' : 'none'} />
     {caption ? <Text style={S.toolCaption}>{caption}</Text> : null}
   </LoggedPressable>;
 }
@@ -136,22 +139,32 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
     select(added[0].id);
   };
   const openPicker = (lane: number) => { preview.stop(); setPickerLane(lane); };
+  const cursorClip = selected || timeline.find((clip) => preview.position >= clip.startMs && preview.position < clip.endMs);
+  const toggleCursorSelection = () => {
+    if (selected) { preview.stop(); select(''); }
+    else if (cursorClip) pick(cursorClip);
+  };
+  const addBeatAtCursor = () => {
+    if (!selected || preview.position < selected.startMs || preview.position >= selected.endMs) return;
+    const ms = Math.round(selected.sourceStartMs + preview.position - selected.startMs);
+    const beatsMs = [...new Set([...(selected.beatsMs || []), ms])].sort((a,b) => a-b);
+    commit(clips.map((clip) => clip.id === selected.id ? { ...clip, beatsMs } : clip), 'beat-at-cursor');
+  };
   const header = <View style={S.headerContent}>
     <View style={S.transport}>
-      <Tool label={preview.playing || preview.busy ? 'Parar prévia' : 'Ouvir mix'} icon={preview.playing ? Pause : Play}
+      <View style={S.transportSide}>
+        <Tool transport label="Adicionar batida no cursor" icon={TagPlus} disabled={saving || !selected || preview.position < selected.startMs || preview.position >= selected.endMs} onPress={addBeatAtCursor} />
+        <Tool transport label="Alternar seleção do clipe" icon={CopyCheck} disabled={saving || !cursorClip} onPress={toggleCursorSelection} />
+      </View>
+      <View style={S.centerTransport}><Tool transport filled label={preview.playing || preview.busy ? 'Parar prévia' : 'Ouvir mix'} icon={preview.playing || preview.busy ? Pause : Play}
         disabled={!clips.length || saving} onPress={() => void preview.toggle({ ...project, tracks: sources, clips },
           selected ? (preview.position >= selected.startMs && preview.position < selected.endMs ? preview.position : selected.startMs)
-            : preview.position >= total ? 0 : preview.position, selected?.id)} selected={preview.playing} />
-      <View style={S.clockGroup}>
-        <Text style={S.clock}>{formatMixTime(preview.position)}</Text>
-        <Text style={S.clockTotal}>{formatMixTime(total)}</Text>
-      </View>
-      <View style={S.history}>
-        <Tool label="Desfazer" icon={Undo2} disabled={!past.length || saving} onPress={undo} />
-        <Tool label="Refazer" icon={Redo2} disabled={!future.length || saving} onPress={redo} />
+            : preview.position >= total ? 0 : preview.position, selected?.id)} selected={preview.playing} /></View>
+      <View style={[S.transportSide, S.history]}>
+        <Tool transport label="Desfazer" icon={Undo2} disabled={!past.length || saving} onPress={undo} />
+        <Tool transport label="Refazer" icon={Redo2} disabled={!future.length || saving} onPress={redo} />
       </View>
     </View>
-    {preview.busy ? <Text accessibilityRole="alert" style={S.secondary}>Preparando áudio…</Text> : null}
     {preview.error ? <Text accessibilityRole="alert" style={S.error}>{preview.error}</Text> : null}
     <MixTimelineEditor timeline={timeline} total={total} tracks={tracks} selectedId={selectedId} position={preview.position}
       playing={preview.playing} disabled={saving} onSelect={pick} onSeek={preview.setPosition} onScrub={preview.stop}
@@ -236,13 +249,13 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
 }
 
 const S = StyleSheet.create({
-  headerContent: { gap: 8 }, transport: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
+  headerContent: { gap: 0 }, transport: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, backgroundColor: '#0D1117', borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingHorizontal: 8 },
   tool: { minWidth: 40, minHeight: 40, gap: 3, alignItems: 'center', justifyContent: 'center' },
   toolCaption: { fontSize: 11, color: '#ABABB2', fontFamily: 'SF-Regular' },
-  clockGroup: { position: 'absolute', left: '35%', right: '35%', alignItems: 'center' },
-  history: { flexDirection: 'row', gap: 4 },
-  clock: { color: '#FFFFFF', fontSize: 15, fontVariant: ['tabular-nums'], textAlign: 'center' },
-  clockTotal: { color: '#ABABB2', fontSize: 12, fontVariant: ['tabular-nums'] },
+  transportTool: { width: 44 },
+  transportSide: { flexDirection: 'row', gap: 4, flex: 1 },
+  centerTransport: { width: 44, alignItems: 'center' },
+  history: { justifyContent: 'flex-end' },
   inspector: { paddingTop: 4, gap: 3 },
   rangeLabel: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 8 },
   secondary: { color: '#ABABB2', fontSize: 13, fontFamily: 'SF-Regular' },

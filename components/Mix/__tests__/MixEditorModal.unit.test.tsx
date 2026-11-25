@@ -2,14 +2,16 @@ import * as React from 'react';
 import { Alert } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { MixEditorModal } from '../MixEditorModal';
+import { INITIAL_MIX_ZOOM, timelineScale } from '../MixTimelineEditor';
 import { saveMixProject } from '../../../services/mix/mixRepository';
 import type { MixProject } from '../../../services/mix/mixTimeline';
 const mockStop = jest.fn();
 const mockPosition = jest.fn();
 const mockToggle = jest.fn();
+let mockBusy = false;
 const mockHandleGestures = new Map<string, any>();
 jest.mock('../useMixPreview', () => ({ useMixPreview: () => ({ stop: mockStop, play: jest.fn(), toggle: mockToggle, position: 15000,
-  playing: false, busy: false, error: '', setPosition: mockPosition }) }));
+  playing: false, busy: mockBusy, error: '', setPosition: mockPosition }) }));
 jest.mock('../../../services/mix/mixRepository', () => ({ saveMixProject: jest.fn() }));
 jest.mock('../../../services/download/localAudioPaths', () => ({
   ...jest.requireActual('../../../services/download/localAudioPaths'),
@@ -32,7 +34,7 @@ jest.mock('react-native-gesture-handler', () => ({
 const project: MixProject = { version: 1, id: 'local_mix_edit', title: 'Treino', description: '', revision: 1,
   createdAt: '', updatedAt: '', tracks: [{ spotifyId: 'one', title: 'One', artistName: 'Artist', imageURL: '', albumName: '', duration_ms: 60000 }],
   clips: [{ id: 'clip', trackId: 'one', sourceStartMs: 1000, sourceEndMs: 31000, volume: 1 }] };
-beforeEach(() => { jest.clearAllMocks(); mockHandleGestures.clear(); jest.spyOn(Alert, 'alert').mockImplementation(() => {}); });
+beforeEach(() => { jest.clearAllMocks(); mockBusy = false; mockHandleGestures.clear(); jest.spyOn(Alert, 'alert').mockImplementation(() => {}); });
 afterEach(() => jest.restoreAllMocks());
 
 it('splits, undoes, redoes and saves actual source cuts in the shared glass sheet', async () => {
@@ -64,6 +66,22 @@ it('stops preview on the standard header close button', async () => {
   await fireEvent.press(view.getByLabelText('Fechar'));
   expect(mockStop).toHaveBeenCalled();
   expect(close).toHaveBeenCalled();
+});
+it('keeps preparation silent and exposes functional top-bar controls', async () => {
+  mockBusy = true;
+  jest.mocked(saveMixProject).mockResolvedValue(project);
+  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  expect(view.queryByText(/Preparando áudio/)).toBeNull();
+  expect(view.getByLabelText('Parar prévia')).toBeTruthy();
+  expect(view.getByTestId('mix-transport-time')).toBeTruthy();
+  await fireEvent.press(view.getByLabelText('Adicionar batida no cursor'));
+  await fireEvent.press(view.getByLabelText('Alternar seleção do clipe'));
+  expect(view.queryByLabelText('Dividir no cursor')).toBeNull();
+  await fireEvent.press(view.getByLabelText('Alternar seleção do clipe'));
+  expect(view.getByLabelText('Dividir no cursor')).toBeTruthy();
+  await fireEvent.press(view.getByLabelText('Salvar mix'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
+  expect(jest.mocked(saveMixProject).mock.calls[0][1][0].beatsMs).toEqual([16000]);
 });
 it('offers three audio tabs and commits the fade, reduction and volume in one edit', async () => {
   jest.mocked(saveMixProject).mockResolvedValue(project);
@@ -151,9 +169,10 @@ it('retains the drag translation across timeline rerenders and commits on gestur
   const handle = mockHandleGestures.get('Arrastar fim do clipe');
   expect(handle).toBeDefined();
   await act(async () => { handle.handlers.onStart({ translationX: 0 }); });
-  await act(async () => { handle.handlers.onUpdate({ translationX: -45 }); });
-  await act(async () => { handle.handlers.onUpdate({ translationX: -90 }); });
-  await act(async () => { handle.handlers.onEnd({ translationX: -90 }, true); handle.handlers.onFinalize({}, true); });
+  const dx = -1000 * timelineScale(INITIAL_MIX_ZOOM, 30000);
+  await act(async () => { handle.handlers.onUpdate({ translationX: dx }); });
+  await act(async () => { handle.handlers.onUpdate({ translationX: dx * 2 }); });
+  await act(async () => { handle.handlers.onEnd({ translationX: dx * 2 }, true); handle.handlers.onFinalize({}, true); });
   await fireEvent.press(view.getByLabelText('Salvar mix'));
   await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
   expect(jest.mocked(saveMixProject).mock.calls[0][1][0].sourceEndMs).toBe(29000);
@@ -163,7 +182,7 @@ it('uses the absolute finger location and preserves the last trim if another ges
   const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
   const handle = mockHandleGestures.get('Arrastar fim do clipe');
   await act(async () => { handle.handlers.onStart({ absoluteX: 200, translationX: 0 }); });
-  await act(async () => { handle.handlers.onUpdate({ absoluteX: 110, translationX: 0 }); });
+  await act(async () => { handle.handlers.onUpdate({ absoluteX: 200 - 2000 * timelineScale(INITIAL_MIX_ZOOM, 30000), translationX: 0 }); });
   await act(async () => { handle.handlers.onEnd({ absoluteX: 200, translationX: 0 }, false); handle.handlers.onFinalize({}, false); });
   await fireEvent.press(view.getByLabelText('Salvar mix'));
   await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
@@ -186,7 +205,8 @@ it('drags a clip horizontally and vertically, preserving its effects and allowin
   expect(view.queryByText(/Deslize para navegar/)).toBeNull();
   const gesture = mockHandleGestures.get('mix-drag-clip');
   const start = { absoluteX: 200, absoluteY: 100, translationX: 0, translationY: 0 };
-  const end = { absoluteX: 290, absoluteY: 146, translationX: 90, translationY: 46 };
+  const dx = 2000 * timelineScale(INITIAL_MIX_ZOOM, 30000);
+  const end = { absoluteX: 200 + dx, absoluteY: 146, translationX: dx, translationY: 46 };
   await act(async () => { gesture.handlers.onStart(start); });
   await act(async () => { gesture.handlers.onUpdate(end); });
   await act(async () => { gesture.handlers.onFinalize(end, true); });
@@ -219,7 +239,8 @@ it('drags an unfocused clip immediately and displays a magnetic edge guide', asy
   const gesture = mockHandleGestures.get('mix-drag-second');
   expect(gesture).toBeDefined();
   const start = { absoluteX: 100, absoluteY: 150, translationX: 0, translationY: 0 };
-  const end = { absoluteX: 100 + 14960 * 0.045, absoluteY: 150, translationX: 14960 * 0.045, translationY: 0 };
+  const dx = 14960 * timelineScale(INITIAL_MIX_ZOOM, 30000);
+  const end = { absoluteX: 100 + dx, absoluteY: 150, translationX: dx, translationY: 0 };
   await act(async () => { gesture.handlers.onStart(start); });
   await act(async () => { gesture.handlers.onUpdate(end); });
   expect(view.getByTestId('mix-snap-guide')).toBeTruthy();

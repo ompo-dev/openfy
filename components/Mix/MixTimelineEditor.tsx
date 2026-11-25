@@ -2,6 +2,7 @@ import * as React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Plus from 'lucide-react-native/icons/plus';
+import { LinearGradient } from 'expo-linear-gradient';
 import { LoggedPressable } from '../native';
 import { formatMixTime, MAX_MIX_LANES, MAX_MIX_DURATION_MS, MIN_CLIP_MS, placeMixClip, snapMixPosition, trimMixClipAtPosition, type MixClip, mixTimeline } from '../../services/mix/mixTimeline';
 import type { mergeMixTrack } from '../../services/mix/mixTrackMetadata';
@@ -14,6 +15,7 @@ import { getExistingLocalCoverPath } from '../../services/download/localAudioPat
 type Entry = ReturnType<typeof mixTimeline>[number];
 type Source = ReturnType<typeof mergeMixTrack>;
 const BASE_SCALE = 0.045;
+export const INITIAL_MIX_ZOOM = 0.2;
 const MIN_ZOOM = 0.0625 / 3;
 const MAX_ZOOM = 24;
 const LANE_HEIGHT = 46;
@@ -147,7 +149,7 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
   onDeselect: () => void;
 }) {
   const [width, setWidth] = React.useState(320);
-  const [zoom, setZoom] = React.useState(1);
+  const [zoom, setZoom] = React.useState(INITIAL_MIX_ZOOM);
   const [offset, setOffset] = React.useState(0);
   const [pinching, setPinching] = React.useState(false);
   const [draft, setDraft] = React.useState<{ id: string; edge: 'start' | 'end'; range: [number, number] } | null>(null);
@@ -159,7 +161,7 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
   const dragScroll = React.useRef({ x: 0, extra: 0, finger: 0, active: false });
   const dragging = React.useRef(false);
   const pinchActive = React.useRef(false);
-  const zoomOrigin = React.useRef(1);
+  const zoomOrigin = React.useRef(INITIAL_MIX_ZOOM);
   const trimActive = React.useRef(false);
   const scale = timelineScale(zoom, total);
   const latest = React.useRef({ zoom, onScrub, disabled, scale, onSeek, position, onDeselect });
@@ -216,9 +218,13 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
     setOffset(x);
   }, [position, scale, total, trimming]);
   const step = STEPS.find((value) => value * scale >= 48) || Math.ceil(48 / scale / 3600000) * 3600000;
-  const first = Math.max(0, Math.floor((offset - width) / (step * scale)));
-  const last = Math.min(Math.ceil(MAX_MIX_DURATION_MS / step), Math.ceil((offset + width * 2) / (step * scale)));
-  const ticks = Array.from({ length: Math.max(0, last - first + 1) }, (_, i) => (first + i) * step);
+  const divisions = step * scale >= 64 ? 8 : 4;
+  const minorStep = step / divisions;
+  const first = Math.max(0, Math.floor((offset - width / 2) / (minorStep * scale)));
+  const last = Math.min(Math.floor(MAX_MIX_DURATION_MS / minorStep), Math.ceil((offset + width / 2) / (minorStep * scale)));
+  const ticks = Array.from({ length: Math.max(0, last - first + 1) }, (_, i) => ({
+    time: (first + i) * minorStep, major: (first + i) % divisions === 0, middle: (first + i) % (divisions / 2) === 0,
+  }));
   const occupiedLanes = Math.max(0, ...timeline.map((clip) => clip.lane + 1));
   const lanes = Math.min(MAX_MIX_LANES, occupiedLanes + 1);
   const laneEnds = Array.from({ length: lanes }, (_, lane) => timeline.reduce((end, clip) => clip.lane === lane ? Math.max(end, clip.endMs) : end, 0));
@@ -247,9 +253,9 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
         <View accessibilityLabel="Timeline do mix" style={[S.content, { height: height - 22, width }]}>
           <LoggedPressable accessibilityLabel="Desmarcar clipe" testID="mix-timeline-background" onPress={onDeselect} style={StyleSheet.absoluteFill} />
           {laneEnds.map((_, lane) => <View key={lane} pointerEvents="none" style={[S.lane, { top: 36 + lane * 46, left: Math.max(0, width / 2 - offset), right: 0 }]} />)}
-          {ticks.map((time) => <View key={time} pointerEvents="none" style={[S.tick, { left: width / 2 + time * scale - offset }]}>
-            <Text style={S.tickLabel}>{time < 60000 ? `${Number((time / 1000).toFixed(1))}s` : formatMixTime(time)}</Text>
-            <View style={S.tickMark} />
+          {ticks.map(({ time, major, middle }) => <View key={time} pointerEvents="none" style={[S.tick, { left: width / 2 + time * scale - offset - 23 }]}>
+            {major ? <Text style={S.tickLabel}>{time < 60000 ? `${Number((time / 1000).toFixed(1))}s` : formatMixTime(time)}</Text> : null}
+            <View style={[S.tickMark, major ? S.majorTick : middle ? S.middleTick : S.minorTick]} />
           </View>)}
           {displayed.map((clip, index) => {
             const original = timeline[index];
@@ -311,18 +317,29 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
         </View>
       </View>
     </GestureDetector>
+    <View pointerEvents="none" testID="mix-transport-time" style={[S.timeOverlay, { maxWidth: Math.max(0, width / 2 - 4) }]}>
+      <LinearGradient colors={['#0D1117', '#0D1117', '#0D111700']} locations={[0, 0.8, 1]}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+      <Text numberOfLines={1} adjustsFontSizeToFit style={S.clock}>{formatMixTime(position)}<Text style={S.clockTotal}> / {formatMixTime(total)}</Text></Text>
+    </View>
     {activeGuide !== null ? <View pointerEvents="none" testID="mix-snap-guide" style={[S.guide, { left: width / 2 + activeGuide * scale - offset, height: height - 26 }]} /> : null}
     <View pointerEvents="none" testID="mix-fixed-playhead" style={[S.playhead, { left: width / 2 - 1.5, height: height - 26 }]} />
   </View>;
 }
 
 const S = StyleSheet.create({
-  viewport: { height: 108, backgroundColor: '#101418', borderRadius: 12, overflow: 'hidden' },
+  viewport: { height: 108, backgroundColor: '#0D1117', borderBottomLeftRadius: 12, borderBottomRightRadius: 12, overflow: 'hidden' },
   content: { height: 86 },
   lane: { position: 'absolute', top: 36, height: 42, backgroundColor: '#20242A' },
-  tick: { position: 'absolute', top: 5, alignItems: 'flex-start' },
-  tickLabel: { color: '#A5ABB4', fontSize: 11, fontVariant: ['tabular-nums'] },
-  tickMark: { width: 2, height: 7, borderRadius: 1, backgroundColor: '#626A74', marginTop: 3 },
+  tick: { position: 'absolute', top: 0, width: 46, height: 28, alignItems: 'center', justifyContent: 'flex-end' },
+  tickLabel: { color: '#7C8795', fontSize: 11, fontVariant: ['tabular-nums'], position: 'absolute', top: 0 },
+  tickMark: { width: 2, borderRadius: 1, backgroundColor: '#303843' },
+  majorTick: { height: 5, backgroundColor: '#56606D' },
+  middleTick: { height: 13 },
+  minorTick: { height: 8 },
+  timeOverlay: { position: 'absolute', top: 0, left: 0, height: 30, width: 115, justifyContent: 'center', paddingLeft: 8, paddingRight: 10, zIndex: 2 },
+  clock: { color: '#FFF', fontSize: 12, fontFamily: 'SF-Semibold', fontVariant: ['tabular-nums'] },
+  clockTotal: { color: '#8E98A5', fontFamily: 'SF-Regular' },
   clip: { position: 'absolute', top: 36, height: 42, borderRadius: 6 },
   selected: { height: 46, borderRadius: 9, backgroundColor: '#FFCF20', zIndex: 2 },
   beat: { position: 'absolute', bottom: 3, width: 4, height: 4, borderRadius: 2 },

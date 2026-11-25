@@ -1,6 +1,9 @@
-import { positionAtOffset, timelineScale, trimAtOffset } from '../MixTimelineEditor';
+import { INITIAL_MIX_ZOOM, positionAtOffset, timelineScale, trimAtOffset } from '../MixTimelineEditor';
 
 const clip = { id: 'clip', trackId: 'one', sourceStartMs: 1000, sourceEndMs: 5000, volume: 1 };
+it('opens five times farther out without changing the pinch limits', () => {
+  expect(timelineScale(INITIAL_MIX_ZOOM, 60000)).toBeCloseTo(timelineScale(1, 60000) / 5);
+});
 it('maps scroll offsets to a bounded playhead position at any zoom', () => {
   const scale = timelineScale(1, 60000);
   expect(positionAtOffset(2000 * scale, scale, 60000)).toBe(2000);

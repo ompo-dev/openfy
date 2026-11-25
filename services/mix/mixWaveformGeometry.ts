@@ -1,3 +1,4 @@
+import { fadeGain } from './mixEffects';
 // Geometry is anchored to source time, never to the moving viewport.
 export const WAVE_TILE = 256;
 type Point = [number, number];
@@ -49,12 +50,18 @@ export function fadeShadePath(tileStart: number, width: number, height: number, 
   if ((!fadeIn && !fadeOut) || scale <= 0 || width <= 0) return '';
   const gain = (x: number) => {
     const ms = (tileStart + x) / scale;
-    return Math.max(0, Math.min(1, fadeIn ? ms / fadeIn : 1, fadeOut ? (duration - ms) / fadeOut : 1));
+    return fadeGain(ms, duration, fadeIn, fadeOut);
   };
   const boundaries = [0, width, fadeIn * scale - tileStart, (duration - fadeOut) * scale - tileStart]
     .filter((x) => x >= 0 && x <= width);
+  for (let i = 1; i < 32; i++) {
+    for (const x of [fadeIn * i / 32 * scale - tileStart, (duration - fadeOut * i / 32) * scale - tileStart]) {
+      if (x > 0 && x < width) boundaries.push(x);
+    }
+  }
   const xs = [...new Set([...boundaries, ...Array.from({ length: Math.ceil(width / 5) }, (_, i) => i * 5)])].sort((a,b) => a-b);
-  return smoothWavePath(xs.map((x): Point => [x, height * (1 - gain(x))])) + `L${fmt(width)} 0 L0 0Z`;
+  // Join the sampled sinusoid rather than flattening every intermediate tangent.
+  return xs.map((x, i) => `${i ? 'L' : 'M'}${fmt(x)} ${fmt(height * (1 - gain(x)))}`).join('') + `L${fmt(width)} 0 L0 0Z`;
 }
 export const darkenWaveColor = (hex: string) => '#' + [1,3,5].map((i) => Math.round(parseInt(hex.slice(i,i+2),16) * 0.53).toString(16).padStart(2,'0')).join('');
 
