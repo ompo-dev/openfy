@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
-import { Keyboard, StyleSheet } from 'react-native';
+import { Keyboard, StyleSheet, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { exportPlaylistJson } from '../../../services/library/playlistJsonTransfer';
 
@@ -149,6 +149,20 @@ const renderCollection = (props = {}) =>
   );
 
 describe('CollectionDetail', () => {
+  it('places the inline editor after the collection actions and before the tracks', async () => {
+    const screen = await renderCollection({ kind: 'playlist', beforeTracks: <View testID="inline-editor-test" />,
+      onOpenMixEditor: jest.fn(), onPlayMix: jest.fn() });
+    await screen.findByLabelText('Tocar Primeira música');
+    const walk = (node: any): string[] => Array.isArray(node) ? node.flatMap(walk) :
+      node && typeof node === 'object' ? [node.props?.accessibilityLabel, node.props?.testID, ...(node.children || []).flatMap(walk)].filter(Boolean) : [];
+    const labels = walk(screen.toJSON());
+    const action = labels.indexOf('Recolher editor de áudio');
+    const editor = labels.indexOf('inline-editor-test');
+    const track = labels.indexOf('Tocar Primeira música');
+    expect(action).toBeGreaterThan(-1);
+    expect(editor).toBeGreaterThan(action);
+    expect(track).toBeGreaterThan(editor);
+  });
   it('copies the full playlist JSON when sharing, including remote pages', async () => {
     const all = [...tracks, { ...tracks[1], id: 'third', title: 'Terceira' }];
     const resolveTracksForPlayback = jest.fn().mockResolvedValue(all);

@@ -46,9 +46,12 @@ function Tool({ label, caption, icon: Icon, onPress, disabled = false, selected 
   </LoggedPressable>;
 }
 
-export function MixEditorModal({ project, library, visible, onClose, onSaved, nested }: {
-  project: MixProject; visible: boolean; onClose: () => void; onSaved: (mix: MixProject) => void;
-  onAddTracks: () => void; nested?: React.ReactNode; library?: LibraryTrack[];
+export type MixEditorHandle = { close: () => void; stop: () => void; hasPendingEdits: () => boolean };
+
+export function MixEditor({ project, library, onClose, onSaved, editorRef, onGestureActive, onPreviewStart }: {
+  project: MixProject; onClose: () => void; onSaved: (mix: MixProject) => void;
+  library?: LibraryTrack[]; editorRef?: React.Ref<MixEditorHandle>;
+  onGestureActive?: (active: boolean) => void; onPreviewStart?: () => void;
 }) {
   const [clips, setClips] = React.useState(() => compactMixLanes(project.clips));
   const [past, setPast] = React.useState<MixClip[][]>([]);
@@ -61,8 +64,8 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
   const [slip, setSlip] = React.useState<{ id: string; sourceStart: number } | null>(null);
   const session = React.useRef(0);
   const editVersion = React.useRef(0);
+  const savedRevision = React.useRef<{ id: string; revision: number } | null>(null);
   const [saving, setSaving] = React.useState(false);
-  const [trimActive, setTrimActive] = React.useState(false);
   const savingRef = React.useRef(false);
   const [panel, setPanel] = React.useState<'volume' | 'beats' | null>(null);
   const [audioTab, setAudioTab] = React.useState<'volume' | 'duck' | 'fade'>('volume');
@@ -83,15 +86,18 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
   const dirty = JSON.stringify(clips) !== JSON.stringify(project.clips);
 
   React.useEffect(() => {
+    if (savedRevision.current?.id === project.id && savedRevision.current.revision === project.revision) {
+      savedRevision.current = null;
+      return;
+    }
     preview.stop();
     setPanel(null);
     session.current++;
     setSlip(null); setReplaceId(null); setClipboard(null);
-    if (!visible) return;
     setClips(compactMixLanes(project.clips)); setPast([]); setFuture([]); select(project.clips[0]?.id || '');
     setSources(project.tracks); setPickerLane(null); preview.setPosition(0);
     // A new revision starts a fresh editing session after adding source tracks.
-  }, [visible, project.id, project.revision, preview.stop]);
+  }, [project.id, project.revision, preview.stop]);
   React.useEffect(() => () => { session.current++; }, []);
   React.useEffect(() => {
     if (selected) setVolume(selected.volume);
@@ -110,17 +116,25 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
   };
   const close = () => {
     preview.stop();
-    if (slip) { setSlip(null); setTrimActive(false); return; }
+    if (slip) { setSlip(null); onGestureActive?.(false); return; }
     if (savingRef.current) return;
     const finish = () => { session.current++; preview.stop(); onClose(); };
     if (dirty) Alert.alert('Descartar alterações?', 'As edições ainda não foram salvas.', [
       { text: 'Continuar editando', style: 'cancel' }, { text: 'Descartar', style: 'destructive', onPress: finish },
     ]); else finish();
   };
+  React.useImperativeHandle(editorRef, () => ({
+    close, stop: preview.stop, hasPendingEdits: () => dirty || savingRef.current || !!slip,
+  }));
+  React.useEffect(() => () => onGestureActive?.(false), [onGestureActive]);
   const save = async () => {
     if (savingRef.current) return;
     savingRef.current = true; setSaving(true); preview.stop();
-    try { const saved = await saveMixProject({ ...project, tracks: sources }, clips); onSaved(saved); onClose(); }
+    try {
+      const saved = await saveMixProject({ ...project, tracks: sources }, clips);
+      savedRevision.current = { id: saved.id, revision: saved.revision };
+      onSaved(saved);
+    }
     catch (error) { Alert.alert('Mix', error instanceof Error ? error.message : 'Não foi possível salvar.'); }
     finally { savingRef.current = false; setSaving(false); }
   };
@@ -197,7 +211,7 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
     setSlip({ id: selected.id, sourceStart: selected.sourceStartMs });
     preview.setPosition(selected.startMs + clipDuration(selected) / 2);
   };
-  const cancelSlip = () => { preview.stop(); setSlip(null); setTrimActive(false); };
+  const cancelSlip = () => { preview.stop(); setSlip(null); onGestureActive?.(false); };
   const applySlip = () => {
     if (slip && track) commit(slipMixClip(clips, slip.id, slip.sourceStart, track.duration_ms), 'slip');
     cancelSlip();
@@ -221,9 +235,9 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
         <Tool transport label="Alternar seleção do clipe" icon={CopyCheck} disabled={saving || !!slip || !cursorClip} onPress={toggleCursorSelection} />
       </View>
       <View style={S.centerTransport}><Tool transport filled label={preview.playing || preview.busy ? 'Parar prévia' : 'Ouvir mix'} icon={preview.playing || preview.busy ? Pause : Play}
-        disabled={!clips.length || saving} onPress={() => void preview.toggle({ ...project, tracks: sources, clips: playbackClips },
+        disabled={!clips.length || saving} onPress={() => { if (!preview.playing && !preview.busy) onPreviewStart?.(); void preview.toggle({ ...project, tracks: sources, clips: playbackClips },
           selected ? (preview.position >= selected.startMs && preview.position < selected.endMs ? preview.position : selected.startMs)
-            : preview.position >= total ? 0 : preview.position, selected?.id)} selected={preview.playing} /></View>
+            : preview.position >= total ? 0 : preview.position, selected?.id); }} selected={preview.playing} /></View>
       <View style={[S.transportSide, S.history]}>
         <Tool transport label="Desfazer" icon={Undo2} disabled={!past.length || saving || !!slip} onPress={undo} />
         <Tool transport label="Refazer" icon={Redo2} disabled={!future.length || saving || !!slip} onPress={redo} />
@@ -235,7 +249,7 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
       onTrim={(id, range) => commit(trimMixClipAtPosition(clips, id, range[0], range[1]), 'trim-handle')}
       onDragSelect={select} onMoveClip={(id, lane, ms) => commit(placeMixClip(clips, id, lane, ms), 'drag-clip')}
       onDeselect={() => { preview.stop(); select(''); }}
-      onAddTrack={openPicker} onTrimActive={setTrimActive}
+      onAddTrack={openPicker} onTrimActive={onGestureActive}
       slip={slip ? { ...slip, onChange: (sourceStart) => { preview.stop(); setSlip((old) => old ? { ...old, sourceStart } : old); } } : undefined} />
     {slip && selected ? <View style={S.slipTools}>
       <Tool label="Cancelar deslizar" icon={X} onPress={cancelSlip} />
@@ -277,10 +291,13 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
     </View> : clipboard ? <View style={S.inspector}><Tool label="Colar clipe" caption="Colar" icon={ClipboardPaste} disabled={saving} onPress={() => insertCopy(false)} /></View> : null}
   </View>;
 
-  return <SheetFrame visible={visible} title="Editar mix" onClose={close} onDismiss={preview.stop} size="full"
-    allowSwipeDismissal={!dirty && !saving && !slip} hideDefaultClose
-    headerLeading={<HeaderIconButton icon="x" label="Fechar" onPress={close} />}
-    nested={<>{nested}{pickerLane !== null ? <PlaylistTrackPickerModal visible tracks={downloaded} existingTrackIds={[]}
+  return <View testID="mix-inline-editor" style={S.inline}>
+    {header}
+    <View style={S.inlineActions}>
+      <HeaderIconButton icon="x" label="Fechar editor" disabled={saving} onPress={close} />
+      <PlaylistSheetAction label="Salvar mix" disabled={!dirty || !!slip} busy={saving} onPress={() => void save()} />
+    </View>
+    {pickerLane !== null ? <PlaylistTrackPickerModal visible tracks={downloaded} existingTrackIds={[]}
       onClose={() => setPickerLane(null)} onConfirm={(ids) => void addSources(ids)} /> : null}{replaceId !== null ? <PlaylistTrackPickerModal visible tracks={downloaded}
       existingTrackIds={[]} singleSelection title="Substituir música" actionLabel="Substituir música"
       onClose={() => setReplaceId(null)} onConfirm={(ids) => void replaceSource(ids)} /> : null}{panel === 'volume' && selected ? <SheetFrame visible title="Áudio" size="sheet" dimBackdrop={false} centerTitle
@@ -315,17 +332,15 @@ export function MixEditorModal({ project, library, visible, onClose, onSaved, ne
     </SheetFrame> : null}{panel === 'beats' && selected && track ? <MixBeatSheet clip={selected} duration={track.duration_ms}
       uri={track.localAudioPath} position={preview.position} playing={preview.playing || preview.busy}
       onSeek={(ms) => { preview.stop(); preview.setPosition(ms); }}
-      onPlay={() => void preview.toggle({ ...project, tracks: sources, clips }, preview.position, selected.id)}
+      onPlay={() => { if (!preview.playing && !preview.busy) onPreviewStart?.(); void preview.toggle({ ...project, tracks: sources, clips }, preview.position, selected.id); }}
       onClose={() => { preview.stop(); setPanel(null); }}
-      onApply={(beatsMs) => { preview.stop(); commit(clips.map((clip) => clip.id === selected.id ? { ...clip, beatsMs } : clip), 'beats'); setPanel(null); }} /> : null}</>}
-    headerTrailing={<PlaylistSheetAction label="Salvar mix" disabled={!dirty || !!slip} busy={saving} onPress={() => void save()} />}
-    renderScrollContent={(pageProps) => <ScrollView {...pageProps} testID="mix-editor-scroll" scrollEnabled={!trimActive}
-      showsVerticalScrollIndicator={false}>{header}</ScrollView>}>
-    <View />
-  </SheetFrame>;
+      onApply={(beatsMs) => { preview.stop(); commit(clips.map((clip) => clip.id === selected.id ? { ...clip, beatsMs } : clip), 'beats'); setPanel(null); }} /> : null}
+  </View>;
 }
 
 const S = StyleSheet.create({
+  inline: { marginHorizontal: 14, marginBottom: 16 },
+  inlineActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4 },
   headerContent: { gap: 0 }, transport: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, backgroundColor: '#0D1117', borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingHorizontal: 8 },
   tool: { minWidth: 40, minHeight: 40, gap: 3, alignItems: 'center', justifyContent: 'center' },
   toolCaption: { fontSize: 11, color: '#ABABB2', fontFamily: 'SF-Regular' },

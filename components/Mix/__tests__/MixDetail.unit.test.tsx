@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Alert } from 'react-native';
 import { act, render, waitFor } from '@testing-library/react-native';
 import { MixDetail } from '../MixDetail';
 import { getMixProject } from '../../../services/mix/mixRepository';
@@ -10,14 +11,21 @@ const mockSeek = jest.fn().mockResolvedValue(undefined);
 const mockPause = jest.fn().mockResolvedValue(undefined);
 const mockSetState = jest.fn();
 let mockSourceId: string | null = null;
+let mockDirty = false;
 let mockEditorProps: any;
 let mockProps: any;
 jest.mock('expo-router', () => ({ useRouter: () => ({ replace: jest.fn() }),
   useFocusEffect: (effect: any) => jest.requireActual('react').useEffect(effect, [effect]) }));
-jest.mock('../../CollectionDetail', () => ({ CollectionDetail: (props: any) => { mockProps = props; return null; } }));
+jest.mock('../../CollectionDetail', () => ({ CollectionDetail: (props: any) => { mockProps = props; return props.beforeTracks || null; } }));
 jest.mock('../../CollectionDetail/PendingCollectionDetail', () => ({ PendingCollectionDetail: () => null }));
 jest.mock('../../LocalPlaylist/PlaylistTrackPickerModal', () => ({ PlaylistTrackPickerModal: () => null }));
-jest.mock('../MixEditorModal', () => ({ MixEditorModal: (props: any) => { mockEditorProps = props; return null; } }));
+jest.mock('../MixEditorModal', () => ({ MixEditor: (props: any) => {
+  mockEditorProps = props;
+  jest.requireActual('react').useImperativeHandle(props.editorRef, () => ({
+    close: props.onClose, stop: jest.fn(), hasPendingEdits: () => mockDirty,
+  }));
+  return null;
+} }));
 jest.mock('../../../stores/usePlayerStore', () => ({ usePlayerStore: { setState: (...args: unknown[]) => mockSetState(...args),
   getState: () => ({ playWithQueue: mockPlay, seekToPosition: mockSeek, queueSourceId: mockSourceId }) } }));
 jest.mock('../../../services/audio/playerService', () => ({ pause: (...args: unknown[]) => mockPause(...args) }));
@@ -29,16 +37,42 @@ const project: MixProject = { version: 1, id: 'local_mix_flow', title: 'Treino',
   clips: [ { id: 'a', trackId: 'one', sourceStartMs: 10000, sourceEndMs: 20000, volume: 1 },
     { id: 'b', trackId: 'two', sourceStartMs: 0, sourceEndMs: 5000, volume: 1 } ] };
 beforeEach(() => {
-  jest.clearAllMocks(); mockProps = undefined; mockEditorProps = undefined; mockSourceId = null;
+  jest.clearAllMocks(); mockProps = undefined; mockEditorProps = undefined; mockSourceId = null; mockDirty = false;
   jest.mocked(getMixProject).mockResolvedValue(project);
   jest.mocked(downloadMixSources).mockResolvedValue(undefined);
   jest.mocked(renderMixAudio).mockResolvedValue({ uri: 'file:///mix.m4a', durationMs: 15000 });
 });
+it('locks the collection scrolling during timeline gestures and unlocks after release', async () => {
+  await render(<MixDetail mixId={project.id} />);
+  await waitFor(() => expect(mockProps.beforeTracks).toBeTruthy());
+  await act(async () => mockEditorProps.onGestureActive(true));
+  expect(mockProps.lockScroll).toBe(true);
+  await act(async () => mockEditorProps.onGestureActive(false));
+  expect(mockProps.lockScroll).toBe(false);
+});
+it('protects unsaved edits from page actions', async () => {
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  try {
+    await render(<MixDetail mixId={project.id} />);
+    await waitFor(() => expect(mockProps.beforeTracks).toBeTruthy());
+    mockDirty = true;
+    expect(mockProps.onBeforeBack()).toBe(false);
+    await act(async () => { await mockProps.onPlayMix(); });
+    expect(mockPlay).not.toHaveBeenCalled();
+    expect(alert).toHaveBeenCalledWith('Mix', expect.stringContaining('Salve ou descarte'));
+    mockDirty = false;
+    expect(mockProps.onBeforeBack()).toBe(true);
+  } finally { alert.mockRestore(); }
+});
 it.each([true, false])('pauses only this mix when closing the editor (same source: %s)', async (sameSource) => {
   await render(<MixDetail mixId={project.id} />);
   await waitFor(() => expect(mockProps?.title).toBe('Treino'));
+  expect(mockProps.beforeTracks).toBeTruthy();
+  await act(async () => { mockProps.onOpenMixEditor(); });
+  expect(mockProps.beforeTracks).toBeUndefined();
   mockSourceId = sameSource ? 'playlist:local_mix_flow:revision:2' : 'playlist:another';
   await act(async () => { mockProps.onOpenMixEditor(); });
+  expect(mockProps.beforeTracks).toBeTruthy();
   if (sameSource) expect(mockPause).toHaveBeenCalledWith('mix-editor-open');
   await act(async () => { mockEditorProps.onClose(); });
   if (sameSource) {

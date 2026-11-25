@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Alert } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import { MixEditorModal } from '../MixEditorModal';
+import { MixEditor } from '../MixEditorModal';
 import { INITIAL_MIX_ZOOM, timelineScale } from '../MixTimelineEditor';
 import { saveMixProject } from '../../../services/mix/mixRepository';
 import type { MixProject } from '../../../services/mix/mixTimeline';
@@ -38,17 +38,17 @@ const project: MixProject = { version: 1, id: 'local_mix_edit', title: 'Treino',
 beforeEach(() => { jest.clearAllMocks(); mockBusy = false; mockHandleGestures.clear(); jest.spyOn(Alert, 'alert').mockImplementation(() => {}); });
 afterEach(() => jest.restoreAllMocks());
 
-it('splits, undoes, redoes and saves actual source cuts in the shared glass sheet', async () => {
+it('splits, undoes, redoes and saves actual source cuts inline without closing the editor', async () => {
   jest.mocked(saveMixProject).mockResolvedValue(project);
   const saved = jest.fn();
-  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={saved} onAddTracks={jest.fn()} />);
+  const close = jest.fn();
+  const view = await render(<MixEditor project={project} onClose={close} onSaved={saved} />);
+  expect(view.getByTestId('mix-inline-editor')).toBeTruthy();
   expect(view.queryByTestId('gym-sheet-custom-content')).toBeNull();
   expect(view.queryByTestId('gym-sheet-header-glass')).toBeNull();
   expect(view.getByTestId('mix-fixed-playhead')).toBeTruthy();
   expect(view.queryByLabelText('Aumentar zoom')).toBeNull();
   expect(view.queryByLabelText('Diminuir zoom')).toBeNull();
-  await fireEvent.scroll(view.getByTestId('mix-editor-scroll'), { nativeEvent: { contentOffset: { y: 50 } } });
-  expect(view.getByTestId('gym-sheet-header-glass')).toBeTruthy();
   await fireEvent.press(view.getByLabelText('Dividir no cursor'));
   expect(view.getByLabelText('Selecionar clipe 2: One')).toBeTruthy();
   await fireEvent.press(view.getByLabelText('Desfazer'));
@@ -59,19 +59,36 @@ it('splits, undoes, redoes and saves actual source cuts in the shared glass shee
   const clips = jest.mocked(saveMixProject).mock.calls[0][1];
   expect(clips.map(({ sourceStartMs, sourceEndMs }) => [sourceStartMs, sourceEndMs])).toEqual([[1000, 16000], [16000, 31000]]);
   expect(saved).toHaveBeenCalledWith(project);
+  expect(close).not.toHaveBeenCalled();
 });
-it('stops preview on the standard header close button', async () => {
+it('stops preview on the inline close button', async () => {
   const close = jest.fn();
-  const view = await render(<MixEditorModal project={project} visible onClose={close} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={project} onClose={close} onSaved={jest.fn()} />);
   mockStop.mockClear();
-  await fireEvent.press(view.getByLabelText('Fechar'));
+  await fireEvent.press(view.getByLabelText('Fechar editor'));
   expect(mockStop).toHaveBeenCalled();
   expect(close).toHaveBeenCalled();
+});
+it('preserves undo history and selection when the saved revision arrives', async () => {
+  const saved = { ...project, revision: 2 };
+  jest.mocked(saveMixProject).mockImplementation(async (_, clips) => ({ ...saved, clips }));
+  function Host() {
+    const [mix, setMix] = React.useState(project);
+    return <MixEditor project={mix} onClose={jest.fn()} onSaved={setMix} />;
+  }
+  const view = await render(<Host />);
+  await fireEvent.press(view.getByLabelText('Dividir no cursor'));
+  await fireEvent.press(view.getByLabelText('Salvar mix'));
+  await waitFor(() => expect(saveMixProject).toHaveBeenCalled());
+  await fireEvent.press(view.getByLabelText('Desfazer'));
+  expect(view.queryByLabelText('Selecionar clipe 2: One')).toBeNull();
+  await fireEvent.press(view.getByLabelText('Refazer'));
+  expect(view.getByLabelText('Selecionar clipe 2: One')).toBeTruthy();
 });
 it('keeps preparation silent and exposes functional top-bar controls', async () => {
   mockBusy = true;
   jest.mocked(saveMixProject).mockResolvedValue(project);
-  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={project} onClose={jest.fn()} onSaved={jest.fn()} />);
   expect(view.queryByText(/Preparando áudio/)).toBeNull();
   expect(view.getByLabelText('Parar prévia')).toBeTruthy();
   expect(view.getByTestId('mix-transport-time')).toBeTruthy();
@@ -86,7 +103,7 @@ it('keeps preparation silent and exposes functional top-bar controls', async () 
 });
 it('slides the source waveform within a fixed 30-second window, previews the draft and commits only on apply', async () => {
   jest.mocked(saveMixProject).mockResolvedValue(project);
-  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={project} onClose={jest.fn()} onSaved={jest.fn()} />);
   await fireEvent.press(view.getByLabelText('Deslizar clipe'));
   expect(view.getByTestId('mix-slip-window')).toBeTruthy();
   const gesture = mockHandleGestures.get('mix-slip-lane');
@@ -109,7 +126,7 @@ it('slides the source waveform within a fixed 30-second window, previews the dra
 it('copies, pastes and duplicates with distinct identities and preserves clip settings', async () => {
   const mix = { ...project, clips: [{ ...project.clips[0], volume: 0.7, fadeInMs: 1000, beatsMs: [5000] }] };
   jest.mocked(saveMixProject).mockResolvedValue(mix);
-  const view = await render(<MixEditorModal project={mix} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={mix} onClose={jest.fn()} onSaved={jest.fn()} />);
   await fireEvent.press(view.getByLabelText('Copiar clipe'));
   await fireEvent.press(view.getByLabelText('Colar clipe'));
   await fireEvent.press(view.getByLabelText('Duplicar clipe'));
@@ -125,7 +142,7 @@ it('replaces the selected source with one downloaded song, supports undo and ret
     { ...project.tracks[0], spotifyId: 'three', title: 'Three', duration_ms: 90000, isDownloaded: true, localAudioPath: 'file:///three.m4a' },
     { ...project.tracks[0], spotifyId: 'remote', title: 'Remote', isDownloaded: false }] as any;
   jest.mocked(saveMixProject).mockResolvedValue(project);
-  const view = await render(<MixEditorModal project={project} library={library} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={project} library={library} onClose={jest.fn()} onSaved={jest.fn()} />);
   await fireEvent.press(view.getByLabelText('Substituir clipe'));
   expect(view.queryByLabelText('Selecionar Remote')).toBeNull();
   await fireEvent.changeText(view.getByLabelText('Buscar na biblioteca'), 'Three');
@@ -145,7 +162,7 @@ it('replaces the selected source with one downloaded song, supports undo and ret
 });
 it('offers three audio tabs and commits the fade, reduction and volume in one edit', async () => {
   jest.mocked(saveMixProject).mockResolvedValue(project);
-  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={project} onClose={jest.fn()} onSaved={jest.fn()} />);
   await fireEvent.press(view.getByLabelText('Volume do clipe'));
   await fireEvent(view.getByLabelText('Ajustar volume do clipe'), 'valueChange', 0.7);
   await fireEvent.press(view.getByLabelText('Redução automática'));
@@ -160,7 +177,7 @@ it('offers three audio tabs and commits the fade, reduction and volume in one ed
 });
 it('adds and saves a manual beat at the source-relative cursor', async () => {
   jest.mocked(saveMixProject).mockResolvedValue(project);
-  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={project} onClose={jest.fn()} onSaved={jest.fn()} />);
   await fireEvent.press(view.getByLabelText('Batidas do clipe'));
   await fireEvent.press(view.getByLabelText('Adicionar batida'));
   await fireEvent.press(view.getByLabelText('Aplicar batidas'));
@@ -170,7 +187,7 @@ it('adds and saves a manual beat at the source-relative cursor', async () => {
 });
 it('shows the fade inside the clip and colors only passed beat dots yellow', async () => {
   const mix = { ...project, clips: [{ ...project.clips[0], fadeInMs: 15000, beatsMs: [14000, 18000] }] };
-  const view = await render(<MixEditorModal project={mix} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={mix} onClose={jest.fn()} onSaved={jest.fn()} />);
   await waitFor(() => expect(view.getAllByTestId('mix-fade-curve').length).toBeGreaterThan(0));
   expect(view.getByTestId('mix-beat-clip-14000')).toHaveStyle({ backgroundColor: '#FFCF20' });
   expect(view.getByTestId('mix-beat-clip-18000')).toHaveStyle({ backgroundColor: '#FFFFFF' });
@@ -179,14 +196,12 @@ it('shows the fade inside the clip and colors only passed beat dots yellow', asy
 });
 it('keeps unsaved edits while opening the source picker', async () => {
   const close = jest.fn();
-  const add = jest.fn();
-  const view = await render(<MixEditorModal project={project} visible onClose={close} onSaved={jest.fn()} onAddTracks={add} />);
+  const view = await render(<MixEditor project={project} onClose={close} onSaved={jest.fn()} />);
   await fireEvent.press(view.getByLabelText('Remover clipe'));
   await fireEvent.press(view.getByLabelText('Adicionar música à faixa 1'));
-  expect(add).not.toHaveBeenCalled();
   expect(view.getByLabelText('Buscar na biblioteca')).toBeTruthy();
   await fireEvent.press(view.getAllByLabelText('Fechar').at(-1)!);
-  await fireEvent.press(view.getByLabelText('Fechar'));
+  await fireEvent.press(view.getByLabelText('Fechar editor'));
   expect(close).not.toHaveBeenCalled();
   expect(Alert.alert).toHaveBeenLastCalledWith('Descartar alterações?', expect.any(String), expect.any(Array));
 });
@@ -195,7 +210,7 @@ it('adds another music in a new lane without requiring a prior save', async () =
   const library = [{ ...project.tracks[0], spotifyId: 'two', title: 'Two', duration_ms: 20000, isDownloaded: true, localAudioPath: 'file:///two.m4a' },
     { ...project.tracks[0], spotifyId: 'stream', title: 'Stream', isDownloaded: false }] as any;
   jest.mocked(saveMixProject).mockResolvedValue(project);
-  const view = await render(<MixEditorModal project={project} library={library} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={project} library={library} onClose={jest.fn()} onSaved={jest.fn()} />);
   await fireEvent.press(view.getByLabelText('Dividir no cursor'));
   await fireEvent.press(view.getByLabelText('Adicionar música à faixa 2'));
   expect(view.queryByLabelText('Selecionar Stream')).toBeNull();
@@ -215,7 +230,7 @@ it('adds another music in a new lane without requiring a prior save', async () =
 
 it('commits handle adjustments instead of snapping back', async () => {
   jest.mocked(saveMixProject).mockResolvedValue(project);
-  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={project} onClose={jest.fn()} onSaved={jest.fn()} />);
   const handle = view.getByLabelText('Arrastar fim do clipe');
   await fireEvent(handle, 'accessibilityAction', { nativeEvent: { actionName: 'decrement' } });
   await fireEvent.press(view.getByLabelText('Salvar mix'));
@@ -225,7 +240,7 @@ it('commits handle adjustments instead of snapping back', async () => {
 
 it('retains the drag translation across timeline rerenders and commits on gesture release', async () => {
   jest.mocked(saveMixProject).mockResolvedValue(project);
-  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={project} onClose={jest.fn()} onSaved={jest.fn()} />);
   const handle = mockHandleGestures.get('Arrastar fim do clipe');
   expect(handle).toBeDefined();
   await act(async () => { handle.handlers.onStart({ translationX: 0 }); });
@@ -239,7 +254,7 @@ it('retains the drag translation across timeline rerenders and commits on gestur
 });
 it('uses the absolute finger location and preserves the last trim if another gesture cancels it', async () => {
   jest.mocked(saveMixProject).mockResolvedValue(project);
-  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={project} onClose={jest.fn()} onSaved={jest.fn()} />);
   const handle = mockHandleGestures.get('Arrastar fim do clipe');
   await act(async () => { handle.handlers.onStart({ absoluteX: 200, translationX: 0 }); });
   await act(async () => { handle.handlers.onUpdate({ absoluteX: 200 - 2000 * timelineScale(INITIAL_MIX_ZOOM, 30000), translationX: 0 }); });
@@ -252,7 +267,7 @@ it('uses the absolute finger location and preserves the last trim if another ges
 it('shows artwork, real waveform, clip duration and explicit marker inside the timeline', async () => {
   const mix = { ...project, tracks: [{ ...project.tracks[0], explicit: true, imageURL: 'https://example.com/cover.jpg' }] };
   const library = [{ ...mix.tracks[0], isDownloaded: true, localAudioPath: 'file:///one.m4a', localImagePath: 'file:///cover.jpg' }] as any;
-  const view = await render(<MixEditorModal project={mix} library={library} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={mix} library={library} onClose={jest.fn()} onSaved={jest.fn()} />);
   expect(view.getAllByText('Artist • 0:30').length).toBeGreaterThan(0);
   expect(view.getByText('One ▪ E')).toBeTruthy();
   expect(view.getByTestId('mix-clip-cover')).toBeTruthy();
@@ -261,7 +276,7 @@ it('shows artwork, real waveform, clip duration and explicit marker inside the t
 
 it('drags a clip horizontally and vertically, preserving its effects and allowing undo', async () => {
   jest.mocked(saveMixProject).mockResolvedValue(project);
-  const view = await render(<MixEditorModal project={project} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={project} onClose={jest.fn()} onSaved={jest.fn()} />);
   expect(view.queryByText(/Deslize para navegar/)).toBeNull();
   const gesture = mockHandleGestures.get('mix-drag-clip');
   const start = { absoluteX: 200, absoluteY: 100, translationX: 0, translationY: 0 };
@@ -281,7 +296,7 @@ it('drags a clip horizontally and vertically, preserving its effects and allowin
 
 it('compacts unused lanes, deselects on the background and switches between solo and full playback', async () => {
   const mix = { ...project, clips: [...project.clips, { ...project.clips[0], id: 'second', lane: 5 }] };
-  const view = await render(<MixEditorModal project={mix} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={mix} onClose={jest.fn()} onSaved={jest.fn()} />);
   expect(view.getByLabelText('Adicionar música à faixa 3')).toBeTruthy();
   expect(view.queryByLabelText('Adicionar música à faixa 4')).toBeNull();
   await fireEvent.press(view.getByLabelText('Ouvir mix'));
@@ -295,7 +310,7 @@ it('compacts unused lanes, deselects on the background and switches between solo
 it('drags an unfocused clip immediately and displays a magnetic edge guide', async () => {
   const mix = { ...project, clips: [...project.clips, { ...project.clips[0], id: 'second', lane: 1 }] };
   jest.mocked(saveMixProject).mockResolvedValue(mix);
-  const view = await render(<MixEditorModal project={mix} visible onClose={jest.fn()} onSaved={jest.fn()} onAddTracks={jest.fn()} />);
+  const view = await render(<MixEditor project={mix} onClose={jest.fn()} onSaved={jest.fn()} />);
   const gesture = mockHandleGestures.get('mix-drag-second');
   expect(gesture).toBeDefined();
   const start = { absoluteX: 100, absoluteY: 150, translationX: 0, translationY: 0 };

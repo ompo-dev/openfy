@@ -88,6 +88,9 @@ export type CollectionDetailProps = {
   sectionTitle?: string;
   disableTrackArtistLinks?: boolean;
   extraTrackSections?: ExtraTrackSection[];
+  beforeTracks?: React.ReactNode;
+  lockScroll?: boolean;
+  onBeforeBack?: () => boolean;
   footer?: React.ReactNode;
   onRefresh?: () => void | Promise<void>;
   refreshing?: boolean;
@@ -226,6 +229,9 @@ export const CollectionDetail = ({
   sectionTitle,
   disableTrackArtistLinks = false,
   extraTrackSections = [],
+  beforeTracks,
+  lockScroll = false,
+  onBeforeBack,
   footer,
   onRefresh,
   refreshing = false,
@@ -701,13 +707,14 @@ export const CollectionDetail = ({
   }, [collectionId, kind, resolveTracksForPlayback]);
 
   const handleBack = React.useCallback(() => {
+    if (onBeforeBack && !onBeforeBack()) return;
     if (router.canGoBack()) {
       router.back();
       return;
     }
     const section = segments.join('/').includes('library') ? 'library' : 'home';
     router.replace(`/(tabs)/${section}` as Href);
-  }, [router, segments]);
+  }, [router, segments, onBeforeBack]);
 
   const renderTrackRow = React.useCallback(
     (
@@ -785,7 +792,8 @@ export const CollectionDetail = ({
         data={visibleTracks}
         keyExtractor={(item) => item.id}
         renderItem={renderTrack}
-        removeClippedSubviews={Platform.OS !== 'web'}
+        removeClippedSubviews={!beforeTracks && Platform.OS !== 'web'}
+        scrollEnabled={!lockScroll}
         onEndReached={onEndReached}
         onScrollBeginDrag={closeSwipeRow}
         onEndReachedThreshold={0.6}
@@ -937,7 +945,7 @@ export const CollectionDetail = ({
               <NativeIconButton
                 systemImage={onOpenMixEditor ? 'waveform' : 'shuffle'}
                 iconName={onOpenMixEditor ? 'pulse' : 'shuffle'}
-                label={onOpenMixEditor ? 'Abrir editor de áudio' : isCollectionShuffleActive ? 'Desativar aleatório' : 'Tocar aleatório'}
+                label={onOpenMixEditor ? (beforeTracks ? 'Recolher editor de áudio' : 'Abrir editor de áudio') : isCollectionShuffleActive ? 'Desativar aleatório' : 'Tocar aleatório'}
                 size={44}
                 tint={isCollectionShuffleActive ? '#1ED760' : '#FFFFFF'}
                 onPress={() => onOpenMixEditor ? onOpenMixEditor() : void handleShufflePlay()}
@@ -1027,6 +1035,7 @@ export const CollectionDetail = ({
             </GlassBackdropScope>
             </View>
             <View style={styles.contentTopSpacer} />
+            {beforeTracks}
             {sectionTitle && visibleTracks.length ? <Text style={styles.sectionTitle}>{sectionTitle}</Text> : null}
           </>
         }
