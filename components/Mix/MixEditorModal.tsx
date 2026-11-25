@@ -46,7 +46,7 @@ function Tool({ label, caption, icon: Icon, onPress, disabled = false, selected 
   </LoggedPressable>;
 }
 
-export type MixEditorHandle = { close: () => void; stop: () => void; hasPendingEdits: () => boolean };
+export type MixEditorHandle = { close: () => void; stop: () => void; hasPendingEdits: () => boolean; flush: () => Promise<boolean> };
 
 export function MixEditor({ project, library, onClose, onSaved, editorRef, onGestureActive, onPreviewStart }: {
   project: MixProject; onClose: () => void; onSaved: (mix: MixProject) => void;
@@ -64,9 +64,11 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
   const [slip, setSlip] = React.useState<{ id: string; sourceStart: number } | null>(null);
   const session = React.useRef(0);
   const editVersion = React.useRef(0);
-  const savedRevision = React.useRef<{ id: string; revision: number } | null>(null);
-  const [saving, setSaving] = React.useState(false);
-  const savingRef = React.useRef(false);
+  const savedBase = React.useRef(project);
+  const writeQueue = React.useRef<Promise<boolean>>(Promise.resolve(true));
+  const pendingWrites = React.useRef(0);
+  const failedWrite = React.useRef(false);
+  const [saveError, setSaveError] = React.useState('');
   const [panel, setPanel] = React.useState<'volume' | 'beats' | null>(null);
   const [audioTab, setAudioTab] = React.useState<'volume' | 'duck' | 'fade'>('volume');
   const [volume, setVolume] = React.useState(1);
@@ -83,13 +85,10 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
   }, [sources, library]);
   const track = selected ? tracks.get(selected.trackId) : undefined;
   const downloaded = React.useMemo(() => (library || []).filter((item) => item.isDownloaded && item.localAudioPath), [library]);
-  const dirty = JSON.stringify(clips) !== JSON.stringify(project.clips);
-
   React.useEffect(() => {
-    if (savedRevision.current?.id === project.id && savedRevision.current.revision === project.revision) {
-      savedRevision.current = null;
-      return;
-    }
+    if (savedBase.current.id === project.id && project.revision <= savedBase.current.revision) return;
+    if (savedBase.current.id === project.id && (pendingWrites.current || failedWrite.current)) return;
+    savedBase.current = project;
     preview.stop();
     setPanel(null);
     session.current++;
@@ -103,54 +102,70 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
     if (selected) setVolume(selected.volume);
   }, [selected?.id, selected?.sourceStartMs, selected?.sourceEndMs, selected?.volume]);
 
+  const persist = (next: MixClip[], nextSources = sources) => {
+    pendingWrites.current++;
+    const id = project.id;
+    const request = session.current;
+    writeQueue.current = writeQueue.current.then(async () => {
+      try {
+        if (savedBase.current.id !== id) throw new Error('O mix mudou.');
+        const saved = await saveMixProject({ ...savedBase.current, tracks: nextSources }, next);
+        savedBase.current = saved;
+        failedWrite.current = false;
+        if (session.current === request) setSaveError('');
+        onSaved(saved);
+        return true;
+      } catch (error) {
+        failedWrite.current = true;
+        const message = error instanceof Error ? error.message : 'Não foi possível salvar.';
+        if (session.current === request) setSaveError(message);
+        log.error('mix autosave failed', { mixId: id, error });
+        return false;
+      } finally { pendingWrites.current--; }
+    });
+    return writeQueue.current;
+  };
   const commit = (next: MixClip[], action: string, nextSources = sources) => {
     next = compactMixLanes(next);
-    if (savingRef.current || next === clips || JSON.stringify(next) === JSON.stringify(clips)) return false;
+    if (next === clips || JSON.stringify(next) === JSON.stringify(clips)) return false;
     try { validateMixClips(next, nextSources); }
     catch (error) { Alert.alert('Mix', String(error)); return false; }
     editVersion.current++;
     preview.stop(); setPast((items) => [...items.slice(-49), clips]); setFuture([]); setClips(next);
     setSources(nextSources);
+    void persist(next, nextSources);
     log.ui('mix edit', { mixId: project.id, action, clips: next.length });
     return true;
   };
-  const close = () => {
+  const flush = async () => {
+    let current: Promise<boolean>;
+    do { current = writeQueue.current; await current; } while (current !== writeQueue.current);
+    return !failedWrite.current;
+  };
+  const close = async () => {
     preview.stop();
     if (slip) { setSlip(null); onGestureActive?.(false); return; }
-    if (savingRef.current) return;
-    const finish = () => { session.current++; preview.stop(); onClose(); };
-    if (dirty) Alert.alert('Descartar alterações?', 'As edições ainda não foram salvas.', [
-      { text: 'Continuar editando', style: 'cancel' }, { text: 'Descartar', style: 'destructive', onPress: finish },
-    ]); else finish();
+    if (await flush()) { session.current++; onClose(); }
   };
   React.useImperativeHandle(editorRef, () => ({
-    close, stop: preview.stop, hasPendingEdits: () => dirty || savingRef.current || !!slip,
+    close: () => void close(), stop: preview.stop, hasPendingEdits: () => pendingWrites.current > 0 || failedWrite.current, flush,
   }));
   React.useEffect(() => () => onGestureActive?.(false), [onGestureActive]);
-  const save = async () => {
-    if (savingRef.current) return;
-    savingRef.current = true; setSaving(true); preview.stop();
-    try {
-      const saved = await saveMixProject({ ...project, tracks: sources }, clips);
-      savedRevision.current = { id: saved.id, revision: saved.revision };
-      onSaved(saved);
-    }
-    catch (error) { Alert.alert('Mix', error instanceof Error ? error.message : 'Não foi possível salvar.'); }
-    finally { savingRef.current = false; setSaving(false); }
-  };
   const pick = (clip: (typeof timeline)[number]) => {
     preview.stop(); select(clip.id);
     if (preview.position < clip.startMs || preview.position >= clip.endMs) preview.setPosition(clip.startMs);
   };
   const undo = () => {
-    if (!past.length || saving) return;
+    if (!past.length) return;
     editVersion.current++;
     preview.stop(); setFuture([clips, ...future]); setClips(past[past.length - 1]); setPast(past.slice(0, -1));
+    void persist(past[past.length - 1]);
   };
   const redo = () => {
-    if (!future.length || saving) return;
+    if (!future.length) return;
     editVersion.current++;
     preview.stop(); setPast([...past, clips]); setClips(future[0]); setFuture(future.slice(1));
+    void persist(future[0]);
   };
   const addSources = async (ids: string[]) => {
     if (pickerLane === null) return;
@@ -228,24 +243,24 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
     const beatsMs = [...new Set([...(selected.beatsMs || []), ms])].sort((a,b) => a-b);
     commit(clips.map((clip) => clip.id === selected.id ? { ...clip, beatsMs } : clip), 'beat-at-cursor');
   };
-  const header = <View style={S.headerContent}>
+  const header = <View testID="mix-editor-panel" style={S.headerContent}>
     <View style={S.transport}>
       <View style={S.transportSide}>
-        <Tool transport label="Adicionar batida no cursor" icon={TagPlus} disabled={saving || !!slip || !selected || preview.position < selected.startMs || preview.position >= selected.endMs} onPress={addBeatAtCursor} />
-        <Tool transport label="Alternar seleção do clipe" icon={CopyCheck} disabled={saving || !!slip || !cursorClip} onPress={toggleCursorSelection} />
+        <Tool transport label="Adicionar batida no cursor" icon={TagPlus} disabled={!!slip || !selected || preview.position < selected.startMs || preview.position >= selected.endMs} onPress={addBeatAtCursor} />
+        <Tool transport label="Alternar seleção do clipe" icon={CopyCheck} disabled={!!slip || !cursorClip} onPress={toggleCursorSelection} />
       </View>
       <View style={S.centerTransport}><Tool transport filled label={preview.playing || preview.busy ? 'Parar prévia' : 'Ouvir mix'} icon={preview.playing || preview.busy ? Pause : Play}
-        disabled={!clips.length || saving} onPress={() => { if (!preview.playing && !preview.busy) onPreviewStart?.(); void preview.toggle({ ...project, tracks: sources, clips: playbackClips },
+        disabled={!clips.length} onPress={() => { if (!preview.playing && !preview.busy) onPreviewStart?.(); void preview.toggle({ ...project, tracks: sources, clips: playbackClips },
           selected ? (preview.position >= selected.startMs && preview.position < selected.endMs ? preview.position : selected.startMs)
             : preview.position >= total ? 0 : preview.position, selected?.id); }} selected={preview.playing} /></View>
       <View style={[S.transportSide, S.history]}>
-        <Tool transport label="Desfazer" icon={Undo2} disabled={!past.length || saving || !!slip} onPress={undo} />
-        <Tool transport label="Refazer" icon={Redo2} disabled={!future.length || saving || !!slip} onPress={redo} />
+        <Tool transport label="Desfazer" icon={Undo2} disabled={!past.length || !!slip} onPress={undo} />
+        <Tool transport label="Refazer" icon={Redo2} disabled={!future.length || !!slip} onPress={redo} />
       </View>
     </View>
     {preview.error ? <Text accessibilityRole="alert" style={S.error}>{preview.error}</Text> : null}
     <MixTimelineEditor timeline={timeline} total={total} tracks={tracks} selectedId={selectedId} position={preview.position}
-      playing={preview.playing} disabled={saving} onSelect={pick} onSeek={preview.setPosition} onScrub={preview.stop}
+      playing={preview.playing} disabled={false} onSelect={pick} onSeek={preview.setPosition} onScrub={preview.stop}
       onTrim={(id, range) => commit(trimMixClipAtPosition(clips, id, range[0], range[1]), 'trim-handle')}
       onDragSelect={select} onMoveClip={(id, lane, ms) => commit(placeMixClip(clips, id, lane, ms), 'drag-clip')}
       onDeselect={() => { preview.stop(); select(''); }}
@@ -256,47 +271,50 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
       <View style={S.slipText}><Text style={S.secondary}>Arraste para selecionar o trecho do áudio que você quer incluir</Text>
         <Text style={S.slipRange}>{formatMixTime(slip.sourceStart)} – {formatMixTime(slip.sourceStart + clipDuration(selected))} · {formatMixTime(clipDuration(selected))}</Text></View>
       <Tool label="Aplicar deslizar" icon={Check} onPress={applySlip} />
-    </View> : selected && track ? <View style={S.inspector}>
+    </View> : <View testID="mix-editor-toolbar" style={S.inspector}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.editTools}>
-        <Tool label="Dividir no cursor" caption="Dividir" icon={Scissors} disabled={saving || preview.position - selected.startMs < MIN_CLIP_MS || selected.endMs - preview.position < MIN_CLIP_MS}
-          onPress={() => commit(splitMixClip(clips, selected.id, preview.position), 'split')} />
-        <Tool label="Volume do clipe" caption="Volume" icon={Volume2} disabled={saving} onPress={() => {
+        <Tool label="Dividir no cursor" caption="Dividir" icon={Scissors} disabled={!selected || preview.position - selected.startMs < MIN_CLIP_MS || selected.endMs - preview.position < MIN_CLIP_MS}
+          onPress={() => { if (selected) commit(splitMixClip(clips, selected.id, preview.position), 'split'); }} />
+        <Tool label="Volume do clipe" caption="Volume" icon={Volume2} disabled={!selected || !track} onPress={() => {
+          if (!selected) return;
           preview.stop(); setVolume(selected.volume); setDuckAmount(selected.duckAmount || 0);
           setFadeInMs(selected.fadeInMs || 0); setFadeOutMs(selected.fadeOutMs || 0);
           setAudioTab('volume'); setPanel('volume');
         }} />
-        <Tool label="Batidas do clipe" caption="Batidas" icon={AudioLines} disabled={saving} onPress={() => {
+        <Tool label="Batidas do clipe" caption="Batidas" icon={AudioLines} disabled={!selected || !track} onPress={() => {
+          if (!selected) return;
           preview.stop(); if (preview.position < selected.startMs || preview.position >= selected.endMs) preview.setPosition(selected.startMs);
           setPanel('beats');
         }} />
-        <Tool label="Substituir clipe" caption="Substituir" icon={ArrowLeftRight} disabled={saving} onPress={() => { preview.stop(); setReplaceId(selected.id); }} />
-        <Tool label="Copiar clipe" caption="Copiar" icon={Copy} disabled={saving} onPress={copyClip} />
-        <Tool label="Colar clipe" caption="Colar" icon={ClipboardPaste} disabled={saving || !clipboard} onPress={() => insertCopy(false)} />
-        <Tool label="Duplicar clipe" caption="Duplicar" icon={CopyPlus} disabled={saving} onPress={() => insertCopy(true)} />
-        <Tool label="Deslizar clipe" caption="Deslizar" icon={MoveHorizontal} disabled={saving || track.duration_ms <= clipDuration(selected)} onPress={openSlip} />
-        <Tool label="Remover clipe" caption="Excluir" icon={Trash2} disabled={saving} onPress={() => { commit(clips.filter((clip) => clip.id !== selected.id), 'remove'); select(''); }} />
-        <Tool label="Mover clipe antes" icon={ChevronLeft} disabled={saving || !timeline.some((c) => c.lane === selected.lane && c.startMs < selected.startMs)}
+        <Tool label="Substituir clipe" caption="Substituir" icon={ArrowLeftRight} disabled={!selected} onPress={() => { if (selected) { preview.stop(); setReplaceId(selected.id); } }} />
+        <Tool label="Copiar clipe" caption="Copiar" icon={Copy} disabled={!selected} onPress={copyClip} />
+        <Tool label="Colar clipe" caption="Colar" icon={ClipboardPaste} disabled={!clipboard} onPress={() => insertCopy(false)} />
+        <Tool label="Duplicar clipe" caption="Duplicar" icon={CopyPlus} disabled={!selected} onPress={() => insertCopy(true)} />
+        <Tool label="Deslizar clipe" caption="Deslizar" icon={MoveHorizontal} disabled={!selected || !track || track.duration_ms <= clipDuration(selected)} onPress={openSlip} />
+        <Tool label="Remover clipe" caption="Excluir" icon={Trash2} disabled={!selected} onPress={() => { if (selected) { commit(clips.filter((clip) => clip.id !== selected.id), 'remove'); select(''); } }} />
+        <Tool label="Mover clipe antes" icon={ChevronLeft} disabled={!selected || !timeline.some((c) => c.lane === selected.lane && c.startMs < selected.startMs)}
           onPress={() => {
+            if (!selected) return;
             const index = timeline.findIndex((c) => c.id === selected.id);
             const previous = timeline.slice(0, index).map((c) => c.lane).lastIndexOf(selected.lane);
             if (previous >= 0) commit(moveMixClip(clips, index, previous), 'reorder');
           }} />
-        <Tool label="Mover clipe depois" icon={ChevronRight} disabled={saving || !timeline.some((c) => c.lane === selected.lane && c.startMs > selected.startMs)}
+        <Tool label="Mover clipe depois" icon={ChevronRight} disabled={!selected || !timeline.some((c) => c.lane === selected.lane && c.startMs > selected.startMs)}
           onPress={() => {
+            if (!selected) return;
             const index = timeline.findIndex((c) => c.id === selected.id);
             const next = timeline.findIndex((c, i) => i > index && c.lane === selected.lane);
             if (next >= 0) commit(moveMixClip(clips, index, next), 'reorder');
           }} />
       </ScrollView>
-    </View> : clipboard ? <View style={S.inspector}><Tool label="Colar clipe" caption="Colar" icon={ClipboardPaste} disabled={saving} onPress={() => insertCopy(false)} /></View> : null}
+    </View>}
   </View>;
 
   return <View testID="mix-inline-editor" style={S.inline}>
     {header}
-    <View style={S.inlineActions}>
-      <HeaderIconButton icon="x" label="Fechar editor" disabled={saving} onPress={close} />
-      <PlaylistSheetAction label="Salvar mix" disabled={!dirty || !!slip} busy={saving} onPress={() => void save()} />
-    </View>
+    {saveError ? <LoggedPressable accessibilityRole="button" accessibilityLabel="Tentar salvar novamente" onPress={() => void persist(clips)}>
+      <Text style={S.error}>Não foi possível salvar: {saveError}. Tentar novamente.</Text>
+    </LoggedPressable> : null}
     {pickerLane !== null ? <PlaylistTrackPickerModal visible tracks={downloaded} existingTrackIds={[]}
       onClose={() => setPickerLane(null)} onConfirm={(ids) => void addSources(ids)} /> : null}{replaceId !== null ? <PlaylistTrackPickerModal visible tracks={downloaded}
       existingTrackIds={[]} singleSelection title="Substituir música" actionLabel="Substituir música"
@@ -340,8 +358,7 @@ export function MixEditor({ project, library, onClose, onSaved, editorRef, onGes
 
 const S = StyleSheet.create({
   inline: { marginHorizontal: 14, marginBottom: 16 },
-  inlineActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4 },
-  headerContent: { gap: 0 }, transport: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, backgroundColor: '#0D1117', borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingHorizontal: 8 },
+  headerContent: { gap: 0, backgroundColor: '#0D1117', borderRadius: 12, overflow: 'hidden' }, transport: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, backgroundColor: '#0D1117', paddingHorizontal: 8 },
   tool: { minWidth: 40, minHeight: 40, gap: 3, alignItems: 'center', justifyContent: 'center' },
   toolCaption: { fontSize: 11, color: '#ABABB2', fontFamily: 'SF-Regular' },
   transportTool: { width: 44 },

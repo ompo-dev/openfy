@@ -149,6 +149,14 @@ const renderCollection = (props = {}) =>
   );
 
 describe('CollectionDetail', () => {
+  it('distinguishes the main mix transport from an original source row', async () => {
+    const onPlayMix = jest.fn().mockResolvedValue(undefined);
+    const screen = await renderCollection({ kind: 'playlist', onPlayMix });
+    await fireEvent.press(screen.getByLabelText('Tocar'));
+    expect(onPlayMix).toHaveBeenNthCalledWith(1);
+    await fireEvent.press(screen.getByLabelText('Tocar Primeira música'));
+    expect(onPlayMix).toHaveBeenNthCalledWith(2, 'track-one');
+  });
   it('places the inline editor after the collection actions and before the tracks', async () => {
     const screen = await renderCollection({ kind: 'playlist', beforeTracks: <View testID="inline-editor-test" />,
       onOpenMixEditor: jest.fn(), onPlayMix: jest.fn() });

@@ -22,7 +22,7 @@ jest.mock('../../LocalPlaylist/PlaylistTrackPickerModal', () => ({ PlaylistTrack
 jest.mock('../MixEditorModal', () => ({ MixEditor: (props: any) => {
   mockEditorProps = props;
   jest.requireActual('react').useImperativeHandle(props.editorRef, () => ({
-    close: props.onClose, stop: jest.fn(), hasPendingEdits: () => mockDirty,
+    close: props.onClose, stop: jest.fn(), hasPendingEdits: () => mockDirty, flush: async () => !mockDirty,
   }));
   return null;
 } }));
@@ -50,18 +50,15 @@ it('locks the collection scrolling during timeline gestures and unlocks after re
   await act(async () => mockEditorProps.onGestureActive(false));
   expect(mockProps.lockScroll).toBe(false);
 });
-it('protects unsaved edits from page actions', async () => {
+it('does not play an outdated mix if autosave fails', async () => {
   const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   try {
     await render(<MixDetail mixId={project.id} />);
     await waitFor(() => expect(mockProps.beforeTracks).toBeTruthy());
     mockDirty = true;
-    expect(mockProps.onBeforeBack()).toBe(false);
     await act(async () => { await mockProps.onPlayMix(); });
     expect(mockPlay).not.toHaveBeenCalled();
-    expect(alert).toHaveBeenCalledWith('Mix', expect.stringContaining('Salve ou descarte'));
-    mockDirty = false;
-    expect(mockProps.onBeforeBack()).toBe(true);
+    expect(alert).toHaveBeenCalledWith('Mix', expect.stringContaining('Não foi possível salvar'));
   } finally { alert.mockRestore(); }
 });
 it.each([true, false])('pauses only this mix when closing the editor (same source: %s)', async (sameSource) => {
@@ -83,19 +80,27 @@ it.each([true, false])('pauses only this mix when closing the editor (same sourc
     expect(mockSetState).not.toHaveBeenCalled();
   }
 });
-it('composes and plays the saved edits locally, seeking to the selected source without losing a request when downloads refresh the library', async () => {
+it('composes and plays the saved edits locally without losing a request when downloads refresh the library', async () => {
   await render(<MixDetail mixId={project.id} />);
   await waitFor(() => expect(mockProps?.title).toBe('Treino'));
   let finish!: () => void;
   jest.mocked(downloadMixSources).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
   let playback!: Promise<void>;
-  await act(async () => { playback = mockProps.onPlayMix('two'); });
+  await act(async () => { playback = mockProps.onPlayMix(); });
   await act(async () => { useLibraryStore.getState().refreshLibrary(); });
   await waitFor(() => expect(getMixProject).toHaveBeenCalledTimes(3));
   await act(async () => { finish(); await playback; });
   expect(renderMixAudio).toHaveBeenCalledWith(project);
   expect(mockPlay).toHaveBeenCalledWith([expect.objectContaining({ localOnly: true, localAudioPath: 'file:///mix.m4a', duration_ms: 15000 })], 0,
     'playlist:local_mix_flow:revision:2');
-  expect(mockSeek).toHaveBeenCalledWith(10000);
+  expect(mockSeek).not.toHaveBeenCalled();
   expect(mockProps.playbackSourceId).toBe('playlist:local_mix_flow:revision:2');
+});
+it('plays the original full-length song when a source row is tapped, never the rendered mix', async () => {
+  await render(<MixDetail mixId={project.id} />);
+  await waitFor(() => expect(mockProps?.title).toBe('Treino'));
+  await act(async () => { await mockProps.onPlayMix('two'); });
+  expect(mockPlay).toHaveBeenCalledWith([expect.objectContaining({ spotifyId: 'two', duration_ms: 60000, title: 'two' })], 0, 'mix-source:local_mix_flow:two');
+  expect(renderMixAudio).not.toHaveBeenCalled();
+  expect(mockSeek).not.toHaveBeenCalled();
 });

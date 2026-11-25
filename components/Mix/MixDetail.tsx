@@ -9,7 +9,7 @@ import { MixEditor, type MixEditorHandle } from './MixEditorModal';
 import { getLibraryTracks, type LibraryTrack } from '../../services/library/catalogLibrary';
 import { addTracksToMix, deleteMixProject, getMixProject, saveMixProject } from '../../services/mix/mixRepository';
 import { downloadMixSources, renderMixAudio } from '../../services/mix/mixAudio';
-import { formatMixTime, mixDuration, mixTimeline, type MixProject } from '../../services/mix/mixTimeline';
+import { formatMixTime, mixDuration, type MixProject } from '../../services/mix/mixTimeline';
 import { useLibraryStore } from '../../stores/useLibraryStore';
 import { useConnectivityStore } from '../../stores/useConnectivityStore';
 import { usePlayerStore } from '../../stores/usePlayerStore';
@@ -44,7 +44,8 @@ export function MixDetail({ mixId }: { mixId: string }) {
     try {
       const [mix, tracks] = await Promise.all([getMixProject(mixId), getLibraryTracks()]);
       if (request !== generation.current) return;
-      setProject(mix); setLibrary(tracks); setError(mix ? '' : 'Mix não encontrado.');
+      setProject((current) => current && mix && current.id === mix.id && current.revision > mix.revision ? current : mix);
+      setLibrary(tracks); setError(mix ? '' : 'Mix não encontrado.');
     } catch (reason) { if (request === generation.current) setError(reason instanceof Error ? reason.message : 'Não foi possível carregar o mix.'); }
   }, [mixId]);
   useFocusEffect(React.useCallback(() => { focused.current = true; void load(); return () => {
@@ -71,13 +72,13 @@ export function MixDetail({ mixId }: { mixId: string }) {
     return () => clearTimeout(timer);
   }, [project, library, mixId]);
   const refresh = () => useLibraryStore.getState().refreshLibrary();
-  const allowSavedAction = () => {
-    if (!editorRef.current?.hasPendingEdits()) return true;
-    Alert.alert('Mix', 'Salve ou descarte as alterações no editor antes de continuar.');
+  const allowSavedAction = async () => {
+    if (!editorRef.current || await editorRef.current.flush()) return true;
+    Alert.alert('Mix', 'Não foi possível salvar as alterações. Tente novamente no editor.');
     return false;
   };
   const add = async (ids: string[]) => {
-    if (!allowSavedAction()) return;
+    if (!await allowSavedAction()) return;
     try {
       const byId = new Map(library.map((track) => [track.spotifyId, track]));
       const selected = ids.map((id) => byId.get(id)).filter((track): track is LibraryTrack => Boolean(track?.isDownloaded && track.localAudioPath));
@@ -89,7 +90,22 @@ export function MixDetail({ mixId }: { mixId: string }) {
     } catch (reason) { Alert.alert('Mix', reason instanceof Error ? reason.message : 'Não foi possível adicionar as músicas.'); }
   };
   const play = async (trackId?: string) => {
-    if (!project || pending.current || !allowSavedAction()) return;
+    if (trackId) {
+      const source = projectRef.current?.tracks.find((track) => track.spotifyId === trackId);
+      if (!source) return;
+      editorRef.current?.stop();
+      const request = ++playbackGeneration.current;
+      try {
+        const track = mergeMixTrack(source, library.find((item) => item.spotifyId === trackId));
+        const path = await getExistingLocalAudioPath(track.localAudioPath, 0);
+        if (request !== playbackGeneration.current || !focused.current) return;
+        await usePlayerStore.getState().playWithQueue([{ ...track, ...(path ? { localAudioPath: path } : {}) }], 0, `mix-source:${mixId}:${trackId}`);
+      } catch (reason) { Alert.alert('Mix', reason instanceof Error ? reason.message : 'Não foi possível tocar a música.'); }
+      return;
+    }
+    if (pending.current || !await allowSavedAction()) return;
+    const project = projectRef.current;
+    if (!project || !project.clips.length) return;
     editorRef.current?.stop();
     pending.current = true; setPreparing(true);
     const request = ++playbackGeneration.current;
@@ -106,7 +122,7 @@ export function MixDetail({ mixId }: { mixId: string }) {
         if (paths.every(Boolean)) {
           if (request !== playbackGeneration.current || !focused.current || projectRef.current?.revision !== expectedRevision) return;
           await usePlayerStore.getState().playWithQueue(queue.map((track, index) => ({ ...track, localAudioPath: paths[index]! })),
-            Math.max(0, project.clips.findIndex((clip) => clip.trackId === trackId)), `playlist:${mixId}:revision:${project.revision}`);
+            0, `playlist:${mixId}:revision:${project.revision}`);
           if (request !== playbackGeneration.current && usePlayerStore.getState().queueSourceId === `playlist:${mixId}:revision:${project.revision}`) await pause('mix-editor-interrupted-start');
           return;
         }
@@ -129,8 +145,6 @@ export function MixDetail({ mixId }: { mixId: string }) {
         }
         return;
       }
-      const offset = trackId ? mixTimeline(project.clips).find((clip) => clip.trackId === trackId)?.startMs : 0;
-      if (offset && request === playbackGeneration.current) await usePlayerStore.getState().seekToPosition(offset);
     } catch (reason) {
       log.error('mix playback failed', { mixId, error: reason });
       Alert.alert('Mix', reason instanceof Error ? reason.message : 'Não foi possível tocar o mix.');
@@ -178,23 +192,27 @@ export function MixDetail({ mixId }: { mixId: string }) {
       metadata={`Mix · ${project.clips.length} clipes · ${formatMixTime(mixDuration(project.clips))}`}
       trackCount={tracks.length} totalDurationMs={mixDuration(project.clips)} tracks={tracks} disableTrackArtistLinks
       onPlayMix={play} onOpenMixEditor={openEditor} onEditPress={openEditor}
-      beforeTracks={editor ? <MixEditor project={project} library={library} editorRef={editorRef} onClose={closeEditor}
-        onSaved={(mix) => { setProject(mix); refresh(); }} onGestureActive={setEditorScrollLocked}
+      beforeTracks={editor ? <MixEditor key={project.id} project={project} library={library} editorRef={editorRef} onClose={closeEditor}
+        onSaved={(mix) => { if (projectRef.current?.id === mix.id) { projectRef.current = mix; setProject(mix); } }} onGestureActive={setEditorScrollLocked}
         onPreviewStart={() => { playbackGeneration.current++; }} /> : undefined}
       lockScroll={editorScrollLocked} onBeforeBack={allowSavedAction}
       onShareMix={async () => {
-        if (!allowSavedAction()) return;
-        await Clipboard.setStringAsync(await exportMixJson({ ...project, tracks: sources }));
+        if (!await allowSavedAction()) return;
+        const latest = projectRef.current;
+        if (!latest) return;
+        await Clipboard.setStringAsync(await exportMixJson({ ...latest, tracks: latest.tracks.map((track) => mergeMixTrack(track, byId.get(track.spotifyId))) }));
         Alert.alert('Mix copiado', 'Músicas, cortes, ordem e volumes copiados. Importe o JSON nas Configurações.');
       }}
-      onAddTracksPress={() => { if (allowSavedAction()) setPicker(true); }} onRefresh={() => { if (allowSavedAction()) return load(); }} loadingError={error}
-      onRemoveTrack={(trackId) => {
-        if (!allowSavedAction()) return;
-        void saveMixProject(project, project.clips.filter((clip) => clip.trackId !== trackId))
+      onAddTracksPress={async () => { if (await allowSavedAction()) setPicker(true); }} onRefresh={async () => { if (await allowSavedAction()) return load(); }} loadingError={error}
+      onRemoveTrack={async (trackId) => {
+        if (!await allowSavedAction()) return;
+        const latest = projectRef.current;
+        if (!latest) return;
+        void saveMixProject(latest, latest.clips.filter((clip) => clip.trackId !== trackId))
           .then((saved) => { setProject(saved); refresh(); })
           .catch((reason) => Alert.alert('Mix', String(reason)));
       }}
-      onDeletePress={() => { if (allowSavedAction()) Alert.alert('Excluir mix?', 'As músicas baixadas continuarão na biblioteca.', [
+      onDeletePress={async () => { if (await allowSavedAction()) Alert.alert('Excluir mix?', 'As músicas baixadas continuarão na biblioteca.', [
         { text: 'Cancelar', style: 'cancel' }, { text: 'Excluir', style: 'destructive', onPress: () => {
           void deleteMixProject(mixId).then(() => { refresh(); router.replace('/(tabs)/library'); })
             .catch(() => Alert.alert('Mix', 'Não foi possível excluir o mix.'));

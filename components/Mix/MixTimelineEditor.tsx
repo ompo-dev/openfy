@@ -246,7 +246,7 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
   };
   const displayed = moved ? timeline.map((clip) => moved.find((item) => item.id === clip.id) || clip) :
     draft ? mixTimeline(trimMixClipAtPosition(timeline, draft.id, draft.range[0], draft.range[1])) : timeline;
-  const height = 66 + lanes * 46;
+  const height = 44 + lanes * 46;
   const slipClip = slip ? timeline.find((clip) => clip.id === slip.id) : undefined;
   const slipSource = slipClip ? tracks.get(slipClip.trackId) : undefined;
   return <View ref={viewport} testID="mix-timeline-viewport" onLayout={({ nativeEvent }) => {
@@ -254,7 +254,7 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
   }} style={[S.viewport, { height }]}>
     <GestureDetector gesture={gestures}>
       <View testID="mix-timeline-scroll" pointerEvents={slip ? 'none' : 'auto'} style={{ flex: 1, opacity: slip ? 0.35 : 1 }} collapsable={false}>
-        <View accessibilityLabel="Timeline do mix" style={[S.content, { height: height - 22, width }]}>
+        <View accessibilityLabel="Timeline do mix" style={[S.content, { height, width }]}>
           <LoggedPressable accessibilityLabel="Desmarcar clipe" testID="mix-timeline-background" onPress={onDeselect} style={StyleSheet.absoluteFill} />
           {laneEnds.map((_, lane) => <View key={lane} pointerEvents="none" style={[S.lane, { top: 36 + lane * 46, left: Math.max(0, width / 2 - offset), right: 0 }]} />)}
           {ticks.map(({ time, major, middle }) => <View key={time} pointerEvents="none" style={[S.tick, { left: width / 2 + time * scale - offset - 23 }]}>
@@ -330,13 +330,13 @@ export function MixTimelineEditor({ timeline, total, tracks, selectedId, positio
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
       <Text numberOfLines={1} adjustsFontSizeToFit style={S.clock}>{formatMixTime(position)}<Text style={S.clockTotal}> / {formatMixTime(total)}</Text></Text>
     </View>
-    {activeGuide !== null ? <View pointerEvents="none" testID="mix-snap-guide" style={[S.guide, { left: width / 2 + activeGuide * scale - offset, height: height - 26 }]} /> : null}
-    <View pointerEvents="none" testID="mix-fixed-playhead" style={[S.playhead, { left: width / 2 - 1.5, height: height - 26, zIndex: slip ? 6 : 3 }]} />
+    {activeGuide !== null ? <View pointerEvents="none" testID="mix-snap-guide" style={[S.guide, { left: width / 2 + activeGuide * scale - offset, height: height - 4 }]} /> : null}
+    <View pointerEvents="none" testID="mix-fixed-playhead" style={[S.playhead, { left: width / 2 - 1.5, height: height - 4, zIndex: slip ? 6 : 3 }]} />
   </View>;
 }
 
 const S = StyleSheet.create({
-  viewport: { height: 108, backgroundColor: '#0D1117', borderBottomLeftRadius: 12, borderBottomRightRadius: 12, overflow: 'hidden' },
+  viewport: { height: 108, backgroundColor: '#0D1117', overflow: 'hidden' },
   content: { height: 86 },
   lane: { position: 'absolute', top: 36, height: 42, backgroundColor: '#20242A' },
   tick: { position: 'absolute', top: 0, width: 46, height: 28, alignItems: 'center', justifyContent: 'flex-end' },

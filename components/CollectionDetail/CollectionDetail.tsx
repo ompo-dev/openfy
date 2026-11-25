@@ -90,7 +90,7 @@ export type CollectionDetailProps = {
   extraTrackSections?: ExtraTrackSection[];
   beforeTracks?: React.ReactNode;
   lockScroll?: boolean;
-  onBeforeBack?: () => boolean;
+  onBeforeBack?: () => boolean | Promise<boolean>;
   footer?: React.ReactNode;
   onRefresh?: () => void | Promise<void>;
   refreshing?: boolean;
@@ -680,8 +680,9 @@ export const CollectionDetail = ({
       await togglePlayPause();
       return;
     }
+    if (onPlayMix) { await onPlayMix(); return; }
     await playCollection();
-  }, [isCollectionPlayback, playCollection, togglePlayPause]);
+  }, [isCollectionPlayback, onPlayMix, playCollection, togglePlayPause]);
 
   const handleShufflePlay = React.useCallback(async () => {
     if (isCollectionPlayback) {
@@ -706,8 +707,8 @@ export const CollectionDetail = ({
     }
   }, [collectionId, kind, resolveTracksForPlayback]);
 
-  const handleBack = React.useCallback(() => {
-    if (onBeforeBack && !onBeforeBack()) return;
+  const handleBack = React.useCallback(async () => {
+    if (onBeforeBack && !await onBeforeBack()) return;
     if (router.canGoBack()) {
       router.back();
       return;
